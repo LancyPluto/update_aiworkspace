@@ -403,7 +403,7 @@ def _should_inline_reference_image(value: str, backend_base_url: str) -> bool:
 
 
 def _resolve_reference_image_sources(params: dict[str, Any]) -> list[str]:
-    keys = (
+    legacy_keys = (
         "image",
         "images",
         "imageUrl",
@@ -441,7 +441,30 @@ def _resolve_reference_image_sources(params: dict[str, Any]) -> list[str]:
                 seen.add(text)
                 sources.append(text)
 
-    for key in keys:
+    for key in (
+        "base_image_url",
+        "baseImageUrl",
+        "base_image",
+        "baseImage",
+    ):
+        add(params.get(key))
+
+    for key in (
+        "reference_images",
+        "referenceImages",
+        "reference_image_urls",
+        "referenceImageUrls",
+        "reference_image_url",
+        "referenceImageUrl",
+    ):
+        value = params.get(key)
+        if isinstance(value, list):
+            for item in value:
+                add(item)
+        else:
+            add(value)
+
+    for key in legacy_keys:
         value = params.get(key)
         if isinstance(value, list):
             for item in value:

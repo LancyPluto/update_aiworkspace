@@ -111,15 +111,19 @@ public class UserUploadController {
 
     @GetMapping("/upload-assets")
     public ApiResponse<PageResponse<UserUploadAssetResponse>> recent(@RequestParam(value = "kind", required = false) String kind,
+                                                                     @RequestParam(value = "pageNo", required = false) Integer pageNo,
                                                                      @RequestParam(value = "pageSize", required = false) Integer pageSize) {
-        int limit = pageSize == null || pageSize < 1 ? 60 : Math.min(pageSize, 100);
+        int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
+        int offset = PageResponse.offset(pageNo, pageSize);
         String normalizedKind = normalizeKind(kind);
+        Long userId = AuthContext.get().userId();
+        long total = userUploadAssetMapper.countActiveByUser(userId, normalizedKind);
         List<UserUploadAssetResponse> items = userUploadAssetMapper
-                .findRecentByUser(AuthContext.get().userId(), normalizedKind, limit)
+                .findRecentByUser(userId, normalizedKind, normalizedPageSize, offset)
                 .stream()
                 .map(UserUploadAssetResponse::from)
                 .toList();
-        return ApiResponse.success(new PageResponse<>(items, items.size(), 1, limit, items.size() == limit));
+        return ApiResponse.success(PageResponse.of(items, total, pageNo, pageSize));
     }
 
     @DeleteMapping("/upload-assets/{assetId}")

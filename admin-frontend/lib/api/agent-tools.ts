@@ -38,6 +38,15 @@ export type AgentRouteDebugResult = {
   visibleToolCount?: number | null
   visibleTools?: AgentRouteDebugTool[] | null
   filteredTools?: AgentRouteDebugFilteredTool[] | null
+  readiness?: "ready" | "warning" | "blocked" | string | null
+  modelConnectivity?: boolean | null
+  availableToolCount?: number | null
+  disclosedToolCount?: number | null
+  estimatedRouterPromptBytes?: number | null
+  nextActions?: string[] | null
+  llmRouterEnabled?: boolean | null
+  productToolLoopEnabled?: boolean | null
+  toolDisclosureEnabled?: boolean | null
 }
 
 export type BulkAgentToolAccessResult = {

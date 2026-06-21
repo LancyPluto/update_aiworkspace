@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.core.schemas import RunContext, WorkspaceMemoryItem
+
+WORKSPACE_FACT_TTL_DAYS = 30
 
 
 @dataclass(slots=True)
@@ -48,13 +51,19 @@ class MemoryCuratorService:
         if _explicit_memory_request(message):
             memory_type = _infer_memory_type(message)
             content = _explicit_memory_content(message, answer, memory_type)
+            action = "add"
+            confidence = 0.92
+            if _looks_like_project_specific_content(content) or memory_type == "workspace_fact":
+                memory_type = "workspace_fact"
+                action = "candidate"
+                confidence = 0.68
             return MemoryCuratorDecision(
-                action="add",
+                action=action,
                 memory_type=memory_type,
                 title=_title_from_text(content),
                 content=content,
                 importance=8,
-                confidence=0.92,
+                confidence=confidence,
                 reason="explicit_memory_request",
                 tags=[memory_type, "explicit"],
             )
@@ -71,7 +80,7 @@ class MemoryCuratorService:
                 tags=["preference"],
             )
 
-        if _looks_like_workspace_fact(message):
+        if _looks_like_workspace_fact(message) or _looks_like_project_specific_content(message):
             return MemoryCuratorDecision(
                 action="candidate",
                 memory_type="workspace_fact",
@@ -98,15 +107,20 @@ class MemoryCuratorService:
         return MemoryCuratorDecision(action="none", reason="no_durable_memory_signal")
 
 
-def build_memory_metadata(decision: MemoryCuratorDecision) -> str:
-    return json.dumps(
-        {
-            "reason": decision.reason,
-            "tags": decision.tags or [],
-            "curator": "fallback_heuristic_v2",
-        },
-        ensure_ascii=False,
-    )
+def build_memory_metadata(decision: MemoryCuratorDecision, context: RunContext | None = None) -> str:
+    metadata: dict[str, Any] = {
+        "reason": decision.reason,
+        "tags": decision.tags or [],
+        "curator": "fallback_heuristic_v2",
+    }
+    if context is not None and decision.memory_type in {"workspace_fact", "tool_lesson"}:
+        metadata["scope"] = "session"
+        metadata["sourceSessionId"] = context.sessionId
+    return json.dumps(metadata, ensure_ascii=False)
+
+
+def workspace_fact_expires_at_iso() -> str:
+    return (datetime.now(timezone.utc) + timedelta(days=WORKSPACE_FACT_TTL_DAYS)).replace(microsecond=0).isoformat()
 
 
 def looks_like_memory_management_turn(message: str) -> bool:
@@ -153,6 +167,21 @@ def _explicit_memory_request(text: str) -> bool:
 def _looks_like_preference(text: str) -> bool:
     compact = re.sub(r"\s+", "", text.lower())
     return any(token in compact for token in ("我喜欢", "我偏好", "我的习惯", "以后都", "prefer", "i like", "my preference"))
+
+
+def _looks_like_project_specific_content(text: str) -> bool:
+    compact = re.sub(r"\s+", "", (text or "").lower())
+    markers = (
+        "海报",
+        "科比",
+        "张继科",
+        "张雪峰",
+        "project",
+        "poster",
+        "文艺片",
+        "校园霸凌",
+    )
+    return any(marker.lower() in compact for marker in markers)
 
 
 def _looks_like_workspace_fact(text: str) -> bool:

@@ -30,19 +30,20 @@ public interface AgentToolPreferenceMapper extends BaseMapper<AgentToolPreferenc
     AgentToolPreference findByUserIdAndToolCode(@Param("userId") Long userId, @Param("toolCode") String toolCode);
 
     @Insert("""
-            INSERT INTO agent_tool_preferences(user_id, tool_code, auto_call_enabled, created_at, updated_at)
-            VALUES(#{preference.userId}, #{preference.toolCode}, #{preference.autoCallEnabled}, #{preference.createdAt}, #{preference.updatedAt})
+            INSERT INTO agent_tool_preferences(user_id, tool_code, auto_call_enabled, disabled, created_at, updated_at)
+            VALUES(#{preference.userId}, #{preference.toolCode}, #{preference.autoCallEnabled}, #{preference.disabled}, #{preference.createdAt}, #{preference.updatedAt})
             """)
     @Options(useGeneratedKeys = true, keyProperty = "preference.id")
     void insertPreference(@Param("preference") AgentToolPreference preference);
 
     @Update("""
             UPDATE agent_tool_preferences
-            SET auto_call_enabled = #{autoCallEnabled}, updated_at = #{updatedAt}
+            SET auto_call_enabled = #{autoCallEnabled}, disabled = #{disabled}, updated_at = #{updatedAt}
             WHERE user_id = #{userId} AND tool_code = #{toolCode}
             """)
     void updatePreference(@Param("userId") Long userId,
                           @Param("toolCode") String toolCode,
                           @Param("autoCallEnabled") Boolean autoCallEnabled,
+                          @Param("disabled") Boolean disabled,
                           @Param("updatedAt") LocalDateTime updatedAt);
 }

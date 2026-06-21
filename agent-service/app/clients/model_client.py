@@ -1,20 +1,26 @@
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+import asyncio
 import json
 import os
-from typing import Any
+from typing import Any, Awaitable, Callable, TypeVar
 
 import httpx
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.clients.chat_model_factory import ChatModelFactory, ChatModelProviderError
-from app.clients.volcengine_model import normalize_volcengine_openai_base_url, resolve_volcengine_model_name
+from app.clients.model_name_resolver import resolve_chat_model_name
+from app.clients.volcengine_model import normalize_volcengine_openai_base_url
 from app.config import Settings, settings as default_settings
 from app.core.schemas import ChatMessage
 
 
 class ModelClientError(RuntimeError):
     pass
+
+
+_T = TypeVar("_T")
+_RETRY_BACKOFF_SECONDS = (0.5, 1.5)
 
 
 @dataclass(slots=True)
@@ -191,22 +197,21 @@ class ModelClient:
     ) -> str:
         base_url = normalize_volcengine_openai_base_url(self.settings.model_api_base_url.rstrip("/"))
         payload: dict[str, Any] = {
-            "model": resolve_volcengine_model_name(self.settings.model_name, base_url),
+            "model": _resolved_model_name(self.settings, base_url),
             "messages": [_to_openai_message(message) for message in messages],
             "stream": False,
         }
         if tools:
             payload["tools"] = tools
         headers = {"Authorization": f"Bearer {self.settings.model_api_key}"}
-        try:
+
+        async def _post_once() -> dict[str, Any]:
             async with _outbound_http_client(self.settings.model_timeout_seconds) as client:
                 response = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
                 response.raise_for_status()
-                data = response.json()
-        except httpx.HTTPStatusError as exception:
-            raise ModelClientError(f"model request failed: {_format_http_error(exception.response)}") from exception
-        except Exception as exception:
-            raise ModelClientError(f"model request failed: {_format_connection_error(exception)}") from exception
+                return response.json()
+
+        data = await _retry_openai_compatible_call(_post_once, self.settings.model_connect_retry_count)
         self._record_openai_usage(data)
         return _openai_compatible_content(data)
 
@@ -218,7 +223,7 @@ class ModelClient:
     ) -> ChatTurnResult:
         base_url = normalize_volcengine_openai_base_url(self.settings.model_api_base_url.rstrip("/"))
         payload: dict[str, Any] = {
-            "model": resolve_volcengine_model_name(self.settings.model_name, base_url),
+            "model": _resolved_model_name(self.settings, base_url),
             "messages": [_to_openai_message(message) for message in messages],
             "stream": False,
         }
@@ -227,15 +232,14 @@ class ModelClient:
         if tool_choice is not None:
             payload["tool_choice"] = tool_choice
         headers = {"Authorization": f"Bearer {self.settings.model_api_key}"}
-        try:
+
+        async def _post_once() -> dict[str, Any]:
             async with _outbound_http_client(self.settings.model_timeout_seconds) as client:
                 response = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
                 response.raise_for_status()
-                data = response.json()
-        except httpx.HTTPStatusError as exception:
-            raise ModelClientError(f"model request failed: {_format_http_error(exception.response)}") from exception
-        except Exception as exception:
-            raise ModelClientError(f"model request failed: {_format_connection_error(exception)}") from exception
+                return response.json()
+
+        data = await _retry_openai_compatible_call(_post_once, self.settings.model_connect_retry_count)
         self._record_openai_usage(data)
         return _openai_compatible_turn_result(data)
 
@@ -259,7 +263,7 @@ class ModelClient:
         if not base_url and self.settings.model_provider.strip().lower() in {"deepseek", "deepseek_compatible"}:
             base_url = "https://api.deepseek.com"
         payload: dict[str, Any] = {
-            "model": resolve_volcengine_model_name(self.settings.model_name, base_url),
+            "model": _resolved_model_name(self.settings, base_url),
             "messages": [_to_openai_message(message) for message in messages],
             "stream": True,
         }
@@ -701,6 +705,49 @@ def _extract_content(content: Any) -> str:
 
 def _chunk_text(value: str, size: int = 80) -> list[str]:
     return [value[index : index + size] for index in range(0, len(value), size)] or [""]
+
+
+def _resolved_model_name(settings: Settings, base_url: str) -> str:
+    return resolve_chat_model_name(settings.model_name, base_url, settings.model_provider)
+
+
+async def _retry_openai_compatible_call(
+    operation: Callable[[], Awaitable[_T]],
+    retry_count: int,
+) -> _T:
+    attempts = max(1, int(retry_count) + 1)
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return await operation()
+        except httpx.HTTPStatusError as exception:
+            raise ModelClientError(f"model request failed: {_format_http_error(exception.response)}") from exception
+        except Exception as exception:
+            last_error = exception
+            if attempt >= attempts - 1 or not _is_retryable_connection_error(exception):
+                break
+            await asyncio.sleep(_RETRY_BACKOFF_SECONDS[min(attempt, len(_RETRY_BACKOFF_SECONDS) - 1)])
+    assert last_error is not None
+    raise ModelClientError(f"model request failed: {_format_connection_error(last_error)}") from last_error
+
+
+def _is_retryable_connection_error(exception: Exception) -> bool:
+    if isinstance(exception, httpx.HTTPStatusError):
+        return False
+    if isinstance(exception, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout)):
+        return True
+    message = _format_exception(exception).lower()
+    return any(
+        marker in message
+        for marker in (
+            "connection error",
+            "connecterror",
+            "connect timeout",
+            "all connection attempts failed",
+            "read timeout",
+            "write timeout",
+        )
+    )
 
 
 def _outbound_http_client(timeout: int | float) -> httpx.AsyncClient:

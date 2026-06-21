@@ -54,6 +54,23 @@ public interface TaskMapper extends BaseMapper<AiTask> {
     long countOwnedTask(@Param("taskId") Long taskId, @Param("userId") Long userId);
 
     @Select("""
+            SELECT COUNT(1)
+            FROM ai_tasks
+            WHERE id = #{taskId}
+              AND user_id = #{userId}
+            """)
+    long countOwnedTaskIgnoringUserDeleted(@Param("taskId") Long taskId, @Param("userId") Long userId);
+
+    @Select("""
+            SELECT COUNT(1)
+            FROM ai_result_resources
+            WHERE user_id = #{userId}
+              AND content_text LIKE CONCAT('%', #{relativeKey})
+            """)
+    long countUserResultContainingRelativeKey(@Param("userId") Long userId,
+                                              @Param("relativeKey") String relativeKey);
+
+    @Select("""
             SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality,
                    COALESCE(model_config.display_name, model_config.model_name) AS model_config_name,
                    model_config.model_name AS model_name

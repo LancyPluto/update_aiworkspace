@@ -1,4 +1,4 @@
-from app.core.schemas import AgentFileContext, RecentToolCallContext, RunContext, ToolDescriptor
+﻿from app.core.schemas import AgentFileContext, RecentToolCallContext, ReferenceMention, RunContext, ToolDescriptor
 from app.core.user_attachment_priority import apply_user_selected_attachment_priority
 
 
@@ -87,6 +87,46 @@ def test_multi_image_schema_receives_all_ready_images():
 
     assert args["referenceImageUrls"][0].endswith("/generated/images/1.png")
     assert args["referenceImageUrls"][1].endswith("/generated/images/2.jpg")
+
+
+def test_base_image_schema_keeps_base_and_places_user_refs_in_reference_images():
+    tool = ToolDescriptor(
+        toolCode="gpt_image2",
+        toolName="GPT-image2",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string"},
+                "base_image_url": {"type": "string"},
+                "reference_images": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+    )
+    ctx = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        message="adjust with @图片2",
+        referenceMentions=[
+            ReferenceMention(
+                token="@图片2",
+                refLabel="@图片2-face.png",
+                url="/generated/uploads/face.png",
+                kind="image",
+                source="current_turn",
+            )
+        ],
+    )
+
+    args = apply_user_selected_attachment_priority(
+        ctx,
+        tool,
+        {"prompt": "previous prompt + face adjustment", "base_image_url": "/generated/images/previous.png"},
+    )
+
+    assert args["base_image_url"] == "/generated/images/previous.png"
+    assert args["reference_images"][0].endswith("/generated/uploads/face.png")
 
 
 def test_multi_image_schema_supports_ofox_image_key():
@@ -230,8 +270,6 @@ def test_style_transfer_preserves_history_and_appends_uploaded_image():
     assert len(args["image"]) == 2
     assert args["image"][0].endswith("/generated/images/301/history-poster.png")
     assert args["image"][1].endswith("/generated/uploads/20260611/upload.png")
-
-
 def test_stale_router_image_dropped_while_history_and_user_kept():
     tool = ToolDescriptor(
         toolCode="gpt_image2",
@@ -285,3 +323,126 @@ def test_stale_router_image_dropped_while_history_and_user_kept():
     assert any(u.endswith("/generated/images/301/history-poster.png") for u in urls)
     assert any(u.endswith("/generated/uploads/20260611/upload.png") for u in urls)
     assert all("stale-router-guess" not in u for u in urls)
+
+
+def test_explicit_reference_mentions_lock_image_array_run840():
+    """Run #840: 2 @ references + recentToolCalls history must NOT prepend history URLs."""
+    tool = ToolDescriptor(
+        toolCode="ofox_gpt_image2",
+        toolName="GPT-image2",
+        autoCallable=True,
+        inputSchema={"type": "object", "properties": {"image": {"type": "array", "items": {"type": "string"}}}},
+    )
+    ctx = RunContext(
+        runId=840,
+        sessionId=1,
+        userId=1,
+        message="为 @图片1-角色 生成 @图片2-风格 风格",
+        referenceMentions=[
+            ReferenceMention(
+                token="@图片1-角色",
+                refLabel="@图片1-角色",
+                url="/generated/uploads/20260618/char.png",
+                kind="image",
+                source="current_turn",
+            ),
+            ReferenceMention(
+                token="@图片2-风格",
+                refLabel="@图片2-风格",
+                url="/generated/uploads/20260618/style.png",
+                kind="image",
+                source="current_turn",
+            ),
+        ],
+        recentToolCalls=[
+            RecentToolCallContext(
+                id=836,
+                toolCode="ofox_gpt_image2",
+                mediaUrls=["/generated/images/836/image-1.png"],
+            ),
+            RecentToolCallContext(
+                id=835,
+                toolCode="ofox_gpt_image2",
+                mediaUrls=["/generated/images/835/image-1.png"],
+            ),
+        ],
+    )
+
+    args = apply_user_selected_attachment_priority(
+        ctx,
+        tool,
+        {
+            "image": [
+                "/generated/images/836/image-1.png",
+                "/generated/images/835/image-1.png",
+                "/generated/uploads/20260618/char.png",
+                "/generated/uploads/20260618/style.png",
+            ],
+        },
+    )
+
+    assert len(args["image"]) == 2
+    assert args["image"][0].endswith("/generated/uploads/20260618/char.png")
+    assert args["image"][1].endswith("/generated/uploads/20260618/style.png")
+    assert all("836" not in u and "835" not in u for u in args["image"])
+
+
+def test_explicit_reference_mentions_history_then_upload_order():
+    """User @-selects history then upload — order follows referenceMentions."""
+    tool = ToolDescriptor(
+        toolCode="gpt_image2",
+        toolName="GPT-image2",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string"},
+                "image": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+    )
+    ctx = RunContext(
+        runId=351,
+        sessionId=1,
+        userId=1,
+        message="把 @图片1-历史 改成 @图片2-上传 的日常风格",
+        referenceMentions=[
+            ReferenceMention(
+                token="@图片1-历史",
+                refLabel="@图片1-历史",
+                url="/generated/images/301/history-poster.png",
+                kind="image",
+                source="session_asset",
+            ),
+            ReferenceMention(
+                token="@图片2-上传",
+                refLabel="@图片2-上传",
+                url="/generated/uploads/20260611/upload.png",
+                kind="image",
+                source="current_turn",
+            ),
+        ],
+        recentToolCalls=[
+            RecentToolCallContext(
+                id=10,
+                toolCode="gpt_image2",
+                mediaUrls=["/generated/images/301/history-poster.png"],
+            ),
+        ],
+    )
+
+    args = apply_user_selected_attachment_priority(
+        ctx,
+        tool,
+        {
+            "prompt": "风格迁移",
+            "image": [
+                "/generated/images/301/history-poster.png",
+                "/generated/uploads/20260611/upload.png",
+            ],
+        },
+    )
+
+    assert len(args["image"]) == 2
+    assert args["image"][0].endswith("/generated/images/301/history-poster.png")
+    assert args["image"][1].endswith("/generated/uploads/20260611/upload.png")

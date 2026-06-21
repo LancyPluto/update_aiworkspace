@@ -31,9 +31,13 @@ import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class AgentWorkspaceServiceImpl implements AgentWorkspaceService {
@@ -42,6 +46,9 @@ public class AgentWorkspaceServiceImpl implements AgentWorkspaceService {
     private static final String PERSONAL_WORKSPACE_TYPE = "PERSONAL";
     private static final String OWNER_ROLE = "OWNER";
     private static final String ACTIVE_STATUS = "ACTIVE";
+    private static final int MIN_RELEVANCE_SCORE = 2;
+    private static final Set<String> SAFE_TOOL_MEMORY_TYPES = Set.of("user_profile", "preference");
+    private static final Set<String> CHAT_CONTEXT_PACK_TYPES = Set.of("user_profile", "preference", "workflow_recipe");
 
     private final AgentWorkspaceMapper agentWorkspaceMapper;
     private final AgentWorkspaceMemberMapper agentWorkspaceMemberMapper;
@@ -91,13 +98,49 @@ public class AgentWorkspaceServiceImpl implements AgentWorkspaceService {
     }
 
     @Override
-    public PageResponse<AgentWorkspaceMemoryItemResponse> listMemory(Long userId, Long workspaceId) {
+    public PageResponse<AgentWorkspaceMemoryItemResponse> listMemory(Long userId, Long workspaceId, String status) {
         assertWorkspaceMember(workspaceId, userId);
-        var items = agentWorkspaceMemoryItemMapper.findActiveByWorkspaceId(workspaceId)
+        String normalizedStatus = normalizeUserMemoryStatus(status);
+        var items = ("CANDIDATE".equals(normalizedStatus)
+                ? agentWorkspaceMemoryItemMapper.findByWorkspaceIdAndStatus(workspaceId, "CANDIDATE")
+                : agentWorkspaceMemoryItemMapper.findActiveByWorkspaceId(workspaceId))
                 .stream()
+                .filter(item -> !isMemoryExpired(item))
                 .map(this::toMemoryResponse)
                 .toList();
         return new PageResponse<>(items, items.size());
+    }
+
+    @Override
+    @Transactional
+    public AgentWorkspaceMemoryItemResponse approveMemoryCandidate(Long userId, Long workspaceId, Long memoryId) {
+        assertWorkspaceMember(workspaceId, userId);
+        AgentWorkspaceMemoryItem existing = agentWorkspaceMemoryItemMapper.findAnyById(memoryId);
+        if (existing == null || !workspaceId.equals(existing.getWorkspaceId())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Workspace memory item not found");
+        }
+        if (!"CANDIDATE".equals(existing.getStatus())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Only candidate memories can be approved");
+        }
+        existing.setStatus(ACTIVE_STATUS);
+        existing.setUpdatedAt(LocalDateTime.now());
+        agentWorkspaceMemoryItemMapper.updateMemory(existing);
+        return toMemoryResponse(existing);
+    }
+
+    @Override
+    @Transactional
+    public AgentWorkspaceMemoryItemResponse rejectMemoryCandidate(Long userId, Long workspaceId, Long memoryId) {
+        assertWorkspaceMember(workspaceId, userId);
+        AgentWorkspaceMemoryItem existing = agentWorkspaceMemoryItemMapper.findAnyById(memoryId);
+        if (existing == null || !workspaceId.equals(existing.getWorkspaceId())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Workspace memory item not found");
+        }
+        if (!"CANDIDATE".equals(existing.getStatus())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Only candidate memories can be rejected");
+        }
+        agentWorkspaceMemoryItemMapper.adminUpdateStatus(memoryId, "REJECTED");
+        return toMemoryResponse(agentWorkspaceMemoryItemMapper.findAnyById(memoryId));
     }
 
     @Override
@@ -204,47 +247,213 @@ public class AgentWorkspaceServiceImpl implements AgentWorkspaceService {
     @Override
     public PageResponse<InternalWorkspaceMemoryItemResponse> retrieveMemory(Long workspaceId, InternalWorkspaceMemoryRetrieveRequest request) {
         String query = request == null || request.query() == null ? "" : request.query().trim();
+        String view = request == null || request.view() == null ? "" : request.view().trim().toLowerCase(Locale.ROOT);
         int limit = request == null || request.limit() == null ? 5 : Math.max(1, Math.min(request.limit(), 20));
+        List<Long> memoryIds = request == null || request.memoryIds() == null
+                ? List.of()
+                : request.memoryIds().stream().filter(Objects::nonNull).distinct().toList();
+        Long sessionId = request == null ? null : request.sessionId();
 
-        if (query.isBlank()) {
+        if ("tool_explicit".equals(view) && !memoryIds.isEmpty()) {
+            var explicitItems = retrieveExplicitMemories(workspaceId, memoryIds, limit);
+            markMemoryAccessed(workspaceId, explicitItems);
+            return new PageResponse<>(explicitItems, explicitItems.size(), 1, limit, explicitItems.size() == limit);
+        }
+
+        if (query.isBlank() && !"tool".equals(view) && !"tool_explicit".equals(view)) {
             var items = agentWorkspaceMemoryItemMapper.findLatestByWorkspace(workspaceId, limit);
             markMemoryAccessed(workspaceId, items);
             return new PageResponse<>(items, items.size(), 1, limit, items.size() == limit);
         }
 
-        var items = agentWorkspaceMemoryItemMapper.findActiveByWorkspaceId(workspaceId);
+        var items = agentWorkspaceMemoryItemMapper.findActiveByWorkspaceId(workspaceId).stream()
+                .filter(item -> shouldIncludeMemoryForSession(item, sessionId))
+                .filter(item -> !isMemoryExpired(item))
+                .toList();
         if (items.isEmpty()) {
             return new PageResponse<>(Collections.emptyList(), 0, 1, limit, false);
         }
 
-        // 先尝试 FULLTEXT 搜索
-        try {
-            var ftItems = agentWorkspaceMemoryItemMapper.searchByFulltext(workspaceId, query, limit);
-            if (!ftItems.isEmpty()) {
-                markMemoryAccessed(workspaceId, ftItems);
-                return new PageResponse<>(ftItems, ftItems.size(), 1, limit, ftItems.size() == limit);
-            }
-        } catch (Exception e) {
-            // FULLTEXT 搜索失败（如查询词为停用词导致语法错误），降级为子串匹配
+        if ("tool".equals(view)) {
+            var toolItems = retrieveToolViewMemory(workspaceId, items, query, limit, false);
+            markMemoryAccessed(workspaceId, toolItems);
+            return new PageResponse<>(toolItems, toolItems.size(), 1, limit, toolItems.size() == limit);
+        }
+        if ("tool_explicit".equals(view)) {
+            var toolItems = retrieveToolViewMemory(workspaceId, items, query, limit, true);
+            markMemoryAccessed(workspaceId, toolItems);
+            return new PageResponse<>(toolItems, toolItems.size(), 1, limit, toolItems.size() == limit);
         }
 
+        // chat / router: relevance search, then safe context pack fallback
+        var chatItems = retrieveChatViewMemory(workspaceId, items, query, limit);
+        markMemoryAccessed(workspaceId, chatItems);
+        return new PageResponse<>(chatItems, chatItems.size(), 1, limit, chatItems.size() == limit);
+    }
+
+    private List<InternalWorkspaceMemoryItemResponse> retrieveExplicitMemories(Long workspaceId, List<Long> memoryIds, int limit) {
+        List<InternalWorkspaceMemoryItemResponse> result = new ArrayList<>();
+        for (Long memoryId : memoryIds) {
+            if (result.size() >= limit) {
+                break;
+            }
+            AgentWorkspaceMemoryItem item = agentWorkspaceMemoryItemMapper.findActiveById(workspaceId, memoryId);
+            if (item != null) {
+                result.add(toInternalMemoryResponse(item, 0, "explicit", List.of("id")));
+            }
+        }
+        return result;
+    }
+
+    private List<InternalWorkspaceMemoryItemResponse> retrieveChatViewMemory(
+            Long workspaceId,
+            List<AgentWorkspaceMemoryItem> items,
+            String query,
+            int limit
+    ) {
+        List<InternalWorkspaceMemoryItemResponse> result = new ArrayList<>();
+        Set<Long> seenIds = new LinkedHashSet<>();
+        if (!query.isBlank()) {
+            appendRelevantMemories(result, seenIds, workspaceId, items, query, limit, true, 1);
+        }
+        if (result.size() < limit) {
+            for (AgentWorkspaceMemoryItem item : items) {
+                if (result.size() >= limit) {
+                    break;
+                }
+                if (isChatContextPackMemory(item)) {
+                    appendUniqueMemory(result, seenIds, toInternalMemoryResponse(item, 0, "context_pack", List.of()), limit);
+                }
+            }
+        }
+        if (result.isEmpty()) {
+            appendUniqueMemories(result, seenIds, buildSafeContextPack(items, limit), limit);
+        }
+        return result;
+    }
+
+    private List<InternalWorkspaceMemoryItemResponse> retrieveToolViewMemory(
+            Long workspaceId,
+            List<AgentWorkspaceMemoryItem> items,
+            String query,
+            int limit,
+            boolean explicitProjectFacts
+    ) {
+        List<InternalWorkspaceMemoryItemResponse> result = new ArrayList<>();
+        Set<Long> seenIds = new LinkedHashSet<>();
+        if (!explicitProjectFacts) {
+            for (AgentWorkspaceMemoryItem item : items) {
+                if (result.size() >= limit) {
+                    break;
+                }
+                if (isSafeToolContextPackMemory(item)) {
+                    appendUniqueMemory(result, seenIds, toInternalMemoryResponse(item, 0, "safe_pack", List.of()), limit);
+                }
+            }
+        }
+        if (!query.isBlank()) {
+            appendRelevantMemories(result, seenIds, workspaceId, items, query, limit, explicitProjectFacts, MIN_RELEVANCE_SCORE);
+        }
+        if (result.isEmpty() && explicitProjectFacts) {
+            appendUniqueMemories(result, seenIds, buildSafeContextPack(items, limit), limit);
+        }
+        return result;
+    }
+
+    private void appendRelevantMemories(
+            List<InternalWorkspaceMemoryItemResponse> result,
+            Set<Long> seenIds,
+            Long workspaceId,
+            List<AgentWorkspaceMemoryItem> items,
+            String query,
+            int limit,
+            boolean includeProjectFacts,
+            int minScore
+    ) {
+        if (result.size() >= limit || query.isBlank()) {
+            return;
+        }
+        String normalizedQuery = normalizeMemoryQuery(query);
+        try {
+            for (InternalWorkspaceMemoryItemResponse candidate : agentWorkspaceMemoryItemMapper.searchByFulltext(workspaceId, normalizedQuery, limit)) {
+                if (result.size() >= limit) {
+                    return;
+                }
+                if (!includeProjectFacts && !isRetrievableForToolView(candidate.memoryType())) {
+                    continue;
+                }
+                if (!includeProjectFacts && isProjectFactType(candidate.memoryType()) && candidate.score() < MIN_RELEVANCE_SCORE) {
+                    continue;
+                }
+                appendUniqueMemory(result, seenIds, candidate, limit);
+            }
+        } catch (Exception ignored) {
+            // FULLTEXT may fail on stop words; fall back to substring scoring.
+        }
+        if (result.size() >= limit) {
+            return;
+        }
         var fallback = items.stream()
-                .map(item -> new ScoredMemoryItem(item, score(item, query.toLowerCase(Locale.ROOT))))
-                .filter(item -> item.score() > 0)
+                .map(item -> new ScoredMemoryItem(item, score(item, normalizedQuery.toLowerCase(Locale.ROOT))))
+                .filter(item -> item.score() >= minScore)
+                .filter(item -> includeProjectFacts || isRetrievableForToolView(item.item().getMemoryType()))
                 .sorted(Comparator.comparingInt(ScoredMemoryItem::score).reversed()
                         .thenComparing(item -> item.item().getUpdatedAt(), Comparator.reverseOrder())
                         .thenComparing(item -> item.item().getId(), Comparator.reverseOrder()))
                 .limit(limit)
                 .map(item -> toInternalMemoryResponse(item.item(), item.score()))
                 .toList();
-        if (!fallback.isEmpty()) {
-            markMemoryAccessed(workspaceId, fallback);
-            return new PageResponse<>(fallback, fallback.size(), 1, limit, fallback.size() == limit);
-        }
+        appendUniqueMemories(result, seenIds, fallback, limit);
+    }
 
-        var contextPack = buildMemoryContextPack(items, limit);
-        markMemoryAccessed(workspaceId, contextPack);
-        return new PageResponse<>(contextPack, contextPack.size(), 1, limit, contextPack.size() == limit);
+    private static String normalizeMemoryQuery(String query) {
+        String trimmed = query == null ? "" : query.trim();
+        if (trimmed.length() <= 12) {
+            StringBuilder keywords = new StringBuilder();
+            for (String token : trimmed.split("[\\s，,。！？!?；;：:\\-]+")) {
+                String piece = token.trim();
+                if (piece.length() >= 2) {
+                    if (!keywords.isEmpty()) {
+                        keywords.append(' ');
+                    }
+                    keywords.append(piece);
+                }
+            }
+            if (!keywords.isEmpty()) {
+                return keywords.toString();
+            }
+        }
+        return trimmed;
+    }
+
+    private void appendUniqueMemories(
+            List<InternalWorkspaceMemoryItemResponse> result,
+            Set<Long> seenIds,
+            List<InternalWorkspaceMemoryItemResponse> candidates,
+            int limit
+    ) {
+        for (InternalWorkspaceMemoryItemResponse candidate : candidates) {
+            if (result.size() >= limit) {
+                return;
+            }
+            appendUniqueMemory(result, seenIds, candidate, limit);
+        }
+    }
+
+    private void appendUniqueMemory(
+            List<InternalWorkspaceMemoryItemResponse> result,
+            Set<Long> seenIds,
+            InternalWorkspaceMemoryItemResponse candidate,
+            int limit
+    ) {
+        if (candidate == null || result.size() >= limit) {
+            return;
+        }
+        Long id = candidate.id();
+        if (id != null && !seenIds.add(id)) {
+            return;
+        }
+        result.add(candidate);
     }
 
     @Override
@@ -339,8 +548,12 @@ public class AgentWorkspaceServiceImpl implements AgentWorkspaceService {
     }
 
     private List<InternalWorkspaceMemoryItemResponse> buildMemoryContextPack(List<AgentWorkspaceMemoryItem> items, int limit) {
+        return buildSafeContextPack(items, limit);
+    }
+
+    private List<InternalWorkspaceMemoryItemResponse> buildSafeContextPack(List<AgentWorkspaceMemoryItem> items, int limit) {
         var contextPack = items.stream()
-                .filter(this::isContextPackMemory)
+                .filter(this::isChatContextPackMemory)
                 .limit(limit)
                 .map(item -> toInternalMemoryResponse(item, 0, "context_pack", List.of()))
                 .toList();
@@ -348,24 +561,41 @@ public class AgentWorkspaceServiceImpl implements AgentWorkspaceService {
             return contextPack;
         }
         return items.stream()
+                .filter(item -> isRetrievableForToolView(item.getMemoryType()))
                 .limit(limit)
                 .map(item -> toInternalMemoryResponse(item, 0, "latest", List.of()))
                 .toList();
     }
 
+    private boolean isSafeToolContextPackMemory(AgentWorkspaceMemoryItem item) {
+        return isRetrievableForToolView(item.getMemoryType());
+    }
+
+    private boolean isChatContextPackMemory(AgentWorkspaceMemoryItem item) {
+        return isContextPackMemory(item);
+    }
+
     private boolean isContextPackMemory(AgentWorkspaceMemoryItem item) {
+        String type = normalizeMemoryType(item.getMemoryType());
+        if (CHAT_CONTEXT_PACK_TYPES.contains(type)) {
+            return true;
+        }
+        if (isProjectFactType(type)) {
+            return false;
+        }
         if (Boolean.TRUE.equals(item.getPinned())) {
             return true;
         }
         Integer importance = item.getImportance();
-        if (importance != null && importance >= 7) {
-            return true;
-        }
-        String type = normalizeMemoryType(item.getMemoryType());
-        return switch (type) {
-            case "user_profile", "preference", "workflow_recipe" -> true;
-            default -> false;
-        };
+        return importance != null && importance >= 7;
+    }
+
+    private boolean isRetrievableForToolView(String memoryType) {
+        return SAFE_TOOL_MEMORY_TYPES.contains(normalizeMemoryType(memoryType));
+    }
+
+    private boolean isProjectFactType(String memoryType) {
+        return "workspace_fact".equals(normalizeMemoryType(memoryType));
     }
 
     private AgentWorkspace ensureDefaultWorkspace(Long userId) {
@@ -560,6 +790,41 @@ public class AgentWorkspaceServiceImpl implements AgentWorkspaceService {
         String lowerText = defaultString(text, "").toLowerCase(Locale.ROOT);
         String lowerQuery = query.toLowerCase(Locale.ROOT);
         return lowerText.contains(lowerQuery) ? 2 : 0;
+    }
+
+    private boolean shouldIncludeMemoryForSession(AgentWorkspaceMemoryItem item, Long sessionId) {
+        if (!isSessionScopedMemory(item)) {
+            return true;
+        }
+        if (sessionId == null) {
+            return false;
+        }
+        Long scopedSessionId = readSessionScopeId(item.getMetadataJson());
+        return scopedSessionId != null && scopedSessionId.equals(sessionId);
+    }
+
+    private boolean isMemoryExpired(AgentWorkspaceMemoryItem item) {
+        return item.getExpiresAt() != null && item.getExpiresAt().isBefore(LocalDateTime.now());
+    }
+
+    private String normalizeUserMemoryStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return ACTIVE_STATUS;
+        }
+        return "CANDIDATE".equalsIgnoreCase(status.trim()) ? "CANDIDATE" : ACTIVE_STATUS;
+    }
+
+    private boolean isSessionScopedMemory(AgentWorkspaceMemoryItem item) {
+        String metadata = item.getMetadataJson();
+        return metadata != null && metadata.contains("\"scope\":\"session\"");
+    }
+
+    private Long readSessionScopeId(String metadataJson) {
+        if (metadataJson == null || metadataJson.isBlank()) {
+            return null;
+        }
+        Matcher matcher = Pattern.compile("\"sourceSessionId\"\\s*:\\s*(\\d+)").matcher(metadataJson);
+        return matcher.find() ? Long.parseLong(matcher.group(1)) : null;
     }
 
     private String normalizeMemoryType(String memoryType) {

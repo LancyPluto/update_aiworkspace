@@ -930,6 +930,7 @@ class AgentApiTest {
     @Test
     void userCanManagePerToolAutoCallPreference() throws Exception {
         mockExternalAuthDependencies();
+        ensureOnlineTool("xiaohongshu_copywriting");
         register("agent_preference_user");
         String token = login("agent_preference_user");
 
@@ -945,13 +946,15 @@ class AgentApiTest {
                         .content("{\"autoCallEnabled\":true}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.toolCode").value("xiaohongshu_copywriting"))
-                .andExpect(jsonPath("$.data.autoCallEnabled").value(true));
+                .andExpect(jsonPath("$.data.autoCallEnabled").value(true))
+                .andExpect(jsonPath("$.data.disabled").value(false));
 
         mockMvc.perform(get("/api/v1/agent/tool-preferences")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].toolCode").value("xiaohongshu_copywriting"))
-                .andExpect(jsonPath("$.data.list[0].autoCallEnabled").value(true));
+                .andExpect(jsonPath("$.data.list[0].autoCallEnabled").value(true))
+                .andExpect(jsonPath("$.data.list[0].disabled").value(false));
 
         mockMvc.perform(put("/api/v1/agent/tool-preferences/{toolCode}", "xiaohongshu_copywriting")
                         .header("Authorization", "Bearer " + token)
@@ -963,8 +966,18 @@ class AgentApiTest {
         mockMvc.perform(put("/api/v1/agent/tool-preferences/{toolCode}", "xiaohongshu_copywriting")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"autoCallEnabled\":true}"))
-                .andExpect(status().isOk());
+                        .content("{\"autoCallEnabled\":true,\"disabled\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.autoCallEnabled").value(false))
+                .andExpect(jsonPath("$.data.disabled").value(true));
+
+        mockMvc.perform(put("/api/v1/agent/tool-preferences/{toolCode}", "xiaohongshu_copywriting")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"disabled\":false,\"autoCallEnabled\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.autoCallEnabled").value(true))
+                .andExpect(jsonPath("$.data.disabled").value(false));
 
         Long sessionId = createSession(token, "Preference Context");
         Long runId = sendMessage(token, sessionId, "帮我写小红书笔记").runId();
@@ -973,7 +986,68 @@ class AgentApiTest {
                         "/api/internal/v1/agent/runs/%d/context".formatted(runId), ""))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.toolPreferences[0].toolCode").value("xiaohongshu_copywriting"))
-                .andExpect(jsonPath("$.data.toolPreferences[0].autoCallEnabled").value(true));
+                .andExpect(jsonPath("$.data.toolPreferences[0].autoCallEnabled").value(true))
+                .andExpect(jsonPath("$.data.toolPreferences[0].disabled").value(false));
+    }
+
+    @Test
+    void userDisabledAgentToolStaysInPickerButIsExcludedFromRuntime() throws Exception {
+        mockExternalAuthDependencies();
+        String toolCode = "agent_user_disabled_tool";
+        ensureOnlineTool(toolCode);
+        register("agent_user_disabled_tool_user");
+        String token = login("agent_user_disabled_tool_user");
+
+        mockMvc.perform(put("/api/v1/agent/tool-preferences/{toolCode}", toolCode)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"autoCallEnabled\":true,\"disabled\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.autoCallEnabled").value(false))
+                .andExpect(jsonPath("$.data.disabled").value(true));
+
+        String pickerResponse = mockMvc.perform(get("/api/v1/agent/tools")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        JsonNode pickerItems = objectMapper.readTree(pickerResponse).path("data");
+        JsonNode pickerTool = null;
+        for (JsonNode item : pickerItems) {
+            if (toolCode.equals(item.path("toolCode").asText())) {
+                pickerTool = item;
+                break;
+            }
+        }
+        assertThat(pickerTool).isNotNull();
+        assertThat(pickerTool.path("disabled").asBoolean()).isTrue();
+        assertThat(pickerTool.path("autoCallEnabled").asBoolean()).isFalse();
+
+        Long sessionId = createSession(token, "User Disabled Tool");
+        Long runId = sendMessage(token, sessionId, "Find a tool without the disabled one.").runId();
+        String context = mockMvc.perform(signed(get("/api/internal/v1/agent/runs/{runId}/context", runId), "GET",
+                        "/api/internal/v1/agent/runs/%d/context".formatted(runId), ""))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        JsonNode contextData = objectMapper.readTree(context).path("data");
+        assertThat(contextData.path("availableTools").toString()).doesNotContain(toolCode);
+        assertThat(contextData.path("toolPreferences").toString()).contains(toolCode);
+
+        mockMvc.perform(post("/api/v1/agent/sessions/{sessionId}/messages", sessionId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "content": "Try disabled preferred tool.",
+                                  "clientRequestId": "%s",
+                                  "preferredToolCode": "%s"
+                                }
+                                """.formatted(java.util.UUID.randomUUID(), toolCode)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("AGENT_TOOL_NOT_AVAILABLE"));
     }
 
     @Test

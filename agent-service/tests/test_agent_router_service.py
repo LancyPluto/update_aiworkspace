@@ -2,6 +2,10 @@ import json
 
 import pytest
 
+from tests.conftest import legacy_llm_router_settings
+
+pytestmark = pytest.mark.usefixtures("legacy_llm_router_settings")
+
 from app.core.event_types import ROUTER_FALLBACK, ROUTER_SELECTED
 from app.core.intent_router import Intent, IntentResult
 from app.core.schemas import AgentRouterSettings, ChatMessage, RecentToolCallContext, RunContext, ToolDescriptor
@@ -105,6 +109,32 @@ async def test_router_accepts_image_editing_alias_as_tool_use():
 
 
 @pytest.mark.asyncio
+async def test_router_accepts_image_tool_alias_as_tool_use():
+    backend = FakeBackend()
+    model = FakeModel({
+        "intent": "image_tool",
+        "selectedToolCode": "kling_image_v21",
+        "candidateToolCodes": ["kling_image_v21", "deepseek_text"],
+        "confidence": 0.95,
+        "reason": "image poster editing request",
+        "arguments": {"prompt": "悬疑智斗电影海报"},
+        "missingFields": [],
+    })
+    service = AgentRouterService(backend, model)
+
+    result = await service.classify(
+        _context("把该电影海报改为悬疑智斗电影"),
+        IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.6, reason="rule_fallback"),
+    )
+
+    assert result is not None
+    assert result.intent == Intent.TOOL_USE
+    assert result.selectedToolCode == "kling_image_v21"
+    assert result.arguments["prompt"] == "悬疑智斗电影海报"
+    assert any(event.eventType == ROUTER_SELECTED for _, event in backend.events)
+
+
+@pytest.mark.asyncio
 async def test_router_falls_back_on_unknown_tool():
     backend = FakeBackend()
     model = FakeModel({
@@ -163,6 +193,40 @@ async def test_router_disabled_does_not_call_model():
 
 
 @pytest.mark.asyncio
+async def test_router_prompt_uses_compact_candidates_without_input_schema():
+    backend = FakeBackend()
+    model = FakeModel({
+        "intent": "tool_use",
+        "selectedToolCode": "kling_image_v21",
+        "candidateToolCodes": ["kling_image_v21"],
+        "confidence": 0.92,
+        "reason": "image",
+        "arguments": {},
+        "missingFields": [],
+    })
+    service = AgentRouterService(backend, model)
+    context = _context()
+    context.availableTools[0] = ToolDescriptor(
+        toolCode="kling_image_v21",
+        toolName="可灵生图 V2.1",
+        description="图片生成",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "properties": {"prompt": {"type": "string", "enum": ["a", "b"]}},
+        },
+        fields=[],
+    )
+
+    await service.classify(context, IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.6, reason="rule_fallback"))
+
+    prompt = model.messages[0][0].content
+    assert "inputSchema" not in prompt
+    started = next(event for _, event in backend.events if event.eventType == "router.started")
+    assert started.eventJson.get("promptBytes", 0) > 0
+
+
+@pytest.mark.asyncio
 async def test_router_prompt_includes_schema_history_and_recent_tool_calls():
     backend = FakeBackend()
     model = FakeModel({
@@ -206,8 +270,9 @@ async def test_router_prompt_includes_schema_history_and_recent_tool_calls():
     assert result.requiresConfirmation is False
     assert "recentToolCalls" in prompt
     assert "old prompt" in prompt
-    assert "inputSchema" in prompt
+    assert "fieldKey" in prompt or '"fields"' in prompt
     assert "outputModality" in prompt
+    assert "inputSchema" not in prompt
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,7 @@ from typing import Any
 import httpx
 
 from app.config import Settings, settings as default_settings
+from app.core.attachment_catalog import user_message_for_llm
 from app.core.schemas import (
     RunArtifactCreate,
     RunComplete,
@@ -49,16 +50,31 @@ class BackendClient:
 
     async def get_run_context(self, run_id: int) -> RunContext:
         data = await self._request("GET", f"/api/internal/v1/agent/runs/{run_id}/context")
-        return RunContext.model_validate(data)
+        context = RunContext.model_validate(data)
+        if not context.referenceMentions:
+            return context
+        return context.model_copy(update={"message": user_message_for_llm(context)})
 
     async def get_active_model_config(self) -> AgentModelConfig:
         data = await self._request("GET", "/api/internal/v1/agent/model-config")
         return AgentModelConfig.model_validate(data)
 
-    async def retrieve_workspace_memory(self, workspace_id: int, query: str, limit: int, view: str | None = None) -> list[WorkspaceMemoryItem]:
+    async def retrieve_workspace_memory(
+        self,
+        workspace_id: int,
+        query: str,
+        limit: int,
+        view: str | None = None,
+        memory_ids: list[int] | None = None,
+        session_id: int | None = None,
+    ) -> list[WorkspaceMemoryItem]:
         body: dict[str, Any] = {"query": query, "limit": limit}
         if view:
             body["view"] = view
+        if memory_ids:
+            body["memoryIds"] = memory_ids
+        if session_id is not None:
+            body["sessionId"] = session_id
         data = await self._request(
             "POST",
             f"/api/internal/v1/agent/workspaces/{workspace_id}/memory/retrieve",
@@ -113,6 +129,7 @@ class BackendClient:
         reason: str | None = None,
         tags_json: str | None = None,
         metadata_json: str | None = None,
+        expires_at: str | None = None,
     ) -> dict[str, Any]:
         return await self._request(
             "POST",
@@ -131,6 +148,7 @@ class BackendClient:
                 "reason": reason,
                 "tagsJson": tags_json,
                 "metadataJson": metadata_json,
+                "expiresAt": expires_at,
             },
         )
 

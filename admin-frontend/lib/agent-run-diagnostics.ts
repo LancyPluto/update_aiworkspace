@@ -38,6 +38,17 @@ export type TimelineStep = {
   payload?: Record<string, unknown>
 }
 
+export type RunObservabilityMetrics = {
+  compactionSavedPercent?: number | null
+  pruningApplied?: boolean | null
+  memoryFlushTriggered?: boolean | null
+  disclosureSavedPercent?: number | null
+  disclosedToolCount?: number | null
+  routerFailureClass?: string | null
+  toolRejectCount?: number
+  toolRejectRecoveredCount?: number
+}
+
 export type RunDiagnosis = {
   summary: string
   severity: DiagnosisSeverity
@@ -45,6 +56,7 @@ export type RunDiagnosis = {
   suggestions: string[]
   timeline: TimelineStep[]
   listHint: string
+  metrics?: RunObservabilityMetrics
 }
 
 function findRouterFallback(events: AgentRunEvent[]) {
@@ -115,6 +127,7 @@ function explainEventPlain(event: AgentRunEvent): { title: string; plainText: st
   }
   if (type === "router.fallback") {
     const vf = textValue(payload.validationFailure)
+    const failureClass = textValue(payload.failureClass)
     const parsed = payload.parsed && typeof payload.parsed === "object" ? (payload.parsed as Record<string, unknown>) : null
     const parsedIntent = parsed ? textValue(parsed.intent) : ""
     let plain = "没能按 AI 路由结果执行，改走备用方案"
@@ -124,12 +137,43 @@ function explainEventPlain(event: AgentRunEvent): { title: string; plainText: st
       plain = explainValidationFailure(vf)
     } else if (textValue(payload.reason) === "invalid_or_low_confidence") {
       plain = "路由 AI 的输出没通过校验，系统改用普通聊天"
+    } else if (failureClass === "connection") {
+      plain = "路由模型连接失败，已回退到规则/聊天路径"
+    } else if (failureClass) {
+      plain = `路由失败（${failureClass}），已回退`
     }
     return {
       title: "路由回退",
       plainText: plain,
       severity: "warning",
-      technical: vf || textValue(payload.reason),
+      technical: failureClass || vf || textValue(payload.reason),
+    }
+  }
+  if (type === "context.compacted") {
+    const saved = payload.savedPercent
+    const pruning = payload.pruningApplied === true
+    const flushed = payload.memoryFlushTriggered === true
+    let plain = typeof saved === "number" ? `历史上下文压缩约 ${saved}%` : "历史上下文已压缩"
+    if (pruning) plain += "，并做了 session pruning"
+    if (flushed) plain += "，压缩前已触发 memory flush"
+    return {
+      title: "上下文压缩",
+      plainText: plain,
+      severity: "success",
+      technical: `before=${textValue(payload.estimatedTokensBefore)} after=${textValue(payload.estimatedTokensAfter)}`,
+    }
+  }
+  if (type === "tool.disclosure") {
+    const saved = payload.savedPercent
+    const before = textValue(payload.availableToolCount)
+    const after = textValue(payload.shortlistedToolCount)
+    return {
+      title: "工具渐进披露",
+      plainText:
+        typeof saved === "number"
+          ? `向模型披露 ${after}/${before} 个工具 schema，节省约 ${saved}% token`
+          : `向模型披露 ${after} 个工具 schema`,
+      severity: "success",
     }
   }
   if (type === "intent.detected") {
@@ -158,10 +202,13 @@ function explainEventPlain(event: AgentRunEvent): { title: string; plainText: st
   }
   if (type === "tool_call.rejected") {
     const reason = textValue(payload.reason)
+    const retried = payload.retryAttempted === true
+    let plain = explainRejectionReason(reason, textValue(payload.name))
+    if (retried) plain += "（已尝试 alias 展开并重试）"
     return {
       title: "工具调用被拒绝",
-      plainText: explainRejectionReason(reason, textValue(payload.name)),
-      severity: "error",
+      plainText: plain,
+      severity: retried ? "warning" : "error",
       technical: reason,
     }
   }
@@ -404,6 +451,38 @@ function buildSummary(run: AgentRun, steps: DiagnosisStep[]): { summary: string;
 
 const TIMELINE_SKIP = new Set(["message.delta", "reasoning.delta", "runtime_settings.applied"])
 
+function asNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+export function extractRunObservabilityMetrics(events: AgentRunEvent[]): RunObservabilityMetrics {
+  const compaction = [...events].reverse().find((e) => e.eventType === "context.compacted")
+  const disclosure = [...events].reverse().find((e) => e.eventType === "tool.disclosure")
+  const fallback = findRouterFallback(events)
+  const rejections = events.filter((e) => e.eventType === "tool_call.rejected")
+  const recovered = rejections.filter((e) => objectPayload(e.eventJson).retryAttempted === true)
+
+  const compactionPayload = compaction ? objectPayload(compaction.eventJson) : {}
+  const disclosurePayload = disclosure ? objectPayload(disclosure.eventJson) : {}
+  const fallbackPayload = fallback ? objectPayload(fallback.eventJson) : {}
+
+  return {
+    compactionSavedPercent: asNumber(compactionPayload.savedPercent),
+    pruningApplied: compactionPayload.pruningApplied === true ? true : compactionPayload.pruningApplied === false ? false : null,
+    memoryFlushTriggered: compactionPayload.memoryFlushTriggered === true ? true : compactionPayload.memoryFlushTriggered === false ? false : null,
+    disclosureSavedPercent: asNumber(disclosurePayload.savedPercent),
+    disclosedToolCount: asNumber(disclosurePayload.shortlistedToolCount),
+    routerFailureClass: textValue(fallbackPayload.failureClass) || null,
+    toolRejectCount: rejections.length,
+    toolRejectRecoveredCount: recovered.length,
+  }
+}
+
 export function diagnoseAgentRun(
   detail: Pick<AdminAgentRunDetail, "run" | "events" | "toolCalls"> & {
     contextSnapshot?: AdminAgentRunContextSnapshot | null
@@ -431,7 +510,7 @@ export function diagnoseAgentRun(
       }
     })
 
-  return { summary, severity, steps, suggestions, timeline, listHint }
+  return { summary, severity, steps, suggestions, timeline, listHint, metrics: extractRunObservabilityMetrics(events) }
 }
 
 export function diagnoseRunListItem(

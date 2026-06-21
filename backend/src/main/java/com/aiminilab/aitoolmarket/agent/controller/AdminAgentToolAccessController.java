@@ -124,7 +124,11 @@ public class AdminAgentToolAccessController {
                 null,
                 List.of(),
                 null,
-                null
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                ""
         );
         AdminAgentRouteDebugResponse response;
         try {
@@ -143,7 +147,16 @@ public class AdminAgentToolAccessController {
                 response.requestedOutputModality(),
                 response.visibleToolCount(),
                 response.visibleTools(),
-                filteredTools
+                filteredTools,
+                response.readiness(),
+                response.modelConnectivity(),
+                response.availableToolCount(),
+                response.disclosedToolCount(),
+                response.estimatedRouterPromptBytes(),
+                response.nextActions(),
+                response.llmRouterEnabled(),
+                response.productToolLoopEnabled(),
+                response.toolDisclosureEnabled()
         ));
     }
 

@@ -13,10 +13,18 @@ from app.core.event_types import (
     TOOL_CALL_REJECTED,
     TOOL_CALL_REQUESTED,
 )
+from app.config import settings
 from app.core.intent_router import Intent, IntentResult
-from app.core.preferred_tool_bias import apply_preferred_tool_override, resolve_preferred_tool, sort_tools_with_preferred
+from app.core.preferred_tool_bias import (
+    apply_preferred_tool_override,
+    message_suggests_tool_use,
+    resolve_preferred_tool,
+    sort_tools_with_preferred,
+)
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate, ToolDescriptor
-from app.tools.registry import infer_output_modality, requested_output_modality
+from app.runtime.context_manager import ContextManager
+from app.tools.registry import ToolRegistry, infer_output_modality, requested_output_modality, resolve_canonical_tool_code
+from app.runtime.tool_disclosure import EXPAND_TOOL, expand_tool_definition
 
 
 PRODUCT_TOOL_LOOP_SYSTEM_PROMPT = (
@@ -74,9 +82,30 @@ class ProductToolCallLoopExecutor:
             },
         )
         messages = self._messages(context, workspace_memory_context=workspace_memory_context)
-        turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
         call_limit = max(1, int(max_tool_calls if max_tool_calls is not None else self.max_tool_calls))
+        expanded_codes: set[str] = set()
+
+        turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
         calls = list(getattr(turn, "tool_calls", []) or [])[:call_limit]
+
+        if calls and calls[0].name == EXPAND_TOOL:
+            code = str((calls[0].arguments or {}).get("toolCode") or "").strip()
+            if code and ToolRegistry(context).get(code):
+                expanded_codes.add(code)
+                tool_defs, aliases = self._tool_definitions(context.availableTools, context, expanded_codes=expanded_codes)
+                turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
+                calls = list(getattr(turn, "tool_calls", []) or [])[:call_limit]
+
+        if not calls and self._should_expand_full(context, aliases):
+            tool_defs, aliases = build_tool_definitions(context.availableTools, context)
+            tool_defs = self._with_expand_meta(tool_defs, context)
+            await self._event(
+                context.runId,
+                TOOL_CALL_LOOP_STARTED,
+                {"kind": "product", "phase": "expanded", "tools": [item["function"]["name"] for item in tool_defs]},
+            )
+            turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
+            calls = list(getattr(turn, "tool_calls", []) or [])[:call_limit]
         if not calls:
             await self._event(
                 context.runId,
@@ -104,16 +133,50 @@ class ProductToolCallLoopExecutor:
         selected = aliases.get(call.name)
         if selected is None:
             selected = next((alias for alias in aliases.values() if alias.tool.toolCode == call.name), None)
-            if selected is None:
-                return await self._reject(
+        if selected is None:
+            resolved_code = resolve_canonical_tool_code(call.name, context.availableTools)
+            if resolved_code:
+                expanded_codes.add(resolved_code)
+                tool_defs, aliases = self._tool_definitions(
+                    context.availableTools,
                     context,
-                    call,
-                    "tool_not_available",
-                    {
-                        "availableToolAliases": sorted(aliases.keys())[:30],
-                        "availableToolCodes": [alias.tool.toolCode for alias in aliases.values()][:30],
-                    },
+                    expanded_codes=expanded_codes,
                 )
+                retry_turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
+                retry_calls = list(getattr(retry_turn, "tool_calls", []) or [])[:call_limit]
+                if retry_calls:
+                    call = retry_calls[0]
+                    await self._event(
+                        context.runId,
+                        TOOL_CALL_REQUESTED,
+                        {
+                            "kind": "product",
+                            "phase": "reject_retry",
+                            "id": call.id,
+                            "name": call.name,
+                            "arguments": _redact_large(call.arguments),
+                        },
+                    )
+                    selected = aliases.get(call.name)
+                    if selected is None:
+                        selected = next(
+                            (alias for alias in aliases.values() if alias.tool.toolCode == call.name),
+                            None,
+                        )
+                    if selected is None and resolved_code:
+                        selected = aliases.get(_alias_for_tool_code(resolved_code))
+        if selected is None:
+            return await self._reject(
+                context,
+                call,
+                "tool_not_available",
+                {
+                    "availableToolAliases": sorted(aliases.keys())[:30],
+                    "availableToolCodes": [alias.tool.toolCode for alias in aliases.values()][:30],
+                    "retryAttempted": bool(expanded_codes),
+                    "resolvedAlias": resolve_canonical_tool_code(call.name, context.availableTools),
+                },
+            )
 
         requested_modality = requested_output_modality(context.message)
         selected_modality = infer_output_modality(selected.tool)
@@ -193,6 +256,12 @@ class ProductToolCallLoopExecutor:
 
     def _messages(self, context: RunContext, *, workspace_memory_context: str = "") -> list[ChatMessage]:
         messages = [ChatMessage(role="system", content=PRODUCT_TOOL_LOOP_SYSTEM_PROMPT)]
+        if settings.agent_tool_disclosure_enabled and context.availableTools:
+            from app.runtime.tool_disclosure import format_tool_catalog
+
+            catalog = format_tool_catalog(context.availableTools)
+            if catalog:
+                messages.append(ChatMessage(role="system", content=catalog))
         if workspace_memory_context.strip():
             messages.append(
                 ChatMessage(
@@ -235,15 +304,40 @@ class ProductToolCallLoopExecutor:
                     ),
                 )
             )
-        messages.extend(context.history[-8:])
+        messages.extend(ContextManager.from_settings(settings).build_history(context.history))
         messages.append(ChatMessage(role="user", content=context.message))
         return messages
+
+    @staticmethod
+    def _with_expand_meta(tool_defs: list[dict[str, Any]], context: RunContext | None) -> list[dict[str, Any]]:
+        if settings.agent_tool_disclosure_enabled and context is not None and context.availableTools:
+            return [*tool_defs, expand_tool_definition()]
+        return tool_defs
+
+    def _should_expand_full(self, context: RunContext, aliases: dict[str, _ToolAlias]) -> bool:
+        return (
+            settings.agent_tool_disclosure_enabled
+            and len(aliases) < len(context.availableTools)
+            and message_suggests_tool_use(context.message)
+        )
 
     def _tool_definitions(
         self,
         tools: list[ToolDescriptor],
         context: RunContext | None = None,
+        *,
+        expanded_codes: set[str] | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, _ToolAlias]]:
+        if settings.agent_tool_disclosure_enabled and context is not None:
+            from app.runtime.tool_disclosure import build_disclosed_definitions
+
+            defs, aliases = build_disclosed_definitions(
+                tools,
+                context,
+                k=settings.agent_tool_shortlist_k,
+                expanded_codes=expanded_codes,
+            )
+            return self._with_expand_meta(defs, context), aliases
         return build_tool_definitions(tools, context)
 
     async def _event(self, run_id: int, event_type: str, payload: dict[str, Any]) -> None:
@@ -280,12 +374,29 @@ def build_tool_definitions(
                 "type": "function",
                 "function": {
                     "name": alias,
-                    "description": _tool_description(tool),
-                    "parameters": _tool_parameters(tool),
+                    "description": _build_tool_description(tool),
+                    "parameters": _build_tool_parameters(tool),
                 },
             }
         )
     return definitions, aliases
+
+
+def _build_tool_description(tool: ToolDescriptor) -> str:
+    if settings.agent_tool_disclosure_enabled:
+        from app.runtime.tool_disclosure import trim_tool_description
+
+        return trim_tool_description(tool, settings.agent_tool_desc_char_limit)
+    return _tool_description(tool)
+
+
+def _build_tool_parameters(tool: ToolDescriptor) -> dict[str, Any]:
+    parameters = _tool_parameters(tool)
+    if settings.agent_tool_disclosure_enabled:
+        from app.runtime.tool_disclosure import trim_tool_parameters
+
+        return trim_tool_parameters(parameters, prune_fields=settings.agent_tool_schema_prune_fields)
+    return parameters
 
 
 def _alias_for_tool_code(tool_code: str) -> str:

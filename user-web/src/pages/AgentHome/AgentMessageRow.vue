@@ -2,6 +2,7 @@
 import { computed } from "vue"
 import { Check, Copy, FileText, Image, Loader2, Pencil, RefreshCw, X } from "lucide-vue-next"
 import ChatMessage from "./ChatMessage.vue"
+import MentionMessageBody from "./MentionMessageBody.vue"
 import AgentAvatar from "./AgentAvatar.vue"
 import RunTimeline from "./RunTimeline.vue"
 import type { AgentAvatarState } from "./AgentAvatar.vue"
@@ -9,6 +10,7 @@ import type { AgentMessage, AgentRunEvent } from "@/api/types"
 import type { AssetPreviewItem } from "@/types/assetPreview"
 import type { ChatAssetRef } from "@/utils/agentChatAssetRefs"
 import { bindLongPressReference, writeAssetDragData } from "@/utils/agentChatAssetRefs"
+import { parseStoredReferenceMentions } from "@/utils/agentMessageMentions"
 import { isImageAttachment, resolveAgentFileUrl } from "@/utils/agentAttachment"
 
 const props = defineProps<{
@@ -41,6 +43,8 @@ const emit = defineEmits<{
   preview: [asset: AssetPreviewItem, message?: AgentMessage]
   reference: [payload: import("@/utils/agentChatAssetRefs").ChatAssetDragPayload]
   "update:editingMessageDraft": [value: string]
+  "open-memory-from-trace": [memoryId: number]
+  "delete-memory-from-trace": [memoryId: number]
 }>()
 
 interface MessageAttachment {
@@ -79,6 +83,12 @@ const attachments = computed(() => {
   const raw = payload.attachments
   return Array.isArray(raw) ? raw.filter(isAttachment) : []
 })
+
+const referenceMentions = computed(() => parseStoredReferenceMentions(props.message.contentJson))
+
+const showMentionMessageBody = computed(
+  () => props.message.role === "USER" && referenceMentions.value.length > 0 && props.message.contentText.trim(),
+)
 
 function formatFileSize(size?: number | null) {
   if (size == null || !Number.isFinite(size)) return ""
@@ -218,9 +228,16 @@ function openAttachmentPreview(file: MessageAttachment) {
             :events="runEvents"
             :inline-mode="true"
             :process-mode="true"
+            @open-memory="emit('open-memory-from-trace', $event)"
+            @delete-memory="emit('delete-memory-from-trace', $event)"
+          />
+          <MentionMessageBody
+            v-if="showMentionMessageBody"
+            :text="message.contentText"
+            :mentions="referenceMentions"
           />
           <ChatMessage
-            v-if="message.contentText.trim() || message.role !== 'USER'"
+            v-else-if="message.contentText.trim() || message.role !== 'USER'"
             :message="message.contentText"
             :is-user="message.role === 'USER'"
             :streaming="isStreaming"

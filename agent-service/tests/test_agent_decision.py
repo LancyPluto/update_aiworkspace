@@ -24,17 +24,25 @@ def _context(message: str) -> RunContext:
 
 
 @pytest.mark.asyncio
-async def test_infrastructure_file_analysis_short_circuits_without_llm():
+async def test_file_analysis_goes_to_llm_not_infrastructure_short_circuit():
     service = AgentDecisionService()
     context = _context("分析文件")
     context.agentFiles = [AgentFileContext(id=1, originalFilename="a.txt", status="READY")]
 
-    async def llm_router(ctx, rule_intent):
-        raise AssertionError("infrastructure path should not call LLM router")
+    async def llm_router(ctx, guard_intent):
+        assert guard_intent.reason == "awaiting_semantic_router"
+        return IntentResult(
+            intent=Intent.FILE_ANALYSIS,
+            confidence=0.92,
+            reason="file_analysis_request",
+            decisionSource="llm_classifier",
+        )
+
     decision = await service.decide(context, llm_router=llm_router)
 
-    assert decision.intent == Intent.FILE_ANALYSIS
-    assert decision.reason == "ready_file_context_available"
+    assert decision.intent == Intent.UNSUPPORTED
+    assert "capability_file_analysis_disabled" in decision.reason
+    assert any(signal["source"] == "llm_classifier" for signal in decision.signals)
 
 
 @pytest.mark.asyncio
@@ -60,7 +68,34 @@ async def test_llm_router_selects_tool():
 
     assert decision.intent == Intent.TOOL_USE
     assert decision.selectedToolCode == "ofox_gpt_image2"
-    assert decision.signals[-1]["source"] == "llm_router"
+    assert decision.signals[-1]["source"] == "llm_classifier"
+
+
+@pytest.mark.asyncio
+async def test_llm_router_failure_falls_back_to_rule_tool_use_when_enabled():
+    class RuleRouter:
+        def classify(self, context):
+            return IntentResult(
+                intent=Intent.TOOL_USE,
+                confidence=0.85,
+                selectedToolCode="ofox_gpt_image2",
+                candidateToolCodes=["ofox_gpt_image2"],
+                reason="ranked_tool_match",
+            )
+
+    service = AgentDecisionService(intent_router=RuleRouter())
+
+    async def llm_router(context, rule_intent):
+        return None
+
+    decision = await service.decide(
+        _context("帮我生成一张图片"),
+        llm_router=llm_router,
+    )
+
+    assert decision.intent == Intent.TOOL_USE
+    assert decision.selectedToolCode == "ofox_gpt_image2"
+    assert decision.reason == "router_fallback_to_rules:ranked_tool_match"
 
 
 @pytest.mark.asyncio
@@ -123,7 +158,7 @@ async def test_preferred_tool_overrides_rule_structured_tool_selection():
     assert decision.intent == Intent.TOOL_USE
     assert decision.selectedToolCode == "gpt_image2"
     assert decision.candidateToolCodes[0] == "gpt_image2"
-    assert "preferred_tool_applied" in decision.reason
+    assert decision.reason == "preferred_tool_selected"
     assert decision.signals[-1]["source"] == "preferred_tool"
 
 

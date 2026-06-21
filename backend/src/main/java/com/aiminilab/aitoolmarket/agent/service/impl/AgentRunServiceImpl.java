@@ -30,6 +30,7 @@ import com.aiminilab.aitoolmarket.agent.dto.InternalAgentRunContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentFileContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalRecentToolCallContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalPendingToolContextResponse;
+import com.aiminilab.aitoolmarket.agent.dto.InternalReferenceMentionResponse;
 import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentToolPreferenceRequest;
 import com.aiminilab.aitoolmarket.agent.entity.AgentFile;
 import com.aiminilab.aitoolmarket.agent.entity.AgentFileChunk;
@@ -225,7 +226,14 @@ public class AgentRunServiceImpl implements AgentRunService {
         message.setContentText(trimmed);
         message.setStatus("ACTIVE");
         message.setCreatedAt(now);
-        String contentJson = messageContentJson(request.urlAttachments(), request.intelligenceLevel());
+        String contentJson = messageContentJson(
+                request.urlAttachments(),
+                request.intelligenceLevel(),
+                request.referenceMentions(),
+                request.globalFileIds(),
+                request.contentParts(),
+                request.positionalPrompt()
+        );
         if (contentJson != null) {
             message.setContentJson(contentJson);
         }
@@ -385,7 +393,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         agentToolDescriptorService.getToolForAgent(userId, request.toolCode());
         LocalDateTime now = LocalDateTime.now();
         if (request.autoCallEnabled() != null) {
-            agentToolPreferenceService.update(userId, request.toolCode(), new UpdateAgentToolPreferenceRequest(request.autoCallEnabled()));
+            agentToolPreferenceService.update(userId, request.toolCode(), new UpdateAgentToolPreferenceRequest(request.autoCallEnabled(), null));
         }
         if (agentRunMapper.markRunningIfStatus(runId, "WAITING_USER_CONFIRMATION", now) == 0) {
             return AgentRunResponse.from(findRun(runId, userId));
@@ -469,12 +477,19 @@ public class AgentRunServiceImpl implements AgentRunService {
         );
         Map<Long, String> filenames = readyFiles.stream()
                 .collect(java.util.stream.Collectors.toMap(AgentFile::getId, AgentFile::getOriginalFilename));
-        List<InternalAgentFileContextResponse> agentFiles = new java.util.ArrayList<>(urlAttachmentContexts(userMessage));
-        agentFiles.addAll(readyFiles
-                .stream()
-                .sorted((left, right) -> Long.compare(left.getId(), right.getId()))
-                .map(InternalAgentFileContextResponse::from)
-                .toList());
+        List<InternalReferenceMentionResponse> referenceMentions = referenceMentionContexts(userMessage);
+        List<Object> globalFileIds = globalFileIdsFromMessage(userMessage);
+        List<Map<String, Object>> contentParts = contentPartsFromMessage(userMessage);
+        String positionalPrompt = positionalPromptFromMessage(userMessage);
+        List<InternalAgentFileContextResponse> agentFiles = mergeAgentFileContexts(
+                urlAttachmentContexts(userMessage),
+                referenceMentionFileContexts(referenceMentions),
+                readyFiles
+                        .stream()
+                        .sorted((left, right) -> Long.compare(left.getId(), right.getId()))
+                        .map(InternalAgentFileContextResponse::from)
+                        .toList()
+        );
         List<InternalAgentFileChunkContextResponse> agentFileChunks = retrieveRelevantFileChunks(
                 run,
                 userMessage == null ? "" : userMessage.getContentText(),
@@ -549,6 +564,9 @@ public class AgentRunServiceImpl implements AgentRunService {
         );
         InternalPendingToolContextResponse pendingToolContextResponse = null;
         AgentPendingToolContext pendingCtx = agentPendingToolContextMapper.findActiveByRunId(runId);
+        if (pendingCtx == null) {
+            pendingCtx = agentPendingToolContextMapper.findActiveBySessionId(run.getSessionId());
+        }
         if (pendingCtx != null) {
             pendingToolContextResponse = new InternalPendingToolContextResponse(
                     pendingCtx.getId(),
@@ -588,8 +606,101 @@ public class AgentRunServiceImpl implements AgentRunService {
                 runtimeSettings,
                 recentToolCallContext(run),
                 pendingToolContextResponse,
-                run.getPreferredToolCode()
+                run.getPreferredToolCode(),
+                referenceMentions,
+                globalFileIds,
+                contentParts,
+                positionalPrompt
         );
+    }
+
+    private List<InternalAgentFileContextResponse> mergeAgentFileContexts(
+            List<InternalAgentFileContextResponse> urlAttachments,
+            List<InternalAgentFileContextResponse> referenceMentionFiles,
+            List<InternalAgentFileContextResponse> uploadedFiles
+    ) {
+        List<InternalAgentFileContextResponse> merged = new java.util.ArrayList<>();
+        java.util.Set<String> seenUrls = new java.util.LinkedHashSet<>();
+        for (InternalAgentFileContextResponse file : urlAttachments) {
+            if (file == null) {
+                continue;
+            }
+            String normalizedUrl = normalizeAgentFileUrl(file.downloadUrl());
+            if (normalizedUrl.isBlank() || !seenUrls.add(normalizedUrl)) {
+                continue;
+            }
+            merged.add(file);
+            if (merged.size() >= FILE_CONTEXT_LIMIT) {
+                return merged;
+            }
+        }
+        for (InternalAgentFileContextResponse file : referenceMentionFiles) {
+            if (file == null) {
+                continue;
+            }
+            String normalizedUrl = normalizeAgentFileUrl(file.downloadUrl());
+            if (normalizedUrl.isBlank() || !seenUrls.add(normalizedUrl)) {
+                continue;
+            }
+            merged.add(file);
+            if (merged.size() >= FILE_CONTEXT_LIMIT) {
+                return merged;
+            }
+        }
+        for (InternalAgentFileContextResponse file : uploadedFiles) {
+            if (file == null) {
+                continue;
+            }
+            String normalizedUrl = normalizeAgentFileUrl(file.downloadUrl());
+            if (!normalizedUrl.isBlank() && !seenUrls.add(normalizedUrl)) {
+                continue;
+            }
+            merged.add(file);
+            if (merged.size() >= FILE_CONTEXT_LIMIT) {
+                return merged;
+            }
+        }
+        return merged;
+    }
+
+    private List<InternalAgentFileContextResponse> referenceMentionFileContexts(
+            List<InternalReferenceMentionResponse> mentions
+    ) {
+        if (mentions == null || mentions.isEmpty()) {
+            return List.of();
+        }
+        List<InternalAgentFileContextResponse> contexts = new java.util.ArrayList<>();
+        long syntheticId = -1L;
+        for (InternalReferenceMentionResponse mention : mentions) {
+            if (mention == null) {
+                continue;
+            }
+            String url = mention.url() == null ? "" : mention.url().trim();
+            if (!isAllowedMaterialUrl(url)) {
+                continue;
+            }
+            String label = nonBlankOrDefault(mention.refLabel(), nonBlankOrDefault(mention.token(), "素材附件"));
+            String contentType = referenceMentionContentType(mention.kind());
+            contexts.add(InternalAgentFileContextResponse.urlAttachment(syntheticId--, label, contentType, url));
+        }
+        return contexts;
+    }
+
+    private String referenceMentionContentType(String kind) {
+        String normalized = kind == null ? "" : kind.trim().toLowerCase();
+        return switch (normalized) {
+            case "video" -> "video/*";
+            case "audio" -> "audio/*";
+            case "document", "file" -> "application/octet-stream";
+            default -> "image/*";
+        };
+    }
+
+    private String normalizeAgentFileUrl(String url) {
+        if (url == null || url.isBlank()) {
+            return "";
+        }
+        return url.trim();
     }
 
     private String normalizePreferredToolCode(String raw) {
@@ -757,6 +868,12 @@ public class AgentRunServiceImpl implements AgentRunService {
             agentRunMapper.markWaitingForConfirmationIfStatus(runId, "RUNNING", now);
             persistPendingToolContextFromConfirmation(run, request.eventJson(), now);
         }
+        if ("tool.missing_arguments".equals(request.eventType())) {
+            persistPendingToolContextFromMissingArguments(run, request.eventJson(), now);
+        }
+        if ("intent.detected".equals(request.eventType())) {
+            persistPendingToolContextFromIntentDetected(run, request.eventJson(), now);
+        }
         return AgentRunEventResponse.from(appendEventInternal(
                 runId,
                 run.getUserId(),
@@ -791,7 +908,76 @@ public class AgentRunServiceImpl implements AgentRunService {
         ctx.setStatus("ACTIVE");
         ctx.setCreatedAt(now);
         ctx.setUpdatedAt(now);
-        agentPendingToolContextMapper.expireByRunId(run.getId());
+        agentPendingToolContextMapper.expireBySessionId(run.getSessionId());
+        agentPendingToolContextMapper.insertPendingContext(ctx);
+    }
+
+    private void persistPendingToolContextFromIntentDetected(AgentRun run, Object eventJson, LocalDateTime now) {
+        JsonNode payload = objectMapper.valueToTree(eventJson == null ? Map.of() : eventJson);
+        if (!"needs_clarification".equalsIgnoreCase(firstText(payload.path("intent")))) {
+            return;
+        }
+        String toolCode = firstText(payload.path("selectedToolCode"));
+        if (toolCode.isBlank()) {
+            return;
+        }
+        JsonNode missing = payload.path("missingFields");
+        List<String> missingFields = new java.util.ArrayList<>();
+        if (missing.isArray()) {
+            missing.forEach(node -> {
+                if (node.isTextual() && !node.asText().isBlank()) {
+                    missingFields.add(node.asText());
+                }
+            });
+        }
+        AgentPendingToolContext ctx = new AgentPendingToolContext();
+        ctx.setRunId(run.getId());
+        ctx.setSessionId(run.getSessionId());
+        ctx.setUserId(run.getUserId());
+        ctx.setSelectedToolCode(toolCode);
+        ctx.setCandidateToolCodesJson(toJson(List.of(toolCode)));
+        ctx.setCollectedArgumentsJson(toJson(Map.of()));
+        ctx.setMissingArgumentsJson(toJson(missingFields));
+        ctx.setClarifyingQuestion(firstText(payload.path("clarifyingQuestion")));
+        ctx.setConfirmationRequired(false);
+        ctx.setSource("intent_needs_clarification");
+        ctx.setStatus("ACTIVE");
+        ctx.setCreatedAt(now);
+        ctx.setUpdatedAt(now);
+        agentPendingToolContextMapper.expireBySessionId(run.getSessionId());
+        agentPendingToolContextMapper.insertPendingContext(ctx);
+    }
+
+    private void persistPendingToolContextFromMissingArguments(AgentRun run, Object eventJson, LocalDateTime now) {
+        JsonNode payload = objectMapper.valueToTree(eventJson == null ? Map.of() : eventJson);
+        String toolCode = firstText(payload.path("toolCode"));
+        if (toolCode.isBlank()) {
+            return;
+        }
+        JsonNode missing = payload.path("missingArguments");
+        List<String> missingFields = new java.util.ArrayList<>();
+        if (missing.isArray()) {
+            missing.forEach(node -> {
+                if (node.isTextual() && !node.asText().isBlank()) {
+                    missingFields.add(node.asText());
+                }
+            });
+        }
+        AgentPendingToolContext ctx = new AgentPendingToolContext();
+        ctx.setRunId(run.getId());
+        ctx.setSessionId(run.getSessionId());
+        ctx.setUserId(run.getUserId());
+        ctx.setSelectedToolCode(toolCode);
+        ctx.setCandidateToolCodesJson(toJson(List.of(toolCode)));
+        ctx.setCollectedArgumentsJson(toJson(Map.of()));
+        ctx.setMissingArgumentsJson(toJson(missingFields));
+        ctx.setClarifyingQuestion(firstText(payload.path("toolName")));
+        ctx.setConfirmationRequired(false);
+        ctx.setSource("tool_missing_arguments");
+        ctx.setStatus("ACTIVE");
+        ctx.setCreatedAt(now);
+        ctx.setUpdatedAt(now);
+        agentPendingToolContextMapper.expireBySessionId(run.getSessionId());
         agentPendingToolContextMapper.insertPendingContext(ctx);
     }
 
@@ -1189,19 +1375,60 @@ public class AgentRunServiceImpl implements AgentRunService {
         if (existing.path("agentOptions").isObject()) {
             payload.put("agentOptions", objectMapper.convertValue(existing.path("agentOptions"), Map.class));
         }
+        if (existing.path("referenceMentions").isArray()) {
+            payload.put("referenceMentions", objectMapper.convertValue(existing.path("referenceMentions"), List.class));
+        }
+        if (existing.path("globalFileIds").isArray()) {
+            payload.put("globalFileIds", objectMapper.convertValue(existing.path("globalFileIds"), List.class));
+        }
+        if (existing.path("contentParts").isArray()) {
+            payload.put("contentParts", objectMapper.convertValue(existing.path("contentParts"), List.class));
+        }
+        if (existing.path("positionalPrompt").isTextual()) {
+            payload.put("positionalPrompt", existing.path("positionalPrompt").asText());
+        }
         userMessage.setContentJson(toJson(payload));
         agentMessageMapper.updateById(userMessage);
     }
 
-    private String messageContentJson(List<Map<String, Object>> rawItems, String intelligenceLevel) {
+    private String messageContentJson(
+            List<Map<String, Object>> rawItems,
+            String intelligenceLevel,
+            List<Map<String, Object>> referenceMentions,
+            List<Object> globalFileIds,
+            List<Map<String, Object>> contentParts,
+            String positionalPrompt
+    ) {
         List<Map<String, Object>> items = normalizedUrlAttachments(rawItems);
         String normalizedLevel = normalizeIntelligenceLevel(intelligenceLevel);
-        if (items.isEmpty() && normalizedLevel == null) {
+        List<Map<String, Object>> mentions = referenceMentions == null ? List.of() : referenceMentions.stream()
+                .filter(item -> item != null && item.get("url") instanceof String url && !url.isBlank())
+                .toList();
+        List<Object> globalIds = globalFileIds == null ? List.of() : globalFileIds.stream()
+                .filter(item -> item instanceof String || item instanceof Number)
+                .toList();
+        List<Map<String, Object>> parts = contentParts == null ? List.of() : contentParts.stream()
+                .filter(item -> item != null && item.get("type") instanceof String)
+                .toList();
+        String prompt = positionalPrompt == null ? "" : positionalPrompt.trim();
+        if (items.isEmpty() && normalizedLevel == null && mentions.isEmpty() && globalIds.isEmpty() && parts.isEmpty() && prompt.isEmpty()) {
             return null;
         }
         Map<String, Object> payload = new LinkedHashMap<>();
         if (!items.isEmpty()) {
             payload.put("attachments", items);
+        }
+        if (!mentions.isEmpty()) {
+            payload.put("referenceMentions", mentions);
+        }
+        if (!globalIds.isEmpty()) {
+            payload.put("globalFileIds", globalIds);
+        }
+        if (!parts.isEmpty()) {
+            payload.put("contentParts", parts);
+        }
+        if (!prompt.isEmpty()) {
+            payload.put("positionalPrompt", prompt);
         }
         if (normalizedLevel != null) {
             payload.put("agentOptions", Map.of("intelligenceLevel", normalizedLevel));
@@ -1226,6 +1453,68 @@ public class AgentRunServiceImpl implements AgentRunService {
     private String intelligenceLevelFromMessage(AgentMessage userMessage) {
         JsonNode root = parseJsonNode(userMessage == null ? null : userMessage.getContentJson());
         return normalizeIntelligenceLevel(firstText(root.path("agentOptions").path("intelligenceLevel")));
+    }
+
+    private List<InternalReferenceMentionResponse> referenceMentionContexts(AgentMessage userMessage) {
+        JsonNode root = parseJsonNode(userMessage == null ? null : userMessage.getContentJson());
+        JsonNode mentions = root.path("referenceMentions");
+        if (!mentions.isArray()) {
+            return List.of();
+        }
+        List<InternalReferenceMentionResponse> contexts = new java.util.ArrayList<>();
+        for (JsonNode item : mentions) {
+            String url = firstText(item.path("url"));
+            if (url.isBlank()) {
+                continue;
+            }
+            contexts.add(new InternalReferenceMentionResponse(
+                    firstText(item.path("token")),
+                    firstText(item.path("refLabel")),
+                    firstText(item.path("assetKey")),
+                    url,
+                    firstText(item.path("kind")),
+                    firstText(item.path("source"))
+            ));
+        }
+        return contexts;
+    }
+
+    private List<Object> globalFileIdsFromMessage(AgentMessage userMessage) {
+        JsonNode root = parseJsonNode(userMessage == null ? null : userMessage.getContentJson());
+        JsonNode ids = root.path("globalFileIds");
+        if (!ids.isArray()) {
+            return List.of();
+        }
+        List<Object> values = new java.util.ArrayList<>();
+        for (JsonNode item : ids) {
+            if (item.isNumber()) {
+                values.add(item.isIntegralNumber() ? item.asLong() : item.asDouble());
+            } else if (item.isTextual() && !item.asText().isBlank()) {
+                values.add(item.asText());
+            }
+        }
+        return values;
+    }
+
+    private List<Map<String, Object>> contentPartsFromMessage(AgentMessage userMessage) {
+        JsonNode root = parseJsonNode(userMessage == null ? null : userMessage.getContentJson());
+        JsonNode parts = root.path("contentParts");
+        if (!parts.isArray()) {
+            return List.of();
+        }
+        List<Map<String, Object>> values = new java.util.ArrayList<>();
+        for (JsonNode item : parts) {
+            if (!item.isObject() || !item.path("type").isTextual()) {
+                continue;
+            }
+            values.add(objectMapper.convertValue(item, Map.class));
+        }
+        return values;
+    }
+
+    private String positionalPromptFromMessage(AgentMessage userMessage) {
+        JsonNode root = parseJsonNode(userMessage == null ? null : userMessage.getContentJson());
+        return firstText(root.path("positionalPrompt"));
     }
 
     private List<Map<String, Object>> urlAttachmentItems(String contentJson) {

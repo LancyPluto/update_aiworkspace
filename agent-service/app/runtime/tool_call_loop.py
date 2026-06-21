@@ -14,7 +14,9 @@ from app.core.event_types import (
     TOOL_CALL_REJECTED,
     TOOL_CALL_REQUESTED,
 )
+from app.config import settings
 from app.core.schemas import ChatMessage, RunEventCreate
+from app.runtime.context_manager import trim_tool_output
 from app.tools.memory_tool import MemoryTool, _format_memory_tool_definitions
 
 
@@ -118,7 +120,10 @@ class AgentToolCallLoopExecutor:
                 working.append(
                     ChatMessage(
                         role="tool",
-                        content=json.dumps(result, ensure_ascii=False),
+                        content=trim_tool_output(
+                            json.dumps(result, ensure_ascii=False),
+                            max(1, settings.agent_tool_output_char_limit),
+                        ),
                         toolCallId=call.id,
                         name=call.name,
                     )

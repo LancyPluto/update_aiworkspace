@@ -64,4 +64,11 @@ public interface AgentPendingToolContextMapper extends BaseMapper<AgentPendingTo
             WHERE run_id = #{runId} AND status = 'ACTIVE'
             """)
     int expireByRunId(@Param("runId") Long runId);
+
+    @Update("""
+            UPDATE agent_pending_tool_context
+            SET status = 'EXPIRED', updated_at = NOW()
+            WHERE session_id = #{sessionId} AND status = 'ACTIVE'
+            """)
+    int expireBySessionId(@Param("sessionId") Long sessionId);
 }

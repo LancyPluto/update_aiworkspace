@@ -10,6 +10,8 @@ from app.config import settings
 from app.core.budget_guard import BudgetExceeded, BudgetGuard, BudgetState
 from app.core.event_types import (
     AGENT_STEP,
+    CONTEXT_COMPACTED,
+    TOOL_DISCLOSURE,
     MEMORY_CONTEXT_FROZEN,
     MESSAGE_COMPLETED,
     MESSAGE_DELTA,
@@ -26,6 +28,8 @@ from app.core.event_types import (
     TOOL_SELECTED,
 )
 from app.core.intent_router import Intent, IntentRouter
+from app.routing import semantic_tool_recall
+from app.routing.v2.unified_router import UnifiedSemanticRouter
 from app.core.preferred_tool_bias import resolve_preferred_tool
 from app.core.schemas import (
     AgentRouteDebugResponse,
@@ -52,6 +56,14 @@ from app.runtime.agent_graph.state import (
     deserialize_checkpoint,
     serialize_checkpoint,
 )
+from app.runtime.context_manager import ContextManager, trim_tool_output
+from app.runtime.product_tool_call_loop import _alias_for_tool_code
+from app.runtime.tool_disclosure import (
+    EXPAND_TOOL,
+    build_disclosed_definitions,
+    expand_tool_definition,
+    format_tool_catalog,
+)
 from app.runtime.agent_graph.tool_specs import (
     FINISH_TOOL,
     MEMORY_ADD_TOOL,
@@ -73,14 +85,16 @@ from app.runtime.memory_runtime import (
     memory_auto_save_enabled,
     memory_context_trace_payload,
 )
+from app.runtime.route_readiness import build_route_readiness
 from app.runtime.runtime_settings import (
     runtime_budget_guard_for_context,
     runtime_int,
     runtime_settings_event_payload,
 )
+from app.runtime.session_state import SESSION_STATE_INSTRUCTIONS, format_session_state_context
 from app.runtime.tool_orchestrator import ToolOrchestrator
 from app.security.prompt_guard import PromptGuard
-from app.tools.backend_tool import BackendToolBridge, ToolExecutionError
+from app.tools.backend_tool import BackendToolBridge, ToolExecutionError, enforce_locked_field_defaults, finalize_generation_arguments
 from app.tools.memory_tool import MemoryTool
 from app.tools.registry import (
     ToolRegistry,
@@ -125,6 +139,9 @@ class AgentGraphEngine:
         self.memory_curator = MemoryCuratorService()
         self.memory_runtime = WorkspaceMemoryRuntime(backend_client, self.memory_curator, model_client=model_client)
         self.file_runtime = WorkspaceFileRuntime(backend_client)
+        self.context_manager = ContextManager.from_settings(settings)
+        self.unified_router = UnifiedSemanticRouter(backend_client, model_client)
+        semantic_tool_recall.set_recall_model_client(model_client)
         self._memory_tool_executed_runs: set[int] = set()
 
         # Per-run scratch state (engines are constructed per request).
@@ -138,6 +155,8 @@ class AgentGraphEngine:
         self._max_tool_retries: int = 2
         self._run_artifacts: list[dict[str, Any]] = []
         self._tool_failures: dict[str, int] = {}
+        self._expanded_tool_codes: set[str] = set()
+        self._memory_tools_enabled: bool = False
         self._compiled = self._build_graph()
 
     # ------------------------------------------------------------------ #
@@ -191,6 +210,12 @@ class AgentGraphEngine:
 
     async def debug_route(self, context: RunContext) -> AgentRouteDebugResponse:
         requested_modality = requested_output_modality(context.message)
+        guard_intent = self.intent_router.classify(context)
+        readiness = await build_route_readiness(
+            context,
+            self.model,
+            guard_intent=guard_intent,
+        )
         return AgentRouteDebugResponse(
             intent="agent_graph",
             confidence=1.0,
@@ -205,6 +230,7 @@ class AgentGraphEngine:
                 AgentRouteDebugTool(toolCode=t.toolCode, toolName=t.toolName, autoCallable=t.autoCallable)
                 for t in context.availableTools
             ],
+            **readiness,
         )
 
     # ------------------------------------------------------------------ #
@@ -263,6 +289,14 @@ class AgentGraphEngine:
     async def _agent_node(self, state: AgentState) -> dict[str, Any]:
         context = self._context
         assert context is not None
+        if settings.agent_tool_disclosure_enabled:
+            # Recompute the shortlist for the current step so chained outputs
+            # (e.g. an image just produced) surface the right next-step tools.
+            self._refresh_tool_defs(context, artifacts=state.get("artifacts") or self._run_artifacts)
+        if int(state.get("iteration", 0)) == 0 and settings.agent_unified_router_enabled:
+            routed = await self._first_step_unified_route(context, state)
+            if routed is not None:
+                return routed
         self._guard.reserve_model_call(self._budget)
         turn = await self.model.chat_turn(state["messages"], tools=self._tool_defs, tool_choice="auto")
         iteration = int(state.get("iteration", 0)) + 1
@@ -286,6 +320,39 @@ class AgentGraphEngine:
         else:
             update["pending_tool_calls"] = []
         return update
+
+    async def _first_step_unified_route(self, context: RunContext, state: AgentState) -> dict[str, Any] | None:
+        """Align graph first step with UnifiedSemanticRouter tool selection."""
+        memory_items = await self.memory_runtime.fetch_items(context)
+        memory_context = format_workspace_memory_context(memory_items)
+        intent = await self.unified_router.route(context, workspace_memory_context=memory_context)
+        if intent is None or intent.intent != Intent.TOOL_USE or not intent.selectedToolCode:
+            return None
+        alias = _alias_for_tool_code(intent.selectedToolCode)
+        call_id = "unified-router-1"
+        arguments = dict(intent.arguments or {})
+        iteration = 1
+        payloads = [tool_call_message_payload(call_id, alias, arguments)]
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=AGENT_STEP,
+                eventText=f"step {iteration}",
+                eventJson={
+                    "iteration": iteration,
+                    "toolCallCount": 1,
+                    "finishReason": "unified_router",
+                    "selectedToolCode": intent.selectedToolCode,
+                },
+            ),
+        )
+        return {
+            "iteration": iteration,
+            "last_content": "",
+            "unified_router_applied": True,
+            "messages": [ChatMessage(role="assistant", content="", toolCalls=payloads)],
+            "pending_tool_calls": [{"id": call_id, "name": alias, "arguments": arguments}],
+        }
 
     async def _tools_node(self, state: AgentState) -> dict[str, Any]:
         context = self._context
@@ -328,6 +395,23 @@ class AgentGraphEngine:
             if name in {MEMORY_ADD_TOOL, MEMORY_REPLACE_TOOL, MEMORY_REMOVE_TOOL}:
                 result = await self._execute_memory_tool(context, name, arguments)
                 new_messages.append(self._tool_message(call_id, name, result))
+                continue
+
+            if name == EXPAND_TOOL:
+                code = str(arguments.get("toolCode") or "").strip()
+                tool = registry.get(code)
+                if tool is None:
+                    new_messages.append(self._tool_message(call_id, name, {
+                        "success": False, "error": f"unknown toolCode: {code}",
+                    }))
+                else:
+                    self._expanded_tool_codes.add(code)
+                    new_messages.append(self._tool_message(call_id, name, {
+                        "success": True,
+                        "toolCode": code,
+                        "callableAs": _alias_for_tool_code(code),
+                        "note": "已展开完整参数，可在下一步直接调用该工具。",
+                    }))
                 continue
 
             # Product tool path.
@@ -479,12 +563,56 @@ class AgentGraphEngine:
                 context.runId,
                 RunEventCreate(eventType=RUN_STARTED, eventText="Agent 已开始处理", eventJson={"runId": context.runId, "engine": "agent_graph"}),
             )
-        self._tool_defs, self._aliases = product_tool_definitions(context.availableTools, context)
-        self._tool_defs = [*self._tool_defs, planning_tool_definition(), finish_tool_definition()]
+        self._expanded_tool_codes = set()
         self._memory_tool = None
-        if context.workspaceId and memory_auto_save_enabled(context):
+        self._memory_tools_enabled = bool(context.workspaceId and memory_auto_save_enabled(context))
+        if self._memory_tools_enabled:
             self._memory_tool = MemoryTool(self.backend, context.workspaceId, context.userId, run_id=context.runId)
-            self._tool_defs.extend(memory_tool_definitions())
+        self._refresh_tool_defs(context, artifacts=None)
+        await self._emit_tool_disclosure(context)
+
+    def _refresh_tool_defs(self, context: RunContext, *, artifacts: list[dict[str, Any]] | None) -> None:
+        """(Re)build the function-calling toolset for the current step.
+
+        With disclosure enabled only the relevant shortlist (plus tools the model
+        explicitly expanded) carry full trimmed schemas; the model still sees every
+        tool in the catalog and can pull any of them via ``expand_tool``.
+        """
+        if settings.agent_tool_disclosure_enabled:
+            product_defs, aliases = build_disclosed_definitions(
+                context.availableTools,
+                context,
+                k=settings.agent_tool_shortlist_k,
+                expanded_codes=self._expanded_tool_codes,
+                artifacts=artifacts,
+            )
+        else:
+            product_defs, aliases = product_tool_definitions(context.availableTools, context)
+        tool_defs = [*product_defs, planning_tool_definition(), finish_tool_definition()]
+        if settings.agent_tool_disclosure_enabled and context.availableTools:
+            tool_defs.append(expand_tool_definition())
+        if self._memory_tools_enabled:
+            tool_defs.extend(memory_tool_definitions())
+        self._tool_defs = tool_defs
+        self._aliases = aliases
+
+    async def _emit_tool_disclosure(self, context: RunContext) -> None:
+        if not settings.agent_tool_disclosure_enabled or not context.availableTools:
+            return
+        full_defs, _ = product_tool_definitions(context.availableTools, context)
+        full_tokens = _estimate_tokens(json.dumps(full_defs, ensure_ascii=False))
+        disclosed_tokens = _estimate_tokens(json.dumps(self._tool_defs, ensure_ascii=False))
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(eventType=TOOL_DISCLOSURE, eventText="tool disclosure applied", eventJson={
+                "availableToolCount": len(context.availableTools),
+                "shortlistedToolCount": len(self._aliases),
+                "expandedToolCount": len(self._expanded_tool_codes),
+                "toolDefsTokensBefore": full_tokens,
+                "toolDefsTokensAfter": disclosed_tokens,
+                "savedPercent": round((full_tokens - disclosed_tokens) / full_tokens * 100, 1) if full_tokens else 0.0,
+            }),
+        )
 
     def _fresh_state(self, messages: list[ChatMessage]) -> AgentState:
         return {
@@ -510,9 +638,12 @@ class AgentGraphEngine:
         )
 
     async def _base_messages(self, context: RunContext) -> list[ChatMessage]:
-        configured = (context.agentSystemPrompt or "").strip() or GRAPH_SYSTEM_PROMPT
+        configured = ((context.agentSystemPrompt or "").strip() or GRAPH_SYSTEM_PROMPT) + "\n\n" + SESSION_STATE_INSTRUCTIONS
         messages: list[ChatMessage] = [ChatMessage(role="system", content=configured)]
-        tools_prompt = _format_available_tools_prompt(context)
+        if settings.agent_tool_disclosure_enabled:
+            tools_prompt = format_tool_catalog(context.availableTools)
+        else:
+            tools_prompt = _format_available_tools_prompt(context)
         if tools_prompt:
             messages.append(ChatMessage(role="system", content=tools_prompt))
         memory_items = await self.memory_runtime.fetch_items(context)
@@ -526,10 +657,40 @@ class AgentGraphEngine:
         file_context = _format_file_context(context)
         if file_context:
             messages.append(ChatMessage(role="system", content=file_context))
-        limit = max(1, settings.agent_max_history_messages)
-        messages.extend(list(context.history or [])[-limit:])
+        session_state_context = format_session_state_context(context)
+        if session_state_context:
+            messages.append(ChatMessage(role="system", content=session_state_context))
+        await self._emit_context_compaction(context)
+        messages.extend(self.context_manager.build_history(context.history))
         messages.append(ChatMessage(role="user", content=context.message))
         return messages
+
+    async def _emit_context_compaction(self, context: RunContext) -> None:
+        """Trace compaction metrics and flush durable memory before aggressive trimming."""
+        history = list(context.history or [])
+        if not history:
+            return
+        metrics = self.context_manager.build_history_metrics(history)
+        before = int(metrics["estimatedTokensBefore"])
+        after = int(metrics["estimatedTokensAfter"])
+        saved_pct = round((before - after) / before * 100, 1) if before else 0.0
+        memory_flushed = await self.memory_runtime.maybe_flush_before_compaction(
+            context,
+            estimated_tokens_before=before,
+            saved_percent=saved_pct,
+        )
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=CONTEXT_COMPACTED,
+                eventText="context window compacted",
+                eventJson={
+                    **metrics,
+                    "savedPercent": saved_pct,
+                    "memoryFlushTriggered": memory_flushed,
+                },
+            ),
+        )
 
     # ------------------------------------------------------------------ #
     # Tool helpers
@@ -566,7 +727,9 @@ class AgentGraphEngine:
             if prompt_value:
                 prepared.setdefault("prompt", prompt_value)
         prepared = self._backfill_artifacts(tool, prepared)
-        return apply_user_selected_attachment_priority(context, tool, prepared)
+        prepared = enforce_locked_field_defaults(tool, prepared, user_message=context.message)
+        prepared = apply_user_selected_attachment_priority(context, tool, prepared)
+        return finalize_generation_arguments(context, tool, prepared)
 
     def _backfill_artifacts(self, tool: ToolDescriptor, prepared: dict[str, Any]) -> dict[str, Any]:
         """Chain prior tool outputs into the next tool's media input fields.
@@ -612,7 +775,9 @@ class AgentGraphEngine:
             for key, value in (pending.collectedArgumentsJson or {}).items():
                 if value not in (None, ""):
                     execution_args[key] = value
-        return apply_user_selected_attachment_priority(context, tool, execution_args)
+        execution_args = enforce_locked_field_defaults(tool, execution_args, user_message=context.message)
+        execution_args = apply_user_selected_attachment_priority(context, tool, execution_args)
+        return finalize_generation_arguments(context, tool, execution_args)
 
     async def _execute_memory_tool(self, context: RunContext, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if self._memory_tool is None:
@@ -650,7 +815,7 @@ class AgentGraphEngine:
             "toolCode": result.get("toolCode"),
             "taskId": result.get("taskId"),
             "resourceType": data.get("resourceType") if isinstance(data, dict) else None,
-            "result": content_text,
+            "result": trim_tool_output(content_text, self.context_manager.tool_output_char_limit),
         }
 
     def _artifact_from_result(self, tool: ToolDescriptor, result: dict[str, Any]) -> dict[str, Any]:

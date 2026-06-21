@@ -170,12 +170,14 @@ export async function uploadToolFile(
 export async function fetchUploadAssets(options?: {
   token?: string | null
   kind?: "image" | "video" | "audio" | "file" | string | null
+  pageNo?: number
   pageSize?: number
 }): Promise<PageResult<UserUploadAsset>> {
   return apiRequest<PageResult<UserUploadAsset>>("GET", "/api/v1/upload-assets", {
     token: options?.token,
     query: {
       kind: options?.kind ?? undefined,
+      pageNo: options?.pageNo ?? undefined,
       pageSize: options?.pageSize ?? undefined,
     },
   })

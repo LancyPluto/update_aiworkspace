@@ -1,5 +1,6 @@
 import pytest
 
+from app.clients.model_client import ChatTurnResult
 from app.core.schemas import RunContext, ToolDescriptor
 from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
 from app.security.prompt_guard import PromptGuard
@@ -60,7 +61,7 @@ class FakeBackend:
     async def fail_run(self, run_id, request):
         self.failed.append((run_id, request.errorCode))
 
-    async def retrieve_workspace_memory(self, workspace_id, query, limit, view=None):
+    async def retrieve_workspace_memory(self, workspace_id, query, limit, view=None, memory_ids=None, session_id=None):
         return []
 
     async def create_run_artifact(self, run_id, filename, content, content_type):
@@ -73,6 +74,9 @@ class FakeModel:
 
     async def chat(self, messages):
         return self.response
+
+    async def chat_turn(self, messages, tools=None, tool_choice=None):
+        return ChatTurnResult(content=self.response)
 
     @property
     def chat_stream(self):

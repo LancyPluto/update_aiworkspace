@@ -50,38 +50,39 @@ pytest -q
 
 ## Agent Tool Routing
 
-The default runtime uses a product-tool-first pass before the legacy intent
-router. The pass exposes visible backend AI tools as structured model tools and
-then sends any selected tool through the existing backend bridge, budget guard,
-confirmation flow, and task polling.
+Routing lives in `app/routing/` as a layered pipeline:
 
-Each run receives runtime settings from the Spring Boot context endpoint. Those
-settings are request-scoped: model/tool call limits, task timeouts, polling
-intervals, stream relay, and product tool loop limits do not mutate shared
-runtime instances. The runtime emits `runtime_settings.applied` so backend/admin
-views can audit the effective settings for a run.
+1. **StateGuard** — deterministic only (empty message, pending tool context, structured field follow-ups)
+2. **LLMClassifier** — semantic intent + tool selection (`attachmentSignals`, `capabilityFlags`, v2 prompt)
+3. **ToolResolver** — optional function-calling refinement when classifier confidence is below threshold
+4. **PolicyValidator** — capability gates (file analysis / RAG / workflow) and modality checks
 
-Intent routing uses the LLM router as the primary decision path. Configure router
-behavior from the admin Prompts page (`agent.router.*`), including:
+Legacy shims remain at `app/core/intent_router.py` and `app/runtime/agent_router_service.py`.
 
-- `agent.router.history_turns` — how many prior user turns are sent to the router (default 4)
-- `agent.router.recent_tool_calls` — how many recent successful tool calls are included (default 5)
-
-Routing order:
-
-1. Infrastructure rules (file / pending tool context)
-2. LLM Router (primary)
-3. Product Tool Call Loop fallback when router rejects the model output (optional, default on via `agent.runtime.product_tool_loop_enabled`)
-4. Safe `general_chat` if both fail
-
-When routing falls back to chat, check run event `router.fallback` for `validationFailure` (for example `confidence_below_min`, `tool_not_available`, `output_modality_mismatch`).
-
-Useful local switches:
+Configure behavior via env:
 
 ```powershell
 AGENT_LLM_ROUTER_ENABLED=true
+AGENT_ROUTING_V2_ENABLED=true
+AGENT_ROUTING_V2_SHADOW_MODE=false
+AGENT_ROUTING_V2_LLM_ONLY=false
+AGENT_CAPABILITY_FILE_ANALYSIS=false
 AGENT_PRODUCT_TOOL_LOOP_ENABLED=true
 ```
+
+Admin Prompts (`agent.router.*`) still override router prompt/history. When routing falls back, inspect run event `router.fallback` for `validationFailure`.
+
+## Multimodal Context Contract
+
+Follow-up image editing must use structured state, not raw-text keyword patches.
+
+- `app/runtime/session_state.py` hydrates the latest generated image from `recentToolCalls.mediaUrls` plus the original prompt from `argumentsJson` / `resultJson`, then injects it as `<SessionState>`.
+- The LLM resolves pronouns such as "this", "previous image", "刚刚", or "原图" by reading `<SessionState>`. Python business code must not special-case those words with `if`, regex, or whitelist routing.
+- GPT/OpenAI image tools expose `base_image_url` for the image being edited and `reference_images` for extra face/style/pose references. Do not collapse them back into one ambiguous `image` field in Agent-facing schema.
+- `app/core/attachment_catalog.py` treats inline chips and `@图片` labels as pointers. Tool arguments must be resolved by `resolve_media_argument_pointers` before task creation, so workers never receive UI labels such as `@图片1`.
+- `app/tools/registry.py` must keep output modality detection conservative. Cinematic style or composition language is image intent unless the user explicitly asks for video output.
+
+Regression coverage for this contract lives in `tests/test_session_state.py`, `tests/test_attachment_catalog.py`, `tests/test_user_attachment_priority.py`, `tests/test_backend_tool_bridge.py`, and `tests/test_tool_registry.py`.
 
 ## Memory
 

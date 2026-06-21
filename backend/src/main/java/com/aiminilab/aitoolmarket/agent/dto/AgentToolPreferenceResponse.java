@@ -8,6 +8,7 @@ public record AgentToolPreferenceResponse(
         Long id,
         String toolCode,
         boolean autoCallEnabled,
+        boolean disabled,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -16,6 +17,7 @@ public record AgentToolPreferenceResponse(
                 preference.getId(),
                 preference.getToolCode(),
                 Boolean.TRUE.equals(preference.getAutoCallEnabled()),
+                Boolean.TRUE.equals(preference.getDisabled()),
                 preference.getCreatedAt(),
                 preference.getUpdatedAt()
         );

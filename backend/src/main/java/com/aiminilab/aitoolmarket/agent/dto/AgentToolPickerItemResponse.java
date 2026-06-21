@@ -6,6 +6,8 @@ public record AgentToolPickerItemResponse(
         String description,
         String outputModality,
         String coverUrl,
-        Integer estimatedCreditCost
+        Integer estimatedCreditCost,
+        boolean autoCallEnabled,
+        boolean disabled
 ) {
 }

@@ -18,6 +18,14 @@ public record CreateAgentMessageRequest(
         /** 随消息一并提交的会话附件 ID；为空则绑定当前会话全部待发送附件。 */
         List<Long> fileIds,
         /** 已有素材 URL 附件，例如素材库中的 /generated/... 结果。 */
-        List<Map<String, Object>> urlAttachments
+        List<Map<String, Object>> urlAttachments,
+        /** 结构化 @ 引用（展示 token + refLabel + url），供 agent-service 映射附件。 */
+        List<Map<String, Object>> referenceMentions,
+        /** 暂存区全局素材 ID，包含上传文件 ID 和 URL 素材稳定 key。 */
+        List<Object> globalFileIds,
+        /** 按输入框 DOM 顺序序列化的 OpenAI-style 多模态片段。 */
+        List<Map<String, Object>> contentParts,
+        /** 将 inline chip 替换成 {asset_key} 变量后的站位提示词。 */
+        String positionalPrompt
 ) {
 }

@@ -95,6 +95,8 @@ CALL add_index_if_missing('agent_context_snapshots', 'idx_agent_context_snapshot
 CALL add_column_if_missing('agent_model_configs', 'agent_enabled', '`agent_enabled` TINYINT NOT NULL DEFAULT 1');
 CALL add_index_if_missing('agent_model_configs', 'idx_agent_model_configs_agent_enabled', 'CREATE INDEX idx_agent_model_configs_agent_enabled ON agent_model_configs(agent_enabled, enabled, is_deleted, is_default, id)');
 
+CALL add_column_if_missing('agent_tool_preferences', 'disabled', '`disabled` TINYINT NOT NULL DEFAULT 0');
+
 CALL add_column_if_missing('agent_tool_descriptor_extension', 'health_status', '`health_status` VARCHAR(32) NOT NULL DEFAULT ''UNKNOWN''');
 CALL add_column_if_missing('agent_tool_descriptor_extension', 'health_message', '`health_message` VARCHAR(512) NULL');
 CALL add_column_if_missing('agent_tool_descriptor_extension', 'health_checked_at', '`health_checked_at` DATETIME NULL');

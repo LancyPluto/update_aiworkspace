@@ -22,7 +22,10 @@ import {
 } from "lucide-vue-next"
 import type { AgentFile, AgentModelConfig, AgentToolPickerItem, AgentUrlAttachment } from "@/api/types"
 import { isImageAttachment, resolveAgentFileUrl } from "@/utils/agentAttachment"
-import { readAssetDragPayload } from "@/utils/agentChatAssetRefs"
+import { readAssetDragPayload, type ChatAssetRef } from "@/utils/agentChatAssetRefs"
+import { displayLabelForMention, listReferencePickerOptions, type AgentReferenceMention } from "@/utils/agentReferenceMentions"
+import ComposerMentionInput from "./ComposerMentionInput.vue"
+import type { ComposerEditorSnapshot } from "@/utils/agentComposerMentionEditor"
 import { useReducedMotion } from "@/composables/useReducedMotion"
 import ModelProviderIcon from "@/components/ModelProviderIcon.vue"
 import {
@@ -33,6 +36,7 @@ import {
 } from "@/utils/agentModelGroups"
 import { formatModelPriceSummary } from "@/utils/formatModelPrice"
 import { lightTap } from "@/utils/haptic"
+import { useInfiniteScroll } from "@/composables/useInfiniteScroll"
 
 const props = withDefaults(defineProps<{
   modelConfigId?: number | null
@@ -44,6 +48,10 @@ const props = withDefaults(defineProps<{
   recentAttachments?: AgentMaterialAttachment[]
   materialAssets?: AgentMaterialAttachment[]
   materialAssetsLoading?: boolean
+  pickerUploadLoadingMore?: boolean
+  pickerUploadHasMore?: boolean
+  materialAssetsLoadingMore?: boolean
+  materialAssetsHasMore?: boolean
   filePreviewUrls?: Record<number, string>
   pendingUploadPreview?: { name: string; url: string } | null
   uploading: boolean
@@ -58,10 +66,14 @@ const props = withDefaults(defineProps<{
   agentTools?: AgentToolPickerItem[]
   agentToolsLoading?: boolean
   selectedToolCode?: string | null
+  sessionAssets?: ChatAssetRef[]
+  referenceMentions?: AgentReferenceMention[]
 }>(), {
   agentTools: () => [],
   agentToolsLoading: false,
   selectedToolCode: null,
+  sessionAssets: () => [],
+  referenceMentions: () => [],
 })
 
 interface AgentMaterialAttachment extends AgentUrlAttachment {
@@ -74,6 +86,7 @@ interface AgentMaterialAttachment extends AgentUrlAttachment {
 
 const emit = defineEmits<{
   "update:draft": [value: string]
+  "update:referenceMentions": [value: AgentReferenceMention[]]
   "change-model": [value: number | null]
   submit: []
   "cancel-run": []
@@ -84,9 +97,13 @@ const emit = defineEmits<{
   "remove-url-attachment": [file: AgentUrlAttachment]
   "remove-recent-attachment": [file: AgentMaterialAttachment]
   "refresh-material-assets": []
+  "refresh-recent-attachments": []
+  "load-more-uploads": []
+  "load-more-material-assets": []
   "open-memory": []
   "update:intelligenceLevel": [value: "standard" | "high"]
   "update:selectedToolCode": [value: string | null]
+  "update-tool-preference": [payload: { toolCode: string; autoCallEnabled?: boolean; disabled?: boolean }]
   "refresh-agent-tools": []
   "add-reference-attachment": [payload: import("@/utils/agentChatAssetRefs").ChatAssetDragPayload]
   "file-selected": [event: Event]
@@ -95,7 +112,7 @@ const emit = defineEmits<{
 }>()
 
 const { reducedMotion } = useReducedMotion()
-const composerTextareaRef = ref<HTMLTextAreaElement | null>(null)
+const composerMentionInputRef = ref<InstanceType<typeof ComposerMentionInput> | null>(null)
 const composerExpanded = ref(false)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const modelDropdownOpen = ref(false)
@@ -104,6 +121,10 @@ const attachmentDialogOpen = ref(false)
 const attachmentDialogTab = ref<"upload" | "material">("upload")
 const pickerSelectedUrls = ref<Set<string>>(new Set())
 const materialUploadDropActive = ref(false)
+const uploadDialogScrollRootRef = ref<HTMLElement | null>(null)
+const uploadDialogSentinelRef = ref<HTMLElement | null>(null)
+const materialDialogScrollRootRef = ref<HTMLElement | null>(null)
+const materialDialogSentinelRef = ref<HTMLElement | null>(null)
 const toolMenuOpen = ref(false)
 const toolMenuRef = ref<HTMLElement | null>(null)
 const intelligenceMenuOpen = ref(false)
@@ -112,6 +133,55 @@ const toolSearch = ref("")
 const selectedToolModality = ref("all")
 const composerDropActive = ref(false)
 const selectedProviderKey = ref("")
+const referencePickerOpen = ref(false)
+const referenceQuery = ref("")
+const referenceHighlight = ref(0)
+const hoverPreview = ref<{ mention: AgentReferenceMention; rect: DOMRect } | null>(null)
+
+interface ReferencePickerOption {
+  dedupeKey: string
+  displayLabel: string
+  refLabel: string
+  subtitle: string
+  previewUrl?: string
+  mention: AgentReferenceMention
+}
+
+interface StagedAsset {
+  assetKey: string
+  fileId?: number | string
+  sourceType: "url" | "file"
+  name: string
+  displayLabel: string
+  contentType?: string | null
+  size?: number | null
+  url?: string | null
+  previewUrl?: string
+  kind: "image" | "video" | "audio" | "file"
+  urlAttachment?: AgentUrlAttachment
+  file?: AgentFile
+}
+
+const referencePickerOptions = computed<ReferencePickerOption[]>(() => {
+  const options = listReferencePickerOptions(
+    props.urlAttachments ?? [],
+    props.files,
+    props.sessionAssets ?? [],
+  )
+  const query = referenceQuery.value.trim().toLowerCase()
+  if (!query) return options
+  return options.filter(
+    (item) =>
+      item.displayLabel.toLowerCase().includes(query) ||
+      item.refLabel.toLowerCase().includes(query) ||
+      item.subtitle.toLowerCase().includes(query),
+  )
+})
+
+const draftReferenceMentions = computed({
+  get: () => props.referenceMentions ?? [],
+  set: (value: AgentReferenceMention[]) => emit("update:referenceMentions", value),
+})
 
 const input = computed({
   get: () => props.draft,
@@ -143,7 +213,14 @@ const inputBlocked = computed(
 
 const sendButtonState = computed(() => {
   if (props.sending || props.hasActiveRun) return "stop"
-  if (input.value.trim() || props.files.length > 0 || (props.urlAttachments?.length ?? 0) > 0) return "ready"
+  if (
+    input.value.trim() ||
+    draftReferenceMentions.value.length > 0 ||
+    props.files.length > 0 ||
+    (props.urlAttachments?.length ?? 0) > 0
+  ) {
+    return "ready"
+  }
   return "idle"
 })
 
@@ -163,8 +240,75 @@ const selectedMaterialAttachments = computed(() => props.urlAttachments ?? [])
 const recentMaterialAttachments = computed(() => props.recentAttachments ?? [])
 const libraryMaterialAttachments = computed(() => props.materialAssets ?? [])
 
+const stagedAssets = computed<StagedAsset[]>(() => {
+  const assets: StagedAsset[] = []
+  selectedMaterialAttachments.value.forEach((file, index) => {
+    const kind = attachmentKind(file.contentType, file.name)
+    assets.push({
+      assetKey: String(file.id ?? file.url),
+      fileId: file.id,
+      sourceType: "url",
+      name: file.name,
+      displayLabel: selectedUrlAttachmentLabel(file, index),
+      contentType: file.contentType,
+      size: file.size,
+      url: file.url,
+      previewUrl: kind === "image" ? urlAttachmentPreviewUrl(file) : undefined,
+      kind,
+      urlAttachment: file,
+    })
+  })
+  props.files.forEach((file, index) => {
+    const kind = attachmentKind(file.contentType, file.originalFilename)
+    assets.push({
+      assetKey: `agent_file:${file.id}`,
+      fileId: file.id,
+      sourceType: "file",
+      name: file.originalFilename,
+      displayLabel: selectedFileAttachmentLabel(file, selectedMaterialAttachments.value.length + index),
+      contentType: file.contentType,
+      size: file.fileSize,
+      url: file.downloadUrl,
+      previewUrl: kind === "image" ? props.filePreviewUrls?.[file.id] || resolveAgentFileUrl(file.downloadUrl) : undefined,
+      kind,
+      file,
+    })
+  })
+  return assets
+})
+
+useInfiniteScroll({
+  sentinelRef: uploadDialogSentinelRef,
+  scrollRootRef: uploadDialogScrollRootRef,
+  enabled: () => attachmentDialogOpen.value && attachmentDialogTab.value === "upload",
+  hasMore: () => Boolean(props.pickerUploadHasMore),
+  loading: () => false,
+  loadingMore: () => Boolean(props.pickerUploadLoadingMore),
+  onLoadMore: () => emit("load-more-uploads"),
+})
+
+useInfiniteScroll({
+  sentinelRef: materialDialogSentinelRef,
+  scrollRootRef: materialDialogScrollRootRef,
+  enabled: () => attachmentDialogOpen.value && attachmentDialogTab.value === "material",
+  hasMore: () => Boolean(props.materialAssetsHasMore),
+  loading: () => Boolean(props.materialAssetsLoading),
+  loadingMore: () => Boolean(props.materialAssetsLoadingMore),
+  onLoadMore: () => emit("load-more-material-assets"),
+})
+
 const selectedTool = computed(
-  () => props.agentTools.find((tool) => tool.toolCode === props.selectedToolCode) ?? null,
+  () => props.agentTools.find((tool) => tool.toolCode === props.selectedToolCode && !tool.disabled) ?? null,
+)
+
+watch(
+  () => [props.selectedToolCode, props.agentTools] as const,
+  ([toolCode, tools]) => {
+    if (!toolCode) return
+    const tool = tools.find((item) => item.toolCode === toolCode)
+    if (tool?.disabled) emit("update:selectedToolCode", null)
+  },
+  { deep: true },
 )
 
 const toolModalityTabs = computed(() => {
@@ -213,6 +357,7 @@ function toggleToolMenu() {
 }
 
 function chooseTool(tool: AgentToolPickerItem) {
+  if (tool.disabled) return
   const next = props.selectedToolCode === tool.toolCode ? null : tool.toolCode
   emit("update:selectedToolCode", next)
   toolMenuOpen.value = false
@@ -221,6 +366,28 @@ function chooseTool(tool: AgentToolPickerItem) {
 
 function clearSelectedTool() {
   emit("update:selectedToolCode", null)
+}
+
+function toggleToolDisabled(tool: AgentToolPickerItem) {
+  const disabled = !tool.disabled
+  emit("update-tool-preference", {
+    toolCode: tool.toolCode,
+    disabled,
+    autoCallEnabled: disabled ? false : tool.autoCallEnabled,
+  })
+  if (disabled && props.selectedToolCode === tool.toolCode) {
+    emit("update:selectedToolCode", null)
+  }
+  lightTap()
+}
+
+function toggleToolWhitelist(tool: AgentToolPickerItem) {
+  if (tool.disabled) return
+  emit("update-tool-preference", {
+    toolCode: tool.toolCode,
+    autoCallEnabled: !tool.autoCallEnabled,
+  })
+  lightTap()
 }
 
 const intelligenceLabel = computed(() => props.intelligenceLevel === "high" ? "高智能" : "标准")
@@ -256,6 +423,14 @@ function onComposerDrop(event: DragEvent) {
   const payload = readAssetDragPayload(event)
   if (payload) {
     emit("add-reference-attachment", payload)
+    insertUrlAttachmentChip({
+      id: payload.assetKey,
+      name: payload.name || payload.refLabel,
+      refLabel: payload.refLabel,
+      contentType: payload.contentType || `${payload.kind}/*`,
+      url: payload.url,
+      source: "chat_reference",
+    })
     lightTap()
   }
 }
@@ -277,6 +452,63 @@ function selectedFileAttachmentLabel(file: AgentFile, index: number) {
   return isImageAttachment(file.contentType, file.originalFilename)
     ? imageReferenceLabel(index, file.originalFilename)
     : file.originalFilename
+}
+
+function attachmentKind(contentType?: string | null, name?: string | null): "image" | "video" | "audio" | "file" {
+  const haystack = `${contentType || ""} ${name || ""}`.toLowerCase()
+  if (haystack.includes("video") || /\.(mp4|mov|webm|mkv)(\?|$)/i.test(haystack)) return "video"
+  if (haystack.includes("audio") || /\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/i.test(haystack)) return "audio"
+  if (haystack.includes("image") || isImageAttachment(contentType, name)) return "image"
+  return "file"
+}
+
+function chipDisplayLabel(kind: string, index: number, name?: string | null) {
+  return displayLabelForMention({ kind }, index + 1, name || undefined)
+}
+
+function mentionFromUrlAttachment(file: AgentUrlAttachment): { mention: AgentReferenceMention; displayLabel: string } {
+  const existingIndex = stagedAssets.value.findIndex((item) => item.url === file.url)
+  const index = existingIndex >= 0 ? existingIndex : stagedAssets.value.length
+  const kind = attachmentKind(file.contentType, file.name)
+  const refLabel = file.refLabel || (isImageAttachment(file.contentType, file.name) ? imageReferenceLabel(index, file.name) : file.name)
+  const displayLabel = chipDisplayLabel(kind, index, file.refLabel || file.name)
+  return {
+    displayLabel,
+    mention: {
+      token: displayLabel,
+      refLabel,
+      assetKey: String(file.id ?? file.url),
+      fileId: file.id,
+      url: file.url,
+      kind,
+      name: file.name,
+      contentType: file.contentType,
+      previewUrl: kind === "image" ? resolveAgentFileUrl(file.url) : undefined,
+      source: file.source || "url",
+    },
+  }
+}
+
+function mentionFromAgentFile(file: AgentFile): { mention: AgentReferenceMention; displayLabel: string } {
+  const existingIndex = stagedAssets.value.findIndex((item) => item.fileId === file.id && item.sourceType === "file")
+  const index = existingIndex >= 0 ? existingIndex : stagedAssets.value.length
+  const kind = attachmentKind(file.contentType, file.originalFilename)
+  const displayLabel = chipDisplayLabel(kind, index, file.originalFilename)
+  return {
+    displayLabel,
+    mention: {
+      token: displayLabel,
+      refLabel: selectedFileAttachmentLabel(file, index),
+      assetKey: `agent_file:${file.id}`,
+      fileId: file.id,
+      url: file.downloadUrl || "",
+      kind,
+      name: file.originalFilename,
+      contentType: file.contentType,
+      previewUrl: kind === "image" ? props.filePreviewUrls?.[file.id] || resolveAgentFileUrl(file.downloadUrl) : undefined,
+      source: "agent_file",
+    },
+  }
 }
 
 function modelLabel(model: AgentModelConfig) {
@@ -340,18 +572,150 @@ function formatFileSize(size: number) {
 function toggleComposerExpanded() {
   composerExpanded.value = !composerExpanded.value
   void nextTick(() => {
-    const el = composerTextareaRef.value
-    if (el) el.style.removeProperty("height")
-    adjustComposerTextareaHeight()
+    composerMentionInputRef.value?.adjustHeight()
   })
 }
 
+function closeReferencePicker() {
+  referencePickerOpen.value = false
+  referenceQuery.value = ""
+  referenceHighlight.value = 0
+}
+
+function openReferencePicker(query = "") {
+  if (inputBlocked.value) return
+  referencePickerOpen.value = true
+  referenceQuery.value = query
+  referenceHighlight.value = 0
+}
+
+function insertReferenceToken(option: ReferencePickerOption) {
+  composerMentionInputRef.value?.insertMention(option.mention, option.displayLabel)
+  closeReferencePicker()
+}
+
+function insertUrlAttachmentChip(file: AgentUrlAttachment) {
+  const item = mentionFromUrlAttachment(file)
+  if (!item.mention.url) return
+  composerMentionInputRef.value?.insertMention(item.mention, item.displayLabel)
+}
+
+function insertAgentFileChip(file: AgentFile) {
+  const item = mentionFromAgentFile(file)
+  if (!item.mention.url) return
+  composerMentionInputRef.value?.insertMention(item.mention, item.displayLabel)
+}
+
+function removeAssetReferences(asset: StagedAsset | AgentUrlAttachment | AgentFile) {
+  const keys: string[] = []
+  if ("assetKey" in asset) {
+    keys.push(asset.assetKey)
+    if (asset.fileId != null) keys.push(`file_${asset.fileId}`, `agent_file:${asset.fileId}`, String(asset.fileId))
+    if (asset.url) keys.push(asset.url, `url:${asset.url}`)
+  } else if ("originalFilename" in asset) {
+    keys.push(`agent_file:${asset.id}`, `file_${asset.id}`, String(asset.id))
+    if (asset.downloadUrl) keys.push(asset.downloadUrl, `url:${asset.downloadUrl}`)
+  } else {
+    keys.push(String(asset.id ?? asset.url), asset.url, `url:${asset.url}`)
+  }
+  composerMentionInputRef.value?.removeMentions(keys.filter(Boolean))
+}
+
+function getComposerSnapshot(): ComposerEditorSnapshot {
+  return composerMentionInputRef.value?.getSnapshot() ?? {
+    text: input.value.trim(),
+    mentions: draftReferenceMentions.value,
+    contentParts: [],
+    positionalPrompt: input.value.trim(),
+  }
+}
+
+function onMentionHover(payload: { mention: AgentReferenceMention; rect: DOMRect }) {
+  hoverPreview.value = payload
+}
+
+function onMentionLeave() {
+  hoverPreview.value = null
+}
+
+function hoverPreviewStyle() {
+  const rect = hoverPreview.value?.rect
+  if (!rect) return {}
+  return {
+    left: `${Math.min(window.innerWidth - 260, Math.max(12, rect.left))}px`,
+    top: `${Math.min(window.innerHeight - 260, rect.bottom + 10)}px`,
+  }
+}
+
+function hoverPreviewUrl(mention: AgentReferenceMention) {
+  return mention.previewUrl || resolveAgentFileUrl(mention.url)
+}
+
+function isAssetHoverLinked(asset: StagedAsset) {
+  const mention = hoverPreview.value?.mention
+  if (!mention) return false
+  const keys = new Set([
+    mention.assetKey,
+    mention.fileId == null ? undefined : `agent_file:${mention.fileId}`,
+    mention.fileId == null ? undefined : `file_${mention.fileId}`,
+    mention.url,
+  ].filter(Boolean) as string[])
+  return keys.has(asset.assetKey) || (asset.url ? keys.has(asset.url) : false)
+}
+
+function previewStagedAsset(asset: StagedAsset) {
+  const url = asset.previewUrl || resolveAgentFileUrl(asset.url)
+  if (!url) return
+  emit("preview-attachment", { name: asset.name, url, contentType: asset.contentType })
+}
+
+function removeStagedAsset(asset: StagedAsset) {
+  removeAssetReferences(asset)
+  if (asset.sourceType === "file" && asset.file) {
+    emit("remove-file", asset.file)
+  } else if (asset.urlAttachment) {
+    emit("remove-url-attachment", asset.urlAttachment)
+  }
+}
+
+function onComposerAtQuery(query: string) {
+  openReferencePicker(query)
+}
+
+function onComposerInput() {
+  void nextTick(() => composerMentionInputRef.value?.adjustHeight())
+}
+
+function onComposerKeydown(event: KeyboardEvent) {
+  if (!referencePickerOpen.value || referencePickerOptions.value.length === 0) return
+  if (event.key === "ArrowDown") {
+    event.preventDefault()
+    referenceHighlight.value = (referenceHighlight.value + 1) % referencePickerOptions.value.length
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault()
+    referenceHighlight.value =
+      (referenceHighlight.value - 1 + referencePickerOptions.value.length) % referencePickerOptions.value.length
+  } else if (event.key === "Enter" || event.key === "Tab") {
+    event.preventDefault()
+    const option = referencePickerOptions.value[referenceHighlight.value]
+    if (option) insertReferenceToken(option)
+  } else if (event.key === "Escape") {
+    closeReferencePicker()
+  }
+}
+
+function onComposerEnter(event: KeyboardEvent) {
+  if (referencePickerOpen.value && referencePickerOptions.value.length > 0) {
+    event.preventDefault()
+    const option = referencePickerOptions.value[referenceHighlight.value]
+    if (option) insertReferenceToken(option)
+    return
+  }
+  onSubmit()
+}
+
 function adjustComposerTextareaHeight() {
-  const el = composerTextareaRef.value
-  if (!el) return
-  const target = composerExpanded.value ? Math.min(window.innerHeight * 0.44, 360) : 52
-  el.style.height = `${target}px`
-  el.style.overflowY = el.scrollHeight > target ? "auto" : "hidden"
+  composerMentionInputRef.value?.adjustHeight()
 }
 
 function onSubmit() {
@@ -447,6 +811,7 @@ function openAttachmentDialog(tab: "upload" | "material" = "upload") {
   }
   pickerSelectedUrls.value = selected
   attachmentDialogOpen.value = true
+  emit("refresh-recent-attachments")
   if (libraryMaterialAttachments.value.length === 0) {
     emit("refresh-material-assets")
   }
@@ -493,6 +858,11 @@ function resolveAgentUploadedFileId(item: AgentMaterialAttachment): number | nul
 
 function confirmPickerMaterials() {
   const selectedUrls = pickerSelectedUrls.value
+  const previousUrls = new Set([
+    ...selectedMaterialAttachments.value.map((item) => item.url),
+    ...(props.files.map((file) => file.downloadUrl).filter(Boolean) as string[]),
+  ])
+  const chipsToInsert: Array<{ mention: AgentReferenceMention; displayLabel: string }> = []
   const selectedAgentFileIds = props.files
     .filter((file) => file.downloadUrl && selectedUrls.has(file.downloadUrl))
     .map((file) => file.id)
@@ -509,11 +879,15 @@ function confirmPickerMaterials() {
   }
   for (const item of pickerMaterials.value) {
     if (!selectedUrls.has(item.url)) continue
+    if (!previousUrls.has(item.url)) {
+      chipsToInsert.push(mentionFromUrlAttachment(item))
+    }
     if (resolveAgentUploadedFileId(item) != null) continue
     if (!selectedMaterialAttachments.value.some((current) => current.url === item.url)) {
       emit("select-url-attachment", item)
     }
   }
+  composerMentionInputRef.value?.insertMentions(chipsToInsert.filter((item) => item.mention.url))
   closeAttachmentDialog()
   lightTap()
 }
@@ -561,7 +935,13 @@ onUnmounted(() => {
   document.removeEventListener("pointerdown", onDocumentPointerDown)
 })
 
-defineExpose({ adjustComposerTextareaHeight })
+defineExpose({
+  adjustComposerTextareaHeight,
+  getComposerSnapshot,
+  insertUrlAttachmentChip,
+  insertAgentFileChip,
+  removeAssetReferences,
+})
 </script>
 
 <template>
@@ -674,7 +1054,7 @@ defineExpose({ adjustComposerTextareaHeight })
       </select>
     </div>
 
-    <div v-if="files.length > 0 || selectedMaterialAttachments.length > 0 || pendingUploadPreview || uploading" class="inner-file-list">
+    <div v-if="stagedAssets.length > 0 || pendingUploadPreview || uploading" class="inner-file-list">
       <div v-if="pendingUploadPreview && !files.length" class="inner-file-item inner-file-item--image">
         <button
           type="button"
@@ -689,108 +1069,86 @@ defineExpose({ adjustComposerTextareaHeight })
         <Loader2 v-if="uploading" class="h-3.5 w-3.5 animate-spin inner-file-uploading" />
       </div>
       <div
-        v-for="(file, index) in selectedMaterialAttachments"
-        :key="`url-${file.id ?? file.url}`"
+        v-for="asset in stagedAssets"
+        :key="asset.assetKey"
         class="inner-file-item"
-        :class="{ 'inner-file-item--image': isImageAttachment(file.contentType, file.name) }"
+        :class="{
+          'inner-file-item--image': asset.kind === 'image',
+          'inner-file-item--linked': isAssetHoverLinked(asset),
+        }"
       >
         <button
-          v-if="isImageAttachment(file.contentType, file.name) && urlAttachmentPreviewUrl(file)"
+          v-if="asset.kind === 'image' && asset.previewUrl"
           type="button"
           class="inner-file-thumb-btn"
           aria-label="预览图片"
-          @click="
-            emit('preview-attachment', {
-              name: file.name,
-              url: urlAttachmentPreviewUrl(file),
-              contentType: file.contentType,
-            })
-          "
+          @click="previewStagedAsset(asset)"
         >
           <img
-            :src="urlAttachmentPreviewUrl(file)"
-            :alt="file.name"
+            :src="asset.previewUrl"
+            :alt="asset.name"
             class="inner-file-thumb"
             loading="lazy"
           />
         </button>
-        <Paperclip v-else class="h-4 w-4 shrink-0" />
-        <span v-if="file.refLabel || isImageAttachment(file.contentType, file.name)" class="inner-file-tag">{{ selectedUrlAttachmentLabel(file, index) }}</span>
-        <template v-else>
-          <span class="inner-file-name">{{ file.name }}</span>
-          <span v-if="file.size" class="inner-file-size">{{ formatFileSize(file.size) }}</span>
-        </template>
-        <button
-          type="button"
-          class="inner-file-close"
-          aria-label="移除素材"
-          @click.stop="emit('remove-url-attachment', file)"
-        >
-          <X class="h-3 w-3" />
-        </button>
-      </div>
-      <div
-        v-for="(file, index) in files"
-        :key="file.id"
-        class="inner-file-item"
-        :class="{ 'inner-file-item--image': isImageAttachment(file.contentType, file.originalFilename) }"
-      >
-        <button
-          v-if="isImageAttachment(file.contentType, file.originalFilename) && (props.filePreviewUrls?.[file.id] || resolveAgentFileUrl(file.downloadUrl))"
-          type="button"
-          class="inner-file-thumb-btn"
-          aria-label="预览图片"
-          @click="
-            emit('preview-attachment', {
-              name: file.originalFilename,
-              url: props.filePreviewUrls?.[file.id] || resolveAgentFileUrl(file.downloadUrl),
-              contentType: file.contentType,
-            })
-          "
-        >
-          <img
-            :src="props.filePreviewUrls?.[file.id] || resolveAgentFileUrl(file.downloadUrl)"
-            :alt="file.originalFilename"
-            class="inner-file-thumb"
-            loading="lazy"
-          />
-        </button>
+        <Image v-else-if="asset.kind === 'image'" class="h-4 w-4 shrink-0" />
         <FileText v-else class="h-4 w-4 shrink-0" />
-        <span v-if="isImageAttachment(file.contentType, file.originalFilename)" class="inner-file-tag">{{ selectedFileAttachmentLabel(file, selectedMaterialAttachments.length + index) }}</span>
+        <span v-if="asset.kind === 'image'" class="inner-file-tag">{{ asset.displayLabel }}</span>
         <template v-else>
-          <span class="inner-file-name">{{ file.originalFilename }}</span>
-          <span class="inner-file-size">{{ formatFileSize(file.fileSize) }}</span>
+          <span class="inner-file-name">{{ asset.name }}</span>
+          <span v-if="asset.size" class="inner-file-size">{{ formatFileSize(asset.size) }}</span>
         </template>
         <button
           type="button"
           class="inner-file-close"
-          :disabled="removingFileId === file.id"
-          aria-label="移除附件"
-          @click.stop="emit('remove-file', file)"
+          :disabled="asset.file && removingFileId === asset.file.id"
+          aria-label="移除素材"
+          @click.stop="removeStagedAsset(asset)"
         >
-          <Loader2 v-if="removingFileId === file.id" class="h-3 w-3 animate-spin" />
+          <Loader2 v-if="asset.file && removingFileId === asset.file.id" class="h-3 w-3 animate-spin" />
           <X v-else class="h-3 w-3" />
         </button>
       </div>
     </div>
 
     <div class="input-wrap">
-      <textarea
-        ref="composerTextareaRef"
+      <ComposerMentionInput
+        ref="composerMentionInputRef"
         v-model="input"
-        rows="1"
-        class="chat-input"
-        :class="{
-          'input-expand': composerExpanded,
-          'chat-input--spring': !reducedMotion,
-        }"
-        :placeholder="
-          inputBlocked ? 'Agent 正在处理当前请求' : '输入消息，回车发送'
-        "
+        :reference-mentions="draftReferenceMentions"
         :disabled="inputBlocked"
-        @keydown.enter.exact.prevent="onSubmit()"
+        :expanded="composerExpanded"
+        :reduced-motion="reducedMotion"
+        :placeholder="inputBlocked ? 'Agent 正在处理当前请求' : '输入消息；输入 @ 引用图片/素材'"
+        @update:reference-mentions="draftReferenceMentions = $event"
+        @input="onComposerInput"
+        @at-query="onComposerAtQuery"
+        @close-at-query="closeReferencePicker"
+        @keydown="onComposerKeydown"
+        @enter="onComposerEnter"
         @paste="onComposerPaste"
+        @mention-hover="onMentionHover"
+        @mention-leave="onMentionLeave"
       />
+      <div
+        v-if="referencePickerOpen && referencePickerOptions.length > 0"
+        class="reference-picker-card"
+      >
+        <button
+          v-for="(option, index) in referencePickerOptions"
+          :key="option.dedupeKey"
+          type="button"
+          class="reference-picker-item"
+          :class="{ active: index === referenceHighlight }"
+          @mousedown.prevent="insertReferenceToken(option)"
+        >
+          <img v-if="option.previewUrl" :src="option.previewUrl" alt="" class="reference-picker-thumb" />
+          <span class="reference-picker-copy">
+            <strong>{{ option.displayLabel }}</strong>
+            <small>{{ option.subtitle }}</small>
+          </span>
+        </button>
+      </div>
       <button
         class="expand-btn"
         type="button"
@@ -852,20 +1210,49 @@ defineExpose({ adjustComposerTextareaHeight })
               <div v-if="agentToolsLoading" class="attachment-empty">工具列表加载中...</div>
               <div v-else-if="filteredAgentTools.length === 0" class="attachment-empty">暂无可用工具</div>
               <section v-else class="tool-picker-list">
-                <button
+                <article
                   v-for="tool in filteredAgentTools"
                   :key="tool.toolCode"
-                  type="button"
                   class="tool-picker-item"
-                  :class="{ 'tool-picker-item--active': selectedToolCode === tool.toolCode }"
-                  @click="chooseTool(tool)"
+                  :class="{
+                    'tool-picker-item--active': selectedToolCode === tool.toolCode && !tool.disabled,
+                    'tool-picker-item--disabled': tool.disabled,
+                  }"
                 >
-                  <span class="tool-picker-item-copy">
-                    <strong>{{ tool.toolName }}</strong>
-                    <small>{{ tool.description || tool.toolCode }}</small>
-                  </span>
-                  <Check v-if="selectedToolCode === tool.toolCode" class="h-4 w-4 shrink-0 text-primary" />
-                </button>
+                  <button
+                    type="button"
+                    class="tool-picker-main"
+                    :disabled="tool.disabled"
+                    @click="chooseTool(tool)"
+                  >
+                    <span class="tool-picker-item-copy">
+                      <strong>{{ tool.toolName }}</strong>
+                      <small>{{ tool.description || tool.toolCode }}</small>
+                    </span>
+                    <Check v-if="selectedToolCode === tool.toolCode && !tool.disabled" class="h-4 w-4 shrink-0 text-primary" />
+                  </button>
+                  <div class="tool-picker-controls">
+                    <button
+                      type="button"
+                      class="tool-toggle"
+                      :class="{ 'tool-toggle--on': !tool.disabled }"
+                      :aria-pressed="!tool.disabled"
+                      @click.stop="toggleToolDisabled(tool)"
+                    >
+                      {{ tool.disabled ? "已禁用" : "启用" }}
+                    </button>
+                    <button
+                      type="button"
+                      class="tool-toggle"
+                      :class="{ 'tool-toggle--on': tool.autoCallEnabled && !tool.disabled }"
+                      :aria-pressed="Boolean(tool.autoCallEnabled && !tool.disabled)"
+                      :disabled="tool.disabled"
+                      @click.stop="toggleToolWhitelist(tool)"
+                    >
+                      白名单
+                    </button>
+                  </div>
+                </article>
               </section>
               <button
                 v-if="selectedToolCode"
@@ -940,6 +1327,28 @@ defineExpose({ adjustComposerTextareaHeight })
     </div>
 
     <Teleport to="body">
+      <div
+        v-if="hoverPreview"
+        class="mention-preview-popover"
+        :style="hoverPreviewStyle()"
+      >
+        <img
+          v-if="hoverPreview.mention.kind === 'image' && hoverPreviewUrl(hoverPreview.mention)"
+          :src="hoverPreviewUrl(hoverPreview.mention)"
+          :alt="hoverPreview.mention.name || hoverPreview.mention.refLabel"
+          class="mention-preview-image"
+        />
+        <div v-else class="mention-preview-file">
+          <FileText class="h-5 w-5" />
+        </div>
+        <div class="mention-preview-copy">
+          <strong>{{ hoverPreview.mention.name || hoverPreview.mention.refLabel || hoverPreview.mention.token }}</strong>
+          <small>{{ hoverPreview.mention.contentType || materialKindLabel(hoverPreview.mention.kind) }}</small>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
       <Transition :name="reducedMotion ? '' : 'model-picker-fade'">
         <div
           v-if="attachmentDialogOpen"
@@ -974,7 +1383,7 @@ defineExpose({ adjustComposerTextareaHeight })
               </button>
             </header>
 
-            <div v-if="attachmentDialogTab === 'upload'" class="material-dialog-body">
+            <div v-if="attachmentDialogTab === 'upload'" ref="uploadDialogScrollRootRef" class="material-dialog-body">
               <button
                 type="button"
                 class="material-upload-card"
@@ -998,7 +1407,7 @@ defineExpose({ adjustComposerTextareaHeight })
                 <div v-if="recentMaterialAttachments.length === 0" class="attachment-empty">暂无最近素材</div>
                 <div v-else class="material-grid">
                   <div
-                    v-for="item in recentMaterialAttachments.slice(0, 12)"
+                    v-for="item in recentMaterialAttachments"
                     :key="`recent-${item.id}`"
                     role="button"
                     tabindex="0"
@@ -1031,10 +1440,18 @@ defineExpose({ adjustComposerTextareaHeight })
                     </button>
                   </div>
                 </div>
+                <div v-if="pickerUploadLoadingMore" class="attachment-empty">
+                  <Loader2 class="h-3.5 w-3.5 animate-spin" />
+                  加载更多...
+                </div>
+                <div v-else-if="!pickerUploadHasMore && recentMaterialAttachments.length > 0" class="attachment-empty attachment-empty--muted">
+                  已加载全部
+                </div>
+                <div ref="uploadDialogSentinelRef" class="h-1" />
               </section>
             </div>
 
-            <div v-else class="material-dialog-body">
+            <div v-else ref="materialDialogScrollRootRef" class="material-dialog-body">
               <div class="material-section-title">
                 <Images class="h-3.5 w-3.5" />
                 <span>素材库</span>
@@ -1047,7 +1464,7 @@ defineExpose({ adjustComposerTextareaHeight })
               <div v-else-if="libraryMaterialAttachments.length === 0" class="attachment-empty">暂无可复用素材</div>
               <div v-else class="material-grid material-grid--library">
                 <button
-                  v-for="item in libraryMaterialAttachments.slice(0, 30)"
+                  v-for="item in libraryMaterialAttachments"
                   :key="`library-${item.id}`"
                   type="button"
                   class="material-tile"
@@ -1070,6 +1487,14 @@ defineExpose({ adjustComposerTextareaHeight })
                   </span>
                 </button>
               </div>
+              <div v-if="materialAssetsLoadingMore" class="attachment-empty">
+                <Loader2 class="h-3.5 w-3.5 animate-spin" />
+                加载更多...
+              </div>
+              <div v-else-if="!materialAssetsHasMore && libraryMaterialAttachments.length > 0" class="attachment-empty attachment-empty--muted">
+                已加载全部
+              </div>
+              <div ref="materialDialogSentinelRef" class="h-1" />
             </div>
 
             <footer class="material-dialog-footer">
@@ -1348,6 +1773,12 @@ defineExpose({ adjustComposerTextareaHeight })
   font-size: 12px;
 }
 
+.inner-file-item--linked {
+  border-color: rgb(96 165 250 / 0.72);
+  background: rgb(59 130 246 / 0.16);
+  box-shadow: 0 0 0 2px rgb(59 130 246 / 0.16);
+}
+
 .inner-file-item--image {
   padding: 6px 10px 6px 6px;
 }
@@ -1408,6 +1839,127 @@ defineExpose({ adjustComposerTextareaHeight })
 .input-wrap {
   position: relative;
   min-height: 52px;
+}
+
+.reference-picker-card {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 36;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(280px, 40vh);
+  overflow-y: auto;
+  border: 1px solid rgb(255 255 255 / 0.09);
+  border-radius: 14px;
+  background: rgb(28 30 35 / 0.98);
+  box-shadow: 0 18px 54px rgb(0 0 0 / 0.48);
+  padding: 6px;
+  backdrop-filter: blur(18px);
+}
+
+.reference-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: rgb(255 255 255 / 0.78);
+  cursor: pointer;
+  text-align: left;
+  padding: 8px 10px;
+}
+
+.reference-picker-item:hover,
+.reference-picker-item.active {
+  background: rgb(255 255 255 / 0.08);
+  color: #fff;
+}
+
+.reference-picker-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: rgb(255 255 255 / 0.06);
+}
+
+.reference-picker-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reference-picker-copy strong {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-picker-copy small {
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.42);
+}
+
+.mention-preview-popover {
+  position: fixed;
+  z-index: 140;
+  width: 240px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgb(96 165 250 / 0.35);
+  border-radius: 14px;
+  background: rgb(18 20 27 / 0.96);
+  box-shadow: 0 18px 54px rgb(0 0 0 / 0.46);
+  backdrop-filter: blur(16px);
+  pointer-events: none;
+}
+
+.mention-preview-image {
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 0.06);
+}
+
+.mention-preview-file {
+  width: 100%;
+  height: 92px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 0.07);
+  color: #93c5fd;
+}
+
+.mention-preview-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.mention-preview-copy strong,
+.mention-preview-copy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-preview-copy strong {
+  color: rgb(255 255 255 / 0.88);
+  font-size: 12px;
+}
+
+.mention-preview-copy small {
+  color: rgb(255 255 255 / 0.44);
+  font-size: 11px;
 }
 
 .chat-input {
@@ -1561,14 +2113,37 @@ defineExpose({ adjustComposerTextareaHeight })
   border-radius: 10px;
   background: transparent;
   color: rgb(255 255 255 / 0.82);
-  padding: 10px;
-  cursor: pointer;
+  padding: 6px;
   text-align: left;
 }
 
 .tool-picker-item:hover,
 .tool-picker-item--active {
   background: rgb(255 255 255 / 0.07);
+}
+
+.tool-picker-item--disabled {
+  color: rgb(255 255 255 / 0.36);
+}
+
+.tool-picker-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  padding: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tool-picker-main:disabled {
+  cursor: not-allowed;
 }
 
 .tool-picker-item-copy {
@@ -1588,6 +2163,37 @@ defineExpose({ adjustComposerTextareaHeight })
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tool-picker-controls {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-toggle {
+  min-width: 56px;
+  border: 1px solid rgb(255 255 255 / 0.10);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.045);
+  color: rgb(255 255 255 / 0.56);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 7px 9px;
+  cursor: pointer;
+}
+
+.tool-toggle--on {
+  border-color: color-mix(in srgb, var(--theme-color) 52%, transparent);
+  background: color-mix(in srgb, var(--theme-color) 16%, transparent);
+  color: #fff;
+}
+
+.tool-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .tool-picker-clear {
@@ -1726,6 +2332,11 @@ defineExpose({ adjustComposerTextareaHeight })
   padding: 10px;
   color: rgb(255 255 255 / 0.38);
   font-size: 12px;
+}
+
+.attachment-empty--muted {
+  justify-content: center;
+  color: rgb(255 255 255 / 0.28);
 }
 
 .attachment-choice {

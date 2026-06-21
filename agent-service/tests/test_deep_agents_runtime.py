@@ -58,7 +58,15 @@ class FakeBackend:
     async def complete_run(self, run_id, completion):
         self.completed_runs.append((run_id, completion))
 
-    async def retrieve_workspace_memory(self, workspace_id: int, query: str, limit: int, view: str | None = None):
+    async def retrieve_workspace_memory(
+        self,
+        workspace_id: int,
+        query: str,
+        limit: int,
+        view: str | None = None,
+        memory_ids=None,
+        session_id=None,
+    ):
         self.memory_requests.append((workspace_id, query, limit, view))
         return self.memory_items
 
@@ -417,8 +425,8 @@ def test_history_for_chat_trims_default_and_memory_modes():
     default_history = _history_for_chat(context, memory_management=False)
     memory_history = _history_for_chat(context, memory_management=True)
 
-    assert len(default_history) == 20
-    assert default_history[0].content == "message-10"
+    assert len(default_history) == 5
+    assert default_history[0].content == "message-25"
     assert len(memory_history) == 8
     assert memory_history[0].content == "message-22"
 

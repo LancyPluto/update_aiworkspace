@@ -15,7 +15,7 @@ class FakeBridge:
     def conversation_argument_text(self, context):
         return context.message
 
-    async def enrich_arguments(self, message, tool, existing_args=None):
+    async def enrich_arguments(self, message, tool, existing_args=None, context=None):
         return existing_args or {}
 
     async def execute_with_args(self, context, tool, arguments):

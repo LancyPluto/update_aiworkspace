@@ -34,6 +34,18 @@ public interface AgentWorkspaceMemoryItemMapper extends BaseMapper<AgentWorkspac
     List<AgentWorkspaceMemoryItem> findActiveByWorkspaceId(@Param("workspaceId") Long workspaceId);
 
     @Select("""
+            SELECT *
+            FROM agent_workspace_memory_items
+            WHERE workspace_id = #{workspaceId}
+              AND status = #{status}
+            ORDER BY pinned DESC, importance DESC, updated_at DESC, id DESC
+            """)
+    List<AgentWorkspaceMemoryItem> findByWorkspaceIdAndStatus(
+            @Param("workspaceId") Long workspaceId,
+            @Param("status") String status
+    );
+
+    @Select("""
             <script>
             SELECT *
             FROM agent_workspace_memory_items

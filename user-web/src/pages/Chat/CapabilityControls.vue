@@ -2,11 +2,12 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import type { Capability } from "@/api/aiToolTypes"
 import type { TaskDetail, ToolField, UserUploadAsset } from "@/api/types"
-import { deleteUploadAsset, fetchUploadAssets, uploadToolFile } from "@/api/toolApi"
+import { deleteUploadAsset, uploadToolFile } from "@/api/toolApi"
 import { normalizeMediaFieldValue, normalizeMediaUrl } from "@/utils/toolCoverMedia"
-import { fetchTasks } from "@/api/taskApi"
 import { useAuthStore } from "@/store/authStore"
 import { buildTaskResultBlocks, resolveAudioTracks } from "@/utils/taskResultBlocks"
+import { useGeneratedMaterialList, useUploadHistoryList } from "@/composables/useMaterialPickerLists"
+import { useInfiniteScroll } from "@/composables/useInfiniteScroll"
 import {
   defaultFieldValue as resolveDefaultFieldValue,
   fieldOptionsFromMeta,
@@ -115,23 +116,89 @@ const state = ref<CapabilityState>({
 })
 const auth = useAuthStore()
 const fieldUploads = ref<Record<string, { uploading?: boolean; error?: string; fileName?: string }>>({})
-const materialPickerOpen = ref(false)
-const materialPickerField = ref<ToolField | null>(null)
 const referencePickerOpen = ref(false)
 const referencePickerTab = ref<"upload" | "material">("upload")
-const materialLoading = ref(false)
-const materialError = ref("")
-const materialAssets = ref<MaterialAsset[]>([])
+const materialPickerOpen = ref(false)
+const materialPickerField = ref<ToolField | null>(null)
 const uploadHistoryOpen = ref(false)
 const uploadHistoryField = ref<ToolField | null>(null)
-const uploadHistoryItems = ref<UploadHistoryItem[]>([])
 const uploadHistoryUploading = ref(false)
 const pickerSelectedUrls = ref<string[]>([])
 const advancedOpen = ref(false)
+const referenceUploadScrollRootRef = ref<HTMLElement | null>(null)
+const referenceUploadSentinelRef = ref<HTMLElement | null>(null)
+const referenceMaterialScrollRootRef = ref<HTMLElement | null>(null)
+const referenceMaterialSentinelRef = ref<HTMLElement | null>(null)
+const standaloneUploadScrollRootRef = ref<HTMLElement | null>(null)
+const standaloneUploadSentinelRef = ref<HTMLElement | null>(null)
+const standaloneMaterialScrollRootRef = ref<HTMLElement | null>(null)
+const standaloneMaterialSentinelRef = ref<HTMLElement | null>(null)
 
-const UPLOAD_HISTORY_LIMIT = 60
 const MULTI_IMAGE_LIMIT = 8
 const SEGMENTED_OPTION_LIMIT = 8
+
+const uploadHistoryList = useUploadHistoryList<UploadHistoryItem>({
+  getKind: () => activeUploadKind.value,
+  getToken: () => auth.token,
+  getUserId: () => auth.user?.id,
+  toHistoryItem: (asset) => uploadAssetToHistoryItem(asset),
+})
+
+const generatedMaterialList = useGeneratedMaterialList<MaterialAsset>({
+  getKind: () => activeMaterialKind.value,
+  getToken: () => auth.token,
+  createAssetsFromTask: (task, targetKind) => createMaterialAssets(task, targetKind),
+})
+
+useInfiniteScroll({
+  sentinelRef: referenceUploadSentinelRef,
+  scrollRootRef: referenceUploadScrollRootRef,
+  enabled: () => referencePickerOpen.value && referencePickerTab.value === "upload",
+  hasMore: () => uploadHistoryList.hasMore.value,
+  loading: () => uploadHistoryList.loading.value,
+  loadingMore: () => uploadHistoryList.loadingMore.value,
+  onLoadMore: () => uploadHistoryList.loadMore(),
+})
+
+useInfiniteScroll({
+  sentinelRef: standaloneUploadSentinelRef,
+  scrollRootRef: standaloneUploadScrollRootRef,
+  enabled: () => uploadHistoryOpen.value,
+  hasMore: () => uploadHistoryList.hasMore.value,
+  loading: () => uploadHistoryList.loading.value,
+  loadingMore: () => uploadHistoryList.loadingMore.value,
+  onLoadMore: () => uploadHistoryList.loadMore(),
+})
+
+useInfiniteScroll({
+  sentinelRef: referenceMaterialSentinelRef,
+  scrollRootRef: referenceMaterialScrollRootRef,
+  enabled: () => referencePickerOpen.value && referencePickerTab.value === "material",
+  hasMore: () => generatedMaterialList.hasMore.value,
+  loading: () => generatedMaterialList.loading.value,
+  loadingMore: () => generatedMaterialList.loadingMore.value,
+  onLoadMore: () => generatedMaterialList.loadMore(),
+})
+
+useInfiniteScroll({
+  sentinelRef: standaloneMaterialSentinelRef,
+  scrollRootRef: standaloneMaterialScrollRootRef,
+  enabled: () => materialPickerOpen.value,
+  hasMore: () => generatedMaterialList.hasMore.value,
+  loading: () => generatedMaterialList.loading.value,
+  loadingMore: () => generatedMaterialList.loadingMore.value,
+  onLoadMore: () => generatedMaterialList.loadMore(),
+})
+
+const uploadHistoryItems = computed(() => uploadHistoryList.items.value)
+const uploadHistoryLoading = computed(() => uploadHistoryList.loading.value)
+const uploadHistoryLoadingMore = computed(() => uploadHistoryList.loadingMore.value)
+const uploadHistoryHasMore = computed(() => uploadHistoryList.hasMore.value)
+const materialAssets = computed(() => generatedMaterialList.assets.value)
+const materialLoading = computed(() => generatedMaterialList.loading.value)
+const materialLoadingMore = computed(() => generatedMaterialList.loadingMore.value)
+const materialHasMore = computed(() => generatedMaterialList.hasMore.value)
+const materialError = computed(() => generatedMaterialList.error.value)
 
 function isAspectRatioField(field: ToolField): boolean {
   return field.fieldType === "aspect_ratio" || field.fieldKey === "aspectRatio" || field.fieldKey === "aspect_ratio" || field.fieldKey === "imageRatio"
@@ -619,31 +686,6 @@ function formatUploadSize(size?: number): string {
   return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
-function uploadHistoryStorageKey(kind: MaterialKind): string {
-  const userId = auth.user?.id ?? "guest"
-  return `ai_tool_market_upload_history:${userId}:${kind}`
-}
-
-function readUploadHistory(kind: MaterialKind): UploadHistoryItem[] {
-  if (typeof window === "undefined") return []
-  try {
-    const raw = window.localStorage.getItem(uploadHistoryStorageKey(kind))
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .filter((item): item is UploadHistoryItem => Boolean(item && typeof item === "object" && typeof (item as UploadHistoryItem).url === "string"))
-      .slice(0, UPLOAD_HISTORY_LIMIT)
-  } catch {
-    return []
-  }
-}
-
-function writeUploadHistory(kind: MaterialKind, items: UploadHistoryItem[]) {
-  if (typeof window === "undefined") return
-  window.localStorage.setItem(uploadHistoryStorageKey(kind), JSON.stringify(items.slice(0, UPLOAD_HISTORY_LIMIT)))
-}
-
 function uploadAssetToHistoryItem(asset: UserUploadAsset): UploadHistoryItem | null {
   if (!asset.url) return null
   const kind = materialKindFromValue(asset.kind || asset.contentType || asset.name)
@@ -660,52 +702,19 @@ function uploadAssetToHistoryItem(asset: UserUploadAsset): UploadHistoryItem | n
   }
 }
 
-function mergeUploadHistoryItems(items: UploadHistoryItem[]): UploadHistoryItem[] {
-  const seen = new Set<string>()
-  const result: UploadHistoryItem[] = []
-  for (const item of items) {
-    const key = item.url || item.id
-    if (!key || seen.has(key)) continue
-    seen.add(key)
-    result.push(item)
-  }
-  return result.slice(0, UPLOAD_HISTORY_LIMIT)
-}
-
-async function loadUploadHistory(kind: MaterialKind) {
-  const localItems = readUploadHistory(kind)
-  uploadHistoryItems.value = localItems
-  if (!auth.token) return
-  try {
-    const page = await fetchUploadAssets({ token: auth.token, kind, pageSize: UPLOAD_HISTORY_LIMIT })
-    const serverItems = page.list
-      .map(uploadAssetToHistoryItem)
-      .filter((item): item is UploadHistoryItem => Boolean(item))
-      .filter((item) => item.kind === kind)
-    const merged = mergeUploadHistoryItems([...serverItems, ...localItems])
-    writeUploadHistory(kind, merged)
-    uploadHistoryItems.value = merged
-  } catch {
-    uploadHistoryItems.value = localItems
-  }
+async function loadUploadHistory() {
+  await uploadHistoryList.resetAndLoad()
 }
 
 function rememberUploadHistoryItem(field: ToolField, item: UploadHistoryItem) {
-  const kind = materialKindForField(field)
-  const existing = readUploadHistory(kind).filter((entry) => entry.url !== item.url)
-  writeUploadHistory(kind, [{ ...item, kind }, ...existing])
-  if (uploadHistoryOpen.value && uploadHistoryField.value?.fieldKey === field.fieldKey) {
-    uploadHistoryItems.value = readUploadHistory(kind)
-  }
+  uploadHistoryList.rememberItem({ ...item, kind: materialKindForField(field) })
 }
 
 function openUploadHistoryPicker(field: ToolField) {
   uploadHistoryField.value = field
-  const kind = materialKindForField(field)
-  uploadHistoryItems.value = readUploadHistory(kind)
-  void loadUploadHistory(kind)
   pickerSelectedUrls.value = isMultiImageField(field) ? multiImageValues(field) : []
   uploadHistoryOpen.value = true
+  void loadUploadHistory()
 }
 
 function openReferenceMaterialPicker(tab: "upload" | "material" = "upload") {
@@ -716,16 +725,13 @@ function openReferenceMaterialPicker(tab: "upload" | "material" = "upload") {
   uploadHistoryField.value = field
   materialPickerField.value = field
   pickerSelectedUrls.value = isMultiImageField(field) ? multiImageValues(field) : []
-  const kind = materialKindForField(field)
-  uploadHistoryItems.value = readUploadHistory(kind)
-  void loadUploadHistory(kind)
-  if (tab === "material") void loadGeneratedMaterialAssets(field)
+  void loadUploadHistory()
+  if (tab === "material") void loadGeneratedMaterialAssets()
 }
 
 function chooseReferencePickerTab(tab: "upload" | "material") {
   referencePickerTab.value = tab
-  const field = primaryReferenceField.value
-  if (tab === "material" && field) void loadGeneratedMaterialAssets(field)
+  if (tab === "material") void loadGeneratedMaterialAssets()
 }
 
 function closeReferenceMaterialPicker() {
@@ -761,10 +767,7 @@ function selectUploadHistoryItem(item: UploadHistoryItem) {
 
 async function deleteUploadHistoryItem(item: UploadHistoryItem) {
   const field = uploadHistoryField.value
-  const kind = field ? materialKindForField(field) : item.kind
-  const next = readUploadHistory(kind).filter((entry) => entry.id !== item.id && entry.url !== item.url)
-  writeUploadHistory(kind, next)
-  uploadHistoryItems.value = next
+  uploadHistoryList.removeItem(item)
   if (item.assetId && auth.token) {
     try {
       await deleteUploadAsset(item.assetId, { token: auth.token })
@@ -840,32 +843,11 @@ async function openMaterialPicker(field: ToolField) {
   materialPickerField.value = field
   materialPickerOpen.value = true
   pickerSelectedUrls.value = isMultiImageField(field) ? multiImageValues(field) : []
-  await loadGeneratedMaterialAssets(field)
+  await loadGeneratedMaterialAssets()
 }
 
-async function loadGeneratedMaterialAssets(field: ToolField) {
-  materialLoading.value = true
-  materialError.value = ""
-  materialAssets.value = []
-  const targetKind = materialKindForField(field)
-  try {
-    const page = await fetchTasks({
-      token: auth.token,
-      query: { pageNo: 1, pageSize: 80, status: "SUCCESS" },
-    })
-    const seen = new Set<string>()
-    const assets = page.list.flatMap((task) => createMaterialAssets(task, targetKind)).filter((asset) => {
-      const key = `${asset.kind}:${asset.url}`
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-    materialAssets.value = assets
-  } catch (err) {
-    materialError.value = (err as Error).message || "素材加载失败"
-  } finally {
-    materialLoading.value = false
-  }
+async function loadGeneratedMaterialAssets() {
+  await generatedMaterialList.resetAndLoad()
 }
 
 function closeMaterialPicker() {
@@ -1570,7 +1552,7 @@ defineExpose({
             </button>
           </div>
 
-          <div v-if="referencePickerTab === 'upload'" class="min-h-[420px] overflow-y-auto p-5">
+          <div v-if="referencePickerTab === 'upload'" ref="referenceUploadScrollRootRef" class="min-h-[420px] overflow-y-auto p-5">
             <label
               class="flex min-h-40 cursor-pointer flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-white/18 bg-white/[0.035] text-white/72 transition hover:border-primary/60 hover:bg-white/[0.055]"
               @dragover.prevent
@@ -1593,7 +1575,11 @@ defineExpose({
                 <Clock class="h-4 w-4" />
                 最近上传
               </div>
-              <div v-if="uploadHistoryItems.length === 0" class="flex h-40 flex-col items-center justify-center rounded-2xl border border-white/8 bg-white/[0.03] text-center text-sm text-white/42">
+              <div v-if="uploadHistoryLoading && uploadHistoryItems.length === 0" class="flex h-40 flex-col items-center justify-center rounded-2xl border border-white/8 bg-white/[0.03] text-center text-sm text-white/42">
+                <Loader2 class="mb-3 h-7 w-7 animate-spin text-white/30" />
+                <p>正在加载上传历史...</p>
+              </div>
+              <div v-else-if="uploadHistoryItems.length === 0" class="flex h-40 flex-col items-center justify-center rounded-2xl border border-white/8 bg-white/[0.03] text-center text-sm text-white/42">
                 <UploadCloud class="mb-3 h-7 w-7 text-white/22" />
                 <p>还没有上传历史</p>
                 <p class="mt-1 text-xs text-white/30">上传一次后，下次可以直接复用。</p>
@@ -1643,20 +1629,28 @@ defineExpose({
                   </div>
                 </article>
               </div>
+              <div v-if="uploadHistoryLoadingMore" class="flex items-center justify-center gap-2 py-4 text-sm text-white/45">
+                <Loader2 class="h-4 w-4 animate-spin" />
+                加载更多...
+              </div>
+              <div v-else-if="!uploadHistoryHasMore && uploadHistoryItems.length > 0" class="py-4 text-center text-xs text-white/30">
+                已加载全部
+              </div>
+              <div ref="referenceUploadSentinelRef" class="h-1" />
             </section>
           </div>
 
-          <div v-else class="min-h-[420px] overflow-y-auto p-5">
+          <div v-else ref="referenceMaterialScrollRootRef" class="min-h-[420px] overflow-y-auto p-5">
             <div class="mb-4 flex items-center justify-between">
               <div class="flex items-center gap-2 text-sm font-semibold text-white/70">
                 <BookOpen class="h-4 w-4" />
                 已生成素材
               </div>
-              <button type="button" class="rounded-full border border-white/10 px-3 py-1 text-xs text-white/45 transition hover:border-white/20 hover:text-white" @click="primaryReferenceField && loadGeneratedMaterialAssets(primaryReferenceField)">
+              <button type="button" class="rounded-full border border-white/10 px-3 py-1 text-xs text-white/45 transition hover:border-white/20 hover:text-white" @click="loadGeneratedMaterialAssets()">
                 刷新
               </button>
             </div>
-            <div v-if="materialLoading" class="flex h-56 items-center justify-center gap-2 text-sm text-white/45">
+            <div v-if="materialLoading && materialAssets.length === 0" class="flex h-56 items-center justify-center gap-2 text-sm text-white/45">
               <Loader2 class="h-4 w-4 animate-spin" />
               正在加载素材...
             </div>
@@ -1698,6 +1692,14 @@ defineExpose({
                 </div>
               </button>
             </div>
+            <div v-if="materialLoadingMore" class="flex items-center justify-center gap-2 py-4 text-sm text-white/45">
+              <Loader2 class="h-4 w-4 animate-spin" />
+              加载更多...
+            </div>
+            <div v-else-if="!materialHasMore && materialAssets.length > 0" class="py-4 text-center text-xs text-white/30">
+              已加载全部
+            </div>
+            <div ref="referenceMaterialSentinelRef" class="h-1" />
           </div>
 
           <footer
@@ -1758,8 +1760,12 @@ defineExpose({
             </div>
           </div>
 
-          <div class="min-h-[260px] overflow-y-auto p-6">
-            <div v-if="uploadHistoryItems.length === 0" class="flex h-56 flex-col items-center justify-center text-center text-sm text-white/45">
+          <div ref="standaloneUploadScrollRootRef" class="min-h-[260px] overflow-y-auto p-6">
+            <div v-if="uploadHistoryLoading && uploadHistoryItems.length === 0" class="flex h-56 flex-col items-center justify-center text-center text-sm text-white/45">
+              <Loader2 class="mb-3 h-8 w-8 animate-spin text-white/25" />
+              <p>正在加载上传历史...</p>
+            </div>
+            <div v-else-if="uploadHistoryItems.length === 0" class="flex h-56 flex-col items-center justify-center text-center text-sm text-white/45">
               <UploadCloud class="mb-3 h-8 w-8 text-white/25" />
               <p>还没有上传历史</p>
               <p class="mt-1 text-xs text-white/32">上传一次后，下次可以直接复用同一张参考图。</p>
@@ -1811,6 +1817,14 @@ defineExpose({
                 </div>
               </article>
             </div>
+            <div v-if="uploadHistoryLoadingMore" class="flex items-center justify-center gap-2 py-4 text-sm text-white/45">
+              <Loader2 class="h-4 w-4 animate-spin" />
+              加载更多...
+            </div>
+            <div v-else-if="!uploadHistoryHasMore && uploadHistoryItems.length > 0" class="py-4 text-center text-xs text-white/30">
+              已加载全部
+            </div>
+            <div ref="standaloneUploadSentinelRef" class="h-1" />
           </div>
           <div
             v-if="uploadHistoryField && isMultiImageField(uploadHistoryField)"
@@ -1853,8 +1867,8 @@ defineExpose({
             </button>
           </div>
 
-          <div class="min-h-[260px] overflow-y-auto p-6">
-            <div v-if="materialLoading" class="flex h-56 items-center justify-center gap-2 text-sm text-white/45">
+          <div ref="standaloneMaterialScrollRootRef" class="min-h-[260px] overflow-y-auto p-6">
+            <div v-if="materialLoading && materialAssets.length === 0" class="flex h-56 items-center justify-center gap-2 text-sm text-white/45">
               <Loader2 class="h-4 w-4 animate-spin" />
               正在加载素材库...
             </div>
@@ -1896,6 +1910,14 @@ defineExpose({
                 </div>
               </button>
             </div>
+            <div v-if="materialLoadingMore" class="flex items-center justify-center gap-2 py-4 text-sm text-white/45">
+              <Loader2 class="h-4 w-4 animate-spin" />
+              加载更多...
+            </div>
+            <div v-else-if="!materialHasMore && materialAssets.length > 0" class="py-4 text-center text-xs text-white/30">
+              已加载全部
+            </div>
+            <div ref="standaloneMaterialSentinelRef" class="h-1" />
           </div>
           <div
             v-if="materialPickerField && isMultiImageField(materialPickerField)"

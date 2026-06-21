@@ -4,15 +4,7 @@ from dataclasses import dataclass
 from app.core.schemas import RunContext, ToolDescriptor
 
 
-TOOL_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "xiaohongshu_copywriting": ("小红书", "种草", "笔记", "爆款笔记"),
-    "moments_copywriting_generator": ("朋友圈", "微信朋友圈", "私域文案"),
-    "product_title_optimizer": ("商品标题", "标题优化", "电商标题"),
-    "wechat_longform_generator": ("公众号", "微信长文", "长文"),
-    "social_media_comment_insights_agent": ("社交媒体评论", "小红书评论", "抖音评论", "评论分析", "用户洞察", "产品建议"),
-    "ofox_gpt_image2": ("图片生成", "文生图", "生图", "写真", "照片", "产品照", "商品主图", "老照片", "海报", "插画"),
-    "kling_image_to_video": ("视频生成", "文生视频", "图生视频", "短视频", "宣传片", "成片", "转场视频"),
-}
+TOOL_KEYWORDS: dict[str, tuple[str, ...]] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +12,31 @@ class ToolMatch:
     tool: ToolDescriptor
     score: int
     matched_terms: tuple[str, ...]
+
+
+def resolve_canonical_tool_code(name: str, tools: list[ToolDescriptor]) -> str | None:
+    """Map a model-provided tool name/alias to an available toolCode when possible."""
+    normalized = (name or "").strip()
+    if not normalized:
+        return None
+    available = {tool.toolCode: tool for tool in tools}
+    if normalized in available:
+        return normalized
+    lowered = normalized.lower()
+    for code in available:
+        if code.lower() == lowered:
+            return code
+    if lowered.startswith("agent_tool__"):
+        raw = lowered.removeprefix("agent_tool__")
+        for code in available:
+            sanitized = re.sub(r"[^a-z0-9_]", "_", code.lower())
+            if sanitized == raw or code.lower() == raw:
+                return code
+    for code, tool in available.items():
+        tool_name = (tool.toolName or "").strip().lower()
+        if tool_name and tool_name == lowered:
+            return code
+    return None
 
 
 class ToolRegistry:
@@ -105,8 +122,30 @@ def _score_modality_intent(text: str, tool: ToolDescriptor) -> tuple[int, set[st
 
 def requested_output_modality(message: str) -> str | None:
     text = message.lower()
-    # Video wins over image when both "画面/图片" and "视频/成片" appear.
-    if _has_any(text, ("视频", "短视频", "成片", "宣传片", "转场视频", "生成一段", "生成一个视频", "图生视频", "文生视频")):
+    if _has_any(text, (
+        "视频",
+        "短视频",
+        "成片",
+        "宣传片",
+        "转场视频",
+        "生成一段",
+        "生成一个视频",
+        "图生视频",
+        "文生视频",
+        "参考生视频",
+        "参考图生视频",
+        "做成视频",
+        "变成视频",
+        "转视频",
+        "动起来",
+        "作为首帧",
+        "当首帧",
+        "做首帧",
+        "image to video",
+        "image-to-video",
+        "text to video",
+        "text-to-video",
+    )):
         return "video"
     if _has_any(text, (
         "图片",

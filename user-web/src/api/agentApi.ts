@@ -73,6 +73,31 @@ export function sendAgentMessage(
     intelligenceLevel?: "standard" | "high"
     fileIds?: number[]
     urlAttachments?: AgentUrlAttachment[]
+    globalFileIds?: Array<string | number>
+    contentParts?: Array<
+      | { type: "text"; text: string }
+      | {
+          type: "image" | "file"
+          file_id?: string | number
+          url?: string
+          asset_key: string
+          name?: string
+          content_type?: string
+        }
+    >
+    positionalPrompt?: string
+    referenceMentions?: Array<{
+      token?: string
+      refLabel?: string
+      assetKey?: string
+      fileId?: string | number
+      url: string
+      kind?: string
+      name?: string
+      contentType?: string | null
+      previewUrl?: string
+      source?: string
+    }>
   },
   options?: { token?: string | null },
 ) {
@@ -232,7 +257,7 @@ export function confirmAgentTool(
 
 export function updateAgentToolPreference(
   toolCode: string,
-  body: { autoCallEnabled: boolean },
+  body: { autoCallEnabled?: boolean; disabled?: boolean },
   options?: { token?: string | null },
 ) {
   return apiRequest<AgentToolPreference>("PUT", `/api/v1/agent/tool-preferences/${toolCode}`, {
@@ -241,10 +266,52 @@ export function updateAgentToolPreference(
   })
 }
 
-export function fetchAgentWorkspaceMemory(workspaceId: number, options?: { token?: string | null }) {
-  return apiRequest<PageResult<AgentWorkspaceMemoryItem>>("GET", `/api/v1/agent/workspaces/${workspaceId}/memory`, {
+export function fetchAgentWorkspaceMemory(
+  workspaceId: number,
+  options?: { token?: string | null; status?: "ACTIVE" | "CANDIDATE" },
+) {
+  const query = options?.status ? `?status=${encodeURIComponent(options.status)}` : ""
+  return apiRequest<PageResult<AgentWorkspaceMemoryItem>>(
+    "GET",
+    `/api/v1/agent/workspaces/${workspaceId}/memory${query}`,
+    { token: options?.token },
+  )
+}
+
+export function pinAgentWorkspaceMemory(
+  workspaceId: number,
+  memoryId: number,
+  pinned: boolean,
+  options?: { token?: string | null },
+) {
+  return apiRequest<AgentWorkspaceMemoryItem>("PUT", `/api/v1/agent/workspaces/${workspaceId}/memory/${memoryId}/pin`, {
     token: options?.token,
+    body: { pinned },
   })
+}
+
+export function approveAgentWorkspaceMemoryCandidate(
+  workspaceId: number,
+  memoryId: number,
+  options?: { token?: string | null },
+) {
+  return apiRequest<AgentWorkspaceMemoryItem>(
+    "POST",
+    `/api/v1/agent/workspaces/${workspaceId}/memory/${memoryId}/approve`,
+    { token: options?.token },
+  )
+}
+
+export function rejectAgentWorkspaceMemoryCandidate(
+  workspaceId: number,
+  memoryId: number,
+  options?: { token?: string | null },
+) {
+  return apiRequest<AgentWorkspaceMemoryItem>(
+    "POST",
+    `/api/v1/agent/workspaces/${workspaceId}/memory/${memoryId}/reject`,
+    { token: options?.token },
+  )
 }
 
 export function createAgentWorkspaceMemory(

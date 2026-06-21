@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.storage;
 
 import com.aiminilab.aitoolmarket.agent.mapper.AgentFileMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentMessageMapper;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
@@ -28,19 +29,22 @@ public class PrivateAssetAccessService {
     private final TaskMapper taskMapper;
     private final AssetStorageService assetStorageService;
     private final AgentFileMapper agentFileMapper;
+    private final AgentMessageMapper agentMessageMapper;
 
     public PrivateAssetAccessService(AppProperties appProperties,
                                      UserUploadAssetMapper userUploadAssetMapper,
                                      AiMarketFileMapper aiMarketFileMapper,
                                      TaskMapper taskMapper,
                                      AssetStorageService assetStorageService,
-                                     AgentFileMapper agentFileMapper) {
+                                     AgentFileMapper agentFileMapper,
+                                     AgentMessageMapper agentMessageMapper) {
         this.appProperties = appProperties;
         this.userUploadAssetMapper = userUploadAssetMapper;
         this.aiMarketFileMapper = aiMarketFileMapper;
         this.taskMapper = taskMapper;
         this.assetStorageService = assetStorageService;
         this.agentFileMapper = agentFileMapper;
+        this.agentMessageMapper = agentMessageMapper;
     }
 
     public boolean canAccess(Long userId, String relativeKey) {
@@ -57,7 +61,10 @@ public class PrivateAssetAccessService {
         }
         String prefix = segments[0].toLowerCase(Locale.ROOT);
         if ("uploads".equals(prefix)) {
-            return userUploadAssetMapper.countActiveByUserAndRelativeKey(userId, key) > 0;
+            if (userUploadAssetMapper.countActiveByUserAndRelativeKey(userId, key) > 0) {
+                return true;
+            }
+            return canAccessReferencedAsset(userId, key);
         }
         if ("market-files".equals(prefix)) {
             return aiMarketFileMapper.countByUserAndRelativeKey(userId, key) > 0;
@@ -72,9 +79,25 @@ public class PrivateAssetAccessService {
         }
         if (TASK_ASSET_PREFIXES.contains(prefix)) {
             Long taskId = parsePositiveLong(segments[1]);
-            return taskId != null && taskMapper.countOwnedTask(taskId, userId) > 0;
+            if (taskId == null) {
+                return false;
+            }
+            if (taskMapper.countOwnedTask(taskId, userId) > 0) {
+                return true;
+            }
+            if (taskMapper.countOwnedTaskIgnoringUserDeleted(taskId, userId) > 0) {
+                return true;
+            }
+            return canAccessReferencedAsset(userId, key);
         }
         return false;
+    }
+
+    private boolean canAccessReferencedAsset(Long userId, String relativeKey) {
+        if (taskMapper.countUserResultContainingRelativeKey(userId, relativeKey) > 0) {
+            return true;
+        }
+        return agentMessageMapper.countActiveByUserContainingRelativeKey(userId, relativeKey) > 0;
     }
 
     public String requireOwnedStableUrl(Long userId, String rawUrl) {

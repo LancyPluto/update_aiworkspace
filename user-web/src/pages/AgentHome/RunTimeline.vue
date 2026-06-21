@@ -10,7 +10,20 @@ const props = defineProps<{
   processMode?: boolean
 }>()
 
+const emit = defineEmits<{
+  "open-memory": [memoryId: number]
+  "delete-memory": [memoryId: number]
+}>()
+
 type TimelineTone = "info" | "success" | "warning" | "error"
+
+interface MemoryTraceItem {
+  id?: number
+  type?: string
+  title?: string
+  preview?: string
+  reason?: string
+}
 
 const TOOL_PROCESS_EVENT_TYPES = new Set([
   "tool.started",
@@ -52,6 +65,39 @@ function parseEventJson(value?: string | null | Record<string, unknown>) {
   }
 }
 
+function memoryTraceItems(event: AgentRunEvent): MemoryTraceItem[] {
+  const payload = parseEventJson(event.eventJson)
+  if (!Array.isArray(payload.items)) return []
+  return payload.items
+    .map((item) => (typeof item === "object" && item !== null ? item as MemoryTraceItem : null))
+    .filter((item): item is MemoryTraceItem => item != null)
+}
+
+function memoryReasonLabel(reason?: string) {
+  const value = (reason || "").trim()
+  if (!value) return "相关检索"
+  const labels: Record<string, string> = {
+    safe_pack: "安全上下文",
+    explicit: "显式引用",
+    context_pack: "上下文包",
+    relevance: "相关检索",
+    skipped: "已跳过注入",
+  }
+  return labels[value] || value
+}
+
+function memoryTypeLabel(type?: string) {
+  const labels: Record<string, string> = {
+    user_profile: "用户画像",
+    preference: "稳定偏好",
+    workspace_fact: "项目知识",
+    tool_lesson: "工具经验",
+    workflow_recipe: "流程配方",
+    custom: "自定义",
+  }
+  return labels[type || ""] || type || "记忆"
+}
+
 function titleFor(event: AgentRunEvent) {
   const payload = parseEventJson(event.eventJson)
   if (event.eventType === "run.started") return "开始处理请求"
@@ -80,6 +126,11 @@ function titleFor(event: AgentRunEvent) {
   if (event.eventType === "subagent.failed") return `子 Agent 执行失败：${String(payload.subagentName || event.eventText || "agent")}`
   if (event.eventType === "memory.context_injected") return "已注入工作区记忆"
   if (event.eventType === "memory.context_frozen") return "已冻结工作区记忆快照"
+  if (event.eventType === "memory.retrieved") {
+    if (payload.memoryInjectionSkipped === true) return "已跳过工具记忆注入"
+    const count = typeof payload.count === "number" ? payload.count : Array.isArray(payload.items) ? payload.items.length : 0
+    return count > 0 ? `已读取 ${count} 条长期记忆` : "未读取长期记忆"
+  }
   if (event.eventType === "memory.candidate_created") return "已生成记忆候选"
   if (event.eventType === "memory.saved") return "已保存工作区记忆"
   if (event.eventType === "workspace_file.created") return `已创建产物：${String(payload.filename || event.eventText || "文件")}`
@@ -110,18 +161,14 @@ function titleFor(event: AgentRunEvent) {
 function detailFor(event: AgentRunEvent) {
   const payload = parseEventJson(event.eventJson)
   if (event.eventType === "memory.retrieved" || event.eventType === "memory.context_frozen") {
-    const count = typeof payload.count === "number" ? payload.count : Array.isArray(payload.items) ? payload.items.length : null
-    const source = typeof payload.source === "string" ? payload.source : typeof payload.view === "string" ? payload.view : ""
-    const itemTitles = Array.isArray(payload.items)
-      ? payload.items
-          .map((item) => typeof item === "object" && item !== null && "title" in item ? String((item as Record<string, unknown>).title || "") : "")
-          .filter(Boolean)
-          .slice(0, 3)
-      : []
-    const prefix = count == null ? "已读取长期记忆" : `已读取 ${count} 条长期记忆`
-    const sourceText = source ? `（${source}）` : ""
-    const titles = itemTitles.length > 0 ? `：${itemTitles.join("、")}` : ""
-    return `${prefix}${sourceText}${titles}`
+    if (payload.memoryInjectionSkipped === true) {
+      const promptMode = typeof payload.promptMode === "string" ? payload.promptMode : ""
+      return promptMode ? `参考图编辑模式（${promptMode}），未注入 workspace 项目记忆。` : "参考图编辑模式，未注入 workspace 项目记忆。"
+    }
+    const policy = typeof payload.policy === "string" ? payload.policy : ""
+    const view = typeof payload.view === "string" ? payload.view : ""
+    const parts = [policy, view].filter(Boolean)
+    return parts.length > 0 ? `策略：${parts.join(" / ")}` : ""
   }
   if (event.eventType === "intent.detected") {
     if (typeof payload.selectedToolCode === "string") return `候选工具：${payload.selectedToolCode}`
@@ -178,6 +225,7 @@ function toneFor(event: AgentRunEvent): TimelineTone {
       "workspace_file.read",
       "memory.context_injected",
       "memory.context_frozen",
+      "memory.retrieved",
       "message.completed",
     ].includes(event.eventType)
   ) {
@@ -223,6 +271,10 @@ function toggleToolTimelineExpanded() {
 function isEventExpanded(eventId: number) {
   return expandedEventIds.value.has(eventId)
 }
+
+function hasMemoryTrace(event: AgentRunEvent) {
+  return memoryTraceItems(event).length > 0
+}
 </script>
 
 <template>
@@ -239,8 +291,21 @@ function isEventExpanded(eventId: number) {
       <div class="timeline-body">
         <p class="timeline-title">{{ titleFor(event) }}</p>
         <p v-if="detailFor(event) && isEventExpanded(event.id)" class="timeline-detail">{{ detailFor(event) }}</p>
+        <ul v-if="isEventExpanded(event.id) && hasMemoryTrace(event)" class="memory-trace-list">
+          <li v-for="item in memoryTraceItems(event)" :key="`${event.id}-${item.id ?? item.title}`" class="memory-trace-item">
+            <div class="memory-trace-main">
+              <strong>#{{ item.id ?? "?" }} · {{ item.title || "未命名记忆" }}</strong>
+              <span>{{ memoryTypeLabel(item.type) }} · {{ memoryReasonLabel(item.reason) }}</span>
+              <p v-if="item.preview">{{ item.preview }}</p>
+            </div>
+            <div v-if="item.id" class="memory-trace-actions">
+              <button type="button" class="memory-trace-btn" @click="emit('open-memory', item.id!)">在记忆中查看</button>
+              <button type="button" class="memory-trace-btn danger" @click="emit('delete-memory', item.id!)">删除此记忆</button>
+            </div>
+          </li>
+        </ul>
         <button
-          v-if="detailFor(event) || detailJson(event)"
+          v-if="detailFor(event) || detailJson(event) || hasMemoryTrace(event)"
           class="detail-toggle"
           type="button"
           @click="toggleExpanded(event.id)"
@@ -347,84 +412,119 @@ function isEventExpanded(eventId: number) {
   color: #027a48;
 }
 
-.timeline-row.warning .timeline-icon {
-  background: #fffaeb;
-  color: #b54708;
-}
-
-.timeline-row.info .timeline-icon {
-  background: #eef4ff;
-  color: #175cd3;
-}
-
 .timeline-row.error .timeline-icon {
   background: #fef3f2;
   color: #b42318;
 }
 
+.timeline-row.warning .timeline-icon {
+  background: #fffaeb;
+  color: #b54708;
+}
+
 .timeline-title {
   margin: 0;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--foreground);
 }
 
 .timeline-detail {
-  margin: 3px 0 0;
-  overflow: hidden;
-  color: var(--muted-foreground);
+  margin: 6px 0 0;
   font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  white-space: pre-wrap;
+}
+
+.memory-trace-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.memory-trace-item {
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgb(255 255 255 / 0.03);
+}
+
+.memory-trace-main {
+  display: grid;
+  gap: 4px;
+}
+
+.memory-trace-main strong {
+  font-size: 12px;
+}
+
+.memory-trace-main span {
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.55);
+}
+
+.memory-trace-main p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgb(255 255 255 / 0.72);
+}
+
+.memory-trace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.memory-trace-btn {
+  border: 1px solid rgb(255 255 255 / 0.12);
+  background: transparent;
+  color: rgb(255 255 255 / 0.78);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.memory-trace-btn.danger {
+  color: #fda29b;
+  border-color: rgb(253 162 155 / 0.35);
 }
 
 .detail-toggle {
-  margin-top: 6px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  margin-top: 6px;
+  padding: 0;
   border: 0;
   background: transparent;
   color: var(--muted-foreground);
+  font-size: 11px;
   cursor: pointer;
-  font-size: 12px;
-  padding: 0;
 }
 
 .detail-toggle .open {
   transform: rotate(180deg);
 }
 
-.timeline-collapse-row {
-  padding: 0 12px 8px 42px;
-}
-
 .detail-json {
   margin: 8px 0 0;
-  max-height: 140px;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--secondary);
-  color: var(--foreground);
-  font-size: 11px;
-  line-height: 1.5;
   padding: 8px;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 0.25);
+  font-size: 10px;
+  line-height: 1.4;
+  overflow-x: auto;
   white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.timeline-title {
-  font-size: 12px;
-}
-.timeline-detail {
-  font-size: 11px;
-}
-
-.run-timeline::-webkit-scrollbar {
-  width: 4px;
-}
-.run-timeline::-webkit-scrollbar-thumb {
-  background: var(--muted-foreground);
-  border-radius: 4px;
+.timeline-collapse-row {
+  padding: 4px 12px 8px;
 }
 </style>

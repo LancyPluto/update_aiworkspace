@@ -698,6 +698,7 @@ export interface AgentSession {
   id: number
   title: string
   status: string
+  workspaceId?: number | null
   createdAt: string
   updatedAt: string
 }
@@ -732,6 +733,8 @@ export interface AgentToolPickerItem {
   outputModality?: string | null
   coverUrl?: string | null
   estimatedCreditCost?: number | null
+  autoCallEnabled?: boolean
+  disabled?: boolean
 }
 
 export interface CreateAgentMessageResponse {
@@ -795,6 +798,7 @@ export interface AgentToolPreference {
   id: number
   toolCode: string
   autoCallEnabled: boolean
+  disabled: boolean
   createdAt: string
   updatedAt: string
 }
@@ -818,6 +822,7 @@ export interface AgentWorkspaceMemoryItem {
   content: string
   sourceRunId?: number | null
   status: string
+  pinned?: boolean
   createdAt: string
   updatedAt: string
 }

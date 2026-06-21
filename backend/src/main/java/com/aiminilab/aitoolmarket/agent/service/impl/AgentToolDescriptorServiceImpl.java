@@ -7,8 +7,10 @@ import com.aiminilab.aitoolmarket.agent.dto.AgentToolPickerItemResponse;
 import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentToolAccessRequest;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.AgentToolDescriptorExtension;
+import com.aiminilab.aitoolmarket.agent.entity.AgentToolPreference;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentToolDescriptorExtensionMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentToolPreferenceMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolDescriptorService;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
@@ -45,6 +47,7 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
     private final ToolMapper toolMapper;
     private final ToolFieldItemMapper toolFieldItemMapper;
     private final AgentToolDescriptorExtensionMapper extensionMapper;
+    private final AgentToolPreferenceMapper preferenceMapper;
     private final AgentModelConfigMapper modelConfigMapper;
     private final TaskCreditEstimateService taskCreditEstimateService;
     private final ObjectMapper objectMapper;
@@ -52,12 +55,14 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
     public AgentToolDescriptorServiceImpl(ToolMapper toolMapper,
                                           ToolFieldItemMapper toolFieldItemMapper,
                                           AgentToolDescriptorExtensionMapper extensionMapper,
+                                          AgentToolPreferenceMapper preferenceMapper,
                                           AgentModelConfigMapper modelConfigMapper,
                                           TaskCreditEstimateService taskCreditEstimateService,
                                           ObjectMapper objectMapper) {
         this.toolMapper = toolMapper;
         this.toolFieldItemMapper = toolFieldItemMapper;
         this.extensionMapper = extensionMapper;
+        this.preferenceMapper = preferenceMapper;
         this.modelConfigMapper = modelConfigMapper;
         this.taskCreditEstimateService = taskCreditEstimateService;
         this.objectMapper = objectMapper;
@@ -67,10 +72,11 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
     public List<AgentToolDescriptorResponse> listAvailableToolsForUser(Long userId) {
         List<AiTool> tools = toolMapper.findTools(true, null, null, null, AGENT_AVAILABLE_TOOL_LIMIT, 0);
         Map<String, AgentToolDescriptorExtension> extensions = findExtensionsByToolCode(tools);
+        Set<String> disabledToolCodes = disabledToolCodes(userId);
         return tools.stream()
                 .filter(tool -> {
                     AgentToolDescriptorExtension ext = extensions.get(tool.getToolCode());
-                    return ext == null || isAgentReadable(ext);
+                    return (ext == null || isAgentReadable(ext)) && !disabledToolCodes.contains(tool.getToolCode());
                 })
                 .map(tool -> toDescriptor(tool, extensions.get(tool.getToolCode())))
                 .toList();
@@ -80,19 +86,26 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
     public List<AgentToolPickerItemResponse> listPickerToolsForUser(Long userId) {
         List<AiTool> tools = toolMapper.findTools(true, null, null, null, AGENT_AVAILABLE_TOOL_LIMIT, 0);
         Map<String, AgentToolDescriptorExtension> extensions = findExtensionsByToolCode(tools);
+        Map<String, AgentToolPreference> preferences = preferencesByToolCode(userId);
         return tools.stream()
                 .filter(tool -> {
                     AgentToolDescriptorExtension ext = extensions.get(tool.getToolCode());
                     return ext == null || isAgentReadable(ext);
                 })
-                .map(tool -> new AgentToolPickerItemResponse(
-                        tool.getToolCode(),
-                        tool.getToolName(),
-                        tool.getDescription(),
-                        normalizeOutputType(tool.getOutputModality()),
-                        tool.getCoverUrl(),
-                        taskCreditEstimateService.estimateUserFacingTaskCredits(tool)
-                ))
+                .map(tool -> {
+                    AgentToolPreference preference = preferences.get(tool.getToolCode());
+                    boolean disabled = preference != null && Boolean.TRUE.equals(preference.getDisabled());
+                    return new AgentToolPickerItemResponse(
+                            tool.getToolCode(),
+                            tool.getToolName(),
+                            tool.getDescription(),
+                            normalizeOutputType(tool.getOutputModality()),
+                            tool.getCoverUrl(),
+                            taskCreditEstimateService.estimateUserFacingTaskCredits(tool),
+                            preference != null && Boolean.TRUE.equals(preference.getAutoCallEnabled()) && !disabled,
+                            disabled
+                    );
+                })
                 .toList();
     }
 
@@ -103,6 +116,10 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
         AgentToolDescriptorExtension ext = extensionMapper.findByToolCode(tool.getToolCode()).orElse(null);
         if (ext != null && !isAgentReadable(ext)) {
             throw new BusinessException(ErrorCode.AGENT_TOOL_NOT_AVAILABLE, "Tool is disabled for Agent");
+        }
+        AgentToolPreference preference = preferenceMapper.findByUserIdAndToolCode(userId, tool.getToolCode());
+        if (preference != null && Boolean.TRUE.equals(preference.getDisabled())) {
+            throw new BusinessException(ErrorCode.AGENT_TOOL_NOT_AVAILABLE, "Tool is disabled by user");
         }
         return toDescriptor(tool, ext);
     }
@@ -227,7 +244,7 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                 tool.getToolName(),
                 tool.getDescription(),
                 taskCreditEstimateService.estimateUserFacingTaskCredits(tool),
-                toInputSchema(fields),
+                toInputSchema(tool.getToolCode(), fields),
                 autoCallable,
                 fieldDescriptors,
                 loadHints(tool.getToolCode(), ext)
@@ -249,6 +266,30 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                         extension -> extension,
                         (left, right) -> left
                 ));
+    }
+
+    private Map<String, AgentToolPreference> preferencesByToolCode(Long userId) {
+        if (userId == null) {
+            return Map.of();
+        }
+        return preferenceMapper.findByUserId(userId).stream()
+                .filter(preference -> preference.getToolCode() != null && !preference.getToolCode().isBlank())
+                .collect(Collectors.toMap(
+                        AgentToolPreference::getToolCode,
+                        preference -> preference,
+                        (left, right) -> left
+                ));
+    }
+
+    private Set<String> disabledToolCodes(Long userId) {
+        if (userId == null) {
+            return Set.of();
+        }
+        return preferenceMapper.findByUserId(userId).stream()
+                .filter(preference -> Boolean.TRUE.equals(preference.getDisabled()))
+                .map(AgentToolPreference::getToolCode)
+                .filter(code -> code != null && !code.isBlank())
+                .collect(Collectors.toSet());
     }
 
     private boolean agentEnabled(AgentToolDescriptorExtension ext) {
@@ -371,7 +412,7 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
         };
     }
 
-    private ObjectNode toInputSchema(List<ToolFieldResponse> fields) {
+    private ObjectNode toInputSchema(String toolCode, List<ToolFieldResponse> fields) {
         ObjectNode schema = objectMapper.createObjectNode();
         ObjectNode properties = objectMapper.createObjectNode();
         ArrayNode required = objectMapper.createArrayNode();
@@ -431,9 +472,52 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                 required.add(field.fieldKey());
             }
         }
+        applyImageEditSchemaEnhancements(toolCode, properties, required);
         schema.set("properties", properties);
         schema.set("required", required);
         return schema;
+    }
+
+    private void applyImageEditSchemaEnhancements(String toolCode, ObjectNode properties, ArrayNode required) {
+        if (!isGptImageTool(toolCode)) {
+            return;
+        }
+        if (!properties.has("prompt")) {
+            ObjectNode prompt = objectMapper.createObjectNode();
+            prompt.put("type", "string");
+            prompt.put("title", "Prompt");
+            properties.set("prompt", prompt);
+            required.add("prompt");
+        }
+        ObjectNode prompt = (ObjectNode) properties.get("prompt");
+        prompt.put("description", "Final image prompt. For edits/follow-ups, inherit the original prompt from session context verbatim and apply only the user's delta.");
+
+        if (!properties.has("base_image_url")) {
+            ObjectNode baseImage = objectMapper.createObjectNode();
+            baseImage.put("type", "string");
+            baseImage.put("title", "Base image URL");
+            baseImage.put("description", "The base image to edit. Use this for the existing/current/previous/generated image from session context.");
+            baseImage.put("x-agent-fill-strategy", "llm");
+            baseImage.put("x-risk-level", "LOW");
+            properties.set("base_image_url", baseImage);
+        }
+        if (!properties.has("reference_images")) {
+            ObjectNode references = objectMapper.createObjectNode();
+            references.put("type", "array");
+            ObjectNode itemSchema = objectMapper.createObjectNode();
+            itemSchema.put("type", "string");
+            references.set("items", itemSchema);
+            references.put("title", "Reference images");
+            references.put("description", "Additional reference images selected by the user, such as @ face/style/pose references.");
+            references.put("x-agent-fill-strategy", "llm");
+            references.put("x-risk-level", "LOW");
+            properties.set("reference_images", references);
+        }
+    }
+
+    private boolean isGptImageTool(String toolCode) {
+        String code = toolCode == null ? "" : toolCode.trim().toLowerCase();
+        return code.contains("gpt_image") || code.contains("gpt-image") || code.contains("openai_image");
     }
 
     private String jsonType(String fieldType) {

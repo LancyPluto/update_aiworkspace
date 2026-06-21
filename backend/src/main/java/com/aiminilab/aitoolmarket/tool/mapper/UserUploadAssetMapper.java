@@ -23,17 +23,28 @@ public interface UserUploadAssetMapper extends BaseMapper<UserUploadAsset> {
     void insertAsset(@Param("asset") UserUploadAsset asset);
 
     @Select("""
+            SELECT COUNT(*)
+            FROM user_upload_assets
+            WHERE user_id = #{userId}
+              AND status = 'ACTIVE'
+              AND (#{kind} IS NULL OR #{kind} = '' OR asset_kind = #{kind})
+            """)
+    long countActiveByUser(@Param("userId") Long userId,
+                           @Param("kind") String kind);
+
+    @Select("""
             SELECT *
             FROM user_upload_assets
             WHERE user_id = #{userId}
               AND status = 'ACTIVE'
               AND (#{kind} IS NULL OR #{kind} = '' OR asset_kind = #{kind})
             ORDER BY id DESC
-            LIMIT #{limit}
+            LIMIT #{limit} OFFSET #{offset}
             """)
     List<UserUploadAsset> findRecentByUser(@Param("userId") Long userId,
                                            @Param("kind") String kind,
-                                           @Param("limit") int limit);
+                                           @Param("limit") int limit,
+                                           @Param("offset") int offset);
 
     @Select("""
             SELECT COUNT(1)

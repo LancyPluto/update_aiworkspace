@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.storage;
 
 import com.aiminilab.aitoolmarket.agent.mapper.AgentFileMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentMessageMapper;
 import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.market.mapper.AiMarketFileMapper;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
@@ -20,8 +21,9 @@ class PrivateAssetAccessServiceTest {
     private final TaskMapper taskMapper = mock(TaskMapper.class);
     private final AssetStorageService storageService = mock(AssetStorageService.class);
     private final AgentFileMapper agentFileMapper = mock(AgentFileMapper.class);
+    private final AgentMessageMapper agentMessageMapper = mock(AgentMessageMapper.class);
     private final PrivateAssetAccessService service = new PrivateAssetAccessService(
-            properties, uploadMapper, marketFileMapper, taskMapper, storageService, agentFileMapper
+            properties, uploadMapper, marketFileMapper, taskMapper, storageService, agentFileMapper, agentMessageMapper
     );
 
     @Test
@@ -36,6 +38,14 @@ class PrivateAssetAccessServiceTest {
     }
 
     @Test
+    void taskGeneratedAssetsAllowUserDeletedTasks() {
+        when(taskMapper.countOwnedTask(71L, 2L)).thenReturn(0L);
+        when(taskMapper.countOwnedTaskIgnoringUserDeleted(71L, 2L)).thenReturn(1L);
+
+        assertTrue(service.canAccess(2L, "images/71/image-1.png"));
+    }
+
+    @Test
     void uploadedAndMarketFilesUseDatabaseOwnership() {
         when(uploadMapper.countActiveByUserAndRelativeKey(2L, "uploads/20260618/a.png")).thenReturn(1L);
         when(marketFileMapper.countByUserAndRelativeKey(2L, "market-files/2/source.pdf")).thenReturn(1L);
@@ -44,6 +54,25 @@ class PrivateAssetAccessServiceTest {
         assertTrue(service.canAccess(2L, "market-files/2/source.pdf"));
         assertFalse(service.canAccess(3L, "uploads/20260618/a.png"));
         assertFalse(service.canAccess(3L, "market-files/2/source.pdf"));
+    }
+
+    @Test
+    void uploadsReferencedInAgentMessagesAreAccessible() {
+        String key = "uploads/20260620/pasted.png";
+        when(uploadMapper.countActiveByUserAndRelativeKey(2L, key)).thenReturn(0L);
+        when(agentMessageMapper.countActiveByUserContainingRelativeKey(2L, key)).thenReturn(1L);
+
+        assertTrue(service.canAccess(2L, key));
+    }
+
+    @Test
+    void taskAssetsReferencedInResultsAreAccessible() {
+        String key = "images/88/output.png";
+        when(taskMapper.countOwnedTask(88L, 2L)).thenReturn(0L);
+        when(taskMapper.countOwnedTaskIgnoringUserDeleted(88L, 2L)).thenReturn(0L);
+        when(taskMapper.countUserResultContainingRelativeKey(2L, key)).thenReturn(1L);
+
+        assertTrue(service.canAccess(2L, key));
     }
 
     @Test

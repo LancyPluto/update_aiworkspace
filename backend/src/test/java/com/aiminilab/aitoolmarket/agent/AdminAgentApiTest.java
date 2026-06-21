@@ -360,7 +360,16 @@ class AdminAgentApiTest {
                 "image",
                 1,
                 List.of(new AdminAgentRouteDebugResponse.RouteDebugToolResponse("debug_image_tool", "debug_image_tool", true)),
-                List.of()
+                List.of(),
+                "ready",
+                true,
+                1,
+                5,
+                12000,
+                List.of(),
+                true,
+                true,
+                true
         ));
 
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/admin/v1/agent/tools/bulk-access")

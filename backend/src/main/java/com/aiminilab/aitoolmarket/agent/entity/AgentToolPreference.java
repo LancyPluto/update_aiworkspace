@@ -12,6 +12,7 @@ public class AgentToolPreference {
     private Long userId;
     private String toolCode;
     private Boolean autoCallEnabled;
+    private Boolean disabled;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -23,6 +24,8 @@ public class AgentToolPreference {
     public void setToolCode(String toolCode) { this.toolCode = toolCode; }
     public Boolean getAutoCallEnabled() { return autoCallEnabled; }
     public void setAutoCallEnabled(Boolean autoCallEnabled) { this.autoCallEnabled = autoCallEnabled; }
+    public Boolean getDisabled() { return disabled; }
+    public void setDisabled(Boolean disabled) { this.disabled = disabled; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

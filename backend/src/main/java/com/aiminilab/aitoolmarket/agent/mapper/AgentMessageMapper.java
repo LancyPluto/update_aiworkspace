@@ -142,4 +142,17 @@ public interface AgentMessageMapper extends BaseMapper<AgentMessage> {
                                              @Param("sessionId") Long sessionId,
                                              @Param("query") String query,
                                              @Param("limit") int limit);
+
+    @Select("""
+            SELECT COUNT(1)
+            FROM agent_messages
+            WHERE user_id = #{userId}
+              AND status = 'ACTIVE'
+              AND (
+                content_text LIKE CONCAT('%', #{relativeKey})
+                OR content_json LIKE CONCAT('%', #{relativeKey})
+              )
+            """)
+    long countActiveByUserContainingRelativeKey(@Param("userId") Long userId,
+                                                @Param("relativeKey") String relativeKey);
 }

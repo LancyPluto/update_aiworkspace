@@ -478,6 +478,48 @@ test("asset library keeps loading successful task pages beyond the first page", 
   assert.doesNotMatch(materialLibrary, /pageNo:\s*1,\s*pageSize:\s*80/)
 })
 
+test("material picker modals paginate uploads and generated assets", async () => {
+  const capabilityControls = await readSource("pages/Chat/CapabilityControls.vue")
+  const agentComposer = await readSource("pages/AgentHome/AgentComposer.vue")
+  const agentChatPane = await readSource("pages/AgentHome/AgentChatPane.vue")
+  const composable = await readSource("composables/useMaterialPickerLists.ts")
+  const toolApi = await readSource("api/toolApi.ts")
+
+  assert.match(composable, /useUploadHistoryList/)
+  assert.match(composable, /useGeneratedMaterialList/)
+  assert.match(composable, /PICKER_PAGE_SIZE/)
+  assert.match(toolApi, /pageNo\?: number/)
+  assert.match(capabilityControls, /useUploadHistoryList/)
+  assert.match(capabilityControls, /useInfiniteScroll/)
+  assert.match(capabilityControls, /uploadLoadSentinelRef|referenceUploadSentinelRef/)
+  assert.doesNotMatch(agentComposer, /recentMaterialAttachments\.slice\(0,\s*12\)/)
+  assert.doesNotMatch(agentComposer, /libraryMaterialAttachments\.slice\(0,\s*30\)/)
+  assert.match(agentChatPane, /loadMorePickerUploads/)
+  assert.match(agentChatPane, /loadMoreMaterialAssets/)
+  assert.doesNotMatch(agentChatPane, /\.slice\(0,\s*60\)/)
+})
+
+test("agent tool picker exposes disable and whitelist controls", async () => {
+  const agentApi = await readSource("api/agentApi.ts")
+  const types = await readSource("api/types.ts")
+  const agentComposer = await readSource("pages/AgentHome/AgentComposer.vue")
+  const agentChatPane = await readSource("pages/AgentHome/AgentChatPane.vue")
+  const confirmationList = await readSource("pages/AgentHome/AgentToolConfirmationList.vue")
+
+  assert.match(types, /autoCallEnabled\?: boolean/)
+  assert.match(types, /disabled\?: boolean/)
+  assert.match(agentApi, /body:\s*\{\s*autoCallEnabled\?: boolean;\s*disabled\?: boolean\s*\}/)
+  assert.match(agentComposer, /toggleToolDisabled/)
+  assert.match(agentComposer, /toggleToolWhitelist/)
+  assert.match(agentComposer, /tool-picker-item--disabled/)
+  assert.match(agentComposer, /白名单/)
+  assert.match(agentComposer, /:disabled="tool\.disabled"/)
+  assert.match(agentChatPane, /function updateToolPreference/)
+  assert.match(agentChatPane, /updateAgentToolPreference\(payload\.toolCode, payload/)
+  assert.match(agentChatPane, /selectedToolCode\.value = null/)
+  assert.match(confirmationList, /加入白名单，后续调用无需确认/)
+})
+
 test("local vite proxy does not forward temporary browser origins to backend CORS", async () => {
   const viteConfig = await readFile(new URL("../vite.config.ts", srcRoot), "utf8")
 

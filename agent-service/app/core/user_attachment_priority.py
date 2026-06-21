@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.config import settings
+from app.core.attachment_catalog import build_reference_plan, reference_mentions_payload
 from app.core.schemas import AgentFileContext, RunContext, ToolDescriptor
 
 _IMAGE_REFERENCE_ARG_KEYS = (
@@ -20,6 +21,8 @@ _IMAGE_REFERENCE_ARG_KEYS = (
 )
 
 _IMAGE_REFERENCE_ARRAY_ARG_KEYS = (
+    "reference_images",
+    "referenceImages",
     "image",
     "images",
     "imageUrls",
@@ -101,15 +104,28 @@ def apply_user_selected_attachment_priority(
     tool: ToolDescriptor,
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
-    """Router / followup 可能填入历史生成图；用户拖入 @图片 时优先采用。
-
-    对多图字段，保留 Router 有意引用的历史生成图（如风格迁移的"第一张"），
-    再补上用户本轮上传图，仅丢弃既非历史图也非用户图的陈旧 URL。
-    """
+    """Router / followup may inject history URLs; @ references lock the image set."""
     normalized = dict(arguments)
     properties = tool.inputSchema.get("properties", {})
     if not isinstance(properties, dict):
         properties = {}
+
+    plan = build_reference_plan(context)
+    array_keys = _reference_array_arg_keys(tool, properties)
+    single_keys = _reference_single_arg_keys(tool, properties)
+
+    if plan.has_explicit_references:
+        urls = list(plan.ordered_urls)
+        for key in array_keys:
+            prop = properties.get(key)
+            if key in properties and not _is_string_array_property(prop):
+                continue
+            normalized[key] = urls
+            return normalized
+        for key in single_keys:
+            if urls:
+                normalized[key] = urls[0]
+        return normalized
 
     user_image_urls = user_selected_image_urls(context)
     image_urls = ready_image_download_urls(context)
@@ -117,8 +133,6 @@ def apply_user_selected_attachment_priority(
         return normalized
 
     history_urls = _history_media_urls(context)
-    array_keys = _reference_array_arg_keys(tool, properties)
-    single_keys = _reference_single_arg_keys(tool, properties)
 
     for key in array_keys:
         prop = properties.get(key)
@@ -140,12 +154,39 @@ def apply_user_selected_attachment_priority(
     return normalized
 
 
+def emit_attachment_resolved_payload(
+    context: RunContext,
+    tool: ToolDescriptor,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    plan = build_reference_plan(context)
+    properties = tool.inputSchema.get("properties", {}) if isinstance(tool.inputSchema, dict) else {}
+    array_keys = _reference_array_arg_keys(tool, properties)
+    resolved: list[str] = []
+    for key in array_keys:
+        value = arguments.get(key)
+        if isinstance(value, list):
+            resolved = [str(item) for item in value if item]
+            break
+        if isinstance(value, str) and value.strip():
+            resolved = [value.strip()]
+            break
+    mode = "at_reference" if plan.has_explicit_references else "default"
+    return {
+        "mode": mode,
+        "toolCode": tool.toolCode,
+        "referenceMentions": reference_mentions_payload(plan),
+        "resolvedUrls": resolved,
+        "resolvedCount": len(resolved),
+    }
+
+
 def _merge_user_and_history_urls(
     existing: Any,
     user_image_urls: list[str],
     history_urls: set[str],
 ) -> list[str]:
-    """保留 Router 有意引用的历史生成图，再补上用户上传图，丢弃陈旧无关 URL。"""
+    """Preserve Router history URLs when user also uploaded; drop stale unrelated URLs."""
     merged: list[str] = []
     existing_items = existing if isinstance(existing, list) else [existing]
     for item in existing_items:
