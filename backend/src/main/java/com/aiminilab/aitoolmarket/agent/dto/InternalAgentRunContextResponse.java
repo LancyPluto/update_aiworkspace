@@ -24,6 +24,10 @@ public record InternalAgentRunContextResponse(
         AgentRuntimeSettingsResponse runtimeSettings,
         List<InternalRecentToolCallContextResponse> recentToolCalls,
         InternalPendingToolContextResponse pendingToolContext,
-        String preferredToolCode
+        String preferredToolCode,
+        List<InternalReferenceMentionResponse> referenceMentions,
+        List<Object> globalFileIds,
+        List<java.util.Map<String, Object>> contentParts,
+        String positionalPrompt
 ) {
 }

@@ -8,16 +8,21 @@ from typing import Any
 from app.clients.backend_client import BackendBusinessError
 from app.config import settings
 from app.credit_messages import credit_message_from_backend_error
+from app.core.attachment_catalog import build_reference_plan, llm_token_for_mention, readable_positional_prompt, resolve_media_argument_pointers
 from app.core.attachment_precheck import format_attachment_error, validate_attachment_arguments
-from app.core.event_types import MESSAGE_DELTA, TOOL_CALL_REJECTED, TOOL_TASK_DISPATCHED, TOOL_TASK_PROGRESS
+from app.core.event_types import ATTACHMENT_RESOLVED, MESSAGE_DELTA, TOOL_CALL_REJECTED, TOOL_TASK_DISPATCHED, TOOL_TASK_PROGRESS
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate, TaskCreate, TaskDetailResponse, ToolCallComplete, ToolCallCreate, ToolCallFail, ToolDescriptor
-from app.core.user_attachment_priority import apply_user_selected_attachment_priority
+from app.core.user_attachment_priority import apply_user_selected_attachment_priority, emit_attachment_resolved_payload
 from app.runtime.runtime_settings import runtime_bool, runtime_float, runtime_int
-from app.tools.registry import infer_output_modality
+from app.runtime.prompt_policy import PromptMode, reference_edit_prompt, resolve_prompt_mode
+from app.runtime.session_state import SESSION_STATE_INSTRUCTIONS, format_session_state_context
 from app.tools.stream_preview import extract_stream_preview
+from app.tools.registry import infer_output_modality
 
 
 logger = logging.getLogger(__name__)
+
+REFERENCE_SEMANTICS_MARKER = "参考图角色约束"
 
 
 class ToolExecutionError(RuntimeError):
@@ -42,7 +47,15 @@ class BackendToolBridge:
         self.timeout_seconds = timeout_seconds or settings.agent_tool_execution_timeout_seconds
         self.poll_interval_seconds = poll_interval_seconds or settings.agent_tool_poll_interval_seconds
 
-    def build_arguments(self, context: RunContext, tool: ToolDescriptor, *, apply_placeholder_defaults: bool = True) -> dict[str, Any]:
+    def build_arguments(
+        self,
+        context: RunContext,
+        tool: ToolDescriptor,
+        *,
+        apply_placeholder_defaults: bool = True,
+        workspace_memory_context: str = "",
+        prompt_mode: PromptMode | None = None,
+    ) -> dict[str, Any]:
         """从用户消息解析参数。占位默认值仅应在「即将执行工具」时启用；缺参检测必须关闭，否则会静默填满 schema 导致从不追问。"""
         arguments: dict[str, Any] = {"userRequest": context.message}
         properties = tool.inputSchema.get("properties", {})
@@ -60,8 +73,16 @@ class BackendToolBridge:
         if apply_placeholder_defaults and tool.toolCode == "xiaohongshu_copywriting":
             arguments = _with_xiaohongshu_defaults(context.message, arguments)
         if apply_placeholder_defaults:
-            arguments = _with_generation_argument_defaults(context, tool, arguments)
+            mode = prompt_mode or resolve_prompt_mode(context, tool)
+            arguments = _with_generation_argument_defaults(
+                context,
+                tool,
+                arguments,
+                workspace_memory_context=workspace_memory_context,
+                prompt_mode=mode,
+            )
             arguments = _with_field_strategy_defaults(tool, arguments)
+            arguments = enforce_locked_field_defaults(tool, arguments, user_message=context.message)
         arguments = _with_attached_file_defaults(context, tool, arguments)
         return arguments
 
@@ -71,7 +92,19 @@ class BackendToolBridge:
         arguments = self.build_arguments(context, tool, apply_placeholder_defaults=False)
         return _missing_user_required_fields(tool, arguments)
 
-    async def enrich_arguments(self, message: str, tool: ToolDescriptor, existing_args: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def enrich_arguments(
+        self,
+        message: str,
+        tool: ToolDescriptor,
+        existing_args: dict[str, Any] | None = None,
+        *,
+        workspace_memory_context: str = "",
+        context: RunContext | None = None,
+        prompt_mode: PromptMode | None = None,
+    ) -> dict[str, Any]:
+        mode = prompt_mode or (resolve_prompt_mode(context, tool) if context is not None else PromptMode.DEFAULT)
+        if mode == PromptMode.REFERENCE_EDIT_DELTA:
+            return existing_args or {}
         if self.model is None:
             return existing_args or {}
         properties = tool.inputSchema.get("properties", {})
@@ -95,16 +128,53 @@ class BackendToolBridge:
         existing_info = ""
         if existing_args:
             existing_info = f"\n已从格式匹配中提取的参数 (不要覆盖): {json.dumps(existing_args, ensure_ascii=False)}"
+        memory_info = ""
+        if workspace_memory_context.strip() and mode != PromptMode.REFERENCE_EDIT_DELTA:
+            memory_info = (
+                "\nWorkspace long-term memory for this run. Use only relevant stable preferences to fill safe, low-risk "
+                "fields. Current user instruction has highest priority:\n"
+                f"{_limit_text(workspace_memory_context.strip(), 1800)}\n"
+            )
+        reference_info = ""
+        if context is not None and mode != PromptMode.REFERENCE_EDIT_DELTA:
+            from app.core.attachment_catalog import build_reference_plan, reference_mentions_payload
+
+            plan = build_reference_plan(context)
+            if plan.mentions:
+                reference_info = (
+                    "\nStructured @ references (use ONLY these URLs for image/reference fields; "
+                    "do not copy URLs from history):\n"
+                    f"{json.dumps(reference_mentions_payload(plan), ensure_ascii=False)}\n"
+                    "When filling prompt-like fields, you MUST preserve each reference's role from the user request "
+                    "(subject identity vs style vs composition). For dual-reference tasks, do not collapse into a "
+                    "single-image description. If the user says 图1/图2, map them to the numbered references above "
+                    "and write explicit role constraints into the prompt field.\n"
+                )
+        session_state_info = ""
+        if context is not None:
+            session_state_context = format_session_state_context(context)
+            if session_state_context:
+                session_state_info = (
+                    "\nSession state available for coreference resolution:\n"
+                    f"{session_state_context}\n"
+                    f"{SESSION_STATE_INSTRUCTIONS}\n"
+                )
+        expand_instruction = "For prompt-like fields, expand short user intent into a useful production prompt."
         prompt = (
             "You are filling arguments for an AI tool call. Return a pure JSON object only.\n"
             "Fill safe, low-risk generation fields from the user's request, recent context, existing arguments, "
-            "and the tool schema. For prompt-like fields, expand short user intent into a useful production prompt. "
+            f"workspace long-term memory, and the tool schema. {expand_instruction} "
+            "When multiple reference images apply, the prompt MUST state which reference supplies subject identity and which supplies style or other roles. "
             "Do not invent credentials, account ids, payment, publishing authorization, personal private data, "
-            "or other high-risk values. Preserve existing arguments unless a field is empty.\n\n"
+            "or other high-risk values. Preserve existing arguments unless a field is empty. "
+            "Do not populate image/reference URL fields when structured references are provided — leave them empty.\n\n"
             f"Tool: {tool.toolName or tool.toolCode}\n"
             f"Description: {tool.description or 'none'}\n"
             f"Fields:\n{chr(10).join(field_descriptions)}\n"
             f"{existing_info}\n"
+            f"{memory_info}"
+            f"{reference_info}"
+            f"{session_state_info}"
             f"Recent user context:\n{message}\n\n"
             "JSON only. Use the exact English field keys from the schema."
         )
@@ -147,6 +217,8 @@ class BackendToolBridge:
     async def execute_with_args(self, context: RunContext, tool: ToolDescriptor, arguments: dict[str, Any]) -> dict[str, Any]:
         if tool.toolCode == "xiaohongshu_copywriting":
             arguments = _with_xiaohongshu_defaults(context.message, arguments)
+        arguments = enforce_locked_field_defaults(tool, arguments, user_message=context.message)
+        arguments = resolve_media_argument_pointers(context, arguments)
         attachment_errors = validate_attachment_arguments(context, arguments)
         if attachment_errors:
             message = format_attachment_error(attachment_errors)
@@ -164,6 +236,14 @@ class BackendToolBridge:
                 ),
             )
             raise ToolExecutionError(message, error_code="PARAM_ERROR")
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=ATTACHMENT_RESOLVED,
+                eventText="attachment references resolved",
+                eventJson=emit_attachment_resolved_payload(context, tool, arguments),
+            ),
+        )
         call = await self.backend.create_tool_call(context.runId, ToolCallCreate(toolCode=tool.toolCode, argumentsJson=arguments))
         task_id: int | None = None
         try:
@@ -462,6 +542,78 @@ def _schema_property_user_required(prop: Any) -> bool:
     return True
 
 
+def enforce_locked_field_defaults(
+    tool: ToolDescriptor,
+    arguments: dict[str, Any],
+    *,
+    user_message: str | None = None,
+) -> dict[str, Any]:
+    """Force backend defaultValue for fields with agentFillStrategy=default (locks Agent/router overrides)."""
+    if not tool.fields:
+        return arguments
+    normalized = dict(arguments)
+    for field in tool.fields:
+        strategy = (field.agentFillStrategy or "").strip().lower()
+        if strategy != "default" or field.defaultValue in (None, ""):
+            continue
+        override = _user_explicit_override_for_locked_field(field, user_message)
+        normalized[field.fieldKey] = override if override is not None else field.defaultValue
+    return normalized
+
+
+def _user_explicit_override_for_locked_field(field, user_message: str | None) -> Any | None:
+    if not user_message or not (field.fieldKey or "").strip():
+        return None
+    key = field.fieldKey.lower()
+    if "quality" not in key:
+        return None
+    explicit = _explicit_quality_preference_from_message(user_message)
+    if explicit is None:
+        return None
+    if _field_accepts_value(field, explicit):
+        return explicit
+    return None
+
+
+def _explicit_quality_preference_from_message(message: str) -> str | None:
+    compact = re.sub(r"\s+", "", (message or "").lower())
+    if not compact:
+        return None
+    high_tokens = (
+        "qualityhigh",
+        "quality=high",
+        "质量high",
+        "高质量档",
+        "高档质量",
+        "用high",
+        "使用high",
+        "这次high",
+    )
+    low_tokens = (
+        "qualitylow",
+        "quality=low",
+        "质量low",
+        "低质量档",
+        "低档质量",
+        "用low",
+        "使用low",
+        "这次low",
+    )
+    if any(token in compact for token in high_tokens):
+        return "high"
+    if any(token in compact for token in low_tokens):
+        return "low"
+    return None
+
+
+def _field_accepts_value(field, value: str) -> bool:
+    options = getattr(field, "options", None)
+    option_values = _option_values(options)
+    if option_values:
+        return value in {str(item).strip().lower() for item in option_values}
+    return True
+
+
 def _with_field_strategy_defaults(tool: ToolDescriptor, arguments: dict[str, Any]) -> dict[str, Any]:
     if not tool.fields:
         return arguments
@@ -502,17 +654,33 @@ def _absolute_backend_url(url: str | None) -> str:
     return f"{base}{path}"
 
 
-def _with_generation_argument_defaults(context: RunContext, tool: ToolDescriptor, arguments: dict[str, Any]) -> dict[str, Any]:
+def _with_generation_argument_defaults(
+    context: RunContext,
+    tool: ToolDescriptor,
+    arguments: dict[str, Any],
+    *,
+    workspace_memory_context: str = "",
+    prompt_mode: PromptMode | None = None,
+) -> dict[str, Any]:
     normalized = dict(arguments)
     properties = tool.inputSchema.get("properties", {})
     if not isinstance(properties, dict):
         return normalized
 
+    mode = prompt_mode or resolve_prompt_mode(context, tool)
     prompt_key = _infer_prompt_field(tool)
     if prompt_key and not normalized.get(prompt_key):
-        prompt = _compose_generation_prompt(context, tool)
-        if prompt:
-            normalized[prompt_key] = prompt
+        if not _should_defer_prompt_to_session_state(context, tool):
+            prompt = _compose_generation_prompt(
+                context,
+                tool,
+                workspace_memory_context=workspace_memory_context,
+                prompt_mode=mode,
+            )
+            if prompt:
+                normalized[prompt_key] = prompt
+    elif prompt_key and mode == PromptMode.REFERENCE_EDIT_DELTA:
+        normalized[prompt_key] = reference_edit_prompt(context.message)
 
     for key, prop in properties.items():
         if not isinstance(key, str) or key in normalized and normalized[key] not in (None, ""):
@@ -583,6 +751,23 @@ def _infer_prompt_field(tool: ToolDescriptor) -> str | None:
     return None
 
 
+def _should_defer_prompt_to_session_state(context: RunContext, tool: ToolDescriptor) -> bool:
+    if infer_output_modality(tool) != "image":
+        return False
+    if not _tool_accepts_base_image(tool):
+        return False
+    return bool(format_session_state_context(context))
+
+
+def _tool_accepts_base_image(tool: ToolDescriptor) -> bool:
+    properties = tool.inputSchema.get("properties", {}) if isinstance(tool.inputSchema, dict) else {}
+    if not isinstance(properties, dict):
+        properties = {}
+    if any(key in properties for key in ("base_image_url", "baseImageUrl", "base_image", "baseImage")):
+        return True
+    return any((field.fieldKey or "") in {"base_image_url", "baseImageUrl", "base_image", "baseImage"} for field in tool.fields)
+
+
 def _is_non_prompt_generation_control(key: str) -> bool:
     lower = key.lower()
     return any(
@@ -606,26 +791,189 @@ def _is_non_prompt_generation_control(key: str) -> bool:
     )
 
 
-def _compose_generation_prompt(context: RunContext, tool: ToolDescriptor) -> str:
+def _compose_generation_prompt(
+    context: RunContext,
+    tool: ToolDescriptor,
+    *,
+    workspace_memory_context: str = "",
+    prompt_mode: PromptMode | None = None,
+) -> str:
+    mode = prompt_mode or resolve_prompt_mode(context, tool)
+    if mode == PromptMode.REFERENCE_EDIT_DELTA:
+        return reference_edit_prompt(context.message)
     request = _compact(context.message, 600)
     if not request:
         return ""
     modality = infer_output_modality(tool)
+    memory_clause = _workspace_memory_prompt_clause(context.message, workspace_memory_context)
     if modality == "image":
-        return (
+        prompt = (
             f"{request}。高质量图片，主体清晰，构图自然，细节丰富，审美高级；"
             "如果用户只给出简短主体，请自动补足适合商业生成的场景、光线、镜头和风格。"
         )
+        prompt = _append_reference_semantics_clause(prompt, context)
+        return _append_memory_prompt_clause(prompt, memory_clause)
     if modality == "video":
-        return (
+        prompt = (
             f"{request}。高质量短视频画面，主体明确，运动自然，镜头连贯，节奏清晰；"
             "如果用户只给出简短主体，请自动补足场景、镜头运动和视觉风格。"
         )
+        return _append_memory_prompt_clause(prompt, memory_clause)
     if modality == "audio":
         return f"{request}。语气自然，节奏清晰，适合直接生成音频。"
     if modality == "text":
-        return request
-    return request
+        return _append_memory_prompt_clause(request, memory_clause)
+    return _append_memory_prompt_clause(request, memory_clause)
+
+
+def _append_reference_semantics_clause(prompt: str, context: RunContext) -> str:
+    plan = build_reference_plan(context)
+    if not plan.has_explicit_references or not plan.mentions:
+        return prompt
+
+    labels: list[str] = []
+    for mention in plan.mentions:
+        label = llm_token_for_mention(mention)
+        if label and label not in labels:
+            labels.append(label)
+    if not labels:
+        return prompt
+
+    if len(labels) >= 2:
+        second_title, second_desc, final_desc = _second_reference_role(context)
+        lines = [
+            "参考图角色约束（必须严格执行，不可交换）：",
+            f"1) 主体身份参考：{labels[0]}，用于保留人物主体与形象（五官、发型、服饰、体态）；若用户要求画风不变，也以此图为画风基准；",
+            f"2) {second_title}：{labels[1]}，{second_desc}",
+        ]
+        for index, label in enumerate(labels[2:], start=3):
+            lines.append(f"{index}) 补充参考：{label}，仅用于细节补充，不改变主体身份。")
+        lines.append(final_desc)
+        return f"{prompt} {' '.join(lines)}"
+
+    only = labels[0]
+    return (
+        f"{prompt} 参考图角色约束：{only} 为主体参考图。"
+        "优先保留主体身份特征；若用户额外描述风格，仅在不改变主体身份前提下进行风格化。"
+    )
+
+
+def _second_reference_role(context: RunContext) -> tuple[str, str, str]:
+    request = readable_positional_prompt(context) or context.message or ""
+    compact = re.sub(r"\s+", "", request).lower()
+    wants_action = any(token in compact for token in ("动作", "姿势", "姿态", "pose", "action", "做出", "perform"))
+    wants_composition = any(token in compact for token in ("构图", "composition", "framing", "layout", "版式", "镜头", "样式"))
+    wants_style = any(token in compact for token in ("风格", "画风", "style", "笔触", "色彩", "质感"))
+
+    if wants_action and wants_composition:
+        return (
+            "动作与构图参考",
+            "仅提供动作、姿态、肢体动态、构图、镜头和版式参考；不得替换主体身份；除非用户明确要求，否则不得覆盖1号参考的画风。",
+            "最终输出需明确保证：主体与画风以1号参考为准，动作和构图主要来自2号参考。",
+        )
+    if wants_action:
+        return (
+            "动作/姿态参考",
+            "仅提供动作、姿态和肢体动态参考；不得替换主体身份或画风。",
+            "最终输出需明确保证：主体与画风以1号参考为准，动作主要来自2号参考。",
+        )
+    if wants_composition:
+        return (
+            "构图/版式参考",
+            "仅提供构图、镜头、画面布局和版式参考；不得替换主体身份或画风。",
+            "最终输出需明确保证：主体与画风以1号参考为准，构图主要来自2号参考。",
+        )
+    if wants_style:
+        return (
+            "风格/画风参考",
+            "仅迁移风格、笔触、色彩、光影和质感；不得替换主体身份。",
+            "最终输出需明确保证：主体来自1号参考，风格主要来自2号参考。",
+        )
+    return (
+        "第二参考图",
+        "按用户句子中的位置关系使用该参考图；不得替换1号参考中的主体身份。",
+        "最终输出需明确保证：主体来自1号参考，其余参考关系按用户原句执行。",
+    )
+
+
+def finalize_generation_arguments(
+    context: RunContext,
+    tool: ToolDescriptor,
+    arguments: dict[str, Any],
+    *,
+    prompt_mode: PromptMode | None = None,
+) -> dict[str, Any]:
+    """Re-apply reference role constraints after LLM/enrich overwrites the prompt field."""
+    mode = prompt_mode or resolve_prompt_mode(context, tool)
+    if mode == PromptMode.REFERENCE_EDIT_DELTA:
+        prompt_key = _infer_prompt_field(tool)
+        if not prompt_key:
+            return arguments
+        updated = dict(arguments)
+        updated[prompt_key] = reference_edit_prompt(context.message)
+        updated["userRequest"] = context.message
+        return updated
+    if infer_output_modality(tool) != "image":
+        return arguments
+    prompt_key = _infer_prompt_field(tool)
+    if not prompt_key:
+        return arguments
+    prompt = arguments.get(prompt_key)
+    if not isinstance(prompt, str) or not prompt.strip():
+        return arguments
+    if REFERENCE_SEMANTICS_MARKER in prompt:
+        return arguments
+    if _has_base_image_argument(arguments):
+        return arguments
+    updated = dict(arguments)
+    updated[prompt_key] = _append_reference_semantics_clause(prompt.strip(), context)
+    return updated
+
+
+def _has_base_image_argument(arguments: dict[str, Any]) -> bool:
+    for key in ("base_image_url", "baseImageUrl", "base_image", "baseImage"):
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+    return False
+
+
+def _append_memory_prompt_clause(prompt: str, memory_clause: str) -> str:
+    if not memory_clause:
+        return prompt
+    return f"{prompt} 长期偏好参考：{memory_clause}"
+
+
+def _workspace_memory_prompt_clause(message: str, workspace_memory_context: str) -> str:
+    if not workspace_memory_context.strip():
+        return ""
+    if not _message_requests_workspace_preferences(message):
+        return ""
+    compact = re.sub(r"\s+", " ", workspace_memory_context).strip()
+    compact = compact.replace("Frozen workspace memory snapshot", "").strip()
+    compact = compact.replace("Priority: current user instruction > live tool result > recent tool calls > long-term memory.", "").strip()
+    return _limit_text(compact, 900)
+
+
+def _message_requests_workspace_preferences(message: str) -> bool:
+    compact = re.sub(r"\s+", "", (message or "").lower())
+    return any(
+        token in compact
+        for token in (
+            "我的喜好",
+            "我的审美",
+            "我的偏好",
+            "按我喜欢",
+            "根据我喜欢",
+            "根据我的喜好",
+            "根据我的审美",
+            "按你了解我",
+            "你了解我",
+            "mytaste",
+            "mypreference",
+            "preferences",
+        )
+    )
 
 
 def _safe_default_for_field(field) -> Any | None:
@@ -651,9 +999,12 @@ def _safe_default_for_key(key: str, field_type: str = "", options: Any = None) -
     lower = key.lower()
     option_values = _option_values(options)
     if option_values:
-        for preferred in ("1:1", "1024x1024", "standard", "normal", "medium", "auto", "default"):
-            if preferred in option_values:
-                return preferred
+        normalized_options = {str(item).strip().lower() for item in option_values}
+        for preferred in ("low", "auto", "1:1", "1024x1024", "default", "standard", "normal", "medium"):
+            if preferred in normalized_options:
+                for item in option_values:
+                    if str(item).strip().lower() == preferred:
+                        return item
         return option_values[0]
     if any(token in lower for token in ("ratio", "aspect")):
         return "1:1"
@@ -662,7 +1013,7 @@ def _safe_default_for_key(key: str, field_type: str = "", options: Any = None) -
     if any(token in lower for token in ("count", "num", "number")) and "negative" not in lower:
         return 1
     if "quality" in lower:
-        return "standard"
+        return "low"
     if "style" in lower and "strength" not in lower:
         return "auto"
     if "negative" in lower:

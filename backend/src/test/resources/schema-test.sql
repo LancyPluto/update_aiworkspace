@@ -571,6 +571,7 @@ CREATE TABLE agent_tool_preferences (
   user_id BIGINT NOT NULL,
   tool_code VARCHAR(128) NOT NULL,
   auto_call_enabled TINYINT NOT NULL DEFAULT 0,
+  disabled TINYINT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(user_id, tool_code)

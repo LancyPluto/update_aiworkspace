@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 
-from app.clients.volcengine_model import resolve_volcengine_model_name
+from app.clients.model_name_resolver import resolve_chat_model_name
 from app.config import Settings
 
 MINIMAX_OPENAI_COMPATIBLE_BASE_URL = "https://api.minimax.io/v1"
@@ -78,7 +78,7 @@ class ChatModelFactory:
             base_url = "https://api.openai.com/v1"
         resolved_base_url = base_url.rstrip("/")
         return chat_openai_cls(
-            model=resolve_volcengine_model_name(self.settings.model_name, resolved_base_url),
+            model=resolve_chat_model_name(self.settings.model_name, resolved_base_url, self.settings.model_provider),
             api_key=api_key,
             base_url=resolved_base_url,
             timeout=self.settings.model_timeout_seconds,

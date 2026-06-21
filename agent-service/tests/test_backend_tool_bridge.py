@@ -3,8 +3,8 @@
 import pytest
 
 from app.config import settings
-from app.core.schemas import AgentFileContext, ChatMessage, RunContext, RuntimeSettings, TaskDetailResponse, ToolDescriptor
-from app.tools.backend_tool import BackendToolBridge, ToolExecutionError, _with_attached_file_defaults
+from app.core.schemas import AgentFileContext, ChatMessage, ReferenceMention, RunContext, RuntimeSettings, TaskDetailResponse, ToolDescriptor
+from app.tools.backend_tool import BackendToolBridge, ToolExecutionError, _with_attached_file_defaults, enforce_locked_field_defaults, finalize_generation_arguments
 
 
 def _xiaohongshu_like_schema() -> dict:
@@ -210,6 +210,139 @@ def test_generation_prompt_field_is_derived_from_short_user_request():
     assert len(args["prompt"]) > len("生成美女")
     assert args["aspectRatio"] == "1:1"
     assert args["count"] == 1
+
+
+def test_generation_prompt_includes_explicit_reference_roles():
+    bridge = BackendToolBridge(backend_client=None)  # type: ignore[arg-type]
+    tool = ToolDescriptor(
+        toolCode="ofox_gpt_image2",
+        toolName="GPT-image2",
+        description="图片生成",
+        autoCallable=True,
+        outputModality="image",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string"},
+                "image": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+    )
+    ctx = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        message="为 @立绘_夕_1 生成 @图片5 风格的二次元插画",
+        referenceMentions=[
+            ReferenceMention(token="@立绘_夕_1", refLabel="@图片1-立绘_夕_1.png", url="/generated/uploads/char.png"),
+            ReferenceMention(token="@图片5", refLabel="@图片5-style_ref.png", url="/generated/images/style.png"),
+        ],
+    )
+
+    args = bridge.build_arguments(ctx, tool, apply_placeholder_defaults=True)
+
+    assert "主体身份参考" in args["prompt"]
+    assert "@图片1-立绘_夕_1.png" in args["prompt"]
+    assert "@图片5-style_ref.png" in args["prompt"]
+    assert "不可交换" in args["prompt"]
+
+
+def test_finalize_generation_arguments_restores_roles_after_llm_overwrite():
+    tool = ToolDescriptor(
+        toolCode="ofox_gpt_image2",
+        toolName="GPT-image2",
+        description="图片生成",
+        autoCallable=True,
+        outputModality="image",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string"},
+                "image": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+    )
+    ctx = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        message="为 @立绘_夕_1 生成 @图片5 风格的二次元插画",
+        referenceMentions=[
+            ReferenceMention(token="@立绘_夕_1", refLabel="@图片1-立绘_夕_1.png", url="/generated/uploads/char.png"),
+            ReferenceMention(token="@图片5", refLabel="@图片5-style_ref.png", url="/generated/images/style.png"),
+        ],
+    )
+    overwritten = {
+        "prompt": "二次元插画风格，白发少女角色，柔和光影，精细上色，干净线条，唯美背景",
+        "userRequest": ctx.message,
+        "image": ["/generated/uploads/char.png", "/generated/images/style.png"],
+    }
+
+    finalized = finalize_generation_arguments(ctx, tool, overwritten)
+
+    assert "主体身份参考" in finalized["prompt"]
+    assert "不可交换" in finalized["prompt"]
+    assert "@图片1-立绘_夕_1.png" in finalized["prompt"]
+
+
+def test_generation_prompt_uses_action_composition_role_for_second_reference():
+    bridge = BackendToolBridge(backend_client=None)  # type: ignore[arg-type]
+    tool = ToolDescriptor(
+        toolCode="ofox_gpt_image2",
+        toolName="GPT-image2",
+        description="图片生成",
+        autoCallable=True,
+        outputModality="image",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string"},
+                "image": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+    )
+    ctx = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        message="让 @图片1 中的人物做出 @图片2 的动作，保持形象、画风不变，构图改成图2的样式",
+        positionalPrompt="让 {asset-a} 中的人物做出 {asset-b} 的动作，保持形象、画风不变，构图改成图2的样式",
+        referenceMentions=[
+            ReferenceMention(token="@图片1", refLabel="@图片1-人物.png", assetKey="asset-a", url="/generated/uploads/char.png"),
+            ReferenceMention(token="@图片2", refLabel="@图片2-动作.png", assetKey="asset-b", url="/generated/uploads/pose.png"),
+        ],
+    )
+
+    args = bridge.build_arguments(ctx, tool, apply_placeholder_defaults=True)
+
+    assert "动作与构图参考" in args["prompt"]
+    assert "动作和构图主要来自2号参考" in args["prompt"]
+    assert "风格主要来自2号参考" not in args["prompt"]
+
+
+def test_finalize_generation_arguments_is_idempotent():
+    tool = ToolDescriptor(
+        toolCode="ofox_gpt_image2",
+        toolName="GPT-image2",
+        autoCallable=True,
+        outputModality="image",
+        inputSchema={"type": "object", "properties": {"prompt": {"type": "string"}}},
+    )
+    ctx = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        message="参考 @图片1-角色 生成",
+        referenceMentions=[
+            ReferenceMention(token="@图片1-角色", refLabel="@图片1-角色.png", url="/generated/uploads/char.png"),
+        ],
+    )
+    args = {"prompt": "基础描述。参考图角色约束：@图片1-角色.png 为主体参考图。"}
+
+    once = finalize_generation_arguments(ctx, tool, args)
+    twice = finalize_generation_arguments(ctx, tool, once)
+
+    assert once["prompt"] == twice["prompt"]
 
 
 def test_attached_ready_image_fills_reference_image_field():
@@ -561,8 +694,9 @@ async def test_execute_continues_when_task_binding_endpoint_is_missing():
     assert backend.failed == []
     assert backend.cancelled == []
     assert backend.completed
-    assert backend.events[0][2]["taskId"] == 130
-    assert backend.events[0][2]["bindStatus"] == "FAILED"
+    dispatch = next(evt for evt in backend.events if evt[1] == "tool.task_dispatched")
+    assert dispatch[2]["taskId"] == 130
+    assert dispatch[2]["bindStatus"] == "FAILED"
 
 
 @pytest.mark.asyncio
@@ -612,3 +746,64 @@ async def test_execute_propagates_task_error_code_to_runtime_boundary():
 
     assert exc.value.error_code == "MODEL_RISK_CONTROL_REJECTED"
     assert backend.failed[0][1] == "MODEL_RISK_CONTROL_REJECTED"
+
+
+def test_enforce_locked_field_defaults_overrides_router_quality():
+    tool = ToolDescriptor(
+        toolCode="gpt_image2",
+        toolName="GPT-image2",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "required": ["quality"],
+            "properties": {
+                "quality": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high"],
+                    "default": "low",
+                    "x-agent-fill-strategy": "default",
+                }
+            },
+        },
+        fields=[
+            {
+                "fieldKey": "quality",
+                "fieldName": "质量",
+                "fieldType": "select",
+                "defaultValue": "low",
+                "agentFillStrategy": "default",
+                "options": {"options": [{"label": "低", "value": "low"}, {"label": "高", "value": "high"}]},
+            }
+        ],
+    )
+    locked = enforce_locked_field_defaults(
+        tool,
+        {"quality": "high", "prompt": "test"},
+        user_message="帮我生成一张写真",
+    )
+    assert locked["quality"] == "low"
+    assert locked["prompt"] == "test"
+
+
+def test_enforce_locked_field_defaults_respects_explicit_user_quality():
+    tool = ToolDescriptor(
+        toolCode="gpt_image2",
+        toolName="GPT-image2",
+        autoCallable=True,
+        fields=[
+            {
+                "fieldKey": "quality",
+                "fieldName": "质量",
+                "fieldType": "select",
+                "defaultValue": "low",
+                "agentFillStrategy": "default",
+                "options": {"options": [{"label": "低", "value": "low"}, {"label": "高", "value": "high"}]},
+            }
+        ],
+    )
+    locked = enforce_locked_field_defaults(
+        tool,
+        {"quality": "medium"},
+        user_message="这次用high生成",
+    )
+    assert locked["quality"] == "high"

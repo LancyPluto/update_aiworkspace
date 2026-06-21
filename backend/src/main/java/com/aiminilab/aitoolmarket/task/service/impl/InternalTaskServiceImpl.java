@@ -30,6 +30,7 @@ import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import com.aiminilab.aitoolmarket.task.metrics.TaskMetrics;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
 import com.aiminilab.aitoolmarket.task.support.TaskFailureMessage;
+import com.aiminilab.aitoolmarket.task.support.TaskParamMediaFields;
 import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
 import com.aiminilab.aitoolmarket.storage.PrivateAssetAccessService;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowExecutionService;
@@ -322,37 +323,45 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     }
 
     private void rewritePrivateAssetUrls(Long userId, JsonNode node) {
-        if (node instanceof ObjectNode objectNode) {
-            objectNode.fields().forEachRemaining(entry -> {
-                JsonNode value = entry.getValue();
-                if (value != null && value.isTextual()) {
-                    String raw = value.asText();
-                    if (privateAssetAccessService.privateRelativeKey(raw) != null) {
-                        objectNode.set(entry.getKey(), TextNode.valueOf(
-                                privateAssetAccessService.resolveForWorker(userId, raw)
-                        ));
-                    }
-                } else if (value != null) {
-                    rewritePrivateAssetUrls(userId, value);
-                }
-            });
+        if (!(node instanceof ObjectNode objectNode)) {
             return;
         }
-        if (node instanceof ArrayNode arrayNode) {
-            for (int i = 0; i < arrayNode.size(); i++) {
-                JsonNode value = arrayNode.get(i);
-                if (value != null && value.isTextual()) {
-                    String raw = value.asText();
-                    if (privateAssetAccessService.privateRelativeKey(raw) != null) {
-                        arrayNode.set(i, TextNode.valueOf(
-                                privateAssetAccessService.resolveForWorker(userId, raw)
-                        ));
+        objectNode.fields().forEachRemaining(entry -> {
+            String key = entry.getKey();
+            JsonNode value = entry.getValue();
+            if (value == null || value.isNull()) {
+                return;
+            }
+            if (value.isTextual() && TaskParamMediaFields.looksLikeMediaField(key)) {
+                String raw = value.asText();
+                if (privateAssetAccessService.privateRelativeKey(raw) != null) {
+                    objectNode.set(key, TextNode.valueOf(
+                            privateAssetAccessService.resolveForWorker(userId, raw)
+                    ));
+                }
+                return;
+            }
+            if (value.isObject()) {
+                rewritePrivateAssetUrls(userId, value);
+                return;
+            }
+            if (value.isArray()) {
+                ArrayNode array = (ArrayNode) value;
+                for (int i = 0; i < array.size(); i++) {
+                    JsonNode item = array.get(i);
+                    if (item != null && item.isTextual() && TaskParamMediaFields.looksLikeMediaField(key)) {
+                        String raw = item.asText();
+                        if (privateAssetAccessService.privateRelativeKey(raw) != null) {
+                            array.set(i, TextNode.valueOf(
+                                    privateAssetAccessService.resolveForWorker(userId, raw)
+                            ));
+                        }
+                    } else if (item != null && item.isObject()) {
+                        rewritePrivateAssetUrls(userId, item);
                     }
-                } else if (value != null) {
-                    rewritePrivateAssetUrls(userId, value);
                 }
             }
-        }
+        });
     }
 
     private boolean isWorkflowStepTask(AiTask task) {

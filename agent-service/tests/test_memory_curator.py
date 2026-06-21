@@ -10,6 +10,7 @@ from app.runtime.memory_runtime import (
     build_consolidated_memory_summary,
     memory_trace_items,
     memory_consolidation_trigger,
+    pre_compaction_memory_flush_trigger,
     parse_consolidation_json,
 )
 
@@ -155,6 +156,43 @@ def test_memory_consolidation_trigger_skips_when_threshold_already_recorded():
 
     trigger = memory_consolidation_trigger(context, user_turns=["记住我喜欢 low quality", "继续"], char_count=4500, existing_profile=existing)
 
+    assert trigger["shouldRun"] is False
+
+
+def test_pre_compaction_memory_flush_trigger_fires_on_significant_compaction():
+    context = RunContext(
+        runId=3,
+        sessionId=2,
+        userId=3,
+        message="继续",
+        history=[ChatMessage(role="user", content="x" * 4000)],
+        memorySettings=MemorySettings(consolidationTokenThreshold=3000),
+    )
+    trigger = pre_compaction_memory_flush_trigger(
+        context,
+        estimated_tokens_before=4000,
+        saved_percent=25.0,
+        existing_profile=None,
+    )
+    assert trigger["shouldRun"] is True
+    assert trigger["triggerReasons"] == ["pre_compaction"]
+
+
+def test_pre_compaction_memory_flush_trigger_skips_small_savings():
+    context = RunContext(
+        runId=4,
+        sessionId=2,
+        userId=3,
+        message="继续",
+        history=[ChatMessage(role="user", content="short")],
+        memorySettings=MemorySettings(consolidationTokenThreshold=3000),
+    )
+    trigger = pre_compaction_memory_flush_trigger(
+        context,
+        estimated_tokens_before=4000,
+        saved_percent=5.0,
+        existing_profile=None,
+    )
     assert trigger["shouldRun"] is False
 
 

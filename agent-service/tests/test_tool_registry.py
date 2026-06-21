@@ -152,3 +152,13 @@ def test_modality_helpers_distinguish_image_from_video_tools():
     assert requested_output_modality("我要生成一张写真照片") == "image"
     assert tool_supports_modality(image_tool, "image") is True
     assert tool_supports_modality(video_tool, "image") is False
+
+
+def test_requested_output_modality_does_not_treat_context_pronouns_as_video():
+    assert requested_output_modality("给刚刚生成的图片改成横板三联电影级迷构图") == "image"
+    assert requested_output_modality("参考上一张图，重新做一张电影海报") == "image"
+
+
+def test_requested_output_modality_video_requires_explicit_video_output():
+    assert requested_output_modality("把上一张图做成视频") == "video"
+    assert requested_output_modality("用这张图作为首帧生成一个视频") == "video"

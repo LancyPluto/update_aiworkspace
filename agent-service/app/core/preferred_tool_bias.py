@@ -31,13 +31,9 @@ def has_explicit_preferred_tool(context: RunContext) -> bool:
 
 
 def message_suggests_tool_use(message: str) -> bool:
-    router = _intent_router()
-    stripped = (message or "").strip()
-    if not stripped:
-        return False
-    if router._is_short_chat(stripped.lower()):
-        return False
-    return router._looks_like_tool_request(stripped)
+    from app.routing.helpers import looks_like_tool_request
+
+    return looks_like_tool_request(message or "")
 
 
 def inject_preferred_tool_hint(context: RunContext, result: IntentResult) -> IntentResult:
@@ -101,13 +97,3 @@ def sort_tools_with_preferred(context: RunContext, tools: list[ToolDescriptor]) 
     return preferred_tools + others
 
 
-_INTENT_ROUTER = None
-
-
-def _intent_router():
-    global _INTENT_ROUTER
-    if _INTENT_ROUTER is None:
-        from app.core.intent_router import IntentRouter
-
-        _INTENT_ROUTER = IntentRouter()
-    return _INTENT_ROUTER

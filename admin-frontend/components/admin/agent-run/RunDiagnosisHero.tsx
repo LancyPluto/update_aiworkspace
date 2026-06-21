@@ -62,6 +62,31 @@ export function RunDiagnosisHero({ diagnosis }: { diagnosis: RunDiagnosis }) {
         </div>
       ) : null}
 
+      {diagnosis.metrics ? (
+        <div className="rounded-lg border p-4">
+          <p className="mb-3 text-sm font-medium">Harness 指标</p>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {typeof diagnosis.metrics.compactionSavedPercent === "number" ? (
+              <MetricPill label="上下文压缩" value={`${diagnosis.metrics.compactionSavedPercent}%`} />
+            ) : null}
+            {typeof diagnosis.metrics.disclosureSavedPercent === "number" ? (
+              <MetricPill label="工具披露节省" value={`${diagnosis.metrics.disclosureSavedPercent}%`} />
+            ) : null}
+            {diagnosis.metrics.routerFailureClass ? (
+              <MetricPill label="路由失败分类" value={diagnosis.metrics.routerFailureClass} />
+            ) : null}
+            {typeof diagnosis.metrics.toolRejectCount === "number" && diagnosis.metrics.toolRejectCount > 0 ? (
+              <MetricPill
+                label="工具拒绝恢复"
+                value={`${diagnosis.metrics.toolRejectRecoveredCount ?? 0}/${diagnosis.metrics.toolRejectCount}`}
+              />
+            ) : null}
+            {diagnosis.metrics.pruningApplied ? <MetricPill label="Session pruning" value="已应用" /> : null}
+            {diagnosis.metrics.memoryFlushTriggered ? <MetricPill label="Memory flush" value="已触发" /> : null}
+          </div>
+        </div>
+      ) : null}
+
       {diagnosis.suggestions.length > 0 ? (
         <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
           <div className="mb-2 flex items-center gap-2 text-sm font-medium">
@@ -75,6 +100,15 @@ export function RunDiagnosisHero({ diagnosis }: { diagnosis: RunDiagnosis }) {
           </ul>
         </div>
       ) : null}
+    </div>
+  )
+}
+
+function MetricPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border bg-background px-3 py-2">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-sm font-medium">{value}</p>
     </div>
   )
 }

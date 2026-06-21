@@ -262,6 +262,84 @@ class AgentWorkspaceApiTest {
     }
 
     @Test
+    void retrievesToolViewMemoryWithPreferencesBeforeLexicalMatches() throws Exception {
+        Mockito.when(tokenDenylistService.isDenied(anyString())).thenReturn(false);
+        Mockito.when(internalRequestSignatureVerifier.verify(
+                        anyString(), anyString(), anyString(), anyString(), anyString(), any(byte[].class)
+                ))
+                .thenReturn(true);
+        register("workspace_memory_tool_view_user");
+        String token = login("workspace_memory_tool_view_user");
+        long workspaceId = defaultWorkspaceId(token);
+        long preferenceId = createMemory(
+                token,
+                workspaceId,
+                "preference",
+                "User visual taste",
+                "User prefers restrained Chinese-inspired realism with negative space."
+        );
+        long matchId = createMemory(
+                token,
+                workspaceId,
+                "workspace_fact",
+                "pricing reference",
+                "Pricing docs mention annual invoices."
+        );
+
+        String body = """
+                {
+                  "query": "pricing",
+                  "limit": 5,
+                  "view": "tool"
+                }
+                """;
+
+        mockMvc.perform(signed(post("/api/internal/v1/agent/workspaces/{workspaceId}/memory/retrieve", workspaceId), "POST",
+                        "/api/internal/v1/agent/workspaces/%d/memory/retrieve".formatted(workspaceId), body)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list.length()").value(1))
+                .andExpect(jsonPath("$.data.list[0].id").value(preferenceId))
+                .andExpect(jsonPath("$.data.list[0].reason").value("safe_pack"));
+    }
+
+    @Test
+    void retrievesToolExplicitViewCanReturnProjectFacts() throws Exception {
+        Mockito.when(tokenDenylistService.isDenied(anyString())).thenReturn(false);
+        Mockito.when(internalRequestSignatureVerifier.verify(
+                        anyString(), anyString(), anyString(), anyString(), anyString(), any(byte[].class)
+                ))
+                .thenReturn(true);
+        register("workspace_memory_tool_explicit_user");
+        String token = login("workspace_memory_tool_explicit_user");
+        long workspaceId = defaultWorkspaceId(token);
+        long projectId = createMemory(
+                token,
+                workspaceId,
+                "workspace_fact",
+                "张继科海报项目",
+                "科比和张雪峰文艺片海报。"
+        );
+
+        String body = """
+                {
+                  "query": "张继科海报",
+                  "limit": 5,
+                  "view": "tool_explicit"
+                }
+                """;
+
+        mockMvc.perform(signed(post("/api/internal/v1/agent/workspaces/{workspaceId}/memory/retrieve", workspaceId), "POST",
+                        "/api/internal/v1/agent/workspaces/%d/memory/retrieve".formatted(workspaceId), body)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list.length()").value(1))
+                .andExpect(jsonPath("$.data.list[0].id").value(projectId));
+    }
+
+    @Test
     void createsMemoryCandidateForSignedInternalRequest() throws Exception {
         Mockito.when(tokenDenylistService.isDenied(anyString())).thenReturn(false);
         Mockito.when(internalRequestSignatureVerifier.verify(

@@ -14,7 +14,7 @@ from app.core.event_types import (
     MEMORY_RETRIEVED,
 )
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate, SessionSearchItem, WorkspaceMemoryItem
-from app.runtime.memory_curator import MemoryCuratorService, build_memory_metadata
+from app.runtime.memory_curator import MemoryCuratorService, build_memory_metadata, workspace_fact_expires_at_iso
 from app.security.injection_patterns import classify_unsafe_message
 from app.tools.memory_tool import MemoryTool, _safety_rejection_reason
 
@@ -41,6 +41,7 @@ class WorkspaceMemoryRuntime:
                 query=context.message,
                 limit=memory_retrieval_limit(context),
                 view=view,
+                session_id=context.sessionId,
             )
             if items:
                 await self.backend.append_event(
@@ -60,35 +61,81 @@ class WorkspaceMemoryRuntime:
         except Exception:
             return []
 
-    async def fetch_tool_items(self, context: RunContext) -> list[WorkspaceMemoryItem]:
+    async def fetch_tool_items(
+        self,
+        context: RunContext,
+        *,
+        skip_injection: bool = False,
+        prompt_mode: str | None = None,
+    ) -> list[WorkspaceMemoryItem]:
         workspace_id = context.workspaceId
         if workspace_id is None:
             return []
+        if skip_injection:
+            await self._emit_tool_memory_skipped(context, prompt_mode=prompt_mode)
+            return []
+
+        from app.runtime.prompt_policy import explicit_memory_ids_from_context, looks_like_explicit_project_memory_request
+
+        explicit_ids = explicit_memory_ids_from_context(context)
+        explicit_request = looks_like_explicit_project_memory_request(context.message) or bool(explicit_ids)
+        view = "tool_explicit" if explicit_request else "tool"
         try:
-            view = "tool"
             items = await self.backend.retrieve_workspace_memory(
                 workspace_id=workspace_id,
                 query=context.message,
                 limit=memory_retrieval_limit(context),
                 view=view,
+                memory_ids=explicit_ids or None,
+                session_id=context.sessionId,
             )
-            if items:
+            await self.backend.append_event(
+                context.runId,
+                RunEventCreate(
+                    eventType=MEMORY_RETRIEVED,
+                    eventJson={
+                        "count": len(items),
+                        "view": view,
+                        "policy": "explicit" if view == "tool_explicit" else "safe_tool",
+                        "excludedTypes": ["workspace_fact"] if view == "tool" else [],
+                        "memoryInjectionSkipped": False,
+                        "promptMode": prompt_mode,
+                        "memoryIds": [item.id for item in items],
+                        "types": [item.memoryType for item in items],
+                        "items": memory_trace_items(items),
+                    },
+                ),
+            )
+            return items
+        except Exception:
+            try:
                 await self.backend.append_event(
                     context.runId,
                     RunEventCreate(
                         eventType=MEMORY_RETRIEVED,
-                        eventJson={
-                            "count": len(items),
-                            "view": view,
-                            "memoryIds": [item.id for item in items],
-                            "types": [item.memoryType for item in items],
-                            "items": memory_trace_items(items),
-                        },
+                        eventJson={"count": 0, "view": view, "items": [], "error": "retrieve_failed"},
                     ),
                 )
-            return items
-        except Exception:
+            except Exception:
+                pass
             return []
+
+    async def _emit_tool_memory_skipped(self, context: RunContext, *, prompt_mode: str | None = None) -> None:
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=MEMORY_RETRIEVED,
+                eventJson={
+                    "count": 0,
+                    "view": "tool",
+                    "policy": "skipped",
+                    "memoryInjectionSkipped": True,
+                    "promptMode": prompt_mode,
+                    "items": [],
+                    "memoryIds": [],
+                },
+            ),
+        )
 
     async def fetch_context(self, context: RunContext) -> str:
         items = await self.fetch_items(context)
@@ -155,7 +202,12 @@ class WorkspaceMemoryRuntime:
                     RunEventCreate(eventType=MEMORY_REJECTED, eventText=decision.reason, eventJson=payload),
                 )
                 return
-            if decision.action == "add" and decision.confidence >= memory_consolidation_min_confidence(context):
+            auto_active_types = {"user_profile", "preference", "custom", "workflow_recipe"}
+            if (
+                decision.action == "add"
+                and decision.memory_type in auto_active_types
+                and decision.confidence >= memory_consolidation_min_confidence(context)
+            ):
                 tool = MemoryTool(self.backend, context.workspaceId, context.userId, run_id=context.runId)
                 await tool.add_memory(
                     memory_type=decision.memory_type,
@@ -185,7 +237,8 @@ class WorkspaceMemoryRuntime:
                 importance=decision.importance,
                 confidence=decision.confidence,
                 reason=decision.reason,
-                metadata_json=build_memory_metadata(decision),
+                metadata_json=build_memory_metadata(decision, context),
+                expires_at=workspace_fact_expires_at_iso() if decision.memory_type == "workspace_fact" else None,
             )
             await self.emit_memory_candidate(
                 context,
@@ -206,23 +259,37 @@ class WorkspaceMemoryRuntime:
             ),
         )
 
-    async def maybe_consolidate(self, context: RunContext, answer: str, existing: list[WorkspaceMemoryItem]) -> None:
+    async def maybe_consolidate(
+        self,
+        context: RunContext,
+        answer: str,
+        existing: list[WorkspaceMemoryItem],
+        *,
+        trigger: dict[str, Any] | None = None,
+    ) -> None:
         if not memory_consolidation_enabled(context):
             return
         user_turns = [message.content for message in context.history if message.role.lower() == "user"]
         user_turns.append(context.message)
         combined = "\n".join(user_turns)
         existing_profile = _find_auto_profile_summary(existing)
-        trigger = memory_consolidation_trigger(context, user_turns=user_turns, char_count=len(combined), existing_profile=existing_profile)
+        if trigger is None:
+            trigger = memory_consolidation_trigger(
+                context,
+                user_turns=user_turns,
+                char_count=len(combined),
+                existing_profile=existing_profile,
+            )
         if not trigger["shouldRun"]:
             return
+        stage = "pre_compaction" if "pre_compaction" in (trigger.get("triggerReasons") or []) else "consolidation"
         await self.backend.append_event(
             context.runId,
             RunEventCreate(
                 eventType=MEMORY_CURATOR_STARTED,
                 eventJson={
                     "mode": "llm" if memory_consolidation_llm_enabled(context) and self.model_client is not None else "heuristic",
-                    "stage": "consolidation",
+                    "stage": stage,
                     **trigger,
                 },
             ),
@@ -316,6 +383,31 @@ class WorkspaceMemoryRuntime:
                 },
             ),
         )
+
+    async def maybe_flush_before_compaction(
+        self,
+        context: RunContext,
+        *,
+        estimated_tokens_before: int,
+        saved_percent: float,
+    ) -> bool:
+        """Persist durable workspace memory before aggressive context compaction (OpenClaw-style)."""
+        if not memory_consolidation_enabled(context) or context.workspaceId is None:
+            return False
+        if not memory_auto_save_enabled(context):
+            return False
+        existing = await self.fetch_items(context)
+        existing_profile = _find_auto_profile_summary(existing)
+        trigger = pre_compaction_memory_flush_trigger(
+            context,
+            estimated_tokens_before=estimated_tokens_before,
+            saved_percent=saved_percent,
+            existing_profile=existing_profile,
+        )
+        if not trigger["shouldRun"]:
+            return False
+        await self.maybe_consolidate(context, "", existing, trigger=trigger)
+        return True
 
     async def _consolidate_with_llm(
         self,
@@ -448,13 +540,21 @@ def memory_context_trace_payload(
     *,
     source: str,
     items: list[WorkspaceMemoryItem] | None = None,
+    prompt_mode: str | None = None,
+    policy: str | None = None,
+    memory_injection_skipped: bool = False,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "frozen": bool(workspace_memory_context),
         "count": len(items) if items is not None else 0,
         "source": source,
         "snapshotPreview": safe_memory_text(workspace_memory_context, 800),
+        "memoryInjectionSkipped": memory_injection_skipped,
     }
+    if prompt_mode:
+        payload["promptMode"] = prompt_mode
+    if policy:
+        payload["policy"] = policy
     if items is not None:
         payload["items"] = memory_trace_items(items)
         payload["memoryIds"] = [item.id for item in items]
@@ -680,6 +780,38 @@ def memory_consolidation_trigger(
     }
 
 
+def pre_compaction_memory_flush_trigger(
+    context: RunContext,
+    *,
+    estimated_tokens_before: int,
+    saved_percent: float,
+    existing_profile: WorkspaceMemoryItem | None,
+) -> dict[str, Any]:
+    """Trigger profile consolidation before context compaction drops durable details."""
+    previous = _consolidation_metadata(existing_profile)
+    marker = memory_history_marker(context)
+    previous_marker = int(previous.get("historyMessageCount") or 0)
+    token_threshold = memory_consolidation_token_threshold(context)
+    min_saved = settings.agent_pre_compaction_flush_min_saved_percent
+    trigger_reasons: list[str] = []
+    if saved_percent >= min_saved and estimated_tokens_before >= token_threshold:
+        trigger_reasons.append("pre_compaction")
+    if trigger_reasons and previous_marker >= marker:
+        trigger_reasons = []
+    user_turns = [message.content for message in context.history if message.role.lower() == "user"]
+    char_count = sum(len(message.content or "") for message in context.history) + len(context.message or "")
+    return {
+        "shouldRun": bool(trigger_reasons),
+        "triggerReasons": trigger_reasons,
+        "turnCount": len(user_turns) + 1,
+        "charCount": char_count,
+        "estimatedInputTokens": estimated_tokens_before,
+        "recentToolCount": successful_recent_tool_count(context),
+        "historyMessageCount": marker,
+        "savedPercent": saved_percent,
+    }
+
+
 def build_consolidation_metadata(context: RunContext, trigger: dict[str, Any], *, confidence: float, reason: str) -> str:
     return json.dumps(
         {
@@ -765,15 +897,17 @@ def parse_consolidation_json(raw: str) -> dict[str, Any] | None:
 
 
 def build_consolidated_memory_summary(context: RunContext, answer: str) -> str:
+    from app.runtime.memory_curator import _looks_like_project_specific_content
+
     user_turns = [message.content.strip() for message in context.history if message.role.lower() == "user" and message.content.strip()]
     assistant_turns = [message.content.strip() for message in context.history if message.role.lower() in {"assistant", "ai"} and message.content.strip()]
     user_turns.append((context.message or "").strip())
     clues: list[str] = []
     for text in user_turns[-12:]:
-        if looks_like_large_media_payload(text):
+        if looks_like_large_media_payload(text) or _looks_like_project_specific_content(text):
             continue
         clue = _extract_stable_user_clue(text)
-        if clue:
+        if clue and not _looks_like_project_specific_content(clue):
             clues.append(clue)
     if answer and any(token in context.message for token in ("我是什么样的人", "用户画像", "个人画像")):
         clues.append(_normalize_summary_line(answer))
@@ -792,7 +926,9 @@ def build_consolidated_memory_summary(context: RunContext, answer: str) -> str:
     for clue in clues[:8]:
         summary_lines.append(f"- {safe_memory_text(clue, 240)}")
     if not clues and assistant_turns:
-        summary_lines.append(f"- 近期对话主题：{safe_memory_text(user_turns[-1], 240)}")
+        latest_topic = safe_memory_text(user_turns[-1], 240)
+        if latest_topic and not _looks_like_project_specific_content(latest_topic):
+            summary_lines.append(f"- 近期对话主题：{latest_topic}")
     return "\n".join(summary_lines)[:1600]
 
 

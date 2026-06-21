@@ -6,12 +6,15 @@ import {
   Database,
   Loader2,
   Pencil,
+  Pin,
   Plus,
   RefreshCw,
   Sparkles,
   Trash2,
   X,
 } from "lucide-vue-next"
+import { collectSessionAssets } from "@/utils/agentChatAssetRefs"
+import { buildReferenceMentionsPayload, type AgentReferenceMention } from "@/utils/agentReferenceMentions"
 import AgentComposer from "./AgentComposer.vue"
 import AgentMessageRow from "./AgentMessageRow.vue"
 import AgentAvatar from "./AgentAvatar.vue"
@@ -41,6 +44,9 @@ import {
   editRegenerateAgentMessage,
   createAgentWorkspaceMemory,
   deleteAgentWorkspaceMemory,
+  approveAgentWorkspaceMemoryCandidate,
+  rejectAgentWorkspaceMemoryCandidate,
+  pinAgentWorkspaceMemory,
   fetchAgentMessages,
   fetchAgentFiles,
   fetchRecentAgentFiles,
@@ -50,13 +56,12 @@ import {
   fetchAgentWorkspaceMemory,
   fetchAgentWorkspaces,
   fetchTaskById,
-  fetchTasks,
   fetchTools,
-  fetchUploadAssets,
   regenerateAgentRun,
   sendAgentMessage,
   streamAgentRunEvents,
   unpublishCommunityPost,
+  updateAgentToolPreference,
   updateAgentWorkspaceMemory,
   uploadAgentFile,
   uploadToolFile,
@@ -88,6 +93,7 @@ import {
 import { openCreateWithAssetRecommendation } from "@/utils/assetReplay"
 import { publishAssetToCommunity, type CommunityPublishPayload } from "@/utils/publishCommunityAsset"
 import { buildTaskResultBlocks, resolveAudioTracks } from "@/utils/taskResultBlocks"
+import { useGeneratedMaterialList, useUploadHistoryList } from "@/composables/useMaterialPickerLists"
 import {
   chatAssetRefByUrl,
   dragPayloadToUrlAttachment,
@@ -118,9 +124,6 @@ const files = ref<AgentFile[]>([])
 const urlAttachments = ref<AgentUrlAttachment[]>([])
 const filePreviewUrls = ref<Record<number, string>>({})
 const pendingUploadPreview = ref<{ name: string; url: string } | null>(null)
-const recentAttachments = ref<AgentMaterialAttachment[]>([])
-const materialAssets = ref<AgentMaterialAttachment[]>([])
-const materialAssetsLoading = ref(false)
 const uploadedFileCache = ref<Record<number, AgentFile>>({})
 const events = ref<AgentRunEvent[]>([])
 const runEventsByRunId = ref<Record<number, AgentRunEvent[]>>({})
@@ -132,6 +135,8 @@ const selectedToolCode = ref<string | null>(null)
 const intelligenceLevel = ref<"standard" | "high">("standard")
 const previewAsset = ref<AssetPreviewItem | null>(null)
 const memoryPanelOpen = ref(false)
+const memoryTab = ref<"active" | "candidate">("active")
+const memoryHighlightId = ref<number | null>(null)
 const memoryWorkspaces = ref<AgentWorkspace[]>([])
 const memoryWorkspaceId = ref<number | null>(null)
 const memoryItems = ref<AgentWorkspaceMemoryItem[]>([])
@@ -153,7 +158,6 @@ const agentError = ref<string | null>(null)
 const creditModalOpen = ref(false)
 const rememberTool = ref(true)
 const AGENT_REFERENCE_ATTACHMENT_LIMIT = 8
-const SHARED_UPLOAD_HISTORY_LIMIT = 60
 
 type MaterialKind = "image" | "video" | "audio" | "file"
 
@@ -165,6 +169,7 @@ interface AgentMaterialAttachment extends AgentUrlAttachment {
   uploadedAt?: string
   subtitle?: string
 }
+
 const activeRunId = ref<number | null>(null)
 const streamingAssistantMessageId = ref<number | null>(null)
 const runConnectionStatus = ref<
@@ -246,6 +251,7 @@ const scrollOffset = ref(0)
 const stickToBottom = ref(true)
 const navLayoutTick = ref(0)
 const messagesKey = computed(() => `agent_messages_${props.sessionId}`)
+const sessionAssetsForComposer = computed(() => collectSessionAssets(messages.value))
 let runStreamAbort: AbortController | null = null
 let runStatusWatchdog: number | null = null
 let streamingAnimationTimer: number | null = null
@@ -309,6 +315,8 @@ const input = computed({
   set: (val: string) => emit("update:draft", val),
 })
 
+const draftReferenceMentions = ref<AgentReferenceMention[]>([])
+
 const sessionAssetRefMap = computed(() => chatAssetRefByUrl(messages.value))
 
 const suggestions = [
@@ -358,19 +366,28 @@ const previewRecommendations = computed<AssetPreviewRecommendation[]>(() =>
   previewAsset.value ? recommendToolsForAsset(previewAsset.value) : [],
 )
 const memoryTypeOptions = [
-  { value: "user_profile", label: "用户偏好" },
-  { value: "project_knowledge", label: "项目知识" },
+  { value: "user_profile", label: "用户画像" },
+  { value: "preference", label: "稳定偏好" },
+  { value: "workspace_fact", label: "项目知识" },
+  { value: "tool_lesson", label: "工具经验" },
+  { value: "workflow_recipe", label: "流程配方" },
   { value: "custom", label: "自定义" },
 ]
 const groupedMemoryItems = computed(() => {
-  const order = ["user_profile", "project_knowledge", "custom"]
-  return order
+  const order = memoryTypeOptions.map((option) => option.value)
+  const groups = order
     .map((type) => ({
       type,
       label: memoryTypeOptions.find((item) => item.value === type)?.label ?? type,
       items: memoryItems.value.filter((item) => item.memoryType === type),
     }))
     .filter((group) => group.items.length > 0)
+  const known = new Set(order)
+  const others = memoryItems.value.filter((item) => !known.has(item.memoryType))
+  if (others.length > 0) {
+    groups.push({ type: "other", label: "其他", items: others })
+  }
+  return groups
 })
 
 const ambientState = computed(() => {
@@ -427,10 +444,38 @@ function messageTime(value?: string | null) {
   })
 }
 
-function messageContentJsonForFiles(items: AgentFile[], urlItems: AgentUrlAttachment[] = []) {
-  if (items.length === 0 && urlItems.length === 0) return undefined
-  return JSON.stringify({
-    attachments: [
+function messageContentJsonForFiles(
+  items: AgentFile[],
+  urlItems: AgentUrlAttachment[] = [],
+  messageText = "",
+  explicitMentions: AgentReferenceMention[] = [],
+  structured?: {
+    contentParts?: unknown[]
+    positionalPrompt?: string
+    globalFileIds?: Array<string | number>
+  },
+) {
+  const sessionAssets = collectSessionAssets(messages.value)
+  const referenceMentions = buildReferenceMentionsPayload(
+    messageText,
+    urlItems,
+    items,
+    sessionAssets,
+    explicitMentions,
+  )
+  if (
+    items.length === 0 &&
+    urlItems.length === 0 &&
+    referenceMentions.length === 0 &&
+    !structured?.contentParts?.length &&
+    !structured?.globalFileIds?.length &&
+    !structured?.positionalPrompt
+  ) {
+    return undefined
+  }
+  const payload: Record<string, unknown> = {}
+  if (urlItems.length > 0 || items.length > 0) {
+    payload.attachments = [
       ...urlItems.map((item, index) => ({
         id: item.id,
         name: referenceAttachmentLabel(index, item.refLabel || item.name, item.contentType),
@@ -438,7 +483,7 @@ function messageContentJsonForFiles(items: AgentFile[], urlItems: AgentUrlAttach
         size: item.size,
         url: item.url,
         status: "READY",
-        source: "url",
+        source: item.source || "url",
       })),
       ...items.map((file, index) => ({
         id: file.id,
@@ -449,8 +494,51 @@ function messageContentJsonForFiles(items: AgentFile[], urlItems: AgentUrlAttach
         status: file.status,
         source: "agent_file",
       })),
-    ],
-  })
+    ]
+  }
+  if (referenceMentions.length > 0) {
+    payload.referenceMentions = referenceMentions
+  }
+  if (structured?.globalFileIds?.length) {
+    payload.globalFileIds = structured.globalFileIds
+  }
+  if (structured?.contentParts?.length) {
+    payload.contentParts = structured.contentParts
+  }
+  if (structured?.positionalPrompt) {
+    payload.positionalPrompt = structured.positionalPrompt
+  }
+  return JSON.stringify(payload)
+}
+
+function referenceMentionsForApi(mentions: AgentReferenceMention[]) {
+  return mentions.map((mention) => ({
+    token: mention.token,
+    refLabel: mention.refLabel,
+    assetKey: mention.assetKey,
+    fileId: mention.fileId,
+    url: mention.url,
+    kind: mention.kind,
+    name: mention.name,
+    contentType: mention.contentType,
+    previewUrl: mention.previewUrl,
+    source: mention.source,
+  }))
+}
+
+function globalFileIdsFor(items: AgentFile[], urlItems: AgentUrlAttachment[]): Array<string | number> {
+  const ids: Array<string | number> = []
+  const seen = new Set<string>()
+  const push = (value: string | number | undefined | null) => {
+    if (value == null || value === "") return
+    const key = String(value)
+    if (seen.has(key)) return
+    seen.add(key)
+    ids.push(value)
+  }
+  items.forEach((item) => push(item.id))
+  urlItems.forEach((item) => push(item.id ?? item.url))
+  return ids
 }
 
 function runEventsForMessage(message: AgentMessage) {
@@ -710,7 +798,8 @@ async function loadMemoryWorkspaces() {
   try {
     const res = await fetchAgentWorkspaces({ token: props.token })
     memoryWorkspaces.value = res.list
-    memoryWorkspaceId.value = memoryWorkspaceId.value ?? res.list[0]?.id ?? null
+    const sessionWorkspaceId = props.sessions.find((item) => item.id === props.sessionId)?.workspaceId ?? null
+    memoryWorkspaceId.value = sessionWorkspaceId ?? memoryWorkspaceId.value ?? res.list[0]?.id ?? null
     if (memoryWorkspaceId.value != null) {
       await loadMemoryItems()
     }
@@ -726,12 +815,89 @@ async function loadMemoryItems() {
   memoryLoading.value = true
   memoryError.value = null
   try {
-    const res = await fetchAgentWorkspaceMemory(memoryWorkspaceId.value, { token: props.token })
+    const res = await fetchAgentWorkspaceMemory(memoryWorkspaceId.value, {
+      token: props.token,
+      status: memoryTab.value === "candidate" ? "CANDIDATE" : undefined,
+    })
     memoryItems.value = res.list
   } catch (error) {
     memoryError.value = formatAgentError(error)
   } finally {
     memoryLoading.value = false
+  }
+}
+
+async function changeMemoryTab(tab: "active" | "candidate") {
+  if (memoryTab.value === tab) return
+  memoryTab.value = tab
+  resetMemoryForm()
+  await loadMemoryItems()
+}
+
+async function toggleMemoryPin(item: AgentWorkspaceMemoryItem) {
+  if (!props.token || memoryWorkspaceId.value == null) return
+  memoryError.value = null
+  try {
+    const saved = await pinAgentWorkspaceMemory(
+      memoryWorkspaceId.value,
+      item.id,
+      !item.pinned,
+      { token: props.token },
+    )
+    memoryItems.value = memoryItems.value.map((current) => (current.id === saved.id ? saved : current))
+  } catch (error) {
+    memoryError.value = formatAgentError(error)
+  }
+}
+
+async function approveCandidateMemory(item: AgentWorkspaceMemoryItem) {
+  if (!props.token || memoryWorkspaceId.value == null) return
+  memoryError.value = null
+  try {
+    await approveAgentWorkspaceMemoryCandidate(memoryWorkspaceId.value, item.id, { token: props.token })
+    memoryItems.value = memoryItems.value.filter((current) => current.id !== item.id)
+  } catch (error) {
+    memoryError.value = formatAgentError(error)
+  }
+}
+
+async function rejectCandidateMemory(item: AgentWorkspaceMemoryItem) {
+  if (!props.token || memoryWorkspaceId.value == null) return
+  memoryError.value = null
+  try {
+    await rejectAgentWorkspaceMemoryCandidate(memoryWorkspaceId.value, item.id, { token: props.token })
+    memoryItems.value = memoryItems.value.filter((current) => current.id !== item.id)
+  } catch (error) {
+    memoryError.value = formatAgentError(error)
+  }
+}
+
+async function openMemoryFromTrace(memoryId: number) {
+  memoryHighlightId.value = memoryId
+  await openMemoryPanel()
+}
+
+async function deleteMemoryFromTrace(memoryId: number) {
+  const item = memoryItems.value.find((current) => current.id === memoryId)
+  if (item) {
+    await removeMemory(item)
+    return
+  }
+  if (!props.token || memoryWorkspaceId.value == null) {
+    await openMemoryPanel()
+    return
+  }
+  const confirmed = window.confirm(`删除记忆 #${memoryId}？`)
+  if (!confirmed) return
+  memoryDeletingId.value = memoryId
+  memoryError.value = null
+  try {
+    await deleteAgentWorkspaceMemory(memoryWorkspaceId.value, memoryId, { token: props.token })
+    memoryItems.value = memoryItems.value.filter((current) => current.id !== memoryId)
+  } catch (error) {
+    memoryError.value = formatAgentError(error)
+  } finally {
+    memoryDeletingId.value = null
   }
 }
 
@@ -817,65 +983,12 @@ function clearPendingUploadPreview() {
   pendingUploadPreview.value = null
 }
 
-function recentAttachmentStorageKey() {
-  return `agent:recent-attachments:${auth.user?.id ?? "anon"}`
-}
-
-function sharedUploadHistoryStorageKey(kind: MaterialKind): string {
-  const userId = auth.user?.id ?? "guest"
-  return `ai_tool_market_upload_history:${userId}:${kind}`
-}
-
 function materialKind(contentType?: string | null, name?: string | null): MaterialKind {
   const type = (contentType || "").toLowerCase()
   if (type.startsWith("image/") || isImageAttachment(contentType, name)) return "image"
   if (type.startsWith("video/")) return "video"
   if (type.startsWith("audio/")) return "audio"
   return "file"
-}
-
-function readSharedUploadHistory(kind: MaterialKind): AgentMaterialAttachment[] {
-  if (typeof window === "undefined") return []
-  try {
-    const raw = window.localStorage.getItem(sharedUploadHistoryStorageKey(kind))
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .map((item) => normalizeUrlAttachment(item as AgentUrlAttachment))
-      .filter((item): item is AgentMaterialAttachment => Boolean(item))
-      .map((item) => ({ ...item, kind }))
-      .slice(0, SHARED_UPLOAD_HISTORY_LIMIT)
-  } catch {
-    return []
-  }
-}
-
-function writeSharedUploadHistory(kind: MaterialKind, items: AgentMaterialAttachment[]) {
-  if (typeof window === "undefined") return
-  window.localStorage.setItem(sharedUploadHistoryStorageKey(kind), JSON.stringify(items.slice(0, SHARED_UPLOAD_HISTORY_LIMIT)))
-}
-
-function rememberSharedUploadHistory(item: AgentMaterialAttachment) {
-  const kind = item.kind || materialKind(item.contentType, item.name)
-  const existing = readSharedUploadHistory(kind).filter((entry) => entry.url !== item.url)
-  writeSharedUploadHistory(kind, [{ ...item, kind }, ...existing])
-}
-
-function readAllSharedUploadHistory() {
-  return (["image", "video", "audio", "file"] as MaterialKind[]).flatMap((kind) => readSharedUploadHistory(kind))
-}
-
-function dedupeRecentAttachments(items: AgentMaterialAttachment[]) {
-  const seen = new Set<string>()
-  const result: AgentMaterialAttachment[] = []
-  for (const item of items) {
-    const key = item.url || item.id
-    if (!key || seen.has(key)) continue
-    seen.add(key)
-    result.push(item)
-  }
-  return result
 }
 
 function normalizeUrlAttachment(item: AgentUrlAttachment): AgentMaterialAttachment | null {
@@ -918,7 +1031,7 @@ function uploadAssetToMaterialAttachment(asset: UserUploadAsset): AgentMaterialA
 
 function agentFileToMaterialAttachment(file: AgentFile): AgentMaterialAttachment | null {
   if (!file.downloadUrl) return null
-  return normalizeUrlAttachment({
+  const attachment = normalizeUrlAttachment({
     id: file.id,
     sessionId: file.sessionId,
     name: file.originalFilename || "素材附件",
@@ -927,62 +1040,56 @@ function agentFileToMaterialAttachment(file: AgentFile): AgentMaterialAttachment
     url: file.downloadUrl,
     source: "agent_file",
   })
+  return attachment ? { ...attachment, uploadedAt: file.createdAt } : null
 }
 
-function readRecentAttachments() {
-  const sharedItems = readAllSharedUploadHistory()
-  try {
-    const parsed = JSON.parse(localStorage.getItem(recentAttachmentStorageKey()) || "[]") as unknown
-    const items = Array.isArray(parsed) ? parsed : []
-    const localItems = items
-      .map((item) => normalizeUrlAttachment(item as AgentUrlAttachment))
-      .filter((item): item is AgentMaterialAttachment => Boolean(item))
-    recentAttachments.value = dedupeRecentAttachments([...sharedItems, ...localItems]).slice(0, 20)
-  } catch {
-    recentAttachments.value = sharedItems.slice(0, 20)
-  }
-}
+const pickerUploadList = useUploadHistoryList<AgentMaterialAttachment & { uploadedAt: string }>({
+  getKind: () => null,
+  getToken: () => props.token,
+  getUserId: () => auth.user?.id,
+  toHistoryItem: (asset) => {
+    const item = uploadAssetToMaterialAttachment(asset)
+    if (!item) return null
+    return { ...item, uploadedAt: item.uploadedAt || new Date().toISOString() }
+  },
+})
+
+const generatedMaterialList = useGeneratedMaterialList<AgentMaterialAttachment>({
+  getKind: () => null,
+  getToken: () => props.token,
+  createAssetsFromTask: (task) => createMaterialAssets(task),
+})
+
+const recentAttachments = computed(() => pickerUploadList.items.value)
+const materialAssets = computed(() => generatedMaterialList.assets.value)
+const materialAssetsLoading = computed(() => generatedMaterialList.loading.value)
+const pickerUploadLoadingMore = computed(() => pickerUploadList.loadingMore.value)
+const pickerUploadHasMore = computed(() => pickerUploadList.hasMore.value)
+const materialAssetsLoadingMore = computed(() => generatedMaterialList.loadingMore.value)
+const materialAssetsHasMore = computed(() => generatedMaterialList.hasMore.value)
 
 async function loadRecentAttachments() {
-  readRecentAttachments()
+  await pickerUploadList.resetAndLoad()
   if (!props.token) return
   try {
-    const uploadAssetsPage = await fetchUploadAssets({ token: props.token, pageSize: SHARED_UPLOAD_HISTORY_LIMIT })
-    const uploadAssetItems = uploadAssetsPage.list
-      .map(uploadAssetToMaterialAttachment)
-      .filter((item): item is AgentMaterialAttachment => Boolean(item))
-    for (const item of uploadAssetItems) {
-      rememberSharedUploadHistory(item)
-    }
     const page = await fetchRecentAgentFiles(props.sessionId, { token: props.token })
     const serverItems = page.list
       .map(agentFileToMaterialAttachment)
       .filter((item): item is AgentMaterialAttachment => Boolean(item))
-    writeRecentAttachments(dedupeRecentAttachments([...uploadAssetItems, ...readAllSharedUploadHistory(), ...serverItems]))
+    pickerUploadList.prependItems(serverItems)
   } catch {
-    // Keep localStorage fallback when the server-side material list is temporarily unavailable.
+    // Keep upload-assets list when agent session files are temporarily unavailable.
   }
-}
-
-function writeRecentAttachments(items: AgentMaterialAttachment[]) {
-  recentAttachments.value = items.slice(0, 20)
-  localStorage.setItem(recentAttachmentStorageKey(), JSON.stringify(recentAttachments.value))
 }
 
 function rememberRecentAttachment(item: AgentUrlAttachment) {
   const normalized = normalizeUrlAttachment(item)
   if (!normalized) return
-  const withTime = { ...normalized, uploadedAt: new Date().toISOString() }
-  writeRecentAttachments([
-    withTime,
-    ...recentAttachments.value.filter((entry) => entry.url !== withTime.url && entry.id !== withTime.id),
-  ])
+  pickerUploadList.rememberItem({ ...normalized, uploadedAt: new Date().toISOString() })
 }
 
 async function removeRecentAttachment(item: AgentMaterialAttachment) {
-  writeRecentAttachments(recentAttachments.value.filter((entry) => entry.id !== item.id && entry.url !== item.url))
-  const kind = item.kind || materialKind(item.contentType, item.name)
-  writeSharedUploadHistory(kind, readSharedUploadHistory(kind).filter((entry) => entry.id !== item.id && entry.url !== item.url))
+  pickerUploadList.removeItem(item)
   if (item.assetId && props.token) {
     try {
       await deleteUploadAsset(item.assetId, { token: props.token })
@@ -1094,22 +1201,15 @@ function createMaterialAssets(task: TaskDetail): AgentMaterialAttachment[] {
 }
 
 async function loadMaterialAssets() {
-  if (!props.token || materialAssetsLoading.value) return
-  materialAssetsLoading.value = true
-  try {
-    const page = await fetchTasks({ token: props.token, query: { pageNo: 1, pageSize: 80, status: "SUCCESS" } })
-    const seen = new Set<string>()
-    materialAssets.value = page.list.flatMap(createMaterialAssets).filter((asset) => {
-      const key = `${asset.kind}:${asset.url}`
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    }).slice(0, 60)
-  } catch {
-    materialAssets.value = []
-  } finally {
-    materialAssetsLoading.value = false
-  }
+  await generatedMaterialList.resetAndLoad()
+}
+
+async function loadMorePickerUploads() {
+  await pickerUploadList.loadMore()
+}
+
+async function loadMoreMaterialAssets() {
+  await generatedMaterialList.loadMore()
 }
 
 async function uploadFiles(
@@ -1146,6 +1246,7 @@ async function uploadFiles(
       }
       if (autoSelect) {
         files.value = [...files.value.filter((item) => item.id !== uploaded.id), uploaded]
+        composerRef.value?.insertAgentFileChip(uploaded)
       }
     }
   } finally {
@@ -1176,12 +1277,12 @@ async function uploadMaterialFiles(selectedFiles: File[]) {
       } as AgentUrlAttachment & { assetId?: number })
       if (!attachment) continue
       const withTime = { ...attachment, uploadedAt: new Date().toISOString() }
-      rememberSharedUploadHistory(withTime)
       rememberRecentAttachment(withTime)
       urlAttachments.value = [
         ...urlAttachments.value.filter((entry) => entry.url !== withTime.url),
         withTime,
       ].slice(0, AGENT_REFERENCE_ATTACHMENT_LIMIT)
+      composerRef.value?.insertUrlAttachmentChip(withTime)
     }
   } finally {
     clearPendingUploadPreview()
@@ -1230,7 +1331,8 @@ async function removeFile(file: AgentFile) {
 }
 
 async function submitMessage(content = input.value) {
-  const text = content.trim()
+  const composerSnapshot = composerRef.value?.getComposerSnapshot()
+  const text = (composerSnapshot?.text ?? content).trim()
   if (!text && files.value.length === 0 && urlAttachments.value.length === 0) return
   if (!props.token || sending.value || editingRegenerating.value || hasActiveRun.value) return
   stickToBottom.value = true
@@ -1248,11 +1350,24 @@ async function submitMessage(content = input.value) {
   lastFailedRunId.value = null
   runConnectionStatus.value = "running"
   try {
-    input.value = ""
     const submittedFiles = [...files.value]
     const submittedUrlAttachments = [...urlAttachments.value]
     const submittedPreferredToolCode = selectedToolCode.value
-    const submittedAttachmentJson = messageContentJsonForFiles(submittedFiles, submittedUrlAttachments)
+    const submittedMentions = [...(composerSnapshot?.mentions ?? draftReferenceMentions.value)]
+    const submittedGlobalFileIds = globalFileIdsFor(submittedFiles, submittedUrlAttachments)
+    input.value = ""
+    draftReferenceMentions.value = []
+    const submittedAttachmentJson = messageContentJsonForFiles(
+      submittedFiles,
+      submittedUrlAttachments,
+      text,
+      submittedMentions,
+      {
+        contentParts: composerSnapshot?.contentParts ?? [],
+        positionalPrompt: composerSnapshot?.positionalPrompt,
+        globalFileIds: submittedGlobalFileIds,
+      },
+    )
     const optimisticMessageId = Date.now()
     files.value = []
     urlAttachments.value = []
@@ -1287,6 +1402,10 @@ async function submitMessage(content = input.value) {
           url: item.url,
           source: item.source || "url",
         })),
+        referenceMentions: referenceMentionsForApi(submittedMentions),
+        globalFileIds: submittedGlobalFileIds,
+        contentParts: composerSnapshot?.contentParts ?? [],
+        positionalPrompt: composerSnapshot?.positionalPrompt,
       },
       { token: props.token },
     )
@@ -1338,6 +1457,48 @@ async function loadAgentTools() {
     agentTools.value = []
   } finally {
     agentToolsLoading.value = false
+  }
+}
+
+async function updateToolPreference(payload: {
+  toolCode: string
+  autoCallEnabled?: boolean
+  disabled?: boolean
+}) {
+  if (!props.token) return
+  const previousTools = agentTools.value.map((tool) => ({ ...tool }))
+  const previousSelectedToolCode = selectedToolCode.value
+  agentError.value = null
+  agentTools.value = agentTools.value.map((tool) => {
+    if (tool.toolCode !== payload.toolCode) return tool
+    const disabled = payload.disabled ?? Boolean(tool.disabled)
+    return {
+      ...tool,
+      disabled,
+      autoCallEnabled: disabled ? false : (payload.autoCallEnabled ?? Boolean(tool.autoCallEnabled)),
+    }
+  })
+  if (payload.disabled === true && selectedToolCode.value === payload.toolCode) {
+    selectedToolCode.value = null
+  }
+  try {
+    const updated = await updateAgentToolPreference(payload.toolCode, payload, { token: props.token })
+    agentTools.value = agentTools.value.map((tool) =>
+      tool.toolCode === payload.toolCode
+        ? {
+            ...tool,
+            autoCallEnabled: updated.autoCallEnabled,
+            disabled: updated.disabled,
+          }
+        : tool,
+    )
+    if (updated.disabled && selectedToolCode.value === payload.toolCode) {
+      selectedToolCode.value = null
+    }
+  } catch (error) {
+    agentTools.value = previousTools
+    selectedToolCode.value = previousSelectedToolCode
+    applyAgentFailure(error)
   }
 }
 
@@ -1585,7 +1746,7 @@ function applyAgentFailure(
     return
   }
   if (error instanceof ApiBusinessError) {
-    applyAgentFailure(error)
+    agentError.value = formatAgentError(error)
     return
   }
   if (errorCode || errorMessage) {
@@ -2357,6 +2518,8 @@ defineExpose({
             @regenerate="regenerateAssistantMessage"
             @preview="(asset, message) => openAssetPreview(asset, message)"
             @reference="addReferenceAttachment"
+            @open-memory-from-trace="openMemoryFromTrace"
+            @delete-memory-from-trace="deleteMemoryFromTrace"
           />
         </template>
 
@@ -2382,7 +2545,12 @@ defineExpose({
             <img src="/logo.svg" alt="AI" />
           </div>
           <div class="bubble">
-            <RunTimeline :events="events" :inline-mode="true" />
+            <RunTimeline
+              :events="events"
+              :inline-mode="true"
+              @open-memory="openMemoryFromTrace"
+              @delete-memory="deleteMemoryFromTrace"
+            />
           </div>
         </article>
 
@@ -2493,6 +2661,10 @@ defineExpose({
         :recent-attachments="recentAttachments"
         :material-assets="materialAssets"
         :material-assets-loading="materialAssetsLoading"
+        :picker-upload-loading-more="pickerUploadLoadingMore"
+        :picker-upload-has-more="pickerUploadHasMore"
+        :material-assets-loading-more="materialAssetsLoadingMore"
+        :material-assets-has-more="materialAssetsHasMore"
         :file-preview-urls="filePreviewUrls"
         :pending-upload-preview="pendingUploadPreview"
         :uploading="uploading"
@@ -2507,8 +2679,12 @@ defineExpose({
         :agent-tools-loading="agentToolsLoading"
         :selected-tool-code="selectedToolCode"
         :intelligence-level="intelligenceLevel"
+        :session-assets="sessionAssetsForComposer"
+        :reference-mentions="draftReferenceMentions"
         @update:draft="emit('update:draft', $event)"
+        @update:reference-mentions="draftReferenceMentions = $event"
         @update:selected-tool-code="selectedToolCode = $event"
+        @update-tool-preference="updateToolPreference"
         @update:intelligence-level="intelligenceLevel = $event"
         @change-model="emit('change-model', $event)"
         @submit="submitMessage()"
@@ -2522,6 +2698,9 @@ defineExpose({
         @remove-url-attachment="removeUrlAttachment"
         @remove-recent-attachment="removeRecentAttachment"
         @refresh-material-assets="loadMaterialAssets"
+        @refresh-recent-attachments="loadRecentAttachments"
+        @load-more-uploads="loadMorePickerUploads"
+        @load-more-material-assets="loadMoreMaterialAssets"
         @refresh-agent-tools="loadAgentTools"
         @add-reference-attachment="addReferenceAttachment"
         @open-memory="openMemoryPanel"
@@ -2567,6 +2746,15 @@ defineExpose({
           </button>
         </div>
 
+        <div class="memory-tabs">
+          <button type="button" class="memory-tab-btn" :class="{ active: memoryTab === 'active' }" @click="changeMemoryTab('active')">
+            已生效
+          </button>
+          <button type="button" class="memory-tab-btn" :class="{ active: memoryTab === 'candidate' }" @click="changeMemoryTab('candidate')">
+            待确认
+          </button>
+        </div>
+
         <p v-if="memoryError" class="memory-error">{{ memoryError }}</p>
 
         <section class="memory-editor">
@@ -2588,7 +2776,13 @@ defineExpose({
             <button v-if="memoryEditingId != null" type="button" class="ghost-btn" :disabled="memorySaving" @click="resetMemoryForm">
               取消编辑
             </button>
-            <button type="button" class="primary-btn" :disabled="memorySaving || memoryWorkspaceId == null" @click="saveMemory">
+            <button
+              v-if="memoryTab === 'active'"
+              type="button"
+              class="primary-btn"
+              :disabled="memorySaving || memoryWorkspaceId == null"
+              @click="saveMemory"
+            >
               <Loader2 v-if="memorySaving" class="h-4 w-4 animate-spin" />
               <Plus v-else-if="memoryEditingId == null" class="h-4 w-4" />
               <Check v-else class="h-4 w-4" />
@@ -2603,27 +2797,42 @@ defineExpose({
             正在加载记忆
           </div>
           <div v-else-if="memoryItems.length === 0" class="memory-empty">
-            还没有长期记忆。你可以手动添加，或在对话里明确告诉 Agent “记住……”
+            {{ memoryTab === "candidate" ? "暂无待确认记忆。" : "还没有长期记忆。你可以手动添加，或在对话里明确告诉 Agent “记住……”" }}
           </div>
           <section v-for="group in groupedMemoryItems" v-else :key="group.type" class="memory-group">
             <p class="memory-group-title">{{ group.label }}</p>
-            <article v-for="item in group.items" :key="item.id" class="memory-item">
+            <article
+              v-for="item in group.items"
+              :key="item.id"
+              class="memory-item"
+              :class="{ highlighted: memoryHighlightId === item.id }"
+            >
               <div class="memory-item-main">
                 <div class="memory-item-title-row">
-                  <strong>{{ item.title || `记忆 #${item.id}` }}</strong>
-                  <span v-if="item.sourceRunId">Run #{{ item.sourceRunId }}</span>
+                  <strong>#{{ item.id }} · {{ item.title || "未命名记忆" }}</strong>
+                  <span v-if="item.pinned">已置顶</span>
+                  <span v-else-if="item.sourceRunId">Run #{{ item.sourceRunId }}</span>
                   <span v-else>手动/历史</span>
                 </div>
                 <p>{{ item.content }}</p>
               </div>
               <div class="memory-item-actions">
-                <button type="button" class="memory-icon-btn" aria-label="编辑记忆" @click="editMemory(item)">
-                  <Pencil class="h-4 w-4" />
-                </button>
-                <button type="button" class="memory-icon-btn danger" :disabled="memoryDeletingId === item.id" aria-label="删除记忆" @click="removeMemory(item)">
-                  <Loader2 v-if="memoryDeletingId === item.id" class="h-4 w-4 animate-spin" />
-                  <Trash2 v-else class="h-4 w-4" />
-                </button>
+                <template v-if="memoryTab === 'candidate'">
+                  <button type="button" class="memory-text-btn" @click="approveCandidateMemory(item)">采纳</button>
+                  <button type="button" class="memory-text-btn danger" @click="rejectCandidateMemory(item)">拒绝</button>
+                </template>
+                <template v-else>
+                  <button type="button" class="memory-icon-btn" :class="{ active: item.pinned }" aria-label="置顶记忆" @click="toggleMemoryPin(item)">
+                    <Pin class="h-4 w-4" />
+                  </button>
+                  <button type="button" class="memory-icon-btn" aria-label="编辑记忆" @click="editMemory(item)">
+                    <Pencil class="h-4 w-4" />
+                  </button>
+                  <button type="button" class="memory-icon-btn danger" :disabled="memoryDeletingId === item.id" aria-label="删除记忆" @click="removeMemory(item)">
+                    <Loader2 v-if="memoryDeletingId === item.id" class="h-4 w-4 animate-spin" />
+                    <Trash2 v-else class="h-4 w-4" />
+                  </button>
+                </template>
               </div>
             </article>
           </section>
@@ -3714,6 +3923,54 @@ defineExpose({
 .memory-item-actions {
   gap: 6px;
   align-self: start;
+}
+
+.memory-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.memory-tab-btn {
+  flex: 1;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  background: rgb(255 255 255 / 0.03);
+  color: rgb(255 255 255 / 0.62);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.memory-tab-btn.active {
+  color: #fff;
+  border-color: rgb(176 92 255 / 0.45);
+  background: rgb(176 92 255 / 0.12);
+}
+
+.memory-item.highlighted {
+  border-color: rgb(176 92 255 / 0.55);
+  box-shadow: 0 0 0 1px rgb(176 92 255 / 0.18);
+}
+
+.memory-text-btn {
+  border: 1px solid rgb(255 255 255 / 0.12);
+  background: transparent;
+  color: rgb(255 255 255 / 0.78);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.memory-text-btn.danger {
+  color: #fda29b;
+  border-color: rgb(253 162 155 / 0.35);
+}
+
+.memory-icon-btn.active {
+  color: #c084fc;
+  border-color: rgb(192 132 252 / 0.35);
 }
 
 @media (max-width: 900px) {

@@ -38,7 +38,7 @@ class ToolDescriptor(BaseModel):
     inputSchema: dict[str, Any] = Field(default_factory=dict)
     autoCallable: bool = False
     fields: list[ToolFieldDescriptor] = Field(default_factory=list)
-    hints: dict[str, Any] = Field(default_factory=dict)
+    hints: dict[str, Any] = Field(default_factory=dict, validation_alias=AliasChoices("hints", "agentHints"))
 
 
 class ToolPreference(BaseModel):
@@ -179,6 +179,21 @@ class RuntimeSettings(BaseModel):
     intelligenceLevel: str | None = None
 
 
+class ReferenceMention(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    token: str | None = None
+    refLabel: str | None = None
+    assetKey: str | None = None
+    fileId: int | str | None = None
+    url: str
+    kind: str | None = None
+    name: str | None = None
+    contentType: str | None = None
+    previewUrl: str | None = None
+    source: str | None = None
+
+
 class RecentToolCallContext(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -284,6 +299,10 @@ class RunContext(BaseModel):
     recentToolCalls: list[RecentToolCallContext] = Field(default_factory=list)
     pendingToolContext: PendingToolContext | None = Field(default=None, validation_alias=AliasChoices("pendingToolContext", "pending_tool_context"))
     preferredToolCode: str | None = Field(default=None, validation_alias=AliasChoices("preferredToolCode", "preferred_tool_code"))
+    referenceMentions: list[ReferenceMention] = Field(default_factory=list)
+    globalFileIds: list[int | str] = Field(default_factory=list, validation_alias=AliasChoices("globalFileIds", "global_file_ids"))
+    contentParts: list[dict[str, Any]] = Field(default_factory=list, validation_alias=AliasChoices("contentParts", "content_parts"))
+    positionalPrompt: str | None = Field(default=None, validation_alias=AliasChoices("positionalPrompt", "positional_prompt"))
 
 
 class RunEventCreate(BaseModel):
@@ -353,6 +372,15 @@ class AgentRouteDebugResponse(BaseModel):
     requestedOutputModality: str | None = None
     visibleToolCount: int = 0
     visibleTools: list[AgentRouteDebugTool] = Field(default_factory=list)
+    readiness: str = "ready"
+    modelConnectivity: bool = False
+    availableToolCount: int = 0
+    disclosedToolCount: int = 0
+    estimatedRouterPromptBytes: int = 0
+    nextActions: list[str] = Field(default_factory=list)
+    llmRouterEnabled: bool = True
+    productToolLoopEnabled: bool = True
+    toolDisclosureEnabled: bool = True
 
 
 class ToolCallResponse(BaseModel):

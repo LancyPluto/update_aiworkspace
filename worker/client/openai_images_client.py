@@ -113,6 +113,15 @@ class OpenAIImagesClient:
             raise OpenAIImagesError("openai images modelName is required")
 
         reference_images = _normalize_reference_images(image)
+        max_reference_images = self._max_reference_images()
+        if max_reference_images > 0 and len(reference_images) > max_reference_images:
+            LOGGER.warning(
+                "openai images reference images truncated requested=%s max=%s",
+                len(reference_images),
+                max_reference_images,
+            )
+            reference_images = reference_images[:max_reference_images]
+        quality = self._resolve_quality(quality)
         if reference_images:
             if self._uses_json_image_array_input():
                 payload = self._build_generation_payload(
@@ -244,7 +253,7 @@ class OpenAIImagesClient:
             "n": max(1, min(10, int(batch_size or 1))),
             "size": _normalize_size(image_size),
         }
-        resolved_quality = (quality or self.extra_auth.get("quality") or "").strip()
+        resolved_quality = self._resolve_quality(quality)
         if resolved_quality:
             payload["quality"] = resolved_quality
         resolved_style = (style or self.extra_auth.get("style") or "").strip()
@@ -289,7 +298,15 @@ class OpenAIImagesClient:
             extension = mimetypes.guess_extension(mime) or ".png"
             filename = f"reference-{index}{extension}"
             image_files.append((filename, image_bytes, mime))
-        resolved_quality = (quality or self.extra_auth.get("quality") or "low").strip()
+        max_input_bytes = self._max_input_image_bytes()
+        if max_input_bytes > 0:
+            total_bytes = sum(len(item[1]) for item in image_files)
+            if total_bytes > max_input_bytes:
+                raise OpenAIImagesError(
+                    "openai images reference images exceed maxInputImageBytes "
+                    f"total={total_bytes} max={max_input_bytes}"
+                )
+        resolved_quality = self._resolve_quality(quality, required=True)
         form_fields: dict[str, str] = {
             "model": self._resolve_edit_model(model),
             "prompt": prompt,
@@ -320,13 +337,28 @@ class OpenAIImagesClient:
                         f"detail={exc}"
                     ) from exc
                 ssl_budget -= 1
+                LOGGER.warning(
+                    "openai images transport retry scheduled reason=ssl_eof attempt=%s sslRemaining=%s url=%s",
+                    attempt,
+                    ssl_budget,
+                    _redact_url(url),
+                )
                 time.sleep(min(2.0, float(attempt)))
             except (RequestsConnectionError, ChunkedEncodingError, OpenAIImagesRetryableServerError) as exc:
                 if conn_budget <= 0:
                     raise OpenAIImagesError(f"openai images request failed: {exc}") from exc
                 conn_budget -= 1
                 conn_retry_index += 1
-                time.sleep(self._compute_backoff(conn_retry_index))
+                backoff = self._compute_backoff(conn_retry_index)
+                LOGGER.warning(
+                    "openai images transport retry scheduled reason=%s attempt=%s retriesRemaining=%s backoff=%.1fs url=%s",
+                    exc,
+                    attempt + 1,
+                    conn_budget,
+                    backoff,
+                    _redact_url(url),
+                )
+                time.sleep(backoff)
 
     def _resolve_edit_model(self, model: str) -> str:
         override = str(self.extra_auth.get("editModel") or "").strip()
@@ -573,6 +605,13 @@ class OpenAIImagesClient:
         attempt = 0
         while True:
             attempt += 1
+            LOGGER.info(
+                "openai images transport start url=%s attempt=%s/%s transport=multipart diagnostics=%s",
+                _redact_url(url),
+                attempt,
+                self.connection_retries + 1,
+                self._connection_diagnostics(url),
+            )
             try:
                 return self._post_multipart_once(url, form_fields, image_files)
             except SSLError as exc:
@@ -583,13 +622,28 @@ class OpenAIImagesClient:
                         f"detail={exc}"
                     ) from exc
                 ssl_budget -= 1
+                LOGGER.warning(
+                    "openai images transport retry scheduled reason=ssl_eof attempt=%s sslRemaining=%s url=%s",
+                    attempt + 1,
+                    ssl_budget,
+                    _redact_url(url),
+                )
                 time.sleep(min(2.0, float(attempt)))
             except (RequestsConnectionError, ChunkedEncodingError, OpenAIImagesRetryableServerError) as exc:
                 if conn_budget <= 0:
                     raise OpenAIImagesError(f"openai images edit request failed: {exc}") from exc
                 conn_budget -= 1
                 conn_retry_index += 1
-                time.sleep(self._compute_backoff(conn_retry_index))
+                backoff = self._compute_backoff(conn_retry_index)
+                LOGGER.warning(
+                    "openai images transport retry scheduled reason=%s attempt=%s retriesRemaining=%s backoff=%.1fs url=%s",
+                    exc,
+                    attempt + 1,
+                    conn_budget,
+                    backoff,
+                    _redact_url(url),
+                )
+                time.sleep(backoff)
 
     def _multipart_headers(self) -> dict[str, str]:
         return {
@@ -605,12 +659,6 @@ class OpenAIImagesClient:
     ) -> dict[str, Any]:
         started_at = time.perf_counter()
         diagnostics = self._connection_diagnostics(url)
-        LOGGER.info(
-            "openai images transport start url=%s timeout=%s transport=multipart diagnostics=%s",
-            _redact_url(url),
-            self.timeout,
-            diagnostics,
-        )
         multipart_body: list[tuple[str, Any]] = []
         for key in ("model", "prompt", "n", "size", "quality", "output_format"):
             value = form_fields.get(key)
@@ -625,12 +673,15 @@ class OpenAIImagesClient:
                 headers=self._multipart_headers(),
                 timeout=self.timeout,
             )
-            LOGGER.info(
-                "openai images transport completed url=%s status=%s elapsed=%.3fs transport=multipart diagnostics=%s",
-                _redact_url(url),
-                response.status_code,
-                time.perf_counter() - started_at,
-                diagnostics,
+            elapsed = time.perf_counter() - started_at
+            _log_transport_http_finished(
+                logger=LOGGER,
+                url=url,
+                status_code=response.status_code,
+                elapsed=elapsed,
+                transport="multipart",
+                diagnostics=diagnostics,
+                will_retry=500 <= response.status_code < 600 and self._should_retry_http_status(response.status_code),
             )
         except Timeout as exc:
             elapsed = time.perf_counter() - started_at
@@ -668,8 +719,12 @@ class OpenAIImagesClient:
             response.raise_for_status()
         except requests.HTTPError as exc:
             if 500 <= response.status_code < 600:
-                raise OpenAIImagesRetryableServerError(
-                    f"openai images request failed: status={response.status_code}, body={response.text}"
+                if self._should_retry_http_status(response.status_code):
+                    raise OpenAIImagesRetryableServerError(
+                        f"openai images gateway error status={response.status_code} elapsed={elapsed:.3f}s; body={response.text}"
+                    ) from exc
+                raise OpenAIImagesError(
+                    _format_openai_images_http_error(response.status_code, response.text, form_fields.get("model"))
                 ) from exc
             raise OpenAIImagesError(
                 _format_openai_images_http_error(response.status_code, response.text, form_fields.get("model"))
@@ -698,12 +753,15 @@ class OpenAIImagesClient:
                 json=payload,
                 timeout=self.timeout,
             )
-            LOGGER.info(
-                "openai images transport completed url=%s status=%s elapsed=%.3fs diagnostics=%s",
-                _redact_url(url),
-                response.status_code,
-                time.perf_counter() - started_at,
-                diagnostics,
+            elapsed = time.perf_counter() - started_at
+            _log_transport_http_finished(
+                logger=LOGGER,
+                url=url,
+                status_code=response.status_code,
+                elapsed=elapsed,
+                transport="json",
+                diagnostics=diagnostics,
+                will_retry=500 <= response.status_code < 600 and self._should_retry_http_status(response.status_code),
             )
         except Timeout as exc:
             elapsed = time.perf_counter() - started_at
@@ -741,7 +799,11 @@ class OpenAIImagesClient:
             response.raise_for_status()
         except requests.HTTPError as exc:
             if 500 <= response.status_code < 600:
-                raise OpenAIImagesRetryableServerError(
+                if self._should_retry_http_status(response.status_code):
+                    raise OpenAIImagesRetryableServerError(
+                        f"openai images request failed: status={response.status_code}, body={response.text}"
+                    ) from exc
+                raise OpenAIImagesError(
                     f"openai images request failed: status={response.status_code}, body={response.text}"
                 ) from exc
             raise OpenAIImagesError(
@@ -854,6 +916,46 @@ class OpenAIImagesClient:
             return 2
         return min(5, _as_int(value))
 
+    def _max_reference_images(self) -> int:
+        return max(0, _as_int(self.extra_auth.get("maxReferenceImages")))
+
+    def _max_input_image_bytes(self) -> int:
+        configured = self.extra_auth.get("maxInputImageBytes")
+        if configured is None:
+            return 0
+        return max(0, _as_int(configured))
+
+    def _no_retry_http_statuses(self) -> set[int]:
+        raw = self.extra_auth.get("noRetryHttpStatuses")
+        if not isinstance(raw, list):
+            return set()
+        statuses: set[int] = set()
+        for item in raw:
+            code = _as_int(item)
+            if code > 0:
+                statuses.add(code)
+        return statuses
+
+    def _should_retry_http_status(self, status_code: int) -> bool:
+        if status_code in self._no_retry_http_statuses():
+            return False
+        return 500 <= status_code < 600
+
+    def _resolve_quality(self, quality: str | None, *, required: bool = False) -> str:
+        force_quality = str(self.extra_auth.get("forceQuality") or "").strip()
+        max_quality = str(self.extra_auth.get("maxQuality") or "").strip()
+        resolved = (quality or self.extra_auth.get("quality") or "").strip()
+        if not resolved and (required or "ofox.ai" in self.base_url.lower()):
+            resolved = "low"
+        if not resolved:
+            return ""
+        resolved = _normalize_openai_image_quality(resolved)
+        if force_quality:
+            resolved = _normalize_openai_image_quality(force_quality)
+        elif max_quality:
+            resolved = _clamp_openai_image_quality(resolved, _normalize_openai_image_quality(max_quality))
+        return resolved
+
     def _compute_backoff(self, retry_index: int) -> float:
         base = max(0.0, self.retry_backoff_seconds)
         cap = max(base, self.retry_backoff_max_seconds)
@@ -886,6 +988,55 @@ class OpenAIImagesClient:
         except json.JSONDecodeError:
             return {}
         return parsed if isinstance(parsed, dict) else {}
+
+
+def _log_transport_http_finished(
+    *,
+    logger: logging.Logger,
+    url: str,
+    status_code: int,
+    elapsed: float,
+    transport: str,
+    diagnostics: str,
+    will_retry: bool,
+) -> None:
+    if status_code < 400:
+        logger.info(
+            "openai images transport succeeded url=%s status=%s elapsed=%.3fs transport=%s diagnostics=%s",
+            _redact_url(url),
+            status_code,
+            elapsed,
+            transport,
+            diagnostics,
+        )
+        return
+    retry_hint = " willRetrySameTask=true" if will_retry else " willRetrySameTask=false"
+    logger.warning(
+        "openai images transport failed url=%s status=%s elapsed=%.3fs transport=%s diagnostics=%s%s",
+        _redact_url(url),
+        status_code,
+        elapsed,
+        transport,
+        diagnostics,
+        retry_hint,
+    )
+
+
+def _normalize_openai_image_quality(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in {"standard", "normal"}:
+        return "low"
+    return normalized
+
+
+def _quality_rank(value: str) -> int:
+    return {"low": 0, "auto": 1, "medium": 2, "standard": 2, "normal": 2, "high": 3}.get(value, 2)
+
+
+def _clamp_openai_image_quality(value: str, max_quality: str) -> str:
+    if _quality_rank(value) <= _quality_rank(max_quality):
+        return value
+    return max_quality
 
 
 def _format_openai_images_http_error(status_code: int, body: str, model: str | None) -> str:

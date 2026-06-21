@@ -1,5 +1,9 @@
 import pytest
 
+from tests.conftest import legacy_llm_router_settings
+
+pytestmark = pytest.mark.usefixtures("legacy_llm_router_settings")
+
 from app.clients.model_client import ChatToolCall, ChatTurnResult
 from app.core.budget_guard import BudgetGuard, BudgetState
 from app.core.schemas import RecentToolCallContext, RunContext, RuntimeSettings, ToolDescriptor, WorkspaceMemoryItem
@@ -77,8 +81,10 @@ class FakeBackend:
 class FakeModel:
     def __init__(self, response: str = ""):
         self.response = response
+        self.calls = []
 
     async def chat(self, messages, tools=None):
+        self.calls.append((messages, tools))
         return self.response
 
     @property
@@ -354,7 +360,7 @@ async def test_llm_router_routes_explicit_image_request():
 
     assert ("task", "ofox_gpt_image2", {"userRequest": message}, "agent-run-24-tool-call-99") in backend.tool_calls
     intent_events = [event for event in backend.events if event[1] == "intent.detected"]
-    assert intent_events[-1][3]["decisionSource"] == "llm_router"
+    assert intent_events[-1][3]["decisionSource"] == "llm_classifier"
 
 
 @pytest.mark.asyncio
@@ -471,7 +477,7 @@ async def test_llm_router_can_select_tool_when_rule_match_is_weak():
     assert ("task", "kling_image_v21", {"userRequest": message}, "agent-run-16-tool-call-99") in backend.tool_calls
     assert not any(call[0] == "task" and call[1] == "deepseek_text_generation" for call in backend.tool_calls)
     intent_events = [event for event in backend.events if event[1] == "intent.detected"]
-    assert intent_events[-1][3]["decisionSource"] == "llm_router"
+    assert intent_events[-1][3]["decisionSource"] == "llm_classifier"
 
 
 @pytest.mark.asyncio
@@ -576,7 +582,7 @@ async def test_llm_router_is_primary_for_media_tool_selection():
     assert ("task", "gpt_image", {"userRequest": message}, "agent-run-17-tool-call-99") in backend.tool_calls
     assert not any(call[0] == "task" and call[1] == "kling_image_to_video" for call in backend.tool_calls)
     intent_events = [event for event in backend.events if event[1] == "intent.detected"]
-    assert intent_events[-1][3]["decisionSource"] == "llm_router"
+    assert intent_events[-1][3]["decisionSource"] == "llm_classifier"
 
 
 @pytest.mark.asyncio
@@ -627,6 +633,139 @@ async def test_tool_use_applies_workspace_memory_quality_preference():
     frozen_events = [event for event in backend.events if event[1] == "memory.context_frozen"]
     assert frozen_events
     assert frozen_events[0][3]["source"] == "tool_use"
+
+
+@pytest.mark.asyncio
+async def test_tool_router_prompt_includes_workspace_memory_for_preference_requests():
+    backend = FakeBackend(resource_type="IMAGE", content_text='{"images":[{"url":"/generated/image.png"}]}')
+    backend.memory_items = [
+        WorkspaceMemoryItem(
+            id=21,
+            title="用户审美画像",
+            content="审美关键词：新中式、克制、留白、真实摄影。",
+            memoryType="preference",
+            score=0,
+        )
+    ]
+    router_json = (
+        '{"intent":"tool_use","selectedToolCode":"gpt_image2",'
+        '"candidateToolCodes":["gpt_image2"],"confidence":0.95,'
+        '"reason":"image_preference_request","arguments":{"userRequest":"根据我的喜好重构图片"}}'
+    )
+    model = FakeModel(response=router_json)
+    engine = DeepAgentsRuntimeEngine(backend, model)
+    context = RunContext(
+        runId=20,
+        sessionId=1,
+        userId=1,
+        workspaceId=7,
+        message="根据我的喜好重构图片",
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="gpt_image2",
+                toolName="GPT-image2",
+                description="GPT 图片生成工具，图片生成，文生图",
+                autoCallable=True,
+            ),
+        ],
+    )
+
+    await engine.run(context)
+
+    router_prompt = model.calls[0][0][0].content
+    assert "workspaceMemory" in router_prompt
+    assert "新中式" in router_prompt
+    assert backend.memory_requests[0] == (7, "根据我的喜好重构图片", 10, "tool")
+
+
+@pytest.mark.asyncio
+async def test_tool_use_merges_workspace_memory_into_generation_prompt():
+    backend = FakeBackend(resource_type="IMAGE", content_text='{"images":[{"url":"/generated/image.png"}]}')
+    backend.memory_items = [
+        WorkspaceMemoryItem(
+            id=22,
+            title="用户审美画像",
+            content="审美关键词：新中式、克制、留白、真实摄影，避免夸张动漫质感。",
+            memoryType="preference",
+            score=0,
+        )
+    ]
+    router_json = (
+        '{"intent":"tool_use","selectedToolCode":"gpt_image2",'
+        '"candidateToolCodes":["gpt_image2"],"confidence":0.95,'
+        '"reason":"image_preference_request","arguments":{"userRequest":"根据我的喜好重构图片"}}'
+    )
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(response=router_json))
+    context = RunContext(
+        runId=21,
+        sessionId=1,
+        userId=1,
+        workspaceId=7,
+        message="根据我的喜好重构图片",
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="gpt_image2",
+                toolName="GPT-image2",
+                description="GPT 图片生成工具，图片生成，文生图",
+                autoCallable=True,
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string", "title": "提示词"},
+                        "quality": {"type": "string", "enum": ["low", "medium", "high"], "default": "high"},
+                    },
+                },
+            ),
+        ],
+    )
+
+    await engine.run(context)
+
+    task_calls = [call for call in backend.tool_calls if call[0] == "task"]
+    assert len(task_calls) == 1
+    params = task_calls[0][2]
+    assert "新中式" in params["prompt"]
+    assert "长期偏好参考" in params["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_tool_memory_events_are_emitted_when_retrieval_is_empty():
+    backend = FakeBackend(resource_type="IMAGE", content_text='{"images":[{"url":"/generated/image.png"}]}')
+    router_json = (
+        '{"intent":"tool_use","selectedToolCode":"gpt_image2",'
+        '"candidateToolCodes":["gpt_image2"],"confidence":0.95,'
+        '"reason":"image_request","arguments":{"userRequest":"生成一张图"}}'
+    )
+    engine = DeepAgentsRuntimeEngine(backend, FakeModel(response=router_json))
+    context = RunContext(
+        runId=22,
+        sessionId=1,
+        userId=1,
+        workspaceId=7,
+        message="生成一张图",
+        creditBudget=20,
+        availableTools=[
+            ToolDescriptor(
+                toolCode="gpt_image2",
+                toolName="GPT-image2",
+                description="GPT 图片生成工具，图片生成，文生图",
+                autoCallable=True,
+            ),
+        ],
+    )
+
+    await engine.run(context)
+
+    retrieved_events = [event for event in backend.events if event[1] == "memory.retrieved"]
+    frozen_events = [event for event in backend.events if event[1] == "memory.context_frozen"]
+    assert retrieved_events
+    assert retrieved_events[0][3]["count"] == 0
+    assert retrieved_events[0][3]["view"] == "tool"
+    assert frozen_events
+    assert frozen_events[0][3]["frozen"] is False
+    assert frozen_events[0][3]["count"] == 0
 
 
 @pytest.mark.asyncio

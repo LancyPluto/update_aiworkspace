@@ -1611,6 +1611,36 @@ function RouteDebugger({
               <SmallStat label="输出模态" value={result.requestedOutputModality || "未知"} />
               <SmallStat label="决策来源" value={result.decisionSource || "-"} />
             </div>
+            {result.readiness ? (
+              <div className="rounded-lg border bg-background p-4">
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <Label>Readiness</Label>
+                  <Badge variant={result.readiness === "ready" ? "secondary" : result.readiness === "warning" ? "outline" : "destructive"}>
+                    {result.readiness}
+                  </Badge>
+                  <Badge variant={result.modelConnectivity ? "secondary" : "destructive"}>
+                    模型连通 {result.modelConnectivity ? "正常" : "异常"}
+                  </Badge>
+                </div>
+                <div className="grid gap-3 md:grid-cols-4">
+                  <SmallStat label="可用工具" value={String(result.availableToolCount ?? result.visibleToolCount ?? "-")} />
+                  <SmallStat label="披露工具" value={String(result.disclosedToolCount ?? "-")} />
+                  <SmallStat
+                    label="Router Prompt"
+                    value={typeof result.estimatedRouterPromptBytes === "number" ? `${Math.round(result.estimatedRouterPromptBytes / 1024)} KB` : "-"}
+                  />
+                  <SmallStat label="LLM Router" value={result.llmRouterEnabled ? "开启" : "关闭"} />
+                </div>
+                {result.nextActions?.length ? (
+                  <div className="mt-3 space-y-1 text-sm text-muted-foreground">
+                    <p className="font-medium text-foreground">建议操作</p>
+                    <ul className="list-inside list-disc">
+                      {result.nextActions.map((action) => <li key={action}>{action}</li>)}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-2">
                 <Label>最终工具</Label>

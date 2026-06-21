@@ -7,6 +7,10 @@ failure reflection/retry, human confirmation, and prompt-injection safety.
 
 import pytest
 
+from tests.conftest import disable_unified_graph_router
+
+pytestmark = pytest.mark.usefixtures("disable_unified_graph_router")
+
 from app.clients.model_client import ChatToolCall, ChatTurnResult
 from app.core.event_types import (
     MESSAGE_COMPLETED,

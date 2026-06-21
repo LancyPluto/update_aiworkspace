@@ -33,17 +33,26 @@ public class AgentToolPreferenceServiceImpl implements AgentToolPreferenceServic
     public AgentToolPreferenceResponse update(Long userId, String toolCode, UpdateAgentToolPreferenceRequest request) {
         LocalDateTime now = LocalDateTime.now();
         AgentToolPreference existing = agentToolPreferenceMapper.findByUserIdAndToolCode(userId, toolCode);
+        boolean disabled = request.disabled() != null
+                ? Boolean.TRUE.equals(request.disabled())
+                : existing != null && Boolean.TRUE.equals(existing.getDisabled());
+        boolean autoCallEnabled = disabled
+                ? false
+                : request.autoCallEnabled() != null
+                    ? Boolean.TRUE.equals(request.autoCallEnabled())
+                    : existing != null && Boolean.TRUE.equals(existing.getAutoCallEnabled());
         if (existing == null) {
             AgentToolPreference preference = new AgentToolPreference();
             preference.setUserId(userId);
             preference.setToolCode(toolCode);
-            preference.setAutoCallEnabled(request.autoCallEnabled());
+            preference.setAutoCallEnabled(autoCallEnabled);
+            preference.setDisabled(disabled);
             preference.setCreatedAt(now);
             preference.setUpdatedAt(now);
             agentToolPreferenceMapper.insertPreference(preference);
             return AgentToolPreferenceResponse.from(preference);
         }
-        agentToolPreferenceMapper.updatePreference(userId, toolCode, request.autoCallEnabled(), now);
+        agentToolPreferenceMapper.updatePreference(userId, toolCode, autoCallEnabled, disabled, now);
         AgentToolPreference updated = agentToolPreferenceMapper.findByUserIdAndToolCode(userId, toolCode);
         return AgentToolPreferenceResponse.from(updated);
     }

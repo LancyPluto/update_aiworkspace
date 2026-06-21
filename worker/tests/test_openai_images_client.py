@@ -1,7 +1,9 @@
 import httpx
+import pytest
 import requests
 from openai import APIStatusError
 from requests import Request
+from typing import Any
 
 from client.openai_images_client import OpenAIImagesClient
 
@@ -394,3 +396,96 @@ def test_volcengine_images_reference_defaults_to_generation_json(monkeypatch):
     assert urls == ["https://cdn.example/seedream.png"]
     assert captured["path"] == "/images/generations"
     assert captured["payload"]["image"] == ["data:image/png;base64,ZmFrZQ=="]
+
+
+def test_openai_images_504_is_not_retried(monkeypatch) -> None:
+    attempts = {"count": 0}
+
+    class Fake504Response:
+        status_code = 504
+        text = "gateway timeout"
+
+        def raise_for_status(self) -> None:
+            raise requests.HTTPError(response=self)  # type: ignore[arg-type]
+
+    def fake_post(*_args, **_kwargs):
+        attempts["count"] += 1
+        return Fake504Response()
+
+    client = OpenAIImagesClient(
+        base_url="https://api.ofox.ai/v1",
+        api_key="fake-key",
+        extra_auth_json='{"noRetryHttpStatuses":[504],"connectionRetries":2}',
+    )
+    monkeypatch.setattr(client.session, "post", fake_post)
+
+    with pytest.raises(Exception):
+        client._post_once("https://api.ofox.ai/v1/images/generations", {"model": "openai/gpt-image-2"})
+
+    assert attempts["count"] == 1
+
+
+def test_openai_images_force_quality_overrides_params() -> None:
+    client = OpenAIImagesClient(
+        base_url="https://api.ofox.ai/v1",
+        api_key="fake-key",
+        extra_auth_json='{"forceQuality":"low"}',
+    )
+    payload = client._build_generation_payload(
+        prompt="test",
+        model="openai/gpt-image-2",
+        image_size="1024x1024",
+        batch_size=1,
+        quality="medium",
+        style=None,
+        output_format=None,
+        response_format=None,
+    )
+    assert payload["quality"] == "low"
+
+
+def test_openai_images_standard_quality_maps_to_low() -> None:
+    client = OpenAIImagesClient(base_url="https://api.ofox.ai/v1", api_key="fake-key")
+    assert client._resolve_quality("standard", required=True) == "low"
+
+
+def test_openai_images_max_reference_images_truncates(monkeypatch) -> None:
+    client = OpenAIImagesClient(
+        base_url="https://api.ofox.ai/v1",
+        api_key="fake-key",
+        extra_auth_json='{"maxReferenceImages":1}',
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_edit(endpoint, form_fields, image_files, *, source_model):
+        captured["image_count"] = len(image_files)
+        return {"data": [{"url": "https://example.com/1.png"}]}
+
+    monkeypatch.setattr(client, "_edit_reference_image", fake_edit)
+
+    client.generate_images(
+        prompt="blend",
+        model="openai/gpt-image-2",
+        image=["data:image/png;base64,ZmFrZQ==", "data:image/png;base64,ZmFrZQ=="],
+    )
+
+    assert captured["image_count"] == 1
+
+
+def test_openai_images_rejects_oversized_reference_images() -> None:
+    client = OpenAIImagesClient(
+        base_url="https://api.ofox.ai/v1",
+        api_key="fake-key",
+        extra_auth_json='{"maxInputImageBytes":8}',
+    )
+    huge = "data:image/png;base64," + ("A" * 32)
+    with pytest.raises(Exception, match="maxInputImageBytes"):
+        client._build_edit_multipart(
+            prompt="edit",
+            model="openai/gpt-image-2",
+            image_size="auto",
+            batch_size=1,
+            quality="low",
+            output_format=None,
+            reference_images=[huge],
+        )

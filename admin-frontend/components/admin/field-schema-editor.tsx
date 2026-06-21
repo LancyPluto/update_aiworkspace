@@ -41,7 +41,7 @@ type FieldSchemaEditorProps = {
 
 const AGENT_FILL_STRATEGIES: Array<{ value: EditableField["agentFillStrategy"]; label: string; hint: string }> = [
   { value: "infer_from_user", label: "从用户需求推断", hint: "适合主题、提示词、对象等可从自然语言抽取的字段" },
-  { value: "default", label: "使用默认值", hint: "适合比例、数量、画质等有产品默认值的字段" },
+  { value: "default", label: "使用默认值", hint: "锁定使用默认值，Agent 无法覆盖（用户消息显式指定时除外）" },
   { value: "ask_user", label: "缺失时追问", hint: "适合预算、授权、账号等不能擅自决定的字段" },
   { value: "derive", label: "由系统派生", hint: "适合 userId、sessionId、素材 ID 等上下文字段" },
   { value: "none", label: "不参与 Agent 填充", hint: "保留给后台或工具执行层处理" },
@@ -332,7 +332,7 @@ export function FieldSchemaEditor({ fields, onChange, disabled }: FieldSchemaEdi
                       onChange={(e) => updateField(index, { defaultValue: e.target.value })}
                     />
                     <p className="text-[11px] text-muted-foreground">
-                      当填充策略为“使用默认值”时，Agent 会优先使用这里的值，不再追问用户。
+                      当填充策略为“使用默认值”时，下发任务会锁定使用这里的值，Agent 无法覆盖（用户消息显式指定时除外）。
                     </p>
                   </div>
                 </div>

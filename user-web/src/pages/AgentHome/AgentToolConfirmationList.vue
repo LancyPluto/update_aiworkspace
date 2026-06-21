@@ -42,7 +42,7 @@ function descriptionFor(payload: Record<string, unknown>) {
           type="checkbox"
           @change="emit('update:rememberTool', ($event.target as HTMLInputElement).checked)"
         />
-        以后调用该工具不再提示
+        加入白名单，后续调用无需确认
       </label>
       <div class="card-actions">
         <button

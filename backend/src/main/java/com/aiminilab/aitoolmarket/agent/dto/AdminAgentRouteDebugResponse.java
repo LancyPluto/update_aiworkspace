@@ -13,7 +13,16 @@ public record AdminAgentRouteDebugResponse(
         String requestedOutputModality,
         Integer visibleToolCount,
         List<RouteDebugToolResponse> visibleTools,
-        List<RouteDebugFilteredToolResponse> filteredTools
+        List<RouteDebugFilteredToolResponse> filteredTools,
+        String readiness,
+        Boolean modelConnectivity,
+        Integer availableToolCount,
+        Integer disclosedToolCount,
+        Integer estimatedRouterPromptBytes,
+        List<String> nextActions,
+        Boolean llmRouterEnabled,
+        Boolean productToolLoopEnabled,
+        Boolean toolDisclosureEnabled
 ) {
     public record RouteDebugToolResponse(
             String toolCode,

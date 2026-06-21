@@ -5,6 +5,7 @@ from typing import Any
 
 from app.core.event_types import MEMORY_REJECTED, MEMORY_SAVED
 from app.core.schemas import RunEventCreate
+from app.runtime.memory_curator import _looks_like_project_specific_content, workspace_fact_expires_at_iso
 
 _ALLOWED_MEMORY_TYPES = {
     "user_profile",
@@ -80,6 +81,25 @@ class MemoryTool:
         if rejection_reason:
             await self._emit_rejected_event("add", memory_type, title, rejection_reason)
             return {"success": False, "error": f"content rejected by security scan: {rejection_reason}"}
+        if memory_type == "workspace_fact" or _looks_like_project_specific_content(content):
+            if not hasattr(self.backend, "create_workspace_memory_candidate"):
+                return {"success": False, "error": "workspace facts require user confirmation"}
+            result = await self.backend.create_workspace_memory_candidate(
+                workspace_id=self.workspace_id,
+                user_id=self.user_id,
+                action="add",
+                memory_type=memory_type if memory_type == "workspace_fact" else "workspace_fact",
+                title=title,
+                content=content,
+                source_run_id=source_run_id,
+                importance=8,
+                confidence=0.68,
+                reason="agent_tool_project_fact_candidate",
+                expires_at=workspace_fact_expires_at_iso(),
+            )
+            memory_id = result.get("id")
+            await self._emit_saved_event("candidate", memory_id, memory_type, title)
+            return {"success": True, "memory_id": memory_id, "status": "CANDIDATE"}
         result = await self.backend.create_workspace_memory(
             workspace_id=self.workspace_id,
             user_id=self.user_id,

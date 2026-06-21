@@ -19,7 +19,11 @@ public interface AgentWorkspaceService {
 
     Long resolveWorkspaceId(Long userId, Long requestedWorkspaceId);
 
-    PageResponse<AgentWorkspaceMemoryItemResponse> listMemory(Long userId, Long workspaceId);
+    PageResponse<AgentWorkspaceMemoryItemResponse> listMemory(Long userId, Long workspaceId, String status);
+
+    AgentWorkspaceMemoryItemResponse approveMemoryCandidate(Long userId, Long workspaceId, Long memoryId);
+
+    AgentWorkspaceMemoryItemResponse rejectMemoryCandidate(Long userId, Long workspaceId, Long memoryId);
 
     AgentWorkspaceMemoryItemResponse createMemory(Long userId, Long workspaceId, CreateAgentWorkspaceMemoryRequest request);
 

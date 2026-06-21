@@ -30,6 +30,7 @@ import com.aiminilab.aitoolmarket.task.service.TaskCreditDispatchService;
 import com.aiminilab.aitoolmarket.task.service.TaskOutboxService;
 import com.aiminilab.aitoolmarket.task.service.TaskService;
 import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
+import com.aiminilab.aitoolmarket.task.support.TaskParamMediaFields;
 import com.aiminilab.aitoolmarket.task.metrics.TaskMetrics;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.AgentToolCall;
@@ -390,7 +391,7 @@ public class TaskServiceImpl implements TaskService {
             if (value == null || value.isNull()) {
                 return;
             }
-            if (value.isTextual() && looksLikeMediaField(key)) {
+            if (value.isTextual() && TaskParamMediaFields.looksLikeMediaField(key)) {
                 String resolved = agentAttachmentUrlResolver.resolveForTaskInput(userId, value.asText());
                 node.set(key, TextNode.valueOf(resolved));
                 return;
@@ -403,7 +404,7 @@ public class TaskServiceImpl implements TaskService {
                 ArrayNode array = (ArrayNode) value;
                 for (int i = 0; i < array.size(); i++) {
                     JsonNode item = array.get(i);
-                    if (item != null && item.isTextual() && looksLikeMediaField(key)) {
+                    if (item != null && item.isTextual() && TaskParamMediaFields.looksLikeMediaField(key)) {
                         array.set(i, TextNode.valueOf(agentAttachmentUrlResolver.resolveForTaskInput(userId, item.asText())));
                     } else if (item != null && item.isObject()) {
                         rewriteAttachmentUrls(userId, (ObjectNode) item);
@@ -411,18 +412,6 @@ public class TaskServiceImpl implements TaskService {
                 }
             }
         });
-    }
-
-    private boolean looksLikeMediaField(String key) {
-        if (key == null || key.isBlank()) {
-            return false;
-        }
-        String lowered = key.toLowerCase();
-        return lowered.contains("image")
-                || lowered.contains("frame")
-                || lowered.contains("url")
-                || lowered.contains("video")
-                || lowered.contains("reference");
     }
 
     private JsonNode firstTextual(JsonNode... nodes) {

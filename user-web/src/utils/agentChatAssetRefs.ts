@@ -52,6 +52,19 @@ function normalizeUrl(url: string): string {
   return resolveAgentFileUrl(url) || url
 }
 
+function attachmentBaseName(name: string): string {
+  let result = name.trim()
+  while (true) {
+    const next = result
+      .replace(/^@(?:图片|音频|视频)\d+-/i, "")
+      .replace(/^@+/, "")
+      .trim()
+    if (next === result) break
+    result = next
+  }
+  return result
+}
+
 function pushAsset(
   assets: ChatAssetRef[],
   seen: Map<string, ChatAssetRef>,
@@ -68,7 +81,7 @@ function pushAsset(
   if (existing) return
 
   counters[kind] += 1
-  const refLabel = `@${KIND_LABELS[kind]}${counters[kind]}-${truncateTitle(name)}`
+  const refLabel = `@${KIND_LABELS[kind]}${counters[kind]}-${truncateTitle(attachmentBaseName(name))}`
   const asset: ChatAssetRef = {
     assetKey,
     refLabel,

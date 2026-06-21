@@ -417,8 +417,8 @@ def test_history_for_chat_trims_default_and_memory_modes():
     default_history = _history_for_chat(context, memory_management=False)
     memory_history = _history_for_chat(context, memory_management=True)
 
-    assert len(default_history) == 20
-    assert default_history[0].content == "message-10"
+    assert len(default_history) == 5
+    assert default_history[0].content == "message-25"
     assert len(memory_history) == 8
     assert memory_history[0].content == "message-22"
 

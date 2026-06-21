@@ -34,8 +34,11 @@ public class AgentWorkspaceController {
     }
 
     @GetMapping("/{workspaceId}/memory")
-    public ApiResponse<PageResponse<AgentWorkspaceMemoryItemResponse>> listMemory(@PathVariable Long workspaceId) {
-        return ApiResponse.success(agentWorkspaceService.listMemory(AuthContext.get().userId(), workspaceId));
+    public ApiResponse<PageResponse<AgentWorkspaceMemoryItemResponse>> listMemory(
+            @PathVariable Long workspaceId,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String status
+    ) {
+        return ApiResponse.success(agentWorkspaceService.listMemory(AuthContext.get().userId(), workspaceId, status));
     }
 
     @PostMapping("/{workspaceId}/memory")
@@ -67,5 +70,21 @@ public class AgentWorkspaceController {
     public ApiResponse<Void> deleteMemory(@PathVariable Long workspaceId, @PathVariable Long memoryId) {
         agentWorkspaceService.deleteMemory(AuthContext.get().userId(), workspaceId, memoryId);
         return ApiResponse.success(null);
+    }
+
+    @PostMapping("/{workspaceId}/memory/{memoryId}/approve")
+    public ApiResponse<AgentWorkspaceMemoryItemResponse> approveMemoryCandidate(
+            @PathVariable Long workspaceId,
+            @PathVariable Long memoryId
+    ) {
+        return ApiResponse.success(agentWorkspaceService.approveMemoryCandidate(AuthContext.get().userId(), workspaceId, memoryId));
+    }
+
+    @PostMapping("/{workspaceId}/memory/{memoryId}/reject")
+    public ApiResponse<AgentWorkspaceMemoryItemResponse> rejectMemoryCandidate(
+            @PathVariable Long workspaceId,
+            @PathVariable Long memoryId
+    ) {
+        return ApiResponse.success(agentWorkspaceService.rejectMemoryCandidate(AuthContext.get().userId(), workspaceId, memoryId));
     }
 }

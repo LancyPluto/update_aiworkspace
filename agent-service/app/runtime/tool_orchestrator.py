@@ -6,7 +6,7 @@ from typing import Any
 from app.core.budget_guard import BudgetState, BudgetGuard
 from app.core.schemas import RunContext, ToolDescriptor
 from app.core.user_attachment_priority import apply_user_selected_attachment_priority
-from app.tools.backend_tool import BackendToolBridge
+from app.tools.backend_tool import BackendToolBridge, enforce_locked_field_defaults, finalize_generation_arguments
 
 
 class ToolOrchestrator:
@@ -47,17 +47,22 @@ class ToolOrchestrator:
         if arguments:
             prepared = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
             prepared.update({key: value for key, value in arguments.items() if value not in (None, "")})
-            return apply_user_selected_attachment_priority(context, tool, prepared)
+            prepared = enforce_locked_field_defaults(tool, prepared, user_message=context.message)
+            prepared = apply_user_selected_attachment_priority(context, tool, prepared)
+            return finalize_generation_arguments(context, tool, prepared)
 
         base_args = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=False)
         enriched = await self.tool_bridge.enrich_arguments(
             self.tool_bridge.conversation_argument_text(context),
             tool,
             existing_args=base_args,
+            context=context,
         )
         prepared = self.tool_bridge.build_arguments(context, tool, apply_placeholder_defaults=True)
         prepared.update({key: value for key, value in enriched.items() if value not in (None, "")})
-        return apply_user_selected_attachment_priority(context, tool, prepared)
+        prepared = enforce_locked_field_defaults(tool, prepared, user_message=context.message)
+        prepared = apply_user_selected_attachment_priority(context, tool, prepared)
+        return finalize_generation_arguments(context, tool, prepared)
 
 
 def missing_execution_arguments(arguments: dict[str, Any], tool: ToolDescriptor) -> list[str]:
