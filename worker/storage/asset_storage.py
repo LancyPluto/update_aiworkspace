@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from config import settings
@@ -10,6 +11,8 @@ try:
     import oss2
 except ImportError:  # pragma: no cover
     oss2 = None
+
+_IMAGE_EXTENSIONS = frozenset(("png", "jpg", "jpeg", "gif", "webp", "avif", "bmp"))
 
 
 class AssetStorageError(RuntimeError):
@@ -22,12 +25,15 @@ class AssetStorage:
     local_root: Path
     public_base_url: str
     private_base_url: str
+    image_transform_options: str
     oss_endpoint: str
     oss_bucket_name: str
+    oss_public_bucket_name: str
     oss_access_key_id: str
     oss_access_key_secret: str
     oss_key_prefix: str
     _bucket_client: object | None = None
+    _public_bucket_client: object | None = None
 
     @classmethod
     def from_settings(cls) -> AssetStorage:
@@ -52,12 +58,14 @@ class AssetStorage:
             local_root=Path(settings.generated_media_dir).resolve(),
             public_base_url=public_base_url,
             private_base_url=private_base_url,
+            image_transform_options=(os.getenv("ASSET_STORAGE_IMAGE_TRANSFORM_OPTIONS") or "").strip(),
             oss_endpoint=(os.getenv("OSS_ENDPOINT") or "").strip(),
             oss_bucket_name=(
                 os.getenv("OSS_PRIVATE_BUCKET")
                 or os.getenv("OSS_BUCKET")
                 or ""
             ).strip(),
+            oss_public_bucket_name=(os.getenv("OSS_PUBLIC_BUCKET") or "").strip(),
             oss_access_key_id=(
                 os.getenv("OSS_ACCESS_KEY_ID")
                 or os.getenv("ALIYUN_ACCESS_KEY_ID")
@@ -85,10 +93,23 @@ class AssetStorage:
             return self._put_oss(key, data, content_type)
         return self._put_local(key, data)
 
+    def put_bytes_public(self, relative_key: str, data: bytes, content_type: str | None = None) -> str:
+        hashed_key = self._content_hash_key(self._normalize_relative_key(relative_key), data)
+        if self.is_oss:
+            return self._put_oss_public(hashed_key, data, content_type)
+        return self._put_local(hashed_key, data)
+
     def public_url(self, relative_key: str) -> str:
         key = self._normalize_relative_key(relative_key)
         base = self.private_base_url
         return f"{base}/{key}"
+
+    def cdn_url(self, relative_key: str) -> str:
+        key = self._normalize_relative_key(relative_key)
+        raw = f"{self.public_base_url}/{key}"
+        if self._is_image_key(key) and self.image_transform_options:
+            return f"{raw}?x-oss-process={self.image_transform_options}"
+        return raw
 
     def local_path(self, relative_key: str) -> Path:
         key = self._normalize_relative_key(relative_key)
@@ -122,6 +143,19 @@ class AssetStorage:
             raise AssetStorageError(f"oss upload failed: {exc}") from exc
         return self.public_url(relative_key)
 
+    def _put_oss_public(self, relative_key: str, data: bytes, content_type: str | None) -> str:
+        self._ensure_oss_client()
+        bucket = self._public_bucket_client or self._bucket_client
+        object_key = f"{self.oss_key_prefix}{relative_key}"
+        headers = {}
+        if content_type:
+            headers["Content-Type"] = content_type
+        try:
+            bucket.put_object(object_key, data, headers=headers or None)
+        except Exception as exc:  # pragma: no cover - network
+            raise AssetStorageError(f"oss public upload failed: {exc}") from exc
+        return self.cdn_url(relative_key)
+
     def _ensure_oss_client(self) -> None:
         if not self.is_oss:
             return
@@ -138,6 +172,26 @@ class AssetStorage:
             endpoint = f"https://{endpoint}"
         auth = oss2.Auth(self.oss_access_key_id, self.oss_access_key_secret)
         self._bucket_client = oss2.Bucket(auth, endpoint, self.oss_bucket_name)
+        if self.oss_public_bucket_name and self.oss_public_bucket_name != self.oss_bucket_name:
+            self._public_bucket_client = oss2.Bucket(auth, endpoint, self.oss_public_bucket_name)
+
+    @staticmethod
+    def _content_hash_key(relative_key: str, data: bytes) -> str:
+        last_slash = relative_key.rfind("/")
+        directory = relative_key[: last_slash + 1] if last_slash >= 0 else ""
+        ext = ""
+        dot = relative_key.rfind(".")
+        if dot > max(last_slash, 0):
+            ext = relative_key[dot:]
+        digest = hashlib.sha256(data).hexdigest()[:40]
+        return f"{directory}{digest}{ext}"
+
+    @staticmethod
+    def _is_image_key(key: str) -> bool:
+        dot = key.rfind(".")
+        if dot < 0 or dot == len(key) - 1:
+            return False
+        return key[dot + 1:].lower() in _IMAGE_EXTENSIONS
 
     @staticmethod
     def _normalize_relative_key(relative_key: str) -> str:

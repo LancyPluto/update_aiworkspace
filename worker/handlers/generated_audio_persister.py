@@ -67,7 +67,7 @@ class GeneratedAudioPersister:
         safe_index = max(int(index or 1), 1)
         relative_key = f"audio/{task_id}/audio-{safe_index}{resolved_extension}"
         try:
-            url = asset_storage.put_bytes(relative_key, audio_bytes, content_type)
+            url = asset_storage.put_bytes_public(relative_key, audio_bytes, content_type)
         except Exception as exc:
             raise GeneratedAudioPersistError(f"write generated audio failed: {exc}") from exc
         path = asset_storage.local_path(relative_key)
