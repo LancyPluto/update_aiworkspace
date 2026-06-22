@@ -46,7 +46,7 @@ class GeneratedImagePersister:
             extension = self._resolve_extension(source_url, content_type)
             relative_key = f"images/{task_id}/image-{index}{extension}"
             try:
-                url = asset_storage.put_bytes(relative_key, image_bytes, content_type)
+                url = asset_storage.put_bytes_public(relative_key, image_bytes, content_type)
             except Exception as exc:
                 raise GeneratedImagePersistError(f"write generated image failed: {exc}") from exc
             path = asset_storage.local_path(relative_key)

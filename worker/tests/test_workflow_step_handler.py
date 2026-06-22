@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+import handlers.workflow_step_handler as workflow_step_handler
 from client.model_client import ModelClientError
 from handlers.workflow_step_handler import (
     WorkflowStepHandler,
@@ -257,3 +258,106 @@ def test_script_planner_does_not_report_template_success_after_two_invalid_outpu
             {},
             {"provider": "agnes_chat", "modelName": "agnes-2.0-flash"},
         )
+
+
+def test_keyframe_generates_white_background_three_view_reference_assets(monkeypatch):
+    generated_prompts: list[str] = []
+
+    def fake_image_generator(prompt: str) -> str:
+        generated_prompts.append(prompt)
+        return f"https://images.example.com/{len(generated_prompts)}.png"
+
+    class FakePersister:
+        def persist_images(self, *, task_id, urls):
+            return [
+                {"url": f"/api/v1/assets/private/images/{task_id}/image-{index}.png", "sourceUrl": url}
+                for index, url in enumerate(urls, start=1)
+            ]
+
+    monkeypatch.setattr(workflow_step_handler, "_resolve_image_generator", lambda model_config: fake_image_generator)
+    monkeypatch.setattr(workflow_step_handler, "GeneratedImagePersister", FakePersister)
+
+    handler = WorkflowStepHandler(backend_client=NoopBackendClient())
+    script = _valid_script(1)
+    script["characters"] = [{"id": "hero", "name": "Lin Che", "appearance": "silver-haired teen in a blue coat"}]
+    script["props"] = [{"id": "key", "name": "star key", "description": "glowing bronze key"}]
+    script["locations"] = [{"id": "observatory", "name": "rooftop observatory", "description": "white dome and star map"}]
+    script["scenes"][0]["characterRefs"] = ["hero"]
+    script["scenes"][0]["propRefs"] = ["key"]
+    script["scenes"][0]["locationRefs"] = ["observatory"]
+
+    result = handler._run_keyframe(
+        {"visualStyle": "cinematic comic"},
+        {"script-planner": script},
+        {"provider": "agnes_images", "modelName": "test-image"},
+        task_id=987,
+        trace_id=None,
+    )
+
+    reference_assets = result["referenceAssets"]
+    assert [asset["assetType"] for asset in reference_assets] == ["character", "prop", "location"]
+    assert [asset["assetId"] for asset in reference_assets] == ["hero", "key", "observatory"]
+    assert all(asset["imageUrl"].startswith("/api/v1/assets/private/images/987/") for asset in reference_assets)
+    assert all("pure white background" in asset["prompt"].lower() for asset in reference_assets)
+    assert all("three-view" in asset["prompt"].lower() for asset in reference_assets)
+    assert result["images"][0]["referenceAssetIds"] == ["hero", "key", "observatory"]
+    assert any("front view" in prompt.lower() and "side view" in prompt.lower() and "back view" in prompt.lower() for prompt in generated_prompts)
+
+
+def test_video_node_injects_scene_specific_reference_images_for_agnes_multi_image(monkeypatch):
+    captured_calls: list[dict] = []
+
+    def fake_video_generator(**kwargs):
+        captured_calls.append(kwargs)
+        return {"videoUrl": f"https://videos.example.com/{len(captured_calls)}.mp4"}
+
+    class FakeVideoPersister:
+        def persist_video_url(self, *, task_id, source_url, index=1):
+            return {"url": f"/api/v1/assets/private/video/{task_id}/video-{index}.mp4", "sourceUrl": source_url}
+
+    monkeypatch.setattr(workflow_step_handler, "_resolve_video_generator", lambda model_config: fake_video_generator)
+    monkeypatch.setattr(workflow_step_handler, "GeneratedVideoPersister", FakeVideoPersister)
+
+    handler = WorkflowStepHandler(backend_client=NoopBackendClient())
+    script = _valid_script(2)
+    script["scenes"][0]["characterRefs"] = ["hero"]
+    script["scenes"][0]["propRefs"] = ["key"]
+    script["scenes"][0]["locationRefs"] = ["observatory"]
+    script["scenes"][1]["characterRefs"] = ["villain"]
+    script["scenes"][1]["propRefs"] = []
+    script["scenes"][1]["locationRefs"] = ["alley"]
+
+    result = handler._run_video(
+        {"storyTheme": "multi-image injection test"},
+        {
+            "script-planner": script,
+            "keyframe": {
+                "images": [
+                    {"sceneIndex": 1, "imageUrl": "/scene-1.png", "referenceAssetIds": ["hero", "key", "observatory"]},
+                    {"sceneIndex": 2, "imageUrl": "/scene-2.png", "referenceAssetIds": ["villain", "alley"]},
+                ],
+                "referenceAssets": [
+                    {"assetId": "hero", "assetType": "character", "imageUrl": "/hero-board.png"},
+                    {"assetId": "key", "assetType": "prop", "imageUrl": "/key-board.png"},
+                    {"assetId": "observatory", "assetType": "location", "imageUrl": "/observatory-board.png"},
+                    {"assetId": "villain", "assetType": "character", "imageUrl": "/villain-board.png"},
+                    {"assetId": "alley", "assetType": "location", "imageUrl": "/alley-board.png"},
+                ],
+            },
+        },
+        {"provider": "agnes_video", "modelName": "test-agnes-video"},
+        task_id=654,
+        trace_id=None,
+    )
+
+    assert result["clips"][0]["referenceImages"] == ["/hero-board.png", "/key-board.png", "/observatory-board.png"]
+    assert result["clips"][1]["referenceImages"] == ["/villain-board.png", "/alley-board.png"]
+    assert captured_calls[0]["image"] == "/scene-1.png"
+    assert captured_calls[0]["reference_images"] == ["/hero-board.png", "/key-board.png", "/observatory-board.png"]
+    assert captured_calls[1]["image"] == "/scene-2.png"
+    assert captured_calls[1]["reference_images"] == ["/villain-board.png", "/alley-board.png"]
+
+
+class NoopBackendClient:
+    def mark_processing(self, *args, **kwargs):
+        return None

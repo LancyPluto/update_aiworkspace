@@ -193,6 +193,12 @@ public class AssetStorageService {
         String normalized = url.trim();
         if (normalized.startsWith("http://") || normalized.startsWith("https://")) {
             if (isOssMode()) {
+                if (normalized.contains("/cdn/")) {
+                    AssetReference ref = parseManagedAssetUrl(normalized);
+                    if (ref != null) {
+                        return urlForKey(ref.relativeKey(), AssetVisibility.PUBLIC);
+                    }
+                }
                 return normalized;
             }
             String relative = relativeKeyFromPublicUrl(normalized);
@@ -371,10 +377,17 @@ public class AssetStorageService {
                 return new AssetReference(storage.getOssPrivateBucket(), storage.getOssKeyPrefix() + relative, relative);
             }
         }
-        // Handle legacy /generated/ paths
+        // Handle legacy /generated/ paths. Some historical public assets were also
+        // stored under /generated/, so route them back to the correct bucket by key.
         if (normalized.startsWith(GENERATED_PREFIX) && !storage.getOssPrivateBucket().isBlank()) {
             String relative = normalizeRelativeKey(normalized.substring(GENERATED_PREFIX.length()));
-            return new AssetReference(storage.getOssPrivateBucket(), storage.getOssKeyPrefix() + relative, relative);
+            String bucket = legacyGeneratedBucket(storage, relative);
+            return new AssetReference(bucket, storage.getOssKeyPrefix() + relative, relative);
+        }
+        int cdnPrefixIdx = normalized.indexOf("/cdn/");
+        if (cdnPrefixIdx >= 0 && !storage.getOssPublicBucket().isBlank()) {
+            String relative = normalizeRelativeKey(normalized.substring(cdnPrefixIdx + "/cdn/".length()));
+            return new AssetReference(storage.getOssPublicBucket(), storage.getOssKeyPrefix() + relative, relative);
         }
         String bucketFromHost = bucketFromOssHost(normalized);
         if (bucketFromHost == null || !knownBuckets(storage).contains(bucketFromHost)) {
@@ -417,6 +430,21 @@ public class AssetStorageService {
         if (!storage.getOssPrivateBucket().isBlank()) buckets.add(storage.getOssPrivateBucket());
         if (!storage.getOssLegacyBucket().isBlank()) buckets.add(storage.getOssLegacyBucket());
         return buckets;
+    }
+
+    private static String legacyGeneratedBucket(AppProperties.AssetStorage storage, String relativeKey) {
+        String normalized = normalizeRelativeKey(relativeKey);
+        if (isLegacyPublicKey(normalized) && !storage.getOssPublicBucket().isBlank()) {
+            return storage.getOssPublicBucket();
+        }
+        return storage.getOssPrivateBucket();
+    }
+
+    private static boolean isLegacyPublicKey(String relativeKey) {
+        return relativeKey.startsWith("tool-covers/")
+                || relativeKey.startsWith("avatars/")
+                || relativeKey.startsWith("icons/")
+                || relativeKey.startsWith("customer-service/");
     }
 
     private static String bucketFor(AssetVisibility visibility, AppProperties.AssetStorage storage) {
@@ -488,6 +516,39 @@ public class AssetStorageService {
             return value;
         }
         return "https://" + value;
+    }
+
+    public String ossDirectUrl(String relativeKey, String bucket) {
+        AppProperties.AssetStorage storage = appProperties.getAssetStorage();
+        String normalizedKey = normalizeRelativeKey(relativeKey);
+        String objectKey = storage.getOssKeyPrefix() + normalizedKey;
+        String endpoint = storage.getOssEndpoint();
+        if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) {
+            int schemeEnd = endpoint.indexOf("://") + 3;
+            return endpoint.substring(0, schemeEnd) + bucket + "." + endpoint.substring(schemeEnd) + "/" + objectKey;
+        }
+        return "https://" + bucket + "." + endpoint + "/" + objectKey;
+    }
+
+    public String rewriteResultUrl(String url, boolean forAdmin) {
+        if (url == null || url.isBlank()) {
+            return url;
+        }
+        AssetReference ref = parseManagedAssetUrl(url);
+        if (ref == null) {
+            return url;
+        }
+        if (forAdmin) {
+            if (!isOssMode()) {
+                return urlForKey(ref.relativeKey(), AssetVisibility.PRIVATE);
+            }
+            return ossDirectUrl(ref.relativeKey(), ref.bucket());
+        }
+        AppProperties.AssetStorage storage = appProperties.getAssetStorage();
+        if (ref.bucket().equals(storage.getOssPublicBucket())) {
+            return urlForKey(ref.relativeKey(), AssetVisibility.PUBLIC);
+        }
+        return urlForKey(ref.relativeKey(), AssetVisibility.PRIVATE);
     }
 
     public String generateSignedUrl(String relativeKey, AssetVisibility visibility, int expirationSeconds) {

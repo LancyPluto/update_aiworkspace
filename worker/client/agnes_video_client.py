@@ -80,6 +80,7 @@ class AgnesVideoClient:
         model: str | None = None,
         image: str = "",
         image_tail: str = "",
+        images: list[str] | None = None,
         seed: int | None = None,
         duration: str = "",
         aspect_ratio: str = "",
@@ -104,6 +105,7 @@ class AgnesVideoClient:
             model=model,
             image=image,
             image_tail=image_tail,
+            images=images,
             seed=seed,
             duration=duration,
             aspect_ratio=aspect_ratio,
@@ -202,6 +204,7 @@ class AgnesVideoClient:
         model: str,
         image: str,
         image_tail: str,
+        images: list[str] | None,
         seed: int | None,
         duration: str,
         aspect_ratio: str,
@@ -226,15 +229,18 @@ class AgnesVideoClient:
         if resolution.strip():
             payload["resolution"] = resolution.strip()
 
-        images = [self._image_to_model_input(value.strip()) for value in (image, image_tail) if value and value.strip()]
+        raw_images = [value for value in (images or []) if isinstance(value, str) and value.strip()]
+        if not raw_images:
+            raw_images = [value for value in (image, image_tail) if value and value.strip()]
+        model_images = [self._image_to_model_input(value.strip()) for value in raw_images]
         mode = mode.strip()
-        if len(images) > 1:
-            extra_body: dict[str, Any] = {"image": images}
+        if len(model_images) > 1:
+            extra_body: dict[str, Any] = {"image": model_images}
             if mode:
                 extra_body["mode"] = mode
             payload["extra_body"] = extra_body
-        elif images:
-            payload["image"] = images[0]
+        elif model_images:
+            payload["image"] = model_images[0]
         elif mode:
             payload["extra_body"] = {"mode": mode}
         return payload

@@ -264,7 +264,7 @@ public class ToolServiceImpl implements ToolService {
         List<ToolSummaryResponse> list = toolMapper
                 .findTools(false, keyword, categoryId, status, normalizedPageSize, offset)
                 .stream()
-                .map(this::toEstimatedSummary)
+                .map(this::toAdminSummary)
                 .toList();
         long total = toolMapper.countTools(false, keyword, categoryId, status);
         return PageResponse.of(list, total, pageNo, pageSize);
@@ -272,7 +272,7 @@ public class ToolServiceImpl implements ToolService {
 
     @Override
     public ToolDetailResponse adminToolDetail(Long toolId) {
-        ToolSummaryResponse summary = findToolSummary(toolId);
+        ToolSummaryResponse summary = findAdminToolSummary(toolId);
         return ToolDetailResponse.of(summary, fields(toolId));
     }
 
@@ -576,14 +576,30 @@ public class ToolServiceImpl implements ToolService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
     }
 
+    private ToolSummaryResponse findAdminToolSummary(Long toolId) {
+        return toolMapper.findById(toolId)
+                .map(this::toAdminSummary)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+    }
+
     private ToolSummaryResponse toEstimatedSummary(AiTool tool) {
         return sanitizeCoverUrl(
+                ToolSummaryResponse.from(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool)));
+    }
+
+    private ToolSummaryResponse toAdminSummary(AiTool tool) {
+        return sanitizeCoverUrlForAdmin(
                 ToolSummaryResponse.from(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool)));
     }
 
     private ToolSummaryResponse sanitizeCoverUrl(ToolSummaryResponse summary) {
         return summary.withSanitizedCoverUrl(
                 generatedMediaPathSupport.resolveExistingPublicUrl(summary.coverUrl()));
+    }
+
+    private ToolSummaryResponse sanitizeCoverUrlForAdmin(ToolSummaryResponse summary) {
+        return summary.withSanitizedCoverUrl(
+                assetStorageService.rewriteResultUrl(summary.coverUrl(), true));
     }
 
     private AiTool fromRequest(UpsertToolRequest request) {

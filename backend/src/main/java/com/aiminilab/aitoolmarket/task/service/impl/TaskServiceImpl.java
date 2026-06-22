@@ -35,6 +35,7 @@ import com.aiminilab.aitoolmarket.task.metrics.TaskMetrics;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.AgentToolCall;
 import com.aiminilab.aitoolmarket.agent.service.AgentAttachmentUrlResolver;
+import com.aiminilab.aitoolmarket.storage.AssetStorageService;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -72,6 +73,7 @@ public class TaskServiceImpl implements TaskService {
     private final CommunityEventMapper communityEventMapper;
     private final CommunityPostMapper communityPostMapper;
     private final AgentAttachmentUrlResolver agentAttachmentUrlResolver;
+    private final AssetStorageService assetStorageService;
     private final WorkflowExecutionService workflowExecutionService;
 
     public TaskServiceImpl(
@@ -90,6 +92,7 @@ public class TaskServiceImpl implements TaskService {
             CommunityEventMapper communityEventMapper,
             CommunityPostMapper communityPostMapper,
             AgentAttachmentUrlResolver agentAttachmentUrlResolver,
+            AssetStorageService assetStorageService,
             @Lazy WorkflowExecutionService workflowExecutionService
     ) {
         this.taskMapper = taskMapper;
@@ -107,6 +110,7 @@ public class TaskServiceImpl implements TaskService {
         this.communityEventMapper = communityEventMapper;
         this.communityPostMapper = communityPostMapper;
         this.agentAttachmentUrlResolver = agentAttachmentUrlResolver;
+        this.assetStorageService = assetStorageService;
         this.workflowExecutionService = workflowExecutionService;
     }
 
@@ -179,7 +183,7 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public TaskDetailResponse detail(Long userId, Long taskId) {
-        return toDetail(findTask(taskId, userId));
+        return toDetail(findTask(taskId, userId), false);
     }
 
     @Override
@@ -189,7 +193,7 @@ public class TaskServiceImpl implements TaskService {
         List<TaskDetailResponse> tasks = taskMapper
                 .findByUserId(userId, status, toolCode, normalizedPageSize, offset)
                 .stream()
-                .map(this::toDetail)
+                .map(t -> toDetail(t, false))
                 .toList();
         long total = taskMapper.countByUserId(userId, status, toolCode);
         return PageResponse.of(tasks, total, pageNo, pageSize);
@@ -237,7 +241,7 @@ public class TaskServiceImpl implements TaskService {
         int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
         int offset = PageResponse.offset(pageNo, pageSize);
         List<TaskDetailResponse> tasks = taskMapper.findForAdmin(status, toolCode, userId, taskId, normalizedPageSize, offset).stream()
-                .map(this::toDetail)
+                .map(t -> toDetail(t, true))
                 .toList();
         long total = taskMapper.countForAdmin(status, toolCode, userId, taskId);
         return PageResponse.of(tasks, total, pageNo, pageSize);
@@ -245,7 +249,7 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public TaskDetailResponse adminDetail(Long taskId) {
-        return toDetail(findTask(taskId));
+        return toDetail(findTask(taskId), true);
     }
 
     @Override
@@ -331,8 +335,9 @@ public class TaskServiceImpl implements TaskService {
         return taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig, params);
     }
 
-    private TaskDetailResponse toDetail(AiTask task) {
+    private TaskDetailResponse toDetail(AiTask task, boolean forAdmin) {
         TaskResultResponse result = taskMapper.findFirstResult(task.getId()).orElse(null);
+        result = rewriteResultUrls(result, forAdmin);
         int consumedCredits = taskMapper.sumConsumedCreditsByTaskId(task.getId());
         AgentTaskSourceResponse agentSource = agentToolCallMapper.findByTaskId(task.getId())
                 .map(this::toAgentTaskSource)
@@ -343,6 +348,42 @@ public class TaskServiceImpl implements TaskService {
                 .map(post -> post.getId())
                 .orElse(null);
         return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result, agentSource, communityPostId, consumedCredits);
+    }
+
+    private TaskResultResponse rewriteResultUrls(TaskResultResponse result, boolean forAdmin) {
+        if (result == null || result.contentText() == null || result.contentText().isBlank()) {
+            return result;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(result.contentText());
+            if (root.isObject()) {
+                rewriteUrlFields((ObjectNode) root, forAdmin);
+                return new TaskResultResponse(result.resourceType(), objectMapper.writeValueAsString(root));
+            }
+        } catch (Exception ignored) {
+        }
+        return result;
+    }
+
+    private void rewriteUrlFields(ObjectNode node, boolean forAdmin) {
+        node.fields().forEachRemaining(entry -> {
+            JsonNode value = entry.getValue();
+            if (value == null || value.isNull()) return;
+            if (value.isTextual() && "url".equals(entry.getKey())) {
+                String rewritten = assetStorageService.rewriteResultUrl(value.asText(), forAdmin);
+                if (rewritten != null && !rewritten.equals(value.asText())) {
+                    node.put(entry.getKey(), rewritten);
+                }
+            } else if (value.isObject()) {
+                rewriteUrlFields((ObjectNode) value, forAdmin);
+            } else if (value.isArray()) {
+                for (JsonNode item : value) {
+                    if (item.isObject()) {
+                        rewriteUrlFields((ObjectNode) item, forAdmin);
+                    }
+                }
+            }
+        });
     }
 
     private AgentTaskSourceResponse toAgentTaskSource(AgentToolCall call) {
