@@ -34,9 +34,11 @@ class AssetStorageServiceTest {
         AssetStorageService service = new AssetStorageService(properties);
         service.init();
 
-        StoredAsset stored = service.storeBytes("uploads/20260611/demo.txt", "hello".getBytes(), "text/plain");
-        assertEquals("/generated/uploads/20260611/demo.txt", stored.publicUrl());
-        assertTrue(Files.exists(tempDir.resolve("uploads/20260611/demo.txt")));
+        byte[] data = "hello".getBytes();
+        StoredAsset stored = service.storeBytes("uploads/20260611/demo.txt", data, "text/plain");
+        String expectedKey = AssetStorageService.contentHashKey("uploads/20260611/demo.txt", data);
+        assertEquals("/generated/" + expectedKey, stored.publicUrl());
+        assertTrue(Files.exists(tempDir.resolve(expectedKey)));
         assertNotNull(service.resolveExistingPublicUrl(stored.publicUrl()));
     }
 

@@ -927,6 +927,39 @@ public class ToolServiceImpl implements ToolService {
         }
     }
 
+    @Override
+    @Transactional
+    public int adminMigrateCovers() {
+        if (!assetStorageService.isOssMode()) {
+            return 0;
+        }
+        List<AiTool> tools = toolMapper.selectList(
+                new LambdaQueryWrapper<AiTool>().eq(AiTool::getDeleted, false));
+        int migrated = 0;
+        for (AiTool tool : tools) {
+            String coverUrl = tool.getCoverUrl();
+            if (coverUrl == null || coverUrl.isBlank()) continue;
+            if (!coverUrl.startsWith("/generated/")) continue;
+            try {
+                String relativeKey = coverUrl.substring("/generated/".length());
+                Path localFile = assetStorageService.localAbsolutePath(relativeKey);
+                if (!Files.exists(localFile)) {
+                    log.warn("Tool cover local file missing: toolId={}, path={}", tool.getId(), localFile);
+                    continue;
+                }
+                byte[] data = Files.readAllBytes(localFile);
+                String contentType = Files.probeContentType(localFile);
+                StoredAsset stored = assetStorageService.storeBytesPublic(relativeKey, data, contentType);
+                toolMapper.updateCoverUrl(tool.getId(), stored.publicUrl());
+                migrated++;
+                log.info("Migrated tool cover to OSS: toolId={}, key={}", tool.getId(), relativeKey);
+            } catch (Exception e) {
+                log.warn("Failed to migrate tool cover: toolId={}, coverUrl={}", tool.getId(), coverUrl, e);
+            }
+        }
+        return migrated;
+    }
+
     private void invalidateUserToolCaches(Long toolId) {
         toolMapper.findById(toolId)
                 .ifPresent(tool -> bypassCacheService.invalidateToolCatalog(tool.getToolCode()));

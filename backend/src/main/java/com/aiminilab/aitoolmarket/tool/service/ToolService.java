@@ -83,4 +83,6 @@ public interface ToolService {
     TestGenerateResponse testGenerate(Long promptVersionId, TestGenerateRequest request);
 
     PromptVersionResponse publishPromptVersion(Long promptVersionId);
+
+    int adminMigrateCovers();
 }

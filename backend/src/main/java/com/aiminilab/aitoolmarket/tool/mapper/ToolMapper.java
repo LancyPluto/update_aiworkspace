@@ -212,6 +212,13 @@ public interface ToolMapper extends BaseMapper<AiTool> {
 
     @Update("""
             UPDATE ai_tools
+            SET cover_url = #{coverUrl}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{toolId} AND is_deleted = 0
+            """)
+    void updateCoverUrl(@Param("toolId") Long toolId, @Param("coverUrl") String coverUrl);
+
+    @Update("""
+            UPDATE ai_tools
             SET is_deleted = 1,
                 status = 'OFFLINE',
                 updated_by = #{operatorId},

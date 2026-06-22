@@ -22,8 +22,11 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -136,27 +139,25 @@ public class AssetStorageService {
 
     private StoredAsset storeBytesForVisibility(String relativeKey, byte[] data, String contentType, AssetVisibility visibility) {
         String normalizedKey = normalizeRelativeKey(relativeKey);
+        String hashedKey = contentHashKey(normalizedKey, data);
         if (isOssMode()) {
-            return storeToOss(normalizedKey, data, contentType, visibility);
+            return storeToOss(hashedKey, data, contentType, visibility);
         }
-        return storeToLocal(normalizedKey, data);
+        return storeToLocal(hashedKey, data);
     }
 
     public StoredAsset storeStream(String relativeKey, InputStream stream, long size, String contentType) {
         String normalizedKey = normalizeRelativeKey(relativeKey);
-        if (isOssMode()) {
-            try {
-                byte[] data = stream.readAllBytes();
-                return storeToOss(normalizedKey, data, contentType, AssetVisibility.PRIVATE);
-            } catch (IOException exception) {
-                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "file save failed");
-            }
-        }
-        Path target = localAbsolutePath(normalizedKey);
         try {
+            byte[] data = stream.readAllBytes();
+            String hashedKey = contentHashKey(normalizedKey, data);
+            if (isOssMode()) {
+                return storeToOss(hashedKey, data, contentType, AssetVisibility.PRIVATE);
+            }
+            Path target = localAbsolutePath(hashedKey);
             Files.createDirectories(target.getParent());
-            Files.copy(stream, target);
-            return new StoredAsset(normalizedKey, publicUrlForKey(normalizedKey), target.toString());
+            Files.write(target, data);
+            return new StoredAsset(hashedKey, publicUrlForKey(hashedKey), target.toString());
         } catch (IOException exception) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "file save failed");
         }
@@ -449,6 +450,22 @@ public class AssetStorageService {
         if (query >= 0) end = Math.min(end, query);
         if (hash >= 0) end = Math.min(end, hash);
         return value.substring(0, end);
+    }
+
+    static String contentHashKey(String relativeKey, byte[] data) {
+        int lastSlash = relativeKey.lastIndexOf('/');
+        String dir = lastSlash >= 0 ? relativeKey.substring(0, lastSlash + 1) : "";
+        String ext = "";
+        int dot = relativeKey.lastIndexOf('.');
+        if (dot > Math.max(lastSlash, 0)) {
+            ext = relativeKey.substring(dot);
+        }
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest(data);
+            return dir + HexFormat.of().formatHex(hash).substring(0, 40) + ext;
+        } catch (NoSuchAlgorithmException e) {
+            return relativeKey;
+        }
     }
 
     private static String normalizeRelativeKey(String relativeKey) {
