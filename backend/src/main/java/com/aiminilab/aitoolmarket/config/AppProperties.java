@@ -871,7 +871,7 @@ public class AppProperties {
         private String ossAccessKeySecret = "";
         /** Optional key prefix inside the bucket, e.g. {@code prod/} or {@code dev/}. */
         private String ossKeyPrefix = "";
-        /** Cloudflare Image Transformations options, e.g. {@code format=auto,quality=85}. When set, public image URLs use {@code /cdn-cgi/image/<options>/} prefix. */
+        /** OSS Image Processing options, e.g. {@code image/format,webp/quality,Q_85}. When set, public image URLs append {@code ?x-oss-process=<options>}. */
         private String imageTransformOptions = "";
 
         public String getProvider() {
