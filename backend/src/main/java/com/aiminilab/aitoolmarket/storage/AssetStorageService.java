@@ -39,6 +39,7 @@ public class AssetStorageService {
     private static final String GENERATED_PREFIX = "/generated/";
     private static final Set<String> IMAGE_EXTENSIONS = Set.of("png", "jpg", "jpeg", "gif", "webp", "avif", "bmp");
     private static final Pattern CF_IMAGE_TRANSFORM = Pattern.compile("^(https?://[^/]+)/cdn-cgi/image/[^/]+(/.*)");
+    private static final Pattern OSS_PROCESS_SUFFIX = Pattern.compile("^(.*?)\\?x-oss-process=.*$");
 
     private final AppProperties appProperties;
     private final Path localRoot;
@@ -332,13 +333,7 @@ public class AssetStorageService {
     private String applyImageTransform(String url) {
         String options = appProperties.getAssetStorage().getImageTransformOptions();
         if (options.isBlank()) return url;
-        try {
-            java.net.URI uri = java.net.URI.create(url);
-            String authority = uri.getScheme() + "://" + uri.getAuthority();
-            return authority + "/cdn-cgi/image/" + options + uri.getPath();
-        } catch (Exception e) {
-            return url;
-        }
+        return url + "?x-oss-process=" + options;
     }
 
     private String relativeKeyFromPublicUrl(String url) {
@@ -440,8 +435,11 @@ public class AssetStorageService {
     }
 
     private static String stripImageTransformPrefix(String url) {
-        Matcher m = CF_IMAGE_TRANSFORM.matcher(url);
-        return m.matches() ? m.group(1) + m.group(2) : url;
+        Matcher cfMatcher = CF_IMAGE_TRANSFORM.matcher(url);
+        if (cfMatcher.matches()) return cfMatcher.group(1) + cfMatcher.group(2);
+        Matcher ossMatcher = OSS_PROCESS_SUFFIX.matcher(url);
+        if (ossMatcher.matches()) return ossMatcher.group(1);
+        return url;
     }
 
     private static String stripQueryAndFragment(String value) {
