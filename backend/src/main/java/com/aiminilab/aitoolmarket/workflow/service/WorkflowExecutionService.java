@@ -868,6 +868,10 @@ public class WorkflowExecutionService {
         if (keyframeImages != null) {
             preview.set("images", keyframeImages);
         }
+        JsonNode referenceAssets = summarizeReferenceAssets(context.path("keyframe").path("referenceAssets"));
+        if (referenceAssets != null) {
+            preview.set("referenceAssets", referenceAssets);
+        }
         String audioUrl = text(context.path("tts"), "audioUrl");
         if (audioUrl == null || audioUrl.isBlank()) {
             audioUrl = text(context.path("tts"), "audioDataUrl");
@@ -882,6 +886,10 @@ public class WorkflowExecutionService {
         String videoUrl = text(context.path("clip-video"), "videoUrl");
         if (videoUrl != null && !videoUrl.isBlank()) {
             preview.put("videoUrl", videoUrl);
+        }
+        JsonNode sceneClips = summarizeSceneMediaList(context.path("clip-video").path("clips"), "videoUrl");
+        if (sceneClips != null) {
+            preview.set("clips", sceneClips);
         }
         JsonNode compose = context.path("compose");
         if (compose.isMissingNode()) {
@@ -910,10 +918,12 @@ public class WorkflowExecutionService {
             case "scriptFeedback", "storyboardFeedback" -> {
                 preview.remove("imageUrl");
                 preview.remove("images");
+                preview.remove("referenceAssets");
                 preview.remove("audioUrl");
                 preview.remove("audios");
                 preview.remove("videoUrl");
                 preview.remove("finalVideoUrl");
+                preview.remove("clips");
             }
             case "sceneFeedback" -> {
                 // 场景图阶段保留 script.scenes（用于逐镜对照），仅过滤音视频
@@ -921,13 +931,16 @@ public class WorkflowExecutionService {
                 preview.remove("audios");
                 preview.remove("videoUrl");
                 preview.remove("finalVideoUrl");
+                preview.remove("clips");
             }
             case "bgmFeedback" -> {
                 preview.remove("script");
                 preview.remove("imageUrl");
                 preview.remove("images");
+                preview.remove("referenceAssets");
                 preview.remove("videoUrl");
                 preview.remove("finalVideoUrl");
+                preview.remove("clips");
             }
             default -> {
                 // no-op
@@ -956,12 +969,37 @@ public class WorkflowExecutionService {
             }
             entry.put(urlField, url);
             copyTextField(entry, item, "speechText");
+            copyArrayField(entry, item, "referenceAssetIds");
+            copyArrayField(entry, item, "referenceImages");
             result.add(entry);
         }
         return result.isEmpty() ? null : result;
     }
 
     /** Shallow script preview for API responses — avoids deep LLM JSON blowing Jackson nesting limits. */
+    private JsonNode summarizeReferenceAssets(JsonNode list) {
+        if (list == null || !list.isArray() || list.isEmpty()) {
+            return null;
+        }
+        var result = objectMapper.createArrayNode();
+        for (JsonNode item : list) {
+            if (item == null || !item.isObject()) {
+                continue;
+            }
+            String imageUrl = text(item, "imageUrl");
+            if (imageUrl == null || imageUrl.isBlank()) {
+                continue;
+            }
+            ObjectNode entry = objectMapper.createObjectNode();
+            copyTextField(entry, item, "assetType");
+            copyTextField(entry, item, "assetId");
+            copyTextField(entry, item, "name");
+            entry.put("imageUrl", imageUrl);
+            result.add(entry);
+        }
+        return result.isEmpty() ? null : result;
+    }
+
     private JsonNode summarizeScriptPreview(JsonNode script) {
         if (script == null || script.isMissingNode() || script.isNull()) {
             return null;
@@ -996,6 +1034,7 @@ public class WorkflowExecutionService {
         copyTextField(summary, source, "screenplay");
         copyTextField(summary, source, "genre");
         copyArrayField(summary, source, "characters");
+        copyArrayField(summary, source, "props");
         copyArrayField(summary, source, "locations");
         JsonNode sceneCount = source.get("sceneCount");
         if (sceneCount != null && sceneCount.isNumber()) {
@@ -1028,6 +1067,9 @@ public class WorkflowExecutionService {
                 copyTextField(sceneSummary, scene, "imageToVideoPrompt");
                 copyTextField(sceneSummary, scene, "multiImageVideoPrompt");
                 copyTextField(sceneSummary, scene, "keyframeTransitionPrompt");
+                copyArrayField(sceneSummary, scene, "characterRefs");
+                copyArrayField(sceneSummary, scene, "propRefs");
+                copyArrayField(sceneSummary, scene, "locationRefs");
                 JsonNode durationSeconds = scene.get("durationSeconds");
                 if (durationSeconds != null && durationSeconds.isNumber()) {
                     sceneSummary.put("durationSeconds", durationSeconds.asInt());
