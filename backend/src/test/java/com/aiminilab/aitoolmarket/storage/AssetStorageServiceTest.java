@@ -82,6 +82,35 @@ class AssetStorageServiceTest {
     }
 
     @Test
+    void resolvesLegacyToolCoverUrlToOssPublicBaseWhenObjectExists() throws Exception {
+        AppProperties properties = new AppProperties();
+        properties.getAssetStorage().setProvider("oss");
+        properties.getAssetStorage().setOssEndpoint("oss-cn-guangzhou.aliyuncs.com");
+        properties.getAssetStorage().setOssPublicBucket("wlcloudai-assets-public");
+        properties.getAssetStorage().setOssPrivateBucket("wlcloudai-assets-private");
+        properties.getAssetStorage().setPublicBaseUrl(
+                "https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com"
+        );
+
+        AssetStorageService service = new AssetStorageService(properties);
+        OSS oss = mock(OSS.class);
+        Field field = AssetStorageService.class.getDeclaredField("ossClient");
+        field.setAccessible(true);
+        field.set(service, oss);
+        when(oss.doesObjectExist("wlcloudai-assets-public", "tool-covers/kling-preview.mp4")).thenReturn(true);
+
+        String legacy = "/generated/tool-covers/kling-preview.mp4";
+        assertEquals(
+                "https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com/tool-covers/kling-preview.mp4",
+                service.resolveExistingPublicUrl(legacy)
+        );
+        assertEquals(
+                "https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com/tool-covers/kling-preview.mp4",
+                service.normalizeLegacyPublicUrl(legacy)
+        );
+    }
+
+    @Test
     void generatesOneHourPrivateOssUrlForWorkerAtReadTime() throws Exception {
         AppProperties properties = new AppProperties();
         properties.getAssetStorage().setProvider("oss");

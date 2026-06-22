@@ -602,13 +602,20 @@ public class ToolServiceImpl implements ToolService {
                 assetStorageService.rewriteResultUrl(summary.coverUrl(), true));
     }
 
+    private String normalizeStoredCoverUrl(String coverUrl) {
+        if (coverUrl == null || coverUrl.isBlank()) {
+            return coverUrl;
+        }
+        return assetStorageService.migrateLegacyPublicUrl(coverUrl.trim());
+    }
+
     private AiTool fromRequest(UpsertToolRequest request) {
         AiTool tool = new AiTool();
         tool.setToolCode(request.toolCode());
         tool.setToolName(request.toolName());
         tool.setCategoryId(request.categoryId());
         tool.setDescription(request.description());
-        tool.setCoverUrl(request.coverUrl());
+        tool.setCoverUrl(normalizeStoredCoverUrl(request.coverUrl()));
         ToolType toolType = ToolType.fromNullable(request.toolType());
         tool.setToolType(toolType.name());
         tool.setInputModality(normalizeInputModality(toolType, request.inputModality()).name());
@@ -955,20 +962,14 @@ public class ToolServiceImpl implements ToolService {
         for (AiTool tool : tools) {
             String coverUrl = tool.getCoverUrl();
             if (coverUrl == null || coverUrl.isBlank()) continue;
-            if (!coverUrl.startsWith("/generated/")) continue;
             try {
-                String relativeKey = coverUrl.substring("/generated/".length());
-                Path localFile = assetStorageService.localAbsolutePath(relativeKey);
-                if (!Files.exists(localFile)) {
-                    log.warn("Tool cover local file missing: toolId={}, path={}", tool.getId(), localFile);
-                    continue;
+                String migratedUrl = assetStorageService.migrateLegacyPublicUrl(coverUrl);
+                if (!migratedUrl.equals(coverUrl)) {
+                    toolMapper.updateCoverUrl(tool.getId(), migratedUrl);
+                    migrated++;
+                    log.info("Migrated tool cover to OSS: toolId={}, from={}, to={}",
+                            tool.getId(), coverUrl, migratedUrl);
                 }
-                byte[] data = Files.readAllBytes(localFile);
-                String contentType = Files.probeContentType(localFile);
-                StoredAsset stored = assetStorageService.storeBytesPublic(relativeKey, data, contentType);
-                toolMapper.updateCoverUrl(tool.getId(), stored.publicUrl());
-                migrated++;
-                log.info("Migrated tool cover to OSS: toolId={}, key={}", tool.getId(), relativeKey);
             } catch (Exception e) {
                 log.warn("Failed to migrate tool cover: toolId={}, coverUrl={}", tool.getId(), coverUrl, e);
             }

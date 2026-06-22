@@ -220,10 +220,89 @@ public class AssetStorageService {
             return null;
         }
         if (isOssMode()) {
+            if (isLegacyPublicKey(relative)) {
+                if (publicObjectExists(relative)) {
+                    return urlForKey(relative, AssetVisibility.PUBLIC);
+                }
+                Path file = localAbsolutePath(relative);
+                if (Files.exists(file)) {
+                    return normalized;
+                }
+            }
             return normalized;
         }
         Path file = localAbsolutePath(relative);
         return Files.exists(file) ? normalized : null;
+    }
+
+    /**
+     * Rewrites legacy {@code /generated/...} public asset URLs to the configured OSS public base URL
+     * when the object already exists in the public bucket.
+     */
+    public String normalizeLegacyPublicUrl(String url) {
+        if (url == null || url.isBlank() || !isOssMode()) {
+            return url;
+        }
+        AssetReference ref = parseManagedAssetUrl(url.trim());
+        if (ref == null || !isLegacyPublicKey(ref.relativeKey())) {
+            return url;
+        }
+        if (!publicObjectExists(ref.relativeKey())) {
+            return url;
+        }
+        return urlForKey(ref.relativeKey(), AssetVisibility.PUBLIC);
+    }
+
+    public String migrateLegacyPublicUrl(String url) {
+        if (url == null || url.isBlank() || !isOssMode()) {
+            return url;
+        }
+        String trimmed = url.trim();
+        if (!trimmed.startsWith(GENERATED_PREFIX)) {
+            return normalizeLegacyPublicUrl(trimmed);
+        }
+        String relativeKey = trimmed.substring(GENERATED_PREFIX.length());
+        if (relativeKey.isBlank() || relativeKey.contains("..") || !isLegacyPublicKey(relativeKey)) {
+            return url;
+        }
+        try {
+            relativeKey = URLDecoder.decode(relativeKey, StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException ignored) {
+            return url;
+        }
+        if (publicObjectExists(relativeKey)) {
+            return urlForKey(relativeKey, AssetVisibility.PUBLIC);
+        }
+        Path localFile = localAbsolutePath(relativeKey);
+        if (!Files.exists(localFile)) {
+            return url;
+        }
+        try {
+            byte[] data = Files.readAllBytes(localFile);
+            String contentType = Files.probeContentType(localFile);
+            return storeBytesPublic(relativeKey, data, contentType).publicUrl();
+        } catch (IOException exception) {
+            log.warn("Failed to migrate legacy public asset: key={}", relativeKey, exception);
+            return url;
+        }
+    }
+
+    public boolean publicObjectExists(String relativeKey) {
+        if (!isOssMode() || ossClient == null) {
+            return false;
+        }
+        AppProperties.AssetStorage storage = appProperties.getAssetStorage();
+        String bucket = storage.getOssPublicBucket();
+        if (bucket.isBlank()) {
+            return false;
+        }
+        String objectKey = storage.getOssKeyPrefix() + normalizeRelativeKey(relativeKey);
+        try {
+            return ossClient.doesObjectExist(bucket, objectKey);
+        } catch (RuntimeException exception) {
+            log.warn("OSS existence check failed: bucket={}, key={}", bucket, objectKey, exception);
+            return false;
+        }
     }
 
     public Path localAbsolutePath(String relativeKey) {
