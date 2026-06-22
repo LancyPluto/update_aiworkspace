@@ -284,6 +284,19 @@ public class AssetStorageService {
         String targetBucket = bucketFor(targetVisibility, storage);
         String targetKey = storage.getOssKeyPrefix() + source.relativeKey();
         if (source.bucket().equals(targetBucket) && source.objectKey().equals(targetKey)) {
+            if (ossClient.doesObjectExist(targetBucket, targetKey)) {
+                return urlForKey(source.relativeKey(), targetVisibility);
+            }
+            for (String fallback : knownBuckets(storage)) {
+                if (fallback.equals(targetBucket)) continue;
+                if (ossClient.doesObjectExist(fallback, targetKey)) {
+                    ossClient.copyObject(new CopyObjectRequest(fallback, targetKey, targetBucket, targetKey));
+                    ossClient.deleteObject(fallback, targetKey);
+                    log.info("OSS asset recovered: oss://{}/{} -> oss://{}/{}", fallback, targetKey, targetBucket, targetKey);
+                    return urlForKey(source.relativeKey(), targetVisibility);
+                }
+            }
+            log.warn("OSS asset missing from all buckets: key={}", targetKey);
             return urlForKey(source.relativeKey(), targetVisibility);
         }
         try {
