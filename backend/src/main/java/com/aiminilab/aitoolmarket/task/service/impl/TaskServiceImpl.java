@@ -50,7 +50,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -366,13 +368,22 @@ public class TaskServiceImpl implements TaskService {
     }
 
     private void rewriteUrlFields(ObjectNode node, boolean forAdmin) {
-        node.fields().forEachRemaining(entry -> {
+        List<Map.Entry<String, JsonNode>> entries = new ArrayList<>();
+        node.fields().forEachRemaining(entries::add);
+        for (Map.Entry<String, JsonNode> entry : entries) {
             JsonNode value = entry.getValue();
-            if (value == null || value.isNull()) return;
+            if (value == null || value.isNull()) continue;
             if (value.isTextual() && "url".equals(entry.getKey())) {
-                String rewritten = assetStorageService.rewriteResultUrl(value.asText(), forAdmin);
-                if (rewritten != null && !rewritten.equals(value.asText())) {
+                String original = value.asText();
+                String rewritten = assetStorageService.rewriteResultUrl(original, forAdmin);
+                if (rewritten != null && !rewritten.equals(original)) {
                     node.put(entry.getKey(), rewritten);
+                }
+                if (!forAdmin) {
+                    String downloadUrl = assetStorageService.rewriteDownloadUrl(original);
+                    if (downloadUrl != null) {
+                        node.put("downloadUrl", downloadUrl);
+                    }
                 }
             } else if (value.isObject()) {
                 rewriteUrlFields((ObjectNode) value, forAdmin);
@@ -383,7 +394,7 @@ public class TaskServiceImpl implements TaskService {
                     }
                 }
             }
-        });
+        }
     }
 
     private AgentTaskSourceResponse toAgentTaskSource(AgentToolCall call) {

@@ -45,7 +45,8 @@ public class AssetProxyController {
                 || !privateAssetAccessService.canAccess(AuthContext.get().userId(), relativeKey)) {
             return ResponseEntity.notFound().build();
         }
-        String signedUrl = assetStorageService.generateSignedUrl(relativeKey, AssetVisibility.PRIVATE, 3600);
+        String process = request.getParameter("x-oss-process");
+        String signedUrl = assetStorageService.generateSignedUrl(relativeKey, AssetVisibility.PRIVATE, 3600, process);
         return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(signedUrl)).build();
     }
 }

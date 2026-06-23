@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.storage;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.model.CopyObjectRequest;
+import com.aliyun.oss.model.GeneratePresignedUrlRequest;
 import com.aliyun.oss.model.ObjectMetadata;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
@@ -402,10 +403,19 @@ public class AssetStorageService {
         String base = visibility == AssetVisibility.PUBLIC ? getPublicBaseUrl() : getPrivateBaseUrl();
         if (base != null && !base.isBlank()) {
             String rawUrl = base.replaceAll("/+$", "") + "/" + normalizedKey;
-            if (visibility == AssetVisibility.PUBLIC && isImageKey(normalizedKey)) {
+            if (isImageKey(normalizedKey)) {
                 return applyImageTransform(rawUrl);
             }
             return rawUrl;
+        }
+        return GENERATED_PREFIX + normalizedKey;
+    }
+
+    private String rawUrlForKey(String relativeKey, AssetVisibility visibility) {
+        String normalizedKey = normalizeRelativeKey(relativeKey);
+        String base = visibility == AssetVisibility.PUBLIC ? getPublicBaseUrl() : getPrivateBaseUrl();
+        if (base != null && !base.isBlank()) {
+            return base.replaceAll("/+$", "") + "/" + normalizedKey;
         }
         return GENERATED_PREFIX + normalizedKey;
     }
@@ -619,7 +629,7 @@ public class AssetStorageService {
         }
         if (forAdmin) {
             if (!isOssMode()) {
-                return urlForKey(ref.relativeKey(), AssetVisibility.PRIVATE);
+                return rawUrlForKey(ref.relativeKey(), AssetVisibility.PRIVATE);
             }
             return ossDirectUrl(ref.relativeKey(), ref.bucket());
         }
@@ -630,7 +640,27 @@ public class AssetStorageService {
         return urlForKey(ref.relativeKey(), AssetVisibility.PRIVATE);
     }
 
+    public String rewriteDownloadUrl(String url) {
+        if (url == null || url.isBlank()) {
+            return url;
+        }
+        AssetReference ref = parseManagedAssetUrl(url);
+        if (ref == null) {
+            return url;
+        }
+        AppProperties.AssetStorage storage = appProperties.getAssetStorage();
+        if (ref.bucket().equals(storage.getOssPublicBucket())) {
+            return rawUrlForKey(ref.relativeKey(), AssetVisibility.PUBLIC);
+        }
+        return rawUrlForKey(ref.relativeKey(), AssetVisibility.PRIVATE);
+    }
+
     public String generateSignedUrl(String relativeKey, AssetVisibility visibility, int expirationSeconds) {
+        return generateSignedUrl(relativeKey, visibility, expirationSeconds, null);
+    }
+
+    public String generateSignedUrl(String relativeKey, AssetVisibility visibility, int expirationSeconds,
+                                    String process) {
         if (!isOssMode() || ossClient == null) {
             return urlForKey(relativeKey, visibility);
         }
@@ -638,8 +668,13 @@ public class AssetStorageService {
         String bucket = bucketFor(visibility, storage);
         String objectKey = storage.getOssKeyPrefix() + normalizeRelativeKey(relativeKey);
         Date expiration = new Date(System.currentTimeMillis() + (long) expirationSeconds * 1000);
-        URL url = ossClient.generatePresignedUrl(bucket, objectKey, expiration);
-        return url.toString();
+        if (process != null && !process.isBlank()) {
+            GeneratePresignedUrlRequest request = new GeneratePresignedUrlRequest(bucket, objectKey);
+            request.setExpiration(expiration);
+            request.setProcess(process);
+            return ossClient.generatePresignedUrl(request).toString();
+        }
+        return ossClient.generatePresignedUrl(bucket, objectKey, expiration).toString();
     }
 
     public String generateSignedPrivateUrl(String relativeKey) {
