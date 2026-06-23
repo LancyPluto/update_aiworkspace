@@ -876,8 +876,10 @@ GPT_IMAGE_2_4K_ALLOWED_SIZES = [
 ]
 
 
-SEEDREAM_5_0_ALLOWED_SIZES = [
-    # All entries are >= 3,686,400 px (Volcengine Seedream 5.0 hard minimum).
+SEEDREAM_ALLOWED_SIZES = [
+    # Vetted Seedream aspect-ratio sizes. Entries are >= 3,686,400 px, which
+    # satisfies the Seedream 5.0 hard minimum while keeping 4.5 auto sizing on
+    # the platform's canonical ratio sizes instead of the generic 2K tier map.
     "2048x2048",
     "2560x1440",
     "1440x2560",
@@ -899,11 +901,12 @@ def _openai_allowed_image_sizes(model_config: dict[str, Any]) -> list[str]:
     model_name = str(model_config.get("modelName") or model_config.get("model") or "").strip().lower()
     if model_name == "gpt-image-2-4k":
         return GPT_IMAGE_2_4K_ALLOWED_SIZES
+    # Seedream 4.5 and 5.0 share the same default aspect-ratio size policy here.
     # Seedream 5.0 / 5.0-lite hard-require image area >= 3,686,400 px.
     # Worker default 1024x1024 / 1536x1024 violates that constraint, so fall back
-    # to a vetted size list when the model name matches the seedream-5-0 family.
-    if "seedream-5-0" in model_name:
-        return SEEDREAM_5_0_ALLOWED_SIZES
+    # to a vetted size list when the model name matches a known Seedream family.
+    if "seedream-4-5" in model_name or "seedream-5-0" in model_name:
+        return SEEDREAM_ALLOWED_SIZES
     return []
 
 
