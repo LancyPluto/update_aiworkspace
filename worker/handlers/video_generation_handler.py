@@ -340,6 +340,39 @@ def _build_video_request(params: dict[str, Any], model: str, provider_protocol: 
         "resolution": str(params.get("resolution") or ""),
     }
     if provider_protocol == "seedance":
+        reference_images = _resolve_reference_image_sources(params)
+        if reference_images:
+            request["images"] = reference_images
+        image_tail = _first_text(
+            params,
+            "lastFrameImage",
+            "lastFrameUrl",
+            "tailImage",
+            "tailImageUrl",
+            "imageTail",
+            "image_tail",
+        )
+        if image_tail:
+            request["image_tail"] = image_tail
+        video_url = _first_text(
+            params,
+            "sourceVideoUrl",
+            "sourceVideo",
+            "videoUrl",
+            "video_url",
+            "referenceVideoUrl",
+        )
+        if video_url:
+            request["video_url"] = video_url
+        audio_data_url = _first_text(
+            params,
+            "audioUrl",
+            "audioDataUrl",
+            "audio_url",
+            "referenceAudioUrl",
+        )
+        if audio_data_url:
+            request["audio_data_url"] = audio_data_url
         if "generateAudio" in params or "generate_audio" in params:
             request["generate_audio"] = _resolve_bool_param(
                 params.get("generateAudio") if "generateAudio" in params else params.get("generate_audio"),
@@ -347,6 +380,11 @@ def _build_video_request(params: dict[str, Any], model: str, provider_protocol: 
             )
         if "watermark" in params:
             request["watermark"] = _resolve_bool_param(params.get("watermark"), default=False)
+        if "cameraFixed" in params or "camera_fixed" in params:
+            request["camera_fixed"] = _resolve_bool_param(
+                params.get("cameraFixed") if "cameraFixed" in params else params.get("camera_fixed"),
+                default=False,
+            )
     if provider_protocol in {"kling_video", "agnes_video"}:
         request["image_tail"] = _first_text(params, "imageTail", "image_tail", "tailImage", "tailImageUrl", "lastFrameUrl")
         request["mode"] = str(params.get("mode") or params.get("qualityMode") or "")

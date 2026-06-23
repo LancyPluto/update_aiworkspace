@@ -466,6 +466,33 @@ def test_volcengine_images_watermark_param_overrides_extra_auth() -> None:
     assert payload["watermark"] is False
 
 
+def test_volcengine_images_payload_includes_sequential_generation_options() -> None:
+    client = OpenAIImagesClient(
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key="fake-key",
+    )
+
+    payload = client._build_generation_payload(
+        prompt="test",
+        model="doubao-seedream-5-0-260128",
+        image_size="2848x1600",
+        batch_size=1,
+        quality=None,
+        style=None,
+        output_format="jpeg",
+        response_format="url",
+        watermark=False,
+        sequential_image_generation="auto",
+        max_images="8",
+        optimize_prompt_mode="standard",
+    )
+
+    assert payload["size"] == "2848x1600"
+    assert payload["sequential_image_generation"] == "auto"
+    assert payload["sequential_image_generation_options"] == {"max_images": 8}
+    assert payload["optimize_prompt_options"] == {"mode": "standard"}
+
+
 def test_openai_images_standard_quality_maps_to_low() -> None:
     client = OpenAIImagesClient(base_url="https://api.ofox.ai/v1", api_key="fake-key")
     assert client._resolve_quality("standard", required=True) == "low"

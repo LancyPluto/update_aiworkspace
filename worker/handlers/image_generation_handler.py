@@ -196,6 +196,17 @@ class ImageGenerationHandler:
                 image_request["style"] = _first_text(params, "style", "imageStyle", "image_style")
                 image_request["output_format"] = _first_text(params, "outputFormat", "output_format")
                 image_request["response_format"] = _first_text(params, "responseFormat", "response_format")
+                image_request["sequential_image_generation"] = _first_text(
+                    params,
+                    "sequentialImageGeneration",
+                    "sequential_image_generation",
+                )
+                image_request["max_images"] = params.get("maxImages") or params.get("max_images")
+                image_request["optimize_prompt_mode"] = _first_text(
+                    params,
+                    "optimizePromptMode",
+                    "optimize_prompt_mode",
+                )
                 if "watermark" in params:
                     image_request["watermark"] = params.get("watermark")
                 image_request["image_size"] = _resolve_openai_image_size(params, model_config)
@@ -731,6 +742,10 @@ def _resolve_openai_image_size(params: dict[str, Any], model_config: dict[str, A
     allowed_sizes = _openai_allowed_image_sizes(config)
     explicit = params.get("imageSize") or params.get("image_size") or params.get("size")
     if isinstance(explicit, str) and explicit.strip():
+        if _is_volcengine_image_model(config):
+            tiered_size = _volcengine_tiered_image_size(explicit.strip(), params)
+            if tiered_size:
+                return tiered_size
         requested = _openai_image_size_from_ratio_or_size(explicit.strip())
         if requested == "auto":
             if allowed_sizes:
@@ -766,14 +781,56 @@ def _volcengine_image_size_from_aspect_ratio(params: dict[str, Any]) -> str:
         aspect_ratio = "1:1"
     return {
         "1:1": "2048x2048",
-        "16:9": "2560x1440",
-        "9:16": "1440x2560",
+        "16:9": "2848x1600",
+        "9:16": "1600x2848",
         "4:3": "2304x1728",
         "3:4": "1728x2304",
-        "3:2": "2400x1600",
-        "2:3": "1600x2400",
-        "21:9": "2560x1080",
+        "3:2": "2496x1664",
+        "2:3": "1664x2496",
+        "21:9": "3136x1344",
     }.get(aspect_ratio, "2048x2048")
+
+
+def _volcengine_tiered_image_size(value: str, params: dict[str, Any]) -> str:
+    tier = value.strip().upper()
+    if tier not in {"2K", "3K", "4K"}:
+        return ""
+    aspect_ratio = _openai_aspect_ratio(params)
+    if _is_auto_aspect_ratio(aspect_ratio):
+        aspect_ratio = "1:1"
+    sizes_by_tier = {
+        "2K": {
+            "1:1": "2048x2048",
+            "16:9": "2848x1600",
+            "9:16": "1600x2848",
+            "4:3": "2304x1728",
+            "3:4": "1728x2304",
+            "3:2": "2496x1664",
+            "2:3": "1664x2496",
+            "21:9": "3136x1344",
+        },
+        "3K": {
+            "1:1": "3072x3072",
+            "16:9": "4096x2304",
+            "9:16": "2304x4096",
+            "4:3": "3456x2592",
+            "3:4": "2592x3456",
+            "3:2": "3744x2496",
+            "2:3": "2496x3744",
+            "21:9": "4704x2016",
+        },
+        "4K": {
+            "1:1": "4096x4096",
+            "16:9": "4096x2304",
+            "9:16": "2304x4096",
+            "4:3": "4096x3072",
+            "3:4": "3072x4096",
+            "3:2": "4096x2736",
+            "2:3": "2736x4096",
+            "21:9": "4096x1755",
+        },
+    }
+    return sizes_by_tier[tier].get(aspect_ratio, sizes_by_tier[tier]["1:1"])
 
 
 def _openai_image_size_from_ratio_or_size(value: Any) -> str:

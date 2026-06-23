@@ -93,3 +93,34 @@ def test_seedance_payload_includes_audio_and_watermark_flags() -> None:
 
     assert payload["generate_audio"] is True
     assert payload["watermark"] is False
+
+
+def test_seedance_payload_supports_multi_reference_images_video_and_camera_fixed() -> None:
+    client = SeedanceVideoClient(api_key="test-key")
+
+    payload = client._build_payload(
+        prompt="让角色在街头转身",
+        image_size="auto",
+        negative_prompt="",
+        model="doubao-seedance-2-0-260128",
+        image="",
+        images=["https://cdn.example.com/ref-a.png", "https://cdn.example.com/ref-b.png"],
+        video_url="https://cdn.example.com/ref.mov",
+        audio_data_url="https://cdn.example.com/ref.mp3",
+        seed=42,
+        duration="10",
+        aspect_ratio="adaptive",
+        resolution="4k",
+        camera_fixed=True,
+    )
+
+    image_items = [item for item in payload["content"] if item["type"] == "image_url"]
+    assert [item["role"] for item in image_items] == ["reference_image", "reference_image"]
+    assert payload["content"][3] == {
+        "type": "video_url",
+        "video_url": {"url": "https://cdn.example.com/ref.mov"},
+        "role": "reference_video",
+    }
+    assert payload["content"][4] == {"type": "audio_url", "audio_url": {"url": "https://cdn.example.com/ref.mp3"}}
+    assert payload["ratio"] == "adaptive"
+    assert payload["camera_fixed"] is True

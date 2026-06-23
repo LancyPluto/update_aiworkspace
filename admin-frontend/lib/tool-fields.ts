@@ -213,6 +213,7 @@ export const OPTION_PRESETS: Record<
     options: [
       { label: "Seedance 1.5 Pro（推荐）", value: "doubao-seedance-1-5-pro-251215" },
       { label: "Seedance 2.0", value: "doubao-seedance-2-0-260128" },
+      { label: "Seedance 2.0 Fast", value: "doubao-seedance-2-0-fast-260128" },
       { label: "Seedance 2.0 Mini", value: "doubao-seedance-2-0-mini-260615" },
       { label: "Seedance 1.0 Pro", value: "doubao-seedance-1-0-pro-250528" },
       { label: "Seedance 1.0 Pro Fast", value: "doubao-seedance-1-0-pro-fast-251015" },
@@ -222,7 +223,8 @@ export const OPTION_PRESETS: Record<
     label: "Seedream 图像模型",
     options: [
       { label: "Seedream 4.5（推荐）", value: "doubao-seedream-4-5-251128" },
-      { label: "Seedream 5.0", value: "doubao-seedream-5-0-260128" },
+      { label: "Seedream 5.0 Lite", value: "doubao-seedream-5-0-260128" },
+      { label: "Seedream 4.0", value: "doubao-seedream-4.0" },
     ],
   },
   volcengine_model_chat: {

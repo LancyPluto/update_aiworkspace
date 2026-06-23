@@ -103,6 +103,9 @@ class OpenAIImagesClient:
         output_format: str | None = None,
         response_format: str | None = None,
         watermark: Any | None = None,
+        sequential_image_generation: str | None = None,
+        max_images: Any | None = None,
+        optimize_prompt_mode: str | None = None,
         image: str | list[str] | None = None,
         **_: Any,
     ) -> list[str]:
@@ -135,6 +138,9 @@ class OpenAIImagesClient:
                     output_format=output_format,
                     response_format=response_format,
                     watermark=watermark,
+                    sequential_image_generation=sequential_image_generation,
+                    max_images=max_images,
+                    optimize_prompt_mode=optimize_prompt_mode,
                 )
                 payload["image"] = reference_images
                 LOGGER.info(
@@ -221,6 +227,9 @@ class OpenAIImagesClient:
                 output_format=output_format,
                 response_format=response_format,
                 watermark=watermark,
+                sequential_image_generation=sequential_image_generation,
+                max_images=max_images,
+                optimize_prompt_mode=optimize_prompt_mode,
             )
             LOGGER.info(
                 "openai images request endpoint=%s model=%s n=%s size=%s quality=%s style=%s output_format=%s response_format=%s",
@@ -250,6 +259,9 @@ class OpenAIImagesClient:
         output_format: str | None,
         response_format: str | None,
         watermark: Any | None = None,
+        sequential_image_generation: str | None = None,
+        max_images: Any | None = None,
+        optimize_prompt_mode: str | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": model,
@@ -278,7 +290,23 @@ class OpenAIImagesClient:
                 payload["watermark"] = _as_bool(self.extra_auth.get("watermark"), False)
             else:
                 payload.setdefault("watermark", False)
-            payload.setdefault("sequential_image_generation", "disabled")
+            sequence_mode = (sequential_image_generation or self.extra_auth.get("sequentialImageGeneration") or "").strip()
+            if not sequence_mode:
+                sequence_mode = str(self.extra_auth.get("sequential_image_generation") or "").strip()
+            if sequence_mode:
+                payload["sequential_image_generation"] = sequence_mode
+            else:
+                payload.setdefault("sequential_image_generation", "disabled")
+            max_images_value = _as_int(max_images)
+            if max_images_value and str(payload.get("sequential_image_generation") or "").strip().lower() == "auto":
+                payload["sequential_image_generation_options"] = {
+                    "max_images": max(1, min(15, max_images_value))
+                }
+            prompt_mode = (optimize_prompt_mode or self.extra_auth.get("optimizePromptMode") or "").strip()
+            if not prompt_mode:
+                prompt_mode = str(self.extra_auth.get("optimize_prompt_mode") or "").strip()
+            if prompt_mode:
+                payload["optimize_prompt_options"] = {"mode": prompt_mode}
             model_name = str(payload.get("model") or "").lower()
             if "seedream-5" in model_name and "guidance_scale" in payload:
                 payload.pop("guidance_scale", None)
