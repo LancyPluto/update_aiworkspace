@@ -200,6 +200,56 @@ def test_trim_tool_parameters_all_pruned_falls_back_to_generic():
     }
 
 
+def test_trim_tool_parameters_preserves_v2_lite_image_semantic_fields():
+    schema = {
+        "type": "object",
+        "required": ["operation"],
+        "additionalProperties": False,
+        "properties": {
+            "operation": {"type": "string", "enum": ["generate", "edit", "variation", "composite"]},
+            "generation_prompt": {
+                "type": "string",
+                "description": "Full standalone prompt for generate/composite.",
+                "x-agent-fill-strategy": "derive",
+            },
+            "base_image_ref": {"type": "string", "x-agent-fill-strategy": "llm"},
+            "base_prompt": {"type": "string", "x-agent-fill-strategy": "llm"},
+            "modification_prompt": {"type": "string", "x-agent-fill-strategy": "llm"},
+            "negative_prompt": {"type": "string", "x-agent-fill-strategy": "derive"},
+            "references": {
+                "type": "array",
+                "description": "Structured current references.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "role": {"type": "string"},
+                        "source_ref": {"type": "string"},
+                        "notes": {"type": "string"},
+                    },
+                },
+            },
+            "aspect_ratio": {"type": "string", "enum": ["auto", "1:1"]},
+            "count": {"type": "integer", "default": 1, "x-agent-fill-strategy": "default"},
+            "routing_notes": {"type": "string", "x-agent-fill-strategy": "derive"},
+        },
+    }
+
+    out = trim_tool_parameters(schema, prune_fields=True)
+    props = out["properties"]
+
+    assert "generation_prompt" in props
+    assert "base_prompt" in props
+    assert "modification_prompt" in props
+    assert "references" in props
+    assert "routing_notes" in props
+    assert props["references"]["items"]["required"] == ["id", "role", "source_ref"]
+    assert "face_ref" in props["references"]["items"]["properties"]["role"]["enum"]
+    assert props["references"]["items"]["properties"]["source_ref"]["description"]
+    assert out["additionalProperties"] is False
+    assert out["required"] == ["operation"]
+
+
 # --------------------------------------------------------------------------- #
 # Expand meta-tool
 # --------------------------------------------------------------------------- #

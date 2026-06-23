@@ -5,7 +5,6 @@ from typing import Any
 
 from app.config import settings
 from app.core.schemas import RunContext
-
 GRAPH_SYSTEM_PROMPT = (
     "You are a capable cloud agent for an AI tool marketplace. "
     "Plan and execute the user's request step by step. "

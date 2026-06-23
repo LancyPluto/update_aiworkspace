@@ -110,6 +110,24 @@ def _image_tool():
     )
 
 
+def _v2_image_tool():
+    return ToolDescriptor(
+        toolCode="gpt_image2",
+        toolName="GPT Image 2",
+        autoCallable=True,
+        outputModality="image",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "operation": {"type": "string"},
+                "generation_prompt": {"type": "string"},
+                "base_image_ref": {"type": "string"},
+                "references": {"type": "array"},
+            },
+        },
+    )
+
+
 def _event_types(backend):
     return [event.eventType for event in backend.events]
 
@@ -164,6 +182,49 @@ async def test_agent_executor_runs_tool_then_final_answer():
     assert backend.completed_tool_calls
     assert TOOL_CALL_EXECUTED in _event_types(backend)
     assert len(model.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_agent_executor_forces_retry_when_schema_validation_reply_has_no_tool_call():
+    alias = _alias_for_tool_code("gpt_image2")
+    media_payload = json.dumps({"images": ["https://cdn.example/fixed.png"]}, ensure_ascii=False)
+    task_detail = TaskDetailResponse(
+        taskId=101,
+        status="SUCCESS",
+        result=TaskResultResponse(resourceType="image", contentText=media_payload),
+    )
+    backend = FakeBackend(task_detail=task_detail)
+    model = FakeModel(
+        [
+            ChatTurnResult(content="", tool_calls=[ChatToolCall(id="c1", name=alias, arguments={"operation": "generate"})]),
+            ChatTurnResult(content="我需要补全 generation_prompt 后才能继续。", tool_calls=[]),
+            ChatTurnResult(
+                content="",
+                tool_calls=[
+                    ChatToolCall(
+                        id="c2",
+                        name=alias,
+                        arguments={"operation": "generate", "generation_prompt": "完整视觉提示词，冷蓝电影海报，主体清晰。"},
+                    )
+                ],
+            ),
+        ]
+    )
+    executor = AgentExecutor(backend, model)
+    context = RunContext(
+        runId=22,
+        sessionId=3,
+        userId=4,
+        message="同样生成一张",
+        availableTools=[_v2_image_tool()],
+    )
+
+    result = await executor.run(context)
+
+    assert result.stop_reason == "tool_media_result"
+    assert "https://cdn.example/fixed.png" in result.final_answer
+    assert len(model.calls) == 3
+    assert backend.tool_calls[-1][1]["generation_prompt"] == "完整视觉提示词，冷蓝电影海报，主体清晰。"
 
 
 @pytest.mark.asyncio

@@ -23,6 +23,8 @@ from app.core.preferred_tool_bias import (
 )
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate, ToolDescriptor
 from app.runtime.context_manager import ContextManager
+from app.runtime.session_state import IMAGE_TOOL_PROMPT_COMPLETENESS_RULES, SESSION_STATE_INSTRUCTIONS, format_session_state_context
+from app.runtime.skill_hydration import SkillHydrationService, hydration_message
 from app.tools.registry import ToolRegistry, infer_output_modality, requested_output_modality, resolve_canonical_tool_code
 from app.runtime.tool_disclosure import EXPAND_TOOL, expand_tool_definition
 
@@ -32,7 +34,9 @@ PRODUCT_TOOL_LOOP_SYSTEM_PROMPT = (
     "Use a tool when the user asks to create, generate, transform, analyze with, or otherwise operate a listed AI tool. "
     "Do not call tools for greetings, identity questions, meta questions about previous turns, or explanations of failures. "
     "If a tool is needed, call exactly one tool with arguments derived from the user request and recent context. "
-    "If no tool is needed, answer normally without a tool call."
+    "If no tool is needed, answer normally without a tool call.\n\n"
+    f"{SESSION_STATE_INSTRUCTIONS}\n\n"
+    f"{IMAGE_TOOL_PROMPT_COMPLETENESS_RULES}"
 )
 
 
@@ -84,6 +88,8 @@ class ProductToolCallLoopExecutor:
         messages = self._messages(context, workspace_memory_context=workspace_memory_context)
         call_limit = max(1, int(max_tool_calls if max_tool_calls is not None else self.max_tool_calls))
         expanded_codes: set[str] = set()
+        hydrated_skill_codes: set[str] = set()
+        hydration = SkillHydrationService(self.backend)
 
         turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
         calls = list(getattr(turn, "tool_calls", []) or [])[:call_limit]
@@ -106,6 +112,11 @@ class ProductToolCallLoopExecutor:
             )
             turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
             calls = list(getattr(turn, "tool_calls", []) or [])[:call_limit]
+
+        if await self._hydrate_selected_skill(hydration, context, messages, calls, hydrated_skill_codes):
+            turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
+            calls = list(getattr(turn, "tool_calls", []) or [])[:call_limit]
+
         if not calls:
             await self._event(
                 context.runId,
@@ -119,6 +130,56 @@ class ProductToolCallLoopExecutor:
             )
             return ProductToolCallLoopResult(answer=getattr(turn, "content", "") or "")
 
+        schema_retry_attempts = 0
+        schema_validation_tool_code: str | None = None
+        while calls:
+            call = calls[0]
+            selected = self._selected_tool_for_call(call, aliases, context)
+            if selected is None:
+                break
+            missing_prompt_fields = _missing_v2_lite_image_prompt_fields(selected.tool, call.arguments)
+            if not missing_prompt_fields:
+                break
+            schema_validation_tool_code = selected.tool.toolCode
+            schema_retry_attempts += 1
+            await self._event(
+                context.runId,
+                TOOL_CALL_REJECTED,
+                {
+                    "kind": "product",
+                    "id": call.id,
+                    "name": call.name,
+                    "reason": "schema_validation_retry",
+                    "selectedToolCode": selected.tool.toolCode,
+                    "missingFields": missing_prompt_fields,
+                    "retryAttempt": schema_retry_attempts,
+                },
+            )
+            if schema_retry_attempts >= 2:
+                calls = []
+                break
+            messages.append(ChatMessage(role="system", content=_schema_validation_retry_message(missing_prompt_fields)))
+            turn = await chat_turn(messages, tools=tool_defs, tool_choice=_force_tool_choice(call.name))
+            calls = list(getattr(turn, "tool_calls", []) or [])[:call_limit]
+            if calls:
+                continue
+            messages.append(ChatMessage(role="system", content=_schema_validation_no_tool_nudge()))
+            turn = await chat_turn(messages, tools=tool_defs, tool_choice=_force_tool_choice(call.name))
+            calls = list(getattr(turn, "tool_calls", []) or [])[:call_limit]
+
+        if not calls and schema_validation_tool_code:
+            await self._event(
+                context.runId,
+                TOOL_CALL_LOOP_COMPLETED,
+                {
+                    "kind": "product",
+                    "iterations": 1 + schema_retry_attempts,
+                    "executedToolCalls": 0,
+                    "finishReason": "schema_validation_retry_exhausted",
+                },
+            )
+            return ProductToolCallLoopResult(answer="")
+
         call = calls[0]
         await self._event(
             context.runId,
@@ -130,9 +191,7 @@ class ProductToolCallLoopExecutor:
                 "arguments": _redact_large(call.arguments),
             },
         )
-        selected = aliases.get(call.name)
-        if selected is None:
-            selected = next((alias for alias in aliases.values() if alias.tool.toolCode == call.name), None)
+        selected = self._selected_tool_for_call(call, aliases, context)
         if selected is None:
             resolved_code = resolve_canonical_tool_code(call.name, context.availableTools)
             if resolved_code:
@@ -231,6 +290,22 @@ class ProductToolCallLoopExecutor:
         )
         return ProductToolCallLoopResult(intent=intent, tool_call_count=1)
 
+    @staticmethod
+    def _selected_tool_for_call(
+        call: ChatToolCall,
+        aliases: dict[str, _ToolAlias],
+        context: RunContext,
+    ) -> _ToolAlias | None:
+        selected = aliases.get(call.name)
+        if selected is None:
+            selected = next((alias for alias in aliases.values() if alias.tool.toolCode == call.name), None)
+        if selected is not None:
+            return selected
+        resolved_code = resolve_canonical_tool_code(call.name, context.availableTools)
+        if not resolved_code:
+            return None
+        return next((alias for alias in aliases.values() if alias.tool.toolCode == resolved_code), None)
+
     async def _reject(
         self,
         context: RunContext,
@@ -262,6 +337,9 @@ class ProductToolCallLoopExecutor:
             catalog = format_tool_catalog(context.availableTools)
             if catalog:
                 messages.append(ChatMessage(role="system", content=catalog))
+        skill_catalog = _format_skill_catalog(context)
+        if skill_catalog:
+            messages.append(ChatMessage(role="system", content=skill_catalog))
         if workspace_memory_context.strip():
             messages.append(
                 ChatMessage(
@@ -293,6 +371,9 @@ class ProductToolCallLoopExecutor:
                     ),
                 )
             )
+        session_state_context = format_session_state_context(context)
+        if session_state_context:
+            messages.append(ChatMessage(role="system", content=session_state_context))
         preferred = resolve_preferred_tool(context)
         if preferred is not None:
             messages.append(
@@ -320,6 +401,23 @@ class ProductToolCallLoopExecutor:
             and len(aliases) < len(context.availableTools)
             and message_suggests_tool_use(context.message)
         )
+
+    async def _hydrate_selected_skill(
+        self,
+        hydration: SkillHydrationService,
+        context: RunContext,
+        messages: list[ChatMessage],
+        calls: list[ChatToolCall],
+        hydrated_skill_codes: set[str],
+    ) -> bool:
+        if not calls:
+            return False
+        tool_code = resolve_canonical_tool_code(calls[0].name, context.availableTools) or calls[0].name
+        result = await hydration.hydrate_for_tool(context, tool_code, hydrated_skill_codes)
+        if result is None:
+            return False
+        messages.append(hydration_message(result))
+        return True
 
     def _tool_definitions(
         self,
@@ -380,6 +478,22 @@ def build_tool_definitions(
             }
         )
     return definitions, aliases
+
+
+def _format_skill_catalog(context: RunContext) -> str:
+    skills = context.availableSkills or []
+    if not skills:
+        return ""
+    lines = []
+    for skill in skills:
+        tools = ", ".join(skill.toolCodes or [])
+        description = (skill.description or "").strip()
+        lines.append(f"- {skill.skillCode} | {skill.displayName or skill.skillCode} | {description} | tools: {tools}")
+    return (
+        "Available Skill Catalog (lightweight menu only). "
+        "Use it to recognize the relevant skill family. Detailed SOP is injected just-in-time before tool arguments.\n"
+        + "\n".join(lines)
+    )
 
 
 def _build_tool_description(tool: ToolDescriptor) -> str:
@@ -446,3 +560,52 @@ def _redact_large(value: Any) -> Any:
     if len(text) <= 1200:
         return value
     return {"preview": text[:1200], "truncated": True}
+
+
+def _missing_v2_lite_image_prompt_fields(tool: ToolDescriptor, arguments: Any) -> list[str]:
+    if not _is_v2_lite_image_schema(tool):
+        return []
+    args = arguments if isinstance(arguments, dict) else {}
+    operation = str(args.get("operation") or "generate").strip().lower()
+    if operation in {"edit", "variation"}:
+        return [field for field in ("base_prompt", "modification_prompt") if not _present(args.get(field))]
+    if operation in {"generate", "composite"}:
+        return ["generation_prompt"] if not _present(args.get("generation_prompt")) else []
+    if not _present(args.get("generation_prompt")) and not _present(args.get("modification_prompt")):
+        return ["generation_prompt"]
+    return []
+
+
+def _is_v2_lite_image_schema(tool: ToolDescriptor) -> bool:
+    schema = tool.inputSchema if isinstance(tool.inputSchema, dict) else {}
+    properties = schema.get("properties")
+    return isinstance(properties, dict) and {"operation", "references", "base_image_ref"}.issubset(properties.keys())
+
+
+def _present(value: Any) -> bool:
+    return not (value is None or (isinstance(value, str) and not value.strip()))
+
+
+def _schema_validation_retry_message(missing_fields: list[str]) -> str:
+    fields = ", ".join(f"`{field}`" for field in missing_fields)
+    return (
+        "SchemaValidationError: Missing or empty required image prompt field(s): "
+        f"{fields}. This is an internal correction step. Do not ask the user for clarification and do not answer "
+        "in natural language. Read <SessionState> and the current request, synthesize the complete visual prompt "
+        "fields yourself, then immediately call the same image tool again with non-empty prompt fields. "
+        "For generate/composite, write a standalone `generation_prompt`. For edit/variation, copy the selected "
+        "SessionState image prompt verbatim into `base_prompt` and put only the new requested visual change into "
+        "`modification_prompt`."
+    )
+
+
+def _schema_validation_no_tool_nudge() -> str:
+    return (
+        "You responded without a tool call after SchemaValidationError. You MUST now call the same image tool. "
+        "Do not ask the user for prompt text. Fill the missing image prompt fields from <SessionState>, attachments, "
+        "and the latest user request."
+    )
+
+
+def _force_tool_choice(function_name: str) -> dict[str, Any]:
+    return {"type": "function", "function": {"name": function_name}}

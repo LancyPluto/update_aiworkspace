@@ -30,6 +30,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -220,22 +221,24 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
         List<ToolFieldResponse> fields = toolFieldItemMapper.findActiveFields(tool.getId()).stream()
                 .map(field -> ToolFieldResponse.from(field, objectMapper))
                 .toList();
-        List<AgentToolFieldDescriptorResponse> fieldDescriptors = fields.stream()
-                .map(field -> new AgentToolFieldDescriptorResponse(
-                        field.fieldKey(),
-                        field.fieldName(),
-                        field.fieldType(),
-                      field.placeholder(),
-                      field.options(),
-                      field.required(),
-                      field.executionRequired(),
-                      field.userRequired(),
-                      field.defaultValue(),
-                      field.agentFillStrategy(),
-                      field.riskLevel(),
-                      field.sortOrder()
-              ))
-                .toList();
+        List<AgentToolFieldDescriptorResponse> fieldDescriptors = isGptImageTool(tool.getToolCode())
+                ? imageV2LiteFieldDescriptors()
+                : fields.stream()
+                        .map(field -> new AgentToolFieldDescriptorResponse(
+                                field.fieldKey(),
+                                field.fieldName(),
+                                field.fieldType(),
+                                field.placeholder(),
+                                field.options(),
+                                field.required(),
+                                field.executionRequired(),
+                                field.userRequired(),
+                                field.defaultValue(),
+                                field.agentFillStrategy(),
+                                field.riskLevel(),
+                                field.sortOrder()
+                        ))
+                        .toList();
 
         boolean autoCallable = ext != null ? Boolean.TRUE.equals(ext.getAgentAutoCallable()) : false;
 
@@ -413,6 +416,9 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
     }
 
     private ObjectNode toInputSchema(String toolCode, List<ToolFieldResponse> fields) {
+        if (isGptImageTool(toolCode)) {
+            return imageV2LiteInputSchema();
+        }
         ObjectNode schema = objectMapper.createObjectNode();
         ObjectNode properties = objectMapper.createObjectNode();
         ArrayNode required = objectMapper.createArrayNode();
@@ -472,209 +478,190 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                 required.add(field.fieldKey());
             }
         }
-        applyImageEditSchemaEnhancements(toolCode, schema, properties, required);
         schema.set("properties", properties);
         schema.set("required", required);
         return schema;
     }
 
-    private void applyImageEditSchemaEnhancements(String toolCode, ObjectNode schema, ObjectNode properties, ArrayNode required) {
-        if (!isGptImageTool(toolCode)) {
-            return;
-        }
+    private ObjectNode imageV2LiteInputSchema() {
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = objectMapper.createObjectNode();
+        ArrayNode required = objectMapper.createArrayNode();
+        schema.put("type", "object");
         schema.put("$id", "https://aidesu.ai/schemas/agent-image-generation-v2-lite.json");
         schema.put("additionalProperties", false);
         schema.set("allOf", imageV2LiteConditionals());
-        addRequiredOnce(required, "operation");
-        removeRequired(required, "prompt");
-        if (!properties.has("operation")) {
-            ObjectNode operation = objectMapper.createObjectNode();
-            operation.put("type", "string");
-            operation.put("title", "Operation");
-            operation.put("description", "generate=全新生成；edit=修改已有图；variation=基于已有图做变体；composite=多图融合。");
-            ArrayNode enumValues = objectMapper.createArrayNode();
-            enumValues.add("generate");
-            enumValues.add("edit");
-            enumValues.add("variation");
-            enumValues.add("composite");
-            operation.set("enum", enumValues);
-            operation.put("default", "generate");
-            operation.put("x-user-required", false);
-            operation.put("x-agent-fill-strategy", "derive");
-            operation.put("x-risk-level", "LOW");
-            properties.set("operation", operation);
-        }
-        if (!properties.has("generation_prompt")) {
-            ObjectNode generationPrompt = objectMapper.createObjectNode();
-            generationPrompt.put("type", "string");
-            generationPrompt.put("title", "Generation prompt");
-            generationPrompt.put("description", "仅用于 generate/composite/variation 的完整生图提示词。edit 操作不要使用该字段。");
-            generationPrompt.put("x-user-required", false);
-            generationPrompt.put("x-agent-fill-strategy", "derive");
-            generationPrompt.put("x-risk-level", "LOW");
-            properties.set("generation_prompt", generationPrompt);
-        }
-        if (!properties.has("base_image_ref")) {
-            ObjectNode baseImageRef = objectMapper.createObjectNode();
-            baseImageRef.put("type", "string");
-            baseImageRef.put("title", "Base image reference");
-            baseImageRef.put("description", "被编辑或续作的底图引用。可填 latest_generated_image.url、generated_images[0].url、@图片1、fileId、assetKey 或 URL。edit/variation 必填。");
-            baseImageRef.put("x-agent-fill-strategy", "llm");
-            baseImageRef.put("x-risk-level", "LOW");
-            properties.set("base_image_ref", baseImageRef);
-        }
-        if (!properties.has("base_prompt")) {
-            ObjectNode basePrompt = objectMapper.createObjectNode();
-            basePrompt.put("type", "string");
-            basePrompt.put("title", "Base prompt");
-            basePrompt.put("description", "edit/variation 必填。必须原样复制 SessionState 中底图对应的 prompt，不要改写、总结或翻译。");
-            basePrompt.put("x-agent-fill-strategy", "llm");
-            basePrompt.put("x-risk-level", "LOW");
-            properties.set("base_prompt", basePrompt);
-        }
-        if (!properties.has("modification_prompt")) {
-            ObjectNode modificationPrompt = objectMapper.createObjectNode();
-            modificationPrompt.put("type", "string");
-            modificationPrompt.put("title", "Modification prompt");
-            modificationPrompt.put("description", "edit/variation 必填。只写本轮新增修改要求，例如换背景、保留某张脸、调色、修手。不要重写完整场景。");
-            modificationPrompt.put("x-agent-fill-strategy", "llm");
-            modificationPrompt.put("x-risk-level", "LOW");
-            properties.set("modification_prompt", modificationPrompt);
-        }
-        if (!properties.has("negative_prompt")) {
-            ObjectNode negativePrompt = objectMapper.createObjectNode();
-            negativePrompt.put("type", "string");
-            negativePrompt.put("title", "Negative prompt");
-            negativePrompt.put("description", "负向约束，例如脸崩、畸形手、水印、文字、风格跑偏。");
-            negativePrompt.put("x-agent-fill-strategy", "derive");
-            negativePrompt.put("x-risk-level", "LOW");
-            properties.set("negative_prompt", negativePrompt);
-        }
-        if (!properties.has("references")) {
-            ObjectNode references = objectMapper.createObjectNode();
-            references.put("type", "array");
-            references.put("title", "Typed references");
-            references.put("description", "语义化参考图。LLM 只需要指定核心角色；强度和模型参数由后端按 role 默认处理。");
-            references.put("x-agent-fill-strategy", "llm");
-            references.put("x-risk-level", "LOW");
-            ObjectNode itemSchema = objectMapper.createObjectNode();
-            itemSchema.put("type", "object");
-            itemSchema.put("additionalProperties", false);
-            ObjectNode itemProperties = objectMapper.createObjectNode();
-            itemProperties.putObject("id").put("type", "string").put("description", "稳定 ID，例如 face_ref_1、style_ref_1、pose_ref_1。");
-            ObjectNode role = itemProperties.putObject("role");
-            role.put("type", "string");
-            ArrayNode roleEnum = objectMapper.createArrayNode();
-            roleEnum.add("face_ref");
-            roleEnum.add("identity_ref");
-            roleEnum.add("style_ref");
-            roleEnum.add("pose_ref");
-            roleEnum.add("composition_ref");
-            roleEnum.add("controlnet_pose_ref");
-            roleEnum.add("background_ref");
-            roleEnum.add("object_ref");
-            roleEnum.add("supplemental_ref");
-            role.set("enum", roleEnum);
-            itemProperties.putObject("source_ref").put("type", "string").put("description", "图片指针或 URL，例如 @图片1、图1、fileId:123、assetKey:xxx、latest_generated_image.url。");
-            itemProperties.putObject("notes").put("type", "string").put("description", "自然语言补充，例如：只参考构图，不参考画风；保留这张脸；仅参考动作。");
-            itemSchema.set("properties", itemProperties);
-            ArrayNode itemRequired = objectMapper.createArrayNode();
-            itemRequired.add("id");
-            itemRequired.add("role");
-            itemRequired.add("source_ref");
-            itemSchema.set("required", itemRequired);
-            references.set("items", itemSchema);
-            properties.set("references", references);
-        }
-        if (!properties.has("aspect_ratio")) {
-            ObjectNode aspectRatio = objectMapper.createObjectNode();
-            aspectRatio.put("type", "string");
-            aspectRatio.put("title", "Aspect ratio");
-            ArrayNode enumValues = objectMapper.createArrayNode();
-            enumValues.add("auto");
-            enumValues.add("1:1");
-            enumValues.add("4:3");
-            enumValues.add("3:4");
-            enumValues.add("16:9");
-            enumValues.add("9:16");
-            enumValues.add("21:9");
-            aspectRatio.set("enum", enumValues);
-            aspectRatio.put("default", "auto");
-            aspectRatio.put("x-user-required", false);
-            aspectRatio.put("x-agent-fill-strategy", "default");
-            aspectRatio.put("x-risk-level", "LOW");
-            properties.set("aspect_ratio", aspectRatio);
-        }
-        if (!properties.has("count")) {
-            ObjectNode count = objectMapper.createObjectNode();
-            count.put("type", "integer");
-            count.put("title", "Count");
-            count.put("description", "生成张数。");
-            count.put("minimum", 1);
-            count.put("maximum", 4);
-            count.put("default", 1);
-            count.put("x-user-required", false);
-            count.put("x-agent-fill-strategy", "default");
-            count.put("x-risk-level", "LOW");
-            properties.set("count", count);
-        }
-        if (!properties.has("routing_notes")) {
-            ObjectNode routingNotes = objectMapper.createObjectNode();
-            routingNotes.put("type", "string");
-            routingNotes.put("title", "Routing notes");
-            routingNotes.put("description", "简短审计说明，例如：图1管脸，图2管动作构图。");
-            routingNotes.put("x-user-required", false);
-            routingNotes.put("x-agent-fill-strategy", "derive");
-            routingNotes.put("x-risk-level", "LOW");
-            properties.set("routing_notes", routingNotes);
-        }
-        if (!properties.has("prompt")) {
-            ObjectNode prompt = objectMapper.createObjectNode();
-            prompt.put("type", "string");
-            prompt.put("title", "Prompt");
-            properties.set("prompt", prompt);
-        }
-        ObjectNode prompt = (ObjectNode) properties.get("prompt");
-        prompt.put("description", "Legacy prompt field. Prefer generation_prompt for new generation and base_prompt/modification_prompt for edit or variation.");
-
-        if (!properties.has("base_image_url")) {
-            ObjectNode baseImage = objectMapper.createObjectNode();
-            baseImage.put("type", "string");
-            baseImage.put("title", "Base image URL");
-            baseImage.put("description", "The base image to edit. Use this for the existing/current/previous/generated image from session context.");
-            baseImage.put("x-agent-fill-strategy", "llm");
-            baseImage.put("x-risk-level", "LOW");
-            properties.set("base_image_url", baseImage);
-        }
-        if (!properties.has("reference_images")) {
-            ObjectNode references = objectMapper.createObjectNode();
-            references.put("type", "array");
-            ObjectNode itemSchema = objectMapper.createObjectNode();
-            itemSchema.put("type", "string");
-            references.set("items", itemSchema);
-            references.put("title", "Reference images");
-            references.put("description", "Additional reference images selected by the user, such as @ face/style/pose references.");
-            references.put("x-agent-fill-strategy", "llm");
-            references.put("x-risk-level", "LOW");
-            properties.set("reference_images", references);
-        }
+        required.add("operation");
+        properties.set("operation", imageV2StringProperty(
+                "Operation",
+                "generate=全新生成；edit=修改已有图；variation=基于已有图做变体；composite=多图融合。",
+                new String[]{"generate", "edit", "variation", "composite"},
+                "generate",
+                "derive"
+        ));
+        properties.set("generation_prompt", imageV2StringProperty(
+                "Generation prompt",
+                "仅用于 generate/composite/variation 的完整生图提示词。edit 操作不要使用该字段。",
+                null,
+                null,
+                "derive"
+        ));
+        properties.set("base_image_ref", imageV2StringProperty(
+                "Base image reference",
+                "被编辑或续作的底图引用。可填 latest_generated_image.url、generated_images[0].url、@图片1、fileId、assetKey 或 URL。edit/variation 必填。",
+                null,
+                null,
+                "llm"
+        ));
+        properties.set("base_prompt", imageV2StringProperty(
+                "Base prompt",
+                "edit/variation 必填。必须原样复制 SessionState 中底图对应的 prompt，不要改写、总结或翻译。",
+                null,
+                null,
+                "llm"
+        ));
+        properties.set("modification_prompt", imageV2StringProperty(
+                "Modification prompt",
+                "edit/variation 必填。只写本轮新增修改要求，例如换背景、保留某张脸、调色、修手。不要重写完整场景。",
+                null,
+                null,
+                "llm"
+        ));
+        properties.set("negative_prompt", imageV2StringProperty(
+                "Negative prompt",
+                "负向约束，例如脸崩、畸形手、水印、文字、风格跑偏。",
+                null,
+                null,
+                "derive"
+        ));
+        properties.set("references", imageV2ReferencesProperty());
+        properties.set("aspect_ratio", imageV2StringProperty(
+                "Aspect ratio",
+                "目标画面比例。",
+                new String[]{"auto", "1:1", "4:3", "3:4", "16:9", "9:16", "21:9"},
+                "auto",
+                "default"
+        ));
+        ObjectNode count = objectMapper.createObjectNode();
+        count.put("type", "integer");
+        count.put("title", "Count");
+        count.put("description", "生成张数。");
+        count.put("minimum", 1);
+        count.put("maximum", 4);
+        count.put("default", 1);
+        count.put("x-user-required", false);
+        count.put("x-agent-fill-strategy", "default");
+        count.put("x-risk-level", "LOW");
+        properties.set("count", count);
+        properties.set("routing_notes", imageV2StringProperty(
+                "Routing notes",
+                "简短审计说明，例如：图1管脸，图2管动作构图。",
+                null,
+                null,
+                "derive"
+        ));
+        schema.set("properties", properties);
+        schema.set("required", required);
+        return schema;
     }
 
-    private void addRequiredOnce(ArrayNode required, String field) {
-        for (int i = 0; i < required.size(); i++) {
-            if (field.equals(required.get(i).asText())) {
-                return;
+    private ObjectNode imageV2StringProperty(String title, String description, String[] enumValues, String defaultValue, String strategy) {
+        ObjectNode property = objectMapper.createObjectNode();
+        property.put("type", "string");
+        property.put("title", title);
+        property.put("description", description);
+        if (enumValues != null && enumValues.length > 0) {
+            ArrayNode values = objectMapper.createArrayNode();
+            for (String value : enumValues) {
+                values.add(value);
             }
+            property.set("enum", values);
         }
-        required.add(field);
+        if (defaultValue != null && !defaultValue.isBlank()) {
+            property.put("default", defaultValue);
+        }
+        property.put("x-user-required", false);
+        property.put("x-agent-fill-strategy", strategy == null || strategy.isBlank() ? "llm" : strategy);
+        property.put("x-risk-level", "LOW");
+        return property;
     }
 
-    private void removeRequired(ArrayNode required, String field) {
-        for (int i = required.size() - 1; i >= 0; i--) {
-            if (field.equals(required.get(i).asText())) {
-                required.remove(i);
-            }
-        }
+    private ObjectNode imageV2ReferencesProperty() {
+        ObjectNode references = objectMapper.createObjectNode();
+        references.put("type", "array");
+        references.put("title", "Typed references");
+        references.put("description", "语义化参考图。LLM 只需要指定核心角色；强度和模型参数由后端按 role 默认处理。");
+        references.put("x-agent-fill-strategy", "llm");
+        references.put("x-user-required", false);
+        references.put("x-risk-level", "LOW");
+        ObjectNode itemSchema = objectMapper.createObjectNode();
+        itemSchema.put("type", "object");
+        itemSchema.put("additionalProperties", false);
+        ObjectNode itemProperties = objectMapper.createObjectNode();
+        itemProperties.putObject("id").put("type", "string").put("description", "稳定 ID，例如 face_ref_1、style_ref_1、pose_ref_1。");
+        ObjectNode role = itemProperties.putObject("role");
+        role.put("type", "string");
+        ArrayNode roleEnum = objectMapper.createArrayNode();
+        roleEnum.add("face_ref");
+        roleEnum.add("identity_ref");
+        roleEnum.add("style_ref");
+        roleEnum.add("pose_ref");
+        roleEnum.add("composition_ref");
+        roleEnum.add("controlnet_pose_ref");
+        roleEnum.add("background_ref");
+        roleEnum.add("object_ref");
+        roleEnum.add("supplemental_ref");
+        role.set("enum", roleEnum);
+        itemProperties.putObject("source_ref").put("type", "string").put("description", "图片指针或 URL，例如 [当前参考图_1]、fileId:123、assetKey:xxx、latest_generated_image.url。");
+        itemProperties.putObject("notes").put("type", "string").put("description", "自然语言补充，例如：只参考构图，不参考画风；保留这张脸；仅参考动作。");
+        itemSchema.set("properties", itemProperties);
+        ArrayNode itemRequired = objectMapper.createArrayNode();
+        itemRequired.add("id");
+        itemRequired.add("role");
+        itemRequired.add("source_ref");
+        itemSchema.set("required", itemRequired);
+        references.set("items", itemSchema);
+        return references;
+    }
+
+    private List<AgentToolFieldDescriptorResponse> imageV2LiteFieldDescriptors() {
+        List<AgentToolFieldDescriptorResponse> fields = new ArrayList<>();
+        fields.add(imageV2Field("operation", "Operation", "select", "generate=全新生成；edit=修改已有图；variation=基于已有图做变体；composite=多图融合。", "generate", "derive", 1));
+        fields.add(imageV2Field("generation_prompt", "Generation prompt", "textarea", "仅用于 generate/composite/variation 的完整生图提示词。edit 操作不要使用该字段。", null, "derive", 2));
+        fields.add(imageV2Field("base_image_ref", "Base image reference", "text", "edit/variation 的底图引用。", null, "llm", 3));
+        fields.add(imageV2Field("base_prompt", "Base prompt", "textarea", "edit/variation 的底图视觉 prompt。", null, "llm", 4));
+        fields.add(imageV2Field("modification_prompt", "Modification prompt", "textarea", "edit/variation 的本轮视觉变化。", null, "llm", 5));
+        fields.add(imageV2Field("negative_prompt", "Negative prompt", "textarea", "负向约束。", null, "derive", 6));
+        fields.add(imageV2Field("references", "Typed references", "json", "语义化参考图数组。", null, "llm", 7));
+        fields.add(imageV2Field("aspect_ratio", "Aspect ratio", "select", "目标画面比例。", "auto", "default", 8));
+        fields.add(imageV2Field("count", "Count", "integer", "生成张数。", "1", "default", 9));
+        fields.add(imageV2Field("routing_notes", "Routing notes", "textarea", "简短审计说明。", null, "derive", 10));
+        return fields;
+    }
+
+    private AgentToolFieldDescriptorResponse imageV2Field(
+            String key,
+            String name,
+            String type,
+            String description,
+            String defaultValue,
+            String strategy,
+            int sortOrder
+    ) {
+        return new AgentToolFieldDescriptorResponse(
+                key,
+                name,
+                type,
+                description,
+                null,
+                false,
+                false,
+                false,
+                defaultValue,
+                strategy,
+                "LOW",
+                sortOrder
+        );
     }
 
     private ArrayNode imageV2LiteConditionals() {

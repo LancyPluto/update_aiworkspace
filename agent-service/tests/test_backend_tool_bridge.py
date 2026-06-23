@@ -4,7 +4,8 @@ import pytest
 
 from app.config import settings
 from app.core.schemas import AgentFileContext, ChatMessage, RecentToolCallContext, ReferenceMention, RunContext, RuntimeSettings, TaskDetailResponse, ToolDescriptor
-from app.tools.backend_tool import BackendToolBridge, ToolExecutionError, _with_attached_file_defaults, enforce_locked_field_defaults, finalize_generation_arguments
+from app.runtime.tool_orchestrator import _raise_image_prompt_schema_validation_if_needed
+from app.tools.backend_tool import BackendToolBridge, ToolExecutionError, _with_attached_file_defaults, compile_v2_lite_image_task_params, enforce_locked_field_defaults, finalize_generation_arguments
 
 
 def _xiaohongshu_like_schema() -> dict:
@@ -20,6 +21,26 @@ def _xiaohongshu_like_schema() -> dict:
             "extraInfo": {"type": "string"},
         },
     }
+
+
+def _v2_lite_image_tool() -> ToolDescriptor:
+    return ToolDescriptor(
+        toolCode="gpt_image2",
+        toolName="GPT-image2",
+        description="图片生成",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "operation": {"type": "string"},
+                "generation_prompt": {"type": "string"},
+                "base_image_ref": {"type": "string"},
+                "base_prompt": {"type": "string"},
+                "modification_prompt": {"type": "string"},
+                "references": {"type": "array"},
+            },
+        },
+    )
 
 
 def test_missing_required_skips_xiaohongshu_placeholders():
@@ -48,6 +69,78 @@ def test_missing_respects_labeled_fields():
     msg = "帮我写笔记 productName: 防晒喷雾 targetCustomer: 年轻女性 style: 种草 sellingPoints: 清爽不油腻"
     ctx = RunContext(runId=1, sessionId=1, userId=1, message=msg)
     assert bridge.missing_required_arguments(ctx, tool) == []
+
+
+def test_v2_lite_multi_reference_requires_structured_routing():
+    ctx = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        message="为图2女性角色生成图1动作构图风格的电影海报",
+        referenceMentions=[
+            ReferenceMention(token="@图1", refLabel="@图片1-pose.png", url="/generated/uploads/pose.png", kind="image"),
+            ReferenceMention(token="@图2", refLabel="@图片2-face.png", url="/generated/uploads/face.png", kind="image"),
+        ],
+    )
+
+    with pytest.raises(ToolExecutionError) as exc:
+        _raise_image_prompt_schema_validation_if_needed(
+            ctx,
+            _v2_lite_image_tool(),
+            {
+                "operation": "composite",
+                "generation_prompt": "A cinematic poster with a young woman.",
+            },
+        )
+
+    assert exc.value.error_code == "SCHEMA_VALIDATION"
+    assert "structured multi-reference routing" in str(exc.value)
+
+
+def test_v2_lite_multi_reference_accepts_structured_routing():
+    ctx = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        message="为图2女性角色生成图1动作构图风格的电影海报",
+        referenceMentions=[
+            ReferenceMention(token="@图1", refLabel="@图片1-pose.png", url="/generated/uploads/pose.png", kind="image"),
+            ReferenceMention(token="@图2", refLabel="@图片2-face.png", url="/generated/uploads/face.png", kind="image"),
+        ],
+    )
+
+    _raise_image_prompt_schema_validation_if_needed(
+        ctx,
+        _v2_lite_image_tool(),
+        {
+            "operation": "composite",
+            "generation_prompt": "A cinematic poster using the second reference for identity and the first reference for pose.",
+            "references": [
+                {"id": "pose_ref_1", "role": "composition_ref", "source_ref": "[当前参考图_1]", "notes": "pose and framing only"},
+                {"id": "face_ref_1", "role": "face_ref", "source_ref": "[当前参考图_2]", "notes": "character identity only"},
+            ],
+        },
+    )
+
+
+def test_v2_lite_compiler_adds_reference_role_preservation_block():
+    params = compile_v2_lite_image_task_params(
+        {
+            "operation": "composite",
+            "generation_prompt": "A cinematic movie poster.",
+            "base_image_ref": "https://example.test/identity.png",
+            "references": [
+                {"id": "pose_ref_1", "role": "composition_ref", "source_ref": "https://example.test/pose.png", "notes": "pose only"},
+                {"id": "face_ref_1", "role": "face_ref", "source_ref": "https://example.test/face.png", "notes": "identity only"},
+            ],
+        }
+    )
+
+    assert "REFERENCE ROUTING:" in params["prompt"]
+    assert "STRICT REFERENCE ROLE PRESERVATION:" in params["prompt"]
+    assert "Do not swap identity/face references" in params["prompt"]
+    assert params["reference_images"] == ["https://example.test/face.png", "https://example.test/pose.png"]
+    assert "base_image_url" not in params
 
 
 def test_execute_arguments_fill_xiaohongshu_placeholders():
@@ -379,7 +472,7 @@ def _v2_lite_image_tool() -> ToolDescriptor:
     )
 
 
-def test_v2_lite_generate_uses_generation_prompt_even_with_session_state():
+def test_v2_lite_generate_does_not_backend_compose_generation_prompt():
     bridge = BackendToolBridge(backend_client=None)  # type: ignore[arg-type]
     tool = _v2_lite_image_tool()
     ctx = RunContext(
@@ -403,12 +496,12 @@ def test_v2_lite_generate_uses_generation_prompt_even_with_session_state():
     args = bridge.build_arguments(ctx, tool, apply_placeholder_defaults=True)
 
     assert args["operation"] == "generate"
-    assert "生成一张冷蓝电影海报" in args["generation_prompt"]
+    assert "generation_prompt" not in args
     assert args["aspect_ratio"] == "auto"
     assert args["count"] == 1
 
 
-def test_v2_lite_edit_finalize_preserves_base_prompt_and_delta():
+def test_v2_lite_edit_finalize_does_not_backend_compose_prompt_fields():
     tool = _v2_lite_image_tool()
     ctx = RunContext(
         runId=1,
@@ -432,9 +525,8 @@ def test_v2_lite_edit_finalize_preserves_base_prompt_and_delta():
 
     assert finalized["operation"] == "edit"
     assert finalized["base_image_ref"] == "latest_generated_image.url"
-    assert finalized["base_prompt"] == "original cinematic poster prompt"
-    assert "赛博朋克" in finalized["modification_prompt"]
-    assert "original cinematic poster prompt" not in finalized["modification_prompt"]
+    assert finalized["base_prompt"] == ""
+    assert finalized["modification_prompt"] == ""
 
 
 def test_v2_lite_edit_finalize_sanitizes_base_prompt_and_namespaces_current_refs():
@@ -478,6 +570,11 @@ def test_v2_lite_edit_finalize_sanitizes_base_prompt_and_namespaces_current_refs
         tool,
         {
             "operation": "edit",
+            "base_prompt": (
+                "冷蓝电影海报，柔焦真实光影。 "
+                "参考图角色约束（必须严格执行，不可交换）：1) 主体身份参考：@图片1。"
+                "最终输出需明确保证：主体来自1号参考。"
+            ),
             "generation_prompt": "LLM incorrectly rewrote a full prompt",
             "prompt": "legacy toxic prompt",
             "modification_prompt": "将人物模特替换为 @图片1 中的女性，人物自然融入场景。",
@@ -494,6 +591,144 @@ def test_v2_lite_edit_finalize_sanitizes_base_prompt_and_namespaces_current_refs
     assert finalized["references"][0]["notes"] == "使用 [当前参考图_1] 的脸"
     assert "generation_prompt" not in finalized
     assert "prompt" not in finalized
+
+
+def test_compile_v2_lite_image_task_params_generate_uses_physical_prompt_and_references():
+    from app.tools.backend_tool import compile_v2_lite_image_task_params
+
+    params = compile_v2_lite_image_task_params(
+        {
+            "operation": "generate",
+            "generation_prompt": "冷蓝电影海报，柔焦真实光影。",
+            "references": [
+                {"id": "style_ref_1", "role": "style_ref", "source_ref": "/style.png", "notes": "只参考色调"},
+                {"id": "face_ref_1", "role": "face_ref", "source_ref": "/face.png", "notes": "保留这张脸"},
+            ],
+            "aspect_ratio": "9:16",
+            "count": 2,
+            "quality": "low",
+            "routing_notes": "图1管脸",
+        }
+    )
+
+    assert params["prompt"].startswith("冷蓝电影海报")
+    assert "REFERENCE ROUTING:" in params["prompt"]
+    assert "face_ref_1 (/face.png): face_ref" in params["prompt"]
+    assert params["reference_images"] == ["/face.png", "/style.png"]
+    assert params["aspectRatio"] == "9:16"
+    assert params["count"] == 2
+    assert params["quality"] == "low"
+    assert "generation_prompt" not in params
+    assert "references" not in params
+
+
+def test_compile_v2_lite_image_task_params_edit_compiles_base_and_delta():
+    from app.tools.backend_tool import compile_v2_lite_image_task_params
+
+    params = compile_v2_lite_image_task_params(
+        {
+            "operation": "edit",
+            "base_image_ref": "/generated/images/701/image-1.png",
+            "base_prompt": "冷蓝电影海报，柔焦真实光影。STRICT PRESERVATION: old rule",
+            "modification_prompt": "将人物模特替换为参考图中的女性。",
+            "references": [
+                {"id": "face_ref_1", "role": "face_ref", "source_ref": "/new-face.png", "notes": "新脸部参考"}
+            ],
+        }
+    )
+
+    assert params["base_image_url"] == "/generated/images/701/image-1.png"
+    assert params["reference_images"] == ["/new-face.png"]
+    assert params["prompt"].startswith("冷蓝电影海报，柔焦真实光影。")
+    assert "old rule" not in params["prompt"]
+    assert "EDIT INSTRUCTION:" in params["prompt"]
+    assert "将人物模特替换为参考图中的女性。" in params["prompt"]
+    assert "Allow identity and face to change" in params["prompt"]
+    assert "base_prompt" not in params
+    assert "modification_prompt" not in params
+    assert "base_image_ref" not in params
+
+
+@pytest.mark.asyncio
+async def test_execute_stores_v2_arguments_but_dispatches_physical_image_params():
+    class Backend:
+        def __init__(self) -> None:
+            self.tool_call_args = None
+            self.task_params = None
+            self.events = []
+            self.completed = []
+
+        async def create_tool_call(self, run_id: int, request):
+            self.tool_call_args = request.argumentsJson
+            return type("ToolCall", (), {"id": 77, "toolCode": request.toolCode})()
+
+        async def create_task(self, request):
+            self.task_params = request.params
+            return type("TaskStatus", (), {"taskId": 177, "status": "QUEUED"})()
+
+        async def bind_tool_call_task(self, tool_call_id: int, task_id: int):
+            return type("ToolCall", (), {"id": tool_call_id, "taskId": task_id})()
+
+        async def append_event(self, run_id: int, event) -> None:
+            self.events.append((run_id, event.eventType, event.eventJson))
+
+        async def get_task_detail(self, user_id: int, task_id: int) -> TaskDetailResponse:
+            return TaskDetailResponse(
+                taskId=task_id,
+                status="SUCCESS",
+                progress=100,
+                progressMessage="done",
+                result={"resourceType": "IMAGE", "contentText": "image url"},
+            )
+
+        async def get_run_context(self, run_id: int) -> RunContext:
+            return RunContext(runId=run_id, sessionId=1, userId=1, message="generate image", status="RUNNING")
+
+        async def complete_tool_call(self, tool_call_id: int, request) -> None:
+            self.completed.append((tool_call_id, request.resultJson))
+
+        async def fail_tool_call(self, tool_call_id: int, request) -> None:
+            raise AssertionError("unexpected failure")
+
+        async def cancel_task(self, user_id: int, task_id: int) -> None:
+            raise AssertionError("unexpected cancel")
+
+    backend = Backend()
+    bridge = BackendToolBridge(backend_client=backend, timeout_seconds=1, poll_interval_seconds=0.01)  # type: ignore[arg-type]
+    tool = _v2_lite_image_tool()
+    context = RunContext(
+        runId=88,
+        sessionId=1,
+        userId=7,
+        message="生成图片 @图片1",
+        status="RUNNING",
+        referenceMentions=[
+            ReferenceMention(
+                token="@图片1",
+                refLabel="@图片1-face.png",
+                url="/generated/uploads/face.png",
+                kind="image",
+                source="current_turn",
+            )
+        ],
+    )
+
+    await bridge.execute_with_args(
+        context,
+        tool,
+        {
+            "operation": "generate",
+            "generation_prompt": "冷蓝电影海报，柔焦真实光影。",
+            "references": [{"id": "face_ref_1", "role": "face_ref", "source_ref": "[当前参考图_1]"}],
+        },
+    )
+
+    assert backend.tool_call_args["generation_prompt"] == "冷蓝电影海报，柔焦真实光影。"
+    assert "generation_prompt" not in backend.task_params
+    assert backend.task_params["prompt"].startswith("冷蓝电影海报")
+    assert len(backend.task_params["reference_images"]) == 1
+    assert backend.task_params["reference_images"][0].endswith("/generated/uploads/face.png")
+    assert backend.completed
 
 
 def test_attached_ready_image_fills_reference_image_field():

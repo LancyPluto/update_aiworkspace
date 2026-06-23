@@ -59,6 +59,9 @@ class BackendClient:
         data = await self._request("GET", "/api/internal/v1/agent/model-config")
         return AgentModelConfig.model_validate(data)
 
+    async def get_agent_skill(self, skill_code: str) -> dict[str, Any]:
+        return await self._request("GET", f"/api/internal/v1/agent/skills/{skill_code}")
+
     async def retrieve_workspace_memory(
         self,
         workspace_id: int,

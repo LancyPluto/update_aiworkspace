@@ -19,6 +19,7 @@ import com.aiminilab.aitoolmarket.agent.dto.InternalAgentSessionSearchRequest;
 import com.aiminilab.aitoolmarket.agent.dto.UpsertAgentGraphCheckpointRequest;
 import com.aiminilab.aitoolmarket.agent.dto.UpsertStreamingAgentAnswerRequest;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentRunContextResponse;
+import com.aiminilab.aitoolmarket.agent.dto.AgentSkillBundleResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentModelConfigResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalCreateWorkspaceMemoryCandidateRequest;
 import com.aiminilab.aitoolmarket.agent.dto.InternalCreateWorkspaceMemoryRequest;
@@ -28,6 +29,7 @@ import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentWorkspaceMemoryRequest;
 import com.aiminilab.aitoolmarket.agent.service.AgentFileService;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.AgentRunService;
+import com.aiminilab.aitoolmarket.agent.service.AgentSkillBundleService;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentWorkspaceMemoryItemMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentWorkspaceService;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
@@ -48,17 +50,20 @@ import org.springframework.web.bind.annotation.RestController;
 public class InternalAgentController {
 
     private final AgentRunService agentRunService;
+    private final AgentSkillBundleService agentSkillBundleService;
     private final AgentModelConfigService agentModelConfigService;
     private final AgentWorkspaceService agentWorkspaceService;
     private final AgentFileService agentFileService;
     private final AgentWorkspaceMemoryItemMapper agentWorkspaceMemoryItemMapper;
 
     public InternalAgentController(AgentRunService agentRunService,
+                                   AgentSkillBundleService agentSkillBundleService,
                                    AgentModelConfigService agentModelConfigService,
                                    AgentWorkspaceService agentWorkspaceService,
                                    AgentFileService agentFileService,
                                    AgentWorkspaceMemoryItemMapper agentWorkspaceMemoryItemMapper) {
         this.agentRunService = agentRunService;
+        this.agentSkillBundleService = agentSkillBundleService;
         this.agentModelConfigService = agentModelConfigService;
         this.agentWorkspaceService = agentWorkspaceService;
         this.agentFileService = agentFileService;
@@ -68,6 +73,11 @@ public class InternalAgentController {
     @GetMapping("/runs/{runId}/context")
     public ApiResponse<InternalAgentRunContextResponse> context(@PathVariable Long runId) {
         return ApiResponse.success(agentRunService.context(runId));
+    }
+
+    @GetMapping("/skills/{skillCode}")
+    public ApiResponse<AgentSkillBundleResponse> skill(@PathVariable String skillCode) {
+        return ApiResponse.success(agentSkillBundleService.getPublished(skillCode));
     }
 
     @GetMapping("/model-config")

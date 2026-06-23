@@ -242,14 +242,20 @@ export function FieldSchemaEditor({ fields, onChange, disabled }: FieldSchemaEdi
                 />
               </div>
 
-              <div className="space-y-3 rounded-md border border-primary/15 bg-primary/5 p-3">
-                <div>
-                  <p className="text-sm font-medium">Agent 交互策略</p>
-                  <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                    区分“工具执行必须有”和“必须追问用户”。默认值、上下文派生和可推断字段不会打断对话。
-                  </p>
-                </div>
-                <div className="grid gap-3 lg:grid-cols-2">
+              <details className="group rounded-md border border-primary/15 bg-primary/5 p-3">
+                <summary className="cursor-pointer list-none">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium">Agent 交互策略</p>
+                      <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                        执行必填：{field.executionRequired ? "开" : "关"} · 缺失追问：{field.userRequired ? "开" : "关"} · 填充：{field.agentFillStrategy}
+                      </p>
+                    </div>
+                    <span className="text-xs text-muted-foreground group-open:hidden">展开</span>
+                    <span className="hidden text-xs text-muted-foreground group-open:inline">收起</span>
+                  </div>
+                </summary>
+                <div className="mt-3 grid gap-3 lg:grid-cols-2">
                   <div className="flex items-center justify-between rounded-md border border-border/80 bg-background/70 px-3 py-2">
                     <div>
                       <Label className="text-sm">执行必填</Label>
@@ -336,7 +342,7 @@ export function FieldSchemaEditor({ fields, onChange, disabled }: FieldSchemaEdi
                     </p>
                   </div>
                 </div>
-              </div>
+              </details>
 
               {supportsOptions(field.fieldType) ? (
                 <div className="space-y-3 rounded-md border border-border/80 bg-background/50 p-3">

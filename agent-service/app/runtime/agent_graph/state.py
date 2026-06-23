@@ -35,6 +35,8 @@ class AgentState(TypedDict, total=False):
     pending_confirmation: Annotated[dict[str, Any] | None, _replace]
     final_answer: Annotated[str, _replace]
     finished: Annotated[bool, _replace]
+    schema_validation_retry_pending: Annotated[bool, _replace]
+    skill_hydration_retry_pending: Annotated[bool, _replace]
 
 
 def serialize_checkpoint(state: AgentState) -> str:

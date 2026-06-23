@@ -36,6 +36,36 @@ SESSION_STATE_INSTRUCTIONS = (
     "- Never put a full rewritten scene into modification_prompt."
 )
 
+IMAGE_TOOL_PROMPT_COMPLETENESS_RULES = (
+    "Image generation parameter law:\n"
+    "- For every image-generation product tool call, the prompt-bearing field must be semantically complete.\n"
+    "- For generate or composite operations, generation_prompt MUST be a standalone visual prompt that can produce "
+    "the image without reading the user message again.\n"
+    "- For edit or variation operations, base_prompt MUST copy the selected image prompt from <SessionState> "
+    "verbatim, and modification_prompt MUST contain the concrete visual change requested in this turn.\n"
+    "- If the request semantically continues from prior generated media, use <SessionState> as the visual foundation "
+    "when constructing tool arguments.\n"
+    "- As a senior visual agent, completing and synthesizing image prompts is your core responsibility. You are "
+    "authorized and expected to merge the visual elements in <SessionState> with the current request and silently "
+    "construct valid tool parameters yourself.\n"
+    "- Do not ask the user for prompt completion when <SessionState> and current attachments provide enough visual "
+    "context to continue. Do not complain about missing descriptions; build the parameters and call the tool.\n"
+    "- Never send empty, placeholder, vague, or purely referential prompt fields. Do not leave semantic work to the backend.\n"
+    "- Current visible attachments must be referenced through aliases such as [当前参考图_1] in references[].source_ref.\n"
+    "- When more than one current visible attachment is used for one image-generation call, references[] is mandatory: "
+    "create one entry per relevant attachment, assign a concrete role, and state in notes what that image controls and "
+    "what it must not override.\n"
+    "- If you cannot actually inspect the pixels of a reference image, do not invent specific visual details from it. "
+    "Use references[].role and notes to route the image, and keep generation_prompt focused on the user's explicit "
+    "visual requirements plus role constraints.\n"
+    "- For pure multi-reference synthesis from current attachments, use operation=composite and do not set base_image_ref. "
+    "Use base_image_ref only when editing or varying an existing base image.\n"
+    "- Do not maintain keyword trigger lists for user wording. Decide from the operation you are constructing and the "
+    "need to provide complete image tool parameters.\n"
+    "Before calling image-generation tools, self-check that prompt fields independently describe what the image model "
+    "must render."
+)
+
 MAX_GENERATED_IMAGES = 2
 MAX_VISIBLE_ATTACHMENTS = 8
 LATEST_PROMPT_MAX_CHARS = 3000

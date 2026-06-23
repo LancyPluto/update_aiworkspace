@@ -418,6 +418,34 @@ export interface ToolFieldPayload {
   sortOrder?: number
 }
 
+export interface AgentSkillBundle {
+  id?: number | null
+  skillCode: string
+  displayName: string
+  description: string
+  toolCodes: string[]
+  sopRules: string
+  whenToUse?: string | null
+  whenNotToUse?: string | null
+  fieldPolicy?: unknown
+  examples?: unknown
+  status: string
+  version?: number | null
+  publishedAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface AgentSkillBundlePayload {
+  displayName: string
+  description: string
+  toolCodes: string[]
+  sopRules: string
+  whenToUse?: string
+  whenNotToUse?: string
+  fieldPolicy?: unknown
+  examples?: unknown
+}
+
 export interface FieldSchemaAdmin {
   id: number
   schemaVersion: string

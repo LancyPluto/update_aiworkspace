@@ -223,6 +223,8 @@ def trim_tool_parameters(
     properties = schema.get("properties")
     if not isinstance(properties, dict) or not properties:
         return _generic_parameters()
+    if _is_v2_lite_image_schema(schema):
+        return _trim_v2_lite_image_parameters(schema, desc_limit=desc_limit, media_desc_limit=media_desc_limit)
 
     kept: dict[str, Any] = {}
     for key, spec in properties.items():
@@ -249,6 +251,96 @@ def trim_tool_parameters(
     required = [name for name in (schema.get("required") or []) if name in kept]
     if required:
         out["required"] = required
+    return out
+
+
+def _is_v2_lite_image_schema(schema: dict[str, Any]) -> bool:
+    properties = schema.get("properties")
+    return isinstance(properties, dict) and {"operation", "generation_prompt", "base_image_ref", "references"}.issubset(properties.keys())
+
+
+def _trim_v2_lite_image_parameters(
+    schema: dict[str, Any],
+    *,
+    desc_limit: int,
+    media_desc_limit: int,
+) -> dict[str, Any]:
+    properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    ordered_keys = (
+        "operation",
+        "generation_prompt",
+        "base_image_ref",
+        "base_prompt",
+        "modification_prompt",
+        "negative_prompt",
+        "references",
+        "aspect_ratio",
+        "count",
+        "routing_notes",
+    )
+    kept: dict[str, Any] = {}
+    for key in ordered_keys:
+        if key not in properties:
+            continue
+        if key == "references":
+            kept[key] = _compact_v2_references_property(properties[key], desc_limit=media_desc_limit)
+        else:
+            kept[key] = _compact_property(properties[key], desc_limit, media_desc_limit=media_desc_limit, field_key=key)
+    required = [name for name in (schema.get("required") or []) if isinstance(name, str) and name in kept]
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": required or ["operation"],
+        "properties": kept,
+    }
+
+
+def _compact_v2_references_property(spec: Any, *, desc_limit: int) -> dict[str, Any]:
+    description = ""
+    if isinstance(spec, dict):
+        raw_description = spec.get("description") or spec.get("title") or ""
+        if isinstance(raw_description, str):
+            description = raw_description.strip().replace("\n", " ")[:desc_limit]
+    role_enum = [
+        "face_ref",
+        "identity_ref",
+        "style_ref",
+        "pose_ref",
+        "composition_ref",
+        "controlnet_pose_ref",
+        "background_ref",
+        "object_ref",
+        "supplemental_ref",
+    ]
+    out = {
+        "type": "array",
+        "description": description
+        or "Structured reference image routing. Use one item per current reference image.",
+        "items": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["id", "role", "source_ref"],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Stable id such as face_ref_1, pose_ref_1, style_ref_1.",
+                },
+                "role": {
+                    "type": "string",
+                    "enum": role_enum,
+                    "description": "What this reference controls.",
+                },
+                "source_ref": {
+                    "type": "string",
+                    "description": "Use current aliases such as [当前参考图_1], not raw @ labels.",
+                },
+                "notes": {
+                    "type": "string",
+                    "description": "Natural-language routing notes: what to use and what not to override.",
+                },
+            },
+        },
+    }
     return out
 
 

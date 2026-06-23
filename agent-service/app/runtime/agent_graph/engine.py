@@ -58,6 +58,8 @@ from app.runtime.agent_graph.state import (
 )
 from app.runtime.context_manager import ContextManager, trim_tool_output
 from app.runtime.product_tool_call_loop import _alias_for_tool_code
+from app.runtime.product_tool_call_loop import _format_skill_catalog
+from app.runtime.skill_hydration import SkillHydrationService, hydration_message
 from app.runtime.tool_disclosure import (
     EXPAND_TOOL,
     build_disclosed_definitions,
@@ -91,7 +93,7 @@ from app.runtime.runtime_settings import (
     runtime_int,
     runtime_settings_event_payload,
 )
-from app.runtime.session_state import SESSION_STATE_INSTRUCTIONS, format_session_state_context
+from app.runtime.session_state import IMAGE_TOOL_PROMPT_COMPLETENESS_RULES, SESSION_STATE_INSTRUCTIONS, format_session_state_context
 from app.runtime.tool_orchestrator import ToolOrchestrator
 from app.security.prompt_guard import PromptGuard
 from app.tools.backend_tool import BackendToolBridge, ToolExecutionError, enforce_locked_field_defaults, finalize_generation_arguments
@@ -100,6 +102,7 @@ from app.tools.registry import (
     ToolRegistry,
     infer_output_modality,
     requested_output_modality,
+    resolve_canonical_tool_code,
     tool_supports_modality,
 )
 
@@ -152,10 +155,14 @@ class AgentGraphEngine:
         self._aliases: dict[str, Any] = {}
         self._memory_tool: MemoryTool | None = None
         self._max_iterations: int = settings.agent_graph_max_iterations
+        self._max_tool_executions: int = settings.agent_max_tool_calls
         self._max_tool_retries: int = 2
         self._run_artifacts: list[dict[str, Any]] = []
         self._tool_failures: dict[str, int] = {}
         self._expanded_tool_codes: set[str] = set()
+        self._pending_schema_validation_tool_code: str | None = None
+        self._hydrated_skill_codes: set[str] = set()
+        self._skill_hydration = SkillHydrationService(backend_client)
         self._memory_tools_enabled: bool = False
         self._compiled = self._build_graph()
 
@@ -242,7 +249,7 @@ class AgentGraphEngine:
         graph.add_node("tools", self._tools_node)
         graph.add_node("finalize", self._finalize_node)
         graph.add_edge(START, "agent")
-        graph.add_conditional_edges("agent", self._route_after_agent, {"tools": "tools", "finalize": "finalize"})
+        graph.add_conditional_edges("agent", self._route_after_agent, {"agent": "agent", "tools": "tools", "finalize": "finalize"})
         graph.add_conditional_edges("tools", self._route_after_tools, {"agent": "agent", "finalize": "finalize", "end": END})
         graph.add_edge("finalize", END)
         return graph.compile()
@@ -253,7 +260,8 @@ class AgentGraphEngine:
             RunEventCreate(eventType=TOOL_CALL_LOOP_STARTED, eventJson={
                 "kind": "graph",
                 "tools": [d["function"]["name"] for d in self._tool_defs],
-                "maxIterations": self._max_iterations,
+                "maxModelTurns": self._max_iterations,
+                "maxToolExecutions": self._max_tool_executions,
             }),
         )
         final_state: AgentState = await self._compiled.ainvoke(
@@ -265,6 +273,9 @@ class AgentGraphEngine:
             RunEventCreate(eventType=TOOL_CALL_LOOP_COMPLETED, eventJson={
                 "kind": "graph",
                 "iterations": int(final_state.get("iteration", 0)),
+                "modelTurns": int(final_state.get("iteration", 0)),
+                "maxModelTurns": self._max_iterations,
+                "maxToolExecutions": self._max_tool_executions,
                 "awaitingConfirmation": bool(final_state.get("pending_confirmation")),
             }),
         )
@@ -293,10 +304,6 @@ class AgentGraphEngine:
             # Recompute the shortlist for the current step so chained outputs
             # (e.g. an image just produced) surface the right next-step tools.
             self._refresh_tool_defs(context, artifacts=state.get("artifacts") or self._run_artifacts)
-        if int(state.get("iteration", 0)) == 0 and settings.agent_unified_router_enabled:
-            routed = await self._first_step_unified_route(context, state)
-            if routed is not None:
-                return routed
         self._guard.reserve_model_call(self._budget)
         turn = await self.model.chat_turn(state["messages"], tools=self._tool_defs, tool_choice="auto")
         iteration = int(state.get("iteration", 0)) + 1
@@ -311,13 +318,31 @@ class AgentGraphEngine:
         )
         update: dict[str, Any] = {"iteration": iteration, "last_content": turn.content or ""}
         if tool_calls:
+            hydration = await self._maybe_hydrate_for_tool_calls(context, tool_calls)
+            if hydration:
+                update["messages"] = [hydration_message(hydration)]
+                update["pending_tool_calls"] = []
+                update["schema_validation_retry_pending"] = False
+                update["skill_hydration_retry_pending"] = True
+                return update
             payloads = [tool_call_message_payload(c.id, c.name, c.arguments) for c in tool_calls]
             update["messages"] = [ChatMessage(role="assistant", content=turn.content or "", toolCalls=payloads)]
             update["pending_tool_calls"] = [
                 {"id": c.id, "name": c.name, "arguments": c.arguments if isinstance(c.arguments, dict) else {}}
                 for c in tool_calls
             ]
+            update["schema_validation_retry_pending"] = False
+            update["skill_hydration_retry_pending"] = False
         else:
+            if self._should_force_schema_validation_retry():
+                update["messages"] = [
+                    ChatMessage(role="assistant", content=turn.content or ""),
+                    ChatMessage(role="system", content=_schema_validation_retry_nudge()),
+                ]
+                update["schema_validation_retry_pending"] = True
+            else:
+                update["schema_validation_retry_pending"] = False
+            update["skill_hydration_retry_pending"] = False
             update["pending_tool_calls"] = []
         return update
 
@@ -473,6 +498,11 @@ class AgentGraphEngine:
                 # arguments and retry, but bound retries per tool to avoid loops.
                 self._tool_failures[tool.toolCode] = self._tool_failures.get(tool.toolCode, 0) + 1
                 exhausted = self._tool_failures[tool.toolCode] >= self._max_tool_retries
+                details = getattr(exc, "details", {}) if hasattr(exc, "details") else {}
+                if exc.error_code == "SCHEMA_VALIDATION" and not exhausted:
+                    self._pending_schema_validation_tool_code = tool.toolCode
+                elif exc.error_code == "SCHEMA_VALIDATION":
+                    self._pending_schema_validation_tool_code = None
                 await self.backend.append_event(
                     context.runId,
                     RunEventCreate(eventType=REFLECT_RETRY, eventText=tool.toolCode, eventJson={
@@ -481,8 +511,18 @@ class AgentGraphEngine:
                         "error": str(exc),
                         "attempt": self._tool_failures[tool.toolCode],
                         "retryable": not exhausted,
+                        **({"details": details} if isinstance(details, dict) and details else {}),
                     }),
                 )
+                if exc.error_code == "SCHEMA_VALIDATION" and exhausted:
+                    return {
+                        "messages": new_messages,
+                        "final_answer": _schema_validation_clarification(tool.toolCode, details),
+                        "finished": True,
+                        "pending_tool_calls": [],
+                        **({"plan": plan_update} if plan_update is not None else {}),
+                        **({"artifacts": artifacts} if artifacts else {}),
+                    }
                 guidance = (
                     "已多次失败，请不要再重试该工具，改用其他方式或直接向用户说明原因。"
                     if exhausted
@@ -491,6 +531,7 @@ class AgentGraphEngine:
                 new_messages.append(self._tool_message(call_id, name, {
                     "success": False, "toolCode": tool.toolCode, "error": str(exc),
                     "errorCode": exc.error_code, "guidance": guidance,
+                    **({"schemaValidationError": details} if exc.error_code == "SCHEMA_VALIDATION" and isinstance(details, dict) else {}),
                 }))
                 continue
 
@@ -501,6 +542,8 @@ class AgentGraphEngine:
                 }))
                 continue
 
+            if self._pending_schema_validation_tool_code == tool.toolCode:
+                self._pending_schema_validation_tool_code = None
             artifact = self._artifact_from_result(tool, result)
             artifacts.append(artifact)
             self._run_artifacts.append(artifact)
@@ -513,6 +556,7 @@ class AgentGraphEngine:
             new_messages.append(self._tool_message(call_id, name, self._tool_result_for_model(result)))
 
         update: dict[str, Any] = {"messages": new_messages, "pending_tool_calls": []}
+        update["schema_validation_retry_pending"] = self._should_force_schema_validation_retry()
         if plan_update is not None:
             update["plan"] = plan_update
         if artifacts:
@@ -534,6 +578,10 @@ class AgentGraphEngine:
     def _route_after_agent(self, state: AgentState) -> str:
         if state.get("pending_tool_calls"):
             return "tools"
+        if state.get("skill_hydration_retry_pending"):
+            return "agent"
+        if state.get("schema_validation_retry_pending"):
+            return "agent"
         return "finalize"
 
     def _route_after_tools(self, state: AgentState) -> str:
@@ -545,6 +593,22 @@ class AgentGraphEngine:
             return "finalize"
         return "agent"
 
+    def _should_force_schema_validation_retry(self) -> bool:
+        code = self._pending_schema_validation_tool_code
+        if not code:
+            return False
+        return self._tool_failures.get(code, 0) < self._max_tool_retries
+
+    async def _maybe_hydrate_for_tool_calls(
+        self,
+        context: RunContext,
+        tool_calls: list[Any],
+    ):
+        if not tool_calls:
+            return None
+        tool_code = resolve_canonical_tool_code(tool_calls[0].name, context.availableTools) or tool_calls[0].name
+        return await self._skill_hydration.hydrate_for_tool(context, tool_code, self._hydrated_skill_codes)
+
     # ------------------------------------------------------------------ #
     # Setup helpers
     # ------------------------------------------------------------------ #
@@ -554,9 +618,22 @@ class AgentGraphEngine:
         self._budget = BudgetState(credit_budget=context.creditBudget)
         self._run_artifacts = []
         self._tool_failures = {}
+        self._pending_schema_validation_tool_code = None
+        self._hydrated_skill_codes = set()
         self._max_iterations = runtime_int(
-            context, "maxToolCalls", settings.agent_graph_max_iterations, 1, 32
-        ) if context.runtimeSettings and context.runtimeSettings.maxToolCalls else settings.agent_graph_max_iterations
+            context,
+            "maxModelCalls",
+            settings.agent_max_model_calls,
+            1,
+            50,
+        )
+        self._max_tool_executions = runtime_int(
+            context,
+            "maxToolCalls",
+            settings.agent_max_tool_calls,
+            1,
+            50,
+        )
         await self._emit_runtime_settings(context)
         if emit_run_started:
             await self.backend.append_event(
@@ -638,7 +715,13 @@ class AgentGraphEngine:
         )
 
     async def _base_messages(self, context: RunContext) -> list[ChatMessage]:
-        configured = ((context.agentSystemPrompt or "").strip() or GRAPH_SYSTEM_PROMPT) + "\n\n" + SESSION_STATE_INSTRUCTIONS
+        configured = (
+            ((context.agentSystemPrompt or "").strip() or GRAPH_SYSTEM_PROMPT)
+            + "\n\n"
+            + SESSION_STATE_INSTRUCTIONS
+            + "\n\n"
+            + IMAGE_TOOL_PROMPT_COMPLETENESS_RULES
+        )
         messages: list[ChatMessage] = [ChatMessage(role="system", content=configured)]
         if settings.agent_tool_disclosure_enabled:
             tools_prompt = format_tool_catalog(context.availableTools)
@@ -646,6 +729,9 @@ class AgentGraphEngine:
             tools_prompt = _format_available_tools_prompt(context)
         if tools_prompt:
             messages.append(ChatMessage(role="system", content=tools_prompt))
+        skill_catalog = _format_skill_catalog(context)
+        if skill_catalog:
+            messages.append(ChatMessage(role="system", content=skill_catalog))
         memory_items = await self.memory_runtime.fetch_items(context)
         memory_context = format_workspace_memory_context(memory_items)
         if memory_context:
@@ -1000,3 +1086,28 @@ class AgentGraphEngine:
             return usage
         prompt_text = "\n".join([*(m.content for m in context.history if m.content), context.message or ""])
         return {"promptTokens": _estimate_tokens(prompt_text), "completionTokens": _estimate_tokens(final_answer)}
+
+
+def _schema_validation_clarification(tool_code: str, details: Any) -> str:
+    missing: list[str] = []
+    latest_preview = ""
+    if isinstance(details, dict):
+        missing = [str(item) for item in details.get("missingFields") or [] if str(item)]
+        latest_preview = str(details.get("latestGeneratedImagePromptPreview") or "").strip()
+    fields = "、".join(missing) if missing else "必要的图片提示词字段"
+    answer = (
+        f"我需要补全图片工具 `{tool_code}` 的 {fields} 后才能继续。"
+        "请提供完整的画面描述，或明确说明要沿用上一张图的哪些视觉元素以及本次要改变什么。"
+    )
+    if latest_preview:
+        answer += f"\n\n当前可继承的上一张图视觉描述片段：{latest_preview}"
+    return answer
+
+
+def _schema_validation_retry_nudge() -> str:
+    return (
+        "You did not call the tool after a SchemaValidationError. "
+        "Do not ask the user for clarification and do not explain the error. "
+        "Immediately produce a valid function tool call. Read <SessionState>, fill the missing image prompt fields "
+        "with complete visual text, and call the same image tool again now."
+    )

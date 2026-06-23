@@ -15,8 +15,10 @@ import {
 } from "lucide-vue-next"
 import { collectSessionAssets } from "@/utils/agentChatAssetRefs"
 import {
+  baseImageLabel,
   buildAttachmentLabelCatalog,
   buildReferenceMentionsPayload,
+  displayLabelForMention,
   findReferenceMentionByAsset,
   type AgentReferenceMention,
 } from "@/utils/agentReferenceMentions"
@@ -518,7 +520,7 @@ function messageContentJsonForFiles(
 }
 
 function referenceMentionsForApi(mentions: AgentReferenceMention[]) {
-  return mentions.map((mention) => ({
+  return normalizeTurnReferenceMentions(mentions).map((mention) => ({
     token: mention.token,
     refLabel: mention.refLabel,
     assetKey: mention.assetKey,
@@ -530,6 +532,45 @@ function referenceMentionsForApi(mentions: AgentReferenceMention[]) {
     previewUrl: mention.previewUrl,
     source: mention.source,
   }))
+}
+
+function normalizeTurnReferenceMentions(mentions: AgentReferenceMention[]) {
+  if (mentions.length <= 1) return mentions
+  const baseCounts = new Map<string, number>()
+  for (const mention of mentions) {
+    const key = normalizedReferenceBaseKey(mention.token || "")
+      || normalizedReferenceBaseKey(mention.refLabel || "")
+      || mention.token
+      || mention.refLabel
+    if (!key) continue
+    baseCounts.set(key, (baseCounts.get(key) ?? 0) + 1)
+  }
+  const needsRenumber = Array.from(baseCounts.values()).some((count) => count > 1)
+  if (!needsRenumber) return mentions
+
+  const counters: Record<string, number> = { image: 0, video: 0, audio: 0, file: 0 }
+  return mentions.map((mention) => {
+    const kind = normalizedMentionKind(mention)
+    counters[kind] += 1
+    const index = counters[kind]
+    const token = displayLabelForMention({ kind }, index)
+    const refLabel = referenceAttachmentLabel(index - 1, mention.refLabel || mention.name || mention.token, mention.contentType)
+    return {
+      ...mention,
+      token,
+      refLabel,
+    }
+  })
+}
+
+function normalizedMentionKind(mention: AgentReferenceMention): "image" | "video" | "audio" | "file" {
+  if (mention.kind === "video" || mention.kind === "audio" || mention.kind === "file") return mention.kind
+  if (isImageAttachment(mention.contentType, mention.name || mention.refLabel || mention.token)) return "image"
+  return "file"
+}
+
+function normalizedReferenceBaseKey(label: string) {
+  return baseImageLabel(label)?.replace(/^@图片/, "@图") ?? ""
 }
 
 function globalFileIdsFor(items: AgentFile[], urlItems: AgentUrlAttachment[]): Array<string | number> {

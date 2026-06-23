@@ -24,6 +24,7 @@ from app.core.event_types import (
     MEMORY_CONTEXT_FROZEN,
     MESSAGE_COMPLETED,
     MESSAGE_DELTA,
+    REFLECT_RETRY,
     REASONING_COMPLETED,
     REASONING_DELTA,
     RUN_STARTED,
@@ -454,6 +455,15 @@ class DeepAgentsRuntimeEngine:
             )
             workspace_memory_context = self._format_tool_memory_context(context, workspace_memory_items)
 
+        if self._product_tool_loop_enabled(context):
+            product_intent = await self._try_product_tool_loop_fallback(
+                context,
+                workspace_memory_context=workspace_memory_context,
+                diagnostic_prefix=False,
+            )
+            if product_intent is not None:
+                return product_intent
+
         async def unified_router_fn(ctx: RunContext, rule_intent: IntentResult) -> IntentResult | None:
             return await self.unified_router.route(ctx, workspace_memory_context=workspace_memory_context)
 
@@ -486,12 +496,7 @@ class DeepAgentsRuntimeEngine:
             llm_router=llm_router,
             tool_resolver=tool_resolver_fn,
         )
-        if intent.reason != "router_fallback_general_chat":
-            return intent
-        if not self._product_tool_loop_enabled(context):
-            return intent
-        product_intent = await self._try_product_tool_loop_fallback(context)
-        return product_intent or intent
+        return intent
 
     @staticmethod
     def _product_tool_loop_enabled(context: RunContext) -> bool:
@@ -503,9 +508,16 @@ class DeepAgentsRuntimeEngine:
             return False
         return True
 
-    async def _try_product_tool_loop_fallback(self, context: RunContext):
+    async def _try_product_tool_loop_fallback(
+        self,
+        context: RunContext,
+        *,
+        workspace_memory_context: str = "",
+        diagnostic_prefix: bool = True,
+    ):
         try:
-            workspace_memory_context = await self._fetch_workspace_memory_context(context)
+            if not workspace_memory_context:
+                workspace_memory_context = await self._fetch_workspace_memory_context(context)
             if workspace_memory_context:
                 await self._emit_memory_context_frozen(context, workspace_memory_context, source="product_tool_loop")
             product_result = await self.product_tool_loop.run(
@@ -524,20 +536,25 @@ class DeepAgentsRuntimeEngine:
             return None
         if product_result.intent is None:
             return None
-        product_result.intent.signals = [
-            {
-                "source": "llm_router",
-                "verdict": "general_chat",
-                "confidence": 0.55,
-                "reason": "router_fallback_general_chat",
-            },
+        signals = []
+        if diagnostic_prefix:
+            signals.append(
+                {
+                    "source": "llm_router",
+                    "verdict": "general_chat",
+                    "confidence": 0.55,
+                    "reason": "router_fallback_general_chat",
+                }
+            )
+        signals.append(
             {
                 "source": "tool_call_loop",
                 "verdict": product_result.intent.intent.value,
                 "confidence": product_result.intent.confidence,
                 "reason": product_result.intent.reason,
-            },
-        ]
+            }
+        )
+        product_result.intent.signals = signals
         LOGGER.info(
             "product tool loop fallback selected runId=%s intent=%s tool=%s",
             context.runId,
@@ -788,13 +805,33 @@ class DeepAgentsRuntimeEngine:
                     await self._fail_run(context.runId, exception.error_code, exception.message, budget=budget)
                     return
                 except ToolExecutionError as exception:
-                    await self._fail_run(
-                        context.runId,
-                        exception.error_code or "TOOL_CALL_FAILED",
-                        str(exception),
-                        budget=budget,
-                    )
-                    return
+                    try:
+                        result = await self._retry_schema_validation_tool_execution(
+                            context,
+                            tool,
+                            budget,
+                            intent,
+                            exception,
+                            workspace_memory_context=workspace_memory_context,
+                            workspace_memory_items=workspace_memory_items,
+                            prompt_mode=prompt_mode,
+                        )
+                    except BudgetExceeded as retry_budget_exception:
+                        await self._fail_run(
+                            context.runId,
+                            retry_budget_exception.error_code,
+                            retry_budget_exception.message,
+                            budget=budget,
+                        )
+                        return
+                    if result is None:
+                        await self._fail_run(
+                            context.runId,
+                            exception.error_code or "TOOL_CALL_FAILED",
+                            str(exception),
+                            budget=budget,
+                        )
+                        return
                 if result.get("missing_tool_arguments"):
                     await self._emit_missing_arguments(context, tool, result["missing_tool_arguments"])
                     answer = self._format_missing_arguments_message(tool, result["missing_tool_arguments"])
@@ -854,13 +891,33 @@ class DeepAgentsRuntimeEngine:
             await self._fail_run(context.runId, exception.error_code, exception.message, budget=budget)
             return
         except ToolExecutionError as exception:
-            await self._fail_run(
-                context.runId,
-                exception.error_code or "TOOL_CALL_FAILED",
-                str(exception),
-                budget=budget,
-            )
-            return
+            try:
+                result = await self._retry_schema_validation_tool_execution(
+                    context,
+                    tool,
+                    budget,
+                    intent,
+                    exception,
+                    workspace_memory_context=workspace_memory_context,
+                    workspace_memory_items=workspace_memory_items,
+                    prompt_mode=prompt_mode,
+                )
+            except BudgetExceeded as retry_budget_exception:
+                await self._fail_run(
+                    context.runId,
+                    retry_budget_exception.error_code,
+                    retry_budget_exception.message,
+                    budget=budget,
+                )
+                return
+            if result is None:
+                await self._fail_run(
+                    context.runId,
+                    exception.error_code or "TOOL_CALL_FAILED",
+                    str(exception),
+                    budget=budget,
+                )
+                return
 
         if result.get("missing_tool_arguments"):
             await self._emit_missing_arguments(context, tool, result["missing_tool_arguments"])
@@ -877,6 +934,89 @@ class DeepAgentsRuntimeEngine:
         self, context: RunContext, tool: ToolDescriptor, budget: BudgetState, arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return await self.tool_orchestrator.execute_with_guard(context, tool, budget, arguments=arguments)
+
+    async def _retry_schema_validation_tool_execution(
+        self,
+        context: RunContext,
+        tool: ToolDescriptor,
+        budget: BudgetState,
+        intent,
+        exception: ToolExecutionError,
+        *,
+        workspace_memory_context: str,
+        workspace_memory_items: list[WorkspaceMemoryItem],
+        prompt_mode: PromptMode,
+    ) -> dict[str, Any] | None:
+        if exception.error_code != "SCHEMA_VALIDATION":
+            return None
+
+        details = getattr(exception, "details", {}) if hasattr(exception, "details") else {}
+        await self.backend.append_event(
+            context.runId,
+            RunEventCreate(
+                eventType=REFLECT_RETRY,
+                eventText=tool.toolCode,
+                eventJson={
+                    "toolCode": tool.toolCode,
+                    "errorCode": exception.error_code,
+                    "error": str(exception),
+                    "attempt": 1,
+                    "retryable": True,
+                    **({"details": details} if isinstance(details, dict) and details else {}),
+                },
+            ),
+        )
+
+        product_result = await self.product_tool_loop.run(
+            context,
+            max_tool_calls=_runtime_int(
+                context,
+                "productToolLoopMaxCalls",
+                self.product_tool_loop.max_tool_calls,
+                1,
+                20,
+            ),
+            workspace_memory_context=workspace_memory_context,
+        )
+        retry_intent = product_result.intent
+        if retry_intent is None or retry_intent.selectedToolCode != tool.toolCode:
+            return None
+
+        retry_args = self.tool_bridge.build_arguments(
+            context,
+            tool,
+            apply_placeholder_defaults=True,
+            workspace_memory_context=workspace_memory_context,
+            prompt_mode=prompt_mode,
+        )
+        retry_args.update({key: value for key, value in (retry_intent.arguments or {}).items() if value not in (None, "")})
+        retry_args = apply_user_selected_attachment_priority(context, tool, retry_args)
+        retry_args = enforce_locked_field_defaults(tool, retry_args, user_message=context.message)
+        retry_args = _apply_workspace_memory_argument_overrides(context, tool, retry_args, workspace_memory_items)
+        retry_args = finalize_generation_arguments(context, tool, retry_args, prompt_mode=prompt_mode)
+        await self._emit_arguments_preview(context, tool, retry_args, [], False)
+        await self._emit_arguments_merged(context, tool, retry_intent, retry_args)
+
+        try:
+            return await self._execute_tool_with_guard(context, tool, budget, arguments=retry_args)
+        except ToolExecutionError as retry_exception:
+            retry_details = getattr(retry_exception, "details", {}) if hasattr(retry_exception, "details") else {}
+            await self.backend.append_event(
+                context.runId,
+                RunEventCreate(
+                    eventType=REFLECT_RETRY,
+                    eventText=tool.toolCode,
+                    eventJson={
+                        "toolCode": tool.toolCode,
+                        "errorCode": retry_exception.error_code,
+                        "error": str(retry_exception),
+                        "attempt": 2,
+                        "retryable": False,
+                        **({"details": retry_details} if isinstance(retry_details, dict) and retry_details else {}),
+                    },
+                ),
+            )
+            return None
 
     async def _emit_arguments_preview(
         self, context: RunContext, tool: ToolDescriptor, extracted_args: dict[str, Any],
@@ -1362,7 +1502,7 @@ class DeepAgentsRuntimeEngine:
                     run_id=run_id,
                     memory_tool=memory_tool,
                     reserve_model_call=lambda: self._budget_guard().reserve_model_call(budget) if budget is not None else None,
-                    max_iterations=self._budget_guard().max_tool_calls,
+                    max_iterations=self._budget_guard().max_model_calls,
                     max_tool_calls_per_turn=4,
                 )
                 result = await loop.run(messages_list, explicit_memory_request=explicit_memory_request)

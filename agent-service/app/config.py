@@ -55,6 +55,7 @@ class Settings:
     agent_tool_shortlist_k_media: int = int(os.getenv("AGENT_TOOL_SHORTLIST_K_MEDIA", "8"))
     agent_tool_desc_char_limit: int = int(os.getenv("AGENT_TOOL_DESC_CHAR_LIMIT", "150"))
     agent_tool_schema_prune_fields: bool = _bool("AGENT_TOOL_SCHEMA_PRUNE_FIELDS", True)
+    agent_skill_hydration_enabled: bool = _bool("AGENT_SKILL_HYDRATION_ENABLED", True)
     agent_default_consumed_credits: int = int(os.getenv("AGENT_DEFAULT_CONSUMED_CREDITS", "1"))
     agent_model_call_cost: int = int(os.getenv("AGENT_MODEL_CALL_COST", "1"))
     agent_tool_execution_timeout_seconds: int = int(os.getenv("AGENT_TOOL_EXECUTION_TIMEOUT_SECONDS", "120"))

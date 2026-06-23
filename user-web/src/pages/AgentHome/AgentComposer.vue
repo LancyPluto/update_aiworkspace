@@ -499,8 +499,10 @@ function mentionFromUrlAttachment(file: AgentUrlAttachment): { mention: AgentRef
     fileId: file.id,
     url: file.url,
   })
-  const refLabel = canonical?.refLabel || file.refLabel || (isImageAttachment(file.contentType, file.name) ? imageReferenceLabel(index, file.name) : file.name)
-  const displayLabel = canonical?.token || chipDisplayLabel(kind, index, file.refLabel || file.name)
+  const refLabel = isImageAttachment(file.contentType, file.name)
+    ? imageReferenceLabel(index, file.refLabel || file.name || canonical?.refLabel)
+    : (canonical?.refLabel || file.refLabel || file.name || "素材附件")
+  const displayLabel = chipDisplayLabel(kind, index, file.refLabel || file.name)
   return {
     displayLabel,
     mention: {
@@ -527,12 +529,12 @@ function mentionFromAgentFile(file: AgentFile): { mention: AgentReferenceMention
     fileId: file.id,
     url: file.downloadUrl || "",
   })
-  const displayLabel = canonical?.token || chipDisplayLabel(kind, index, file.originalFilename)
+  const displayLabel = chipDisplayLabel(kind, index, file.originalFilename)
   return {
     displayLabel,
     mention: {
       token: displayLabel,
-      refLabel: canonical?.refLabel || selectedFileAttachmentLabel(file, index),
+      refLabel: selectedFileAttachmentLabel(file, index),
       assetKey: canonical?.assetKey || `agent_file:${file.id}`,
       fileId: canonical?.fileId ?? file.id,
       url: canonical?.url || file.downloadUrl || "",

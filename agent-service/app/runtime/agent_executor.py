@@ -52,8 +52,10 @@ from app.runtime.memory_runtime import (
     memory_context_trace_payload,
 )
 from app.runtime.product_tool_call_loop import _alias_for_tool_code, build_tool_definitions
+from app.runtime.product_tool_call_loop import _format_skill_catalog
 from app.runtime.runtime_settings import runtime_budget_guard_for_context, runtime_int, runtime_settings_event_payload
-from app.runtime.session_state import SESSION_STATE_INSTRUCTIONS, format_session_state_context
+from app.runtime.session_state import IMAGE_TOOL_PROMPT_COMPLETENESS_RULES, SESSION_STATE_INSTRUCTIONS, format_session_state_context
+from app.runtime.skill_hydration import SkillHydrationService, hydration_message
 from app.runtime.tool_call_loop import contains_pseudo_tool_call, strip_pseudo_tool_calls
 from app.runtime.tool_confirmation_policy import ToolConfirmationPolicy
 from app.runtime.tool_disclosure import EXPAND_TOOL, build_disclosed_definitions, expand_tool_definition
@@ -141,6 +143,10 @@ class AgentExecutor:
         self._workspace_memory_context = ""
         self._tool_defs: list[dict[str, Any]] = []
         self._aliases: dict[str, Any] = {}
+        self._pending_schema_validation_tool_code: str | None = None
+        self._hydrated_skill_codes: set[str] = set()
+        self._skill_hydration = SkillHydrationService(backend)
+        self._max_tool_executions = settings.agent_max_tool_calls
 
     async def run(
         self,
@@ -161,7 +167,8 @@ class AgentExecutor:
                 eventJson={
                     "kind": "agent_executor",
                     "tools": [item["function"]["name"] for item in self._tool_defs],
-                    "maxIterations": self._max_iterations,
+                    "maxModelTurns": self._max_iterations,
+                    "maxToolExecutions": self._max_tool_executions,
                 },
             ),
         )
@@ -192,11 +199,17 @@ class AgentExecutor:
                 ),
             )
 
+            if tool_calls and await self._maybe_hydrate_for_tool_calls(context, messages, tool_calls):
+                continue
+
             messages.append(self._assistant_message(turn))
 
             if not tool_calls:
                 if contains_pseudo_tool_call(content):
                     messages.append(ChatMessage(role="system", content=PSEUDO_TOOL_CALL_GUIDANCE))
+                    continue
+                if self._should_force_schema_validation_retry():
+                    messages.append(ChatMessage(role="system", content=_schema_validation_retry_nudge()))
                     continue
                 answer = strip_pseudo_tool_calls(content)
                 await self._emit_loop_completed(context.runId, iteration, executed_tools)
@@ -292,9 +305,17 @@ class AgentExecutor:
         self._artifacts = []
         self._tool_failures = {}
         self._expanded_tool_codes = set()
+        self._hydrated_skill_codes = set()
         self._workspace_memory_items = []
         self._workspace_memory_context = ""
         self._max_iterations = runtime_int(
+            context,
+            "maxModelCalls",
+            settings.agent_max_model_calls,
+            1,
+            50,
+        )
+        self._max_tool_executions = runtime_int(
             context,
             "maxToolCalls",
             settings.agent_max_tool_calls,
@@ -356,6 +377,7 @@ class AgentExecutor:
         messages: list[ChatMessage] = [
             ChatMessage(role="system", content=AGENT_EXECUTOR_SYSTEM_PROMPT),
             ChatMessage(role="system", content=configured),
+            ChatMessage(role="system", content=IMAGE_TOOL_PROMPT_COMPLETENESS_RULES),
         ]
         memory_items = await self.memory_runtime.fetch_items(context)
         self._workspace_memory_items = memory_items
@@ -384,6 +406,9 @@ class AgentExecutor:
         session_state_context = format_session_state_context(context)
         if session_state_context:
             messages.append(ChatMessage(role="system", content=session_state_context))
+        skill_catalog = _format_skill_catalog(context)
+        if skill_catalog:
+            messages.append(ChatMessage(role="system", content=skill_catalog))
         await self._emit_context_compaction(context)
         messages.extend(self.context_manager.build_history(context.history))
         messages.append(ChatMessage(role="user", content=user_message_for_llm(context)))
@@ -395,6 +420,21 @@ class AgentExecutor:
         pending_confirmation: PendingConfirmation | None = None
         finish_answer: str | None = None
         tool_result: dict[str, Any] | None = None
+
+    async def _maybe_hydrate_for_tool_calls(
+        self,
+        context: RunContext,
+        messages: list[ChatMessage],
+        tool_calls: list[ChatToolCall],
+    ) -> bool:
+        if not tool_calls:
+            return False
+        tool_code = resolve_canonical_tool_code(tool_calls[0].name, context.availableTools) or tool_calls[0].name
+        result = await self._skill_hydration.hydrate_for_tool(context, tool_code, self._hydrated_skill_codes)
+        if result is None:
+            return False
+        messages.append(hydration_message(result))
+        return True
 
     async def _execute_tool_call(
         self,
@@ -520,6 +560,11 @@ class AgentExecutor:
         except ToolExecutionError as exc:
             self._tool_failures[tool.toolCode] = self._tool_failures.get(tool.toolCode, 0) + 1
             exhausted = self._tool_failures[tool.toolCode] >= self._max_tool_retries
+            details = getattr(exc, "details", {}) if hasattr(exc, "details") else {}
+            if exc.error_code == "SCHEMA_VALIDATION" and not exhausted:
+                self._pending_schema_validation_tool_code = tool.toolCode
+            elif exc.error_code == "SCHEMA_VALIDATION":
+                self._pending_schema_validation_tool_code = None
             await self.backend.append_event(
                 context.runId,
                 RunEventCreate(
@@ -531,9 +576,12 @@ class AgentExecutor:
                         "error": str(exc),
                         "attempt": self._tool_failures[tool.toolCode],
                         "retryable": not exhausted,
+                        **({"details": details} if isinstance(details, dict) and details else {}),
                     },
                 ),
             )
+            if exc.error_code == "SCHEMA_VALIDATION" and exhausted:
+                return self._ToolOutcome(finish_answer=_schema_validation_clarification(tool.toolCode, details))
             guidance = (
                 "已多次失败，请不要再重试该工具，改用其他方式或直接向用户说明原因。"
                 if exhausted
@@ -545,6 +593,7 @@ class AgentExecutor:
                 "error": str(exc),
                 "errorCode": exc.error_code,
                 "guidance": guidance,
+                **({"schemaValidationError": details} if exc.error_code == "SCHEMA_VALIDATION" and isinstance(details, dict) else {}),
             }
             return self._ToolOutcome(tool_message=self._tool_message(call_id, alias, payload))
 
@@ -557,6 +606,8 @@ class AgentExecutor:
             }
             return self._ToolOutcome(tool_message=self._tool_message(call_id, alias, payload))
 
+        if self._pending_schema_validation_tool_code == tool.toolCode:
+            self._pending_schema_validation_tool_code = None
         artifact = self._artifact_from_result(tool, result)
         self._artifacts.append(artifact)
         await self.backend.append_event(
@@ -601,6 +652,12 @@ class AgentExecutor:
         prepared = _apply_workspace_memory_argument_overrides(context, tool, prepared, self._workspace_memory_items)
         prepared = apply_user_selected_attachment_priority(context, tool, prepared)
         return finalize_generation_arguments(context, tool, prepared)
+
+    def _should_force_schema_validation_retry(self) -> bool:
+        code = self._pending_schema_validation_tool_code
+        if not code:
+            return False
+        return self._tool_failures.get(code, 0) < self._max_tool_retries
 
     def _backfill_artifacts(self, tool: ToolDescriptor, prepared: dict[str, Any]) -> dict[str, Any]:
         if not self._artifacts:
@@ -743,7 +800,10 @@ class AgentExecutor:
                 eventJson={
                     "kind": "agent_executor",
                     "iterations": iterations,
+                    "modelTurns": iterations,
                     "executedToolCalls": executed_tools,
+                    "maxModelTurns": self._max_iterations,
+                    "maxToolExecutions": self._max_tool_executions,
                 },
             ),
         )
@@ -901,6 +961,31 @@ def _current_request_explicitly_sets_quality(message: str) -> bool:
             "低质量",
             "最低质量",
         )
+    )
+
+
+def _schema_validation_clarification(tool_code: str, details: Any) -> str:
+    missing: list[str] = []
+    latest_preview = ""
+    if isinstance(details, dict):
+        missing = [str(item) for item in details.get("missingFields") or [] if str(item)]
+        latest_preview = str(details.get("latestGeneratedImagePromptPreview") or "").strip()
+    fields = "、".join(missing) if missing else "必要的图片提示词字段"
+    answer = (
+        f"我需要补全图片工具 `{tool_code}` 的 {fields} 后才能继续。"
+        "请提供完整的画面描述，或明确说明要沿用上一张图的哪些视觉元素以及本次要改变什么。"
+    )
+    if latest_preview:
+        answer += f"\n\n当前可继承的上一张图视觉描述片段：{latest_preview}"
+    return answer
+
+
+def _schema_validation_retry_nudge() -> str:
+    return (
+        "You did not call the tool after a SchemaValidationError. "
+        "Do not ask the user for clarification and do not explain the error. "
+        "Immediately produce a valid function tool call. Read <SessionState>, fill the missing image prompt fields "
+        "with complete visual text, and call the same image tool again now."
     )
 
 

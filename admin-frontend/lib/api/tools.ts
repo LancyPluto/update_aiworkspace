@@ -7,6 +7,8 @@ import type {
   ToolDetail,
   ToolField,
   ToolFieldPayload,
+  AgentSkillBundle,
+  AgentSkillBundlePayload,
   ToolPromptDraftPayload,
   ToolPromptDraftResult,
   ToolSummary,
@@ -128,4 +130,16 @@ export function fetchToolFields(toolId: number) {
 
 export function updateToolFields(toolId: number, fields: ToolFieldPayload[]) {
   return http.put<ToolField[]>(`/api/admin/v1/tools/${toolId}/fields`, { fields })
+}
+
+export function fetchAgentSkill(skillCode: string) {
+  return http.get<AgentSkillBundle>(`/api/admin/v1/agent/skills/${encodeURIComponent(skillCode)}`)
+}
+
+export function saveAgentSkillDraft(skillCode: string, payload: AgentSkillBundlePayload) {
+  return http.put<AgentSkillBundle>(`/api/admin/v1/agent/skills/${encodeURIComponent(skillCode)}`, payload)
+}
+
+export function publishAgentSkill(skillCode: string) {
+  return http.post<AgentSkillBundle>(`/api/admin/v1/agent/skills/${encodeURIComponent(skillCode)}/publish`)
 }

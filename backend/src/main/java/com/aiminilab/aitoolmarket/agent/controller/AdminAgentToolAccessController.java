@@ -13,6 +13,7 @@ import com.aiminilab.aitoolmarket.agent.dto.BulkUpdateAgentToolAccessResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentRunContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentToolAccessRequest;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
+import com.aiminilab.aitoolmarket.agent.service.AgentSkillBundleService;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolDescriptorService;
 import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
@@ -36,15 +37,18 @@ import java.util.Set;
 public class AdminAgentToolAccessController {
 
     private final AgentToolDescriptorService agentToolDescriptorService;
+    private final AgentSkillBundleService agentSkillBundleService;
     private final AgentModelConfigService agentModelConfigService;
     private final SystemSettingService systemSettingService;
     private final AgentServiceClient agentServiceClient;
 
     public AdminAgentToolAccessController(AgentToolDescriptorService agentToolDescriptorService,
+                                          AgentSkillBundleService agentSkillBundleService,
                                           AgentModelConfigService agentModelConfigService,
                                           SystemSettingService systemSettingService,
                                           AgentServiceClient agentServiceClient) {
         this.agentToolDescriptorService = agentToolDescriptorService;
+        this.agentSkillBundleService = agentSkillBundleService;
         this.agentModelConfigService = agentModelConfigService;
         this.systemSettingService = systemSettingService;
         this.agentServiceClient = agentServiceClient;
@@ -106,6 +110,7 @@ public class AdminAgentToolAccessController {
                 List.of(),
                 List.of(),
                 availableTools,
+                agentSkillBundleService.listAvailableSkillDescriptors(availableTools),
                 List.of(),
                 0,
                 null,

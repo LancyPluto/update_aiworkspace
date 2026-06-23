@@ -277,8 +277,6 @@ class LLMClassifier:
         except ValueError:
             return None, "invalid_intent"
         confidence = _safe_float(parsed.get("confidence"), 0)
-        if confidence < self._min_confidence(context):
-            return None, f"confidence_below_min:{confidence:.2f}<{self._min_confidence(context):.2f}"
 
         available = {tool.toolCode for tool in context.availableTools}
         selected_tool = _resolve_selected_tool_code(parsed.get("selectedToolCode"), context.availableTools)

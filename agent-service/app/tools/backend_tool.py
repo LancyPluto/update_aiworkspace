@@ -249,13 +249,14 @@ class BackendToolBridge:
             ),
         )
         call = await self.backend.create_tool_call(context.runId, ToolCallCreate(toolCode=tool.toolCode, argumentsJson=arguments))
+        task_params = compile_v2_lite_image_task_params(arguments) if _is_v2_lite_image_schema(tool) else arguments
         task_id: int | None = None
         try:
             task = await self.backend.create_task(
                 TaskCreate(
                     userId=context.userId,
                     toolCode=tool.toolCode,
-                    params=arguments,
+                    params=task_params,
                     clientRequestId=f"agent-run-{context.runId}-tool-call-{call.id}",
                 )
             )
@@ -686,9 +687,9 @@ def _with_generation_argument_defaults(
         normalized = _with_v2_lite_image_defaults(context, normalized, mode=mode)
     prompt_key = _infer_prompt_field(tool)
     if prompt_key and not normalized.get(prompt_key):
-        should_defer = _should_defer_prompt_to_session_state(context, tool)
+        should_defer = True if _is_v2_lite_image_schema(tool) else _should_defer_prompt_to_session_state(context, tool)
         if _is_v2_lite_image_schema(tool) and str(normalized.get("operation") or "").lower() in {"generate", "composite"}:
-            should_defer = False
+            should_defer = True
         if not should_defer:
             prompt = _compose_generation_prompt(
                 context,
@@ -733,8 +734,6 @@ def _with_v2_lite_image_defaults(
     if mode == PromptMode.REFERENCE_EDIT_DELTA and latest is not None:
         normalized.setdefault("operation", "edit")
         normalized.setdefault("base_image_ref", "latest_generated_image.url")
-        normalized.setdefault("base_prompt", sanitize_visual_prompt(latest.prompt))
-        normalized.setdefault("modification_prompt", reference_edit_prompt(context.message))
         return normalized
     normalized.setdefault("operation", "generate")
     return normalized
@@ -989,9 +988,7 @@ def _finalize_v2_lite_image_arguments(
         updated["operation"] = operation if operation in {"edit", "variation"} else "edit"
         if latest is not None:
             updated.setdefault("base_image_ref", "latest_generated_image.url")
-            updated.setdefault("base_prompt", latest.prompt)
         updated["base_prompt"] = sanitize_visual_prompt(str(updated.get("base_prompt") or ""))
-        updated.setdefault("modification_prompt", reference_edit_prompt(context.message))
         updated["modification_prompt"] = _namespace_current_attachment_labels(
             context,
             sanitize_visual_prompt(str(updated.get("modification_prompt") or "")),
@@ -1005,6 +1002,208 @@ def _finalize_v2_lite_image_arguments(
     elif operation in {"generate", "composite"} and "references" in updated:
         updated["references"] = _namespace_v2_references(context, updated.get("references"))
     return updated
+
+
+def compile_v2_lite_image_task_params(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Compile the agent-facing v2-lite image schema into physical workbench params."""
+    source = dict(arguments or {})
+    operation = str(source.get("operation") or "generate").strip().lower()
+    physical = {
+        key: value
+        for key, value in source.items()
+        if key
+        not in {
+            "operation",
+            "generation_prompt",
+            "base_prompt",
+            "modification_prompt",
+            "base_image_ref",
+            "references",
+            "routing_notes",
+            "prompt",
+            "base_image_url",
+            "reference_images",
+        }
+    }
+
+    prompt = _compile_v2_lite_prompt(source, operation)
+    if prompt:
+        physical["prompt"] = prompt
+
+    base_image_ref = str(source.get("base_image_ref") or "").strip() if operation in {"edit", "variation"} else ""
+    if base_image_ref:
+        physical["base_image_url"] = base_image_ref
+
+    reference_images = _compile_v2_lite_reference_images(source)
+    if reference_images:
+        physical["reference_images"] = reference_images
+
+    aspect_ratio = str(source.get("aspect_ratio") or source.get("aspectRatio") or "").strip()
+    if aspect_ratio:
+        physical["aspectRatio"] = aspect_ratio
+        physical.pop("aspect_ratio", None)
+
+    if "negative_prompt" in source and source.get("negative_prompt") not in (None, ""):
+        physical["negative_prompt"] = source.get("negative_prompt")
+    if "count" in source and source.get("count") not in (None, ""):
+        physical["count"] = source.get("count")
+    return physical
+
+
+def _compile_v2_lite_prompt(arguments: dict[str, Any], operation: str) -> str:
+    if operation in {"edit", "variation"}:
+        base_prompt = sanitize_visual_prompt(str(arguments.get("base_prompt") or ""))
+        modification_prompt = sanitize_visual_prompt(str(arguments.get("modification_prompt") or ""))
+        parts: list[str] = []
+        if base_prompt:
+            parts.append(base_prompt)
+        if modification_prompt:
+            parts.extend(["EDIT INSTRUCTION:", modification_prompt])
+        reference_lines = _v2_reference_routing_lines(arguments.get("references"))
+        if reference_lines:
+            parts.append("REFERENCE ROUTING:")
+            parts.extend(reference_lines)
+            parts.append("STRICT REFERENCE ROLE PRESERVATION:")
+            parts.extend(_v2_strict_reference_role_lines(arguments.get("references")))
+        if base_prompt or modification_prompt:
+            parts.append("STRICT PRESERVATION:")
+            parts.extend(_v2_strict_preservation_lines(modification_prompt, arguments.get("references")))
+        return "\n\n".join(part for part in parts if str(part).strip())
+
+    prompt = str(arguments.get("generation_prompt") or "").strip()
+    if not prompt:
+        return ""
+    reference_lines = _v2_reference_routing_lines(arguments.get("references"))
+    if reference_lines:
+        return "\n\n".join(
+            [
+                prompt,
+                "REFERENCE ROUTING:",
+                *reference_lines,
+                "STRICT REFERENCE ROLE PRESERVATION:",
+                *_v2_strict_reference_role_lines(arguments.get("references")),
+            ]
+        )
+    return prompt
+
+
+def _compile_v2_lite_reference_images(arguments: dict[str, Any]) -> list[str]:
+    images: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: Any) -> None:
+        if isinstance(value, str):
+            text = value.strip()
+            if text and text not in seen:
+                seen.add(text)
+                images.append(text)
+
+    for reference in _sorted_v2_lite_references(arguments.get("references")):
+        add(reference.get("source_ref"))
+
+    legacy = arguments.get("reference_images")
+    if isinstance(legacy, list):
+        for item in legacy:
+            add(item)
+    else:
+        add(legacy)
+    return images
+
+
+_V2_REFERENCE_ROLE_PRIORITY = {
+    "face_ref": 100,
+    "identity_ref": 100,
+    "controlnet_pose_ref": 80,
+    "pose_ref": 70,
+    "composition_ref": 70,
+    "object_ref": 65,
+    "style_ref": 60,
+    "background_ref": 50,
+    "supplemental_ref": 10,
+}
+
+
+def _sorted_v2_lite_references(references: Any) -> list[dict[str, Any]]:
+    if not isinstance(references, list):
+        return []
+    items = [item for item in references if isinstance(item, dict)]
+    return sorted(
+        items,
+        key=lambda item: -_V2_REFERENCE_ROLE_PRIORITY.get(str(item.get("role") or ""), 0),
+    )
+
+
+def _v2_reference_routing_lines(references: Any) -> list[str]:
+    lines: list[str] = []
+    for reference in _sorted_v2_lite_references(references):
+        ref_id = str(reference.get("id") or "").strip() or "reference"
+        role = str(reference.get("role") or "").strip() or "supplemental_ref"
+        source_ref = str(reference.get("source_ref") or "").strip()
+        notes = str(reference.get("notes") or "").strip()
+        label = f"{ref_id} ({source_ref})" if source_ref else ref_id
+        line = f"- {label}: {role}."
+        if notes:
+            line += f" {notes}"
+        lines.append(line)
+    return lines
+
+
+def _v2_strict_preservation_lines(modification_prompt: str, references: Any) -> list[str]:
+    if _v2_requests_identity_replacement(modification_prompt) and _v2_has_identity_reference(references):
+        return [
+            "Allow identity and face to change according to the current face_ref or identity_ref.",
+            "Preserve pose, camera, composition, lighting style, background, outfit, and art direction unless explicitly changed.",
+        ]
+    return [
+        "Preserve all visual elements from the base image unless explicitly changed in EDIT INSTRUCTION.",
+        "Do not change identity, outfit, pose, camera, composition, lighting style, or art direction unless explicitly requested.",
+    ]
+
+
+def _v2_strict_reference_role_lines(references: Any) -> list[str]:
+    lines = [
+        "Follow each current reference image only for its declared role.",
+        "Do not swap identity/face references with pose, composition, control, style, background, or object references.",
+    ]
+    roles = {str(reference.get("role") or "").strip() for reference in _sorted_v2_lite_references(references)}
+    if roles.intersection({"face_ref", "identity_ref"}):
+        lines.append("face_ref/identity_ref controls character identity, facial features, hair, and body traits; it must not be overridden by pose/style references.")
+    if roles.intersection({"pose_ref", "composition_ref", "controlnet_pose_ref"}):
+        lines.append("pose_ref/composition_ref/controlnet_pose_ref controls action, body pose, camera angle, framing, and layout; it must not replace the subject identity.")
+    if "style_ref" in roles:
+        lines.append("style_ref controls visual style, rendering language, palette, and texture only when compatible with the user's requested identity and composition roles.")
+    if "background_ref" in roles:
+        lines.append("background_ref controls environment and scene setting only; it must not replace the subject identity.")
+    return lines
+
+
+def _v2_has_identity_reference(references: Any) -> bool:
+    return any(
+        str(reference.get("role") or "").strip() in {"face_ref", "identity_ref"}
+        for reference in _sorted_v2_lite_references(references)
+    )
+
+
+def _v2_requests_identity_replacement(text: str) -> bool:
+    compact = re.sub(r"\s+", "", (text or "").lower())
+    chinese_patterns = (
+        r"换脸",
+        r"(?:人物|模特|角色|主体|女性|男人|女人|女孩|男孩|脸|面部|五官).{0,12}(?:换成|替换|换为)",
+        r"(?:换成|替换为|换为).{0,12}(?:人物|模特|角色|主体|女性|男人|女人|女孩|男孩|脸|面部|五官)",
+    )
+    if any(re.search(pattern, compact) for pattern in chinese_patterns):
+        return True
+    return any(
+        token in compact
+        for token in (
+            "replaceface",
+            "changeface",
+            "swapface",
+            "replaceperson",
+            "replacecharacter",
+            "differentidentity",
+        )
+    )
 
 
 def _namespace_v2_references(context: RunContext, references: Any) -> Any:
@@ -1122,6 +1321,8 @@ def _safe_default_for_property(key: str, prop: Any) -> Any | None:
 
 def _safe_default_for_key(key: str, field_type: str = "", options: Any = None) -> Any | None:
     lower = key.lower()
+    if "prompt" in lower or lower in {"description", "subject", "topic", "content"}:
+        return None
     option_values = _option_values(options)
     if option_values:
         normalized_options = {str(item).strip().lower() for item in option_values}
