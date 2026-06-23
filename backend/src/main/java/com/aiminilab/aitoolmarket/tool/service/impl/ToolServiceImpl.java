@@ -344,7 +344,10 @@ public class ToolServiceImpl implements ToolService {
                     originalFilename, file.getContentType(), file.getSize(), ex);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "工具展示素材保存失败，请查看后端日志");
         }
-        String url = stored.publicUrl();
+        String url = assetStorageService.rewriteResultUrl(stored.publicUrl(), true);
+        if (url == null || url.isBlank()) {
+            url = stored.publicUrl();
+        }
         log.info("Admin uploaded tool cover: url={}, originalFilename={}, contentType={}, size={}",
                 url, originalFilename, file.getContentType(), file.getSize());
         return new ToolCoverUploadResponse(url, filename, defaultString(file.getContentType()), file.getSize());
@@ -594,7 +597,7 @@ public class ToolServiceImpl implements ToolService {
 
     private ToolSummaryResponse sanitizeCoverUrl(ToolSummaryResponse summary) {
         return summary.withSanitizedCoverUrl(
-                generatedMediaPathSupport.resolveExistingPublicUrl(summary.coverUrl()));
+                assetStorageService.rewriteResultUrl(summary.coverUrl(), false));
     }
 
     private ToolSummaryResponse sanitizeCoverUrlForAdmin(ToolSummaryResponse summary) {
