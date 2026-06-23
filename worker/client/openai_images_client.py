@@ -153,6 +153,11 @@ class OpenAIImagesClient:
                     _response_format_for_log(payload),
                 )
                 response = self._post(self.endpoint_path, payload)
+                response = self._top_up_json_generation_response(
+                    response,
+                    payload,
+                    requested_count=max(1, min(10, int(batch_size or 1))),
+                )
             else:
                 form_fields, image_files = self._build_edit_multipart(
                     prompt=prompt,
@@ -243,9 +248,65 @@ class OpenAIImagesClient:
                 payload.get("response_format"),
             )
             response = self._post(self.endpoint_path, payload)
+            response = self._top_up_json_generation_response(
+                response,
+                payload,
+                requested_count=max(1, min(10, int(batch_size or 1))),
+            )
         urls = self._extract_image_urls(response)
         self.last_usage = self._resolve_usage(response, payload, len(urls))
         return urls
+
+    def _top_up_json_generation_response(
+        self,
+        response: dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        requested_count: int,
+    ) -> dict[str, Any]:
+        urls = self._extract_image_urls(response)
+        if len(urls) >= requested_count:
+            return response
+        LOGGER.warning(
+            "openai images json generation returned fewer images than requested requested=%s received=%s endpoint=%s model=%s responseData=%s",
+            requested_count,
+            len(urls),
+            self.endpoint_path,
+            payload.get("model"),
+            _image_response_data_summary(response),
+        )
+        if not self._should_top_up_json_generation(payload):
+            return response
+        LOGGER.warning(
+            "openai images json generation top-up enabled; issuing single-image requests requested=%s received=%s endpoint=%s model=%s",
+            requested_count,
+            len(urls),
+            self.endpoint_path,
+            payload.get("model"),
+        )
+        responses = [response]
+        single_payload = {**payload, "n": 1}
+        while len(urls) < requested_count:
+            top_up_response = self._post(self.endpoint_path, single_payload)
+            top_up_urls = self._extract_image_urls(top_up_response)
+            responses.append(top_up_response)
+            if not top_up_urls:
+                break
+            urls.extend(top_up_urls)
+        combined = _combine_image_responses(responses)
+        data = combined.get("data")
+        if isinstance(data, list) and len(data) > requested_count:
+            combined["data"] = data[:requested_count]
+        return combined
+
+    def _should_top_up_json_generation(self, payload: dict[str, Any]) -> bool:
+        configured = self.extra_auth.get("topUpJsonBatch")
+        if configured is not None:
+            return _as_bool(configured, False)
+        sequence_mode = str(payload.get("sequential_image_generation") or "").strip().lower()
+        if sequence_mode == "auto":
+            return False
+        return _is_volcengine_ark_base_url(self.base_url)
 
     def _build_generation_payload(
         self,
