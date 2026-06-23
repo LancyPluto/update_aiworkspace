@@ -637,6 +637,9 @@ public class AssetStorageService {
         if (ref.bucket().equals(storage.getOssPublicBucket())) {
             return urlForKey(ref.relativeKey(), AssetVisibility.PUBLIC);
         }
+        if (storage.isCdnAuthConfigured()) {
+            return generateCdnSignedUrl(ref.relativeKey(), true);
+        }
         return urlForKey(ref.relativeKey(), AssetVisibility.PRIVATE);
     }
 
@@ -651,6 +654,9 @@ public class AssetStorageService {
         AppProperties.AssetStorage storage = appProperties.getAssetStorage();
         if (ref.bucket().equals(storage.getOssPublicBucket())) {
             return rawUrlForKey(ref.relativeKey(), AssetVisibility.PUBLIC);
+        }
+        if (storage.isCdnAuthConfigured()) {
+            return generateCdnSignedUrl(ref.relativeKey(), false);
         }
         return rawUrlForKey(ref.relativeKey(), AssetVisibility.PRIVATE);
     }
@@ -679,6 +685,42 @@ public class AssetStorageService {
 
     public String generateSignedPrivateUrl(String relativeKey) {
         return generateSignedUrl(relativeKey, AssetVisibility.PRIVATE, 3600);
+    }
+
+    public String generateCdnSignedUrl(String relativeKey, boolean withImageTransform) {
+        AppProperties.AssetStorage storage = appProperties.getAssetStorage();
+        if (!storage.isCdnAuthConfigured()) {
+            return withImageTransform
+                    ? urlForKey(relativeKey, AssetVisibility.PRIVATE)
+                    : rawUrlForKey(relativeKey, AssetVisibility.PRIVATE);
+        }
+        String normalizedKey = normalizeRelativeKey(relativeKey);
+        String objectKey = storage.getOssKeyPrefix() + normalizedKey;
+        String path = "/" + objectKey;
+        String cdnBase = storage.getCdnPrivateBaseUrl().replaceAll("/+$", "");
+        String authKey = storage.getCdnAuthKey();
+        long timestamp = System.currentTimeMillis() / 1000 + storage.getCdnAuthExpiration();
+        String rand = "0";
+        String uid = "0";
+        String toSign = path + "-" + timestamp + "-" + rand + "-" + uid + "-" + authKey;
+        String md5 = md5Hex(toSign);
+        String url = cdnBase + path + "?auth_key=" + timestamp + "-" + rand + "-" + uid + "-" + md5;
+        if (withImageTransform && isImageKey(normalizedKey)) {
+            String options = storage.getImageTransformOptions();
+            if (!options.isBlank()) {
+                url += "&x-oss-process=" + options;
+            }
+        }
+        return url;
+    }
+
+    private static String md5Hex(String input) {
+        try {
+            byte[] digest = MessageDigest.getInstance("MD5").digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("MD5 not available", e);
+        }
     }
 
     public enum AssetVisibility {
