@@ -921,7 +921,7 @@ public class CommunityServiceImpl implements CommunityService {
         boolean liked = viewerId != null && postMapper.countLike(post.getId(), viewerId) > 0;
         boolean favorited = viewerId != null && postMapper.countFavorite(post.getId(), viewerId) > 0;
         String promptSnapshot = resolvePromptSnapshot(post);
-        return CommunityPostResponse.from(
+        CommunityPostResponse resp = CommunityPostResponse.from(
                 post,
                 liked,
                 favorited,
@@ -931,6 +931,7 @@ public class CommunityServiceImpl implements CommunityService {
                 promptSnapshot,
                 resolvePostMediaUrls(post)
         );
+        return rewriteResponseUrls(resp, false);
     }
 
     private List<String> resolvePostMediaUrls(CommunityPost post) {
@@ -973,12 +974,26 @@ public class CommunityServiceImpl implements CommunityService {
 
     private CommunityPostResponse adminResponse(CommunityPost post) {
         User user = post.getUserId() == null ? null : userMapper.findById(post.getUserId()).orElse(null);
-        return CommunityPostResponse.adminFrom(
+        CommunityPostResponse resp = CommunityPostResponse.adminFrom(
                 post,
                 postMapper.findTags(post.getId()),
                 resolveAuthorNickname(user, post.getUserId()),
                 user == null ? null : user.getAvatarUrl(),
                 resolvePromptSnapshot(post)
+        );
+        return rewriteResponseUrls(resp, true);
+    }
+
+    private CommunityPostResponse rewriteResponseUrls(CommunityPostResponse resp, boolean forAdmin) {
+        String coverUrl = assetStorageService.rewriteResultUrl(resp.coverUrl(), forAdmin);
+        String mediaUrl = assetStorageService.rewriteResultUrl(resp.mediaUrl(), forAdmin);
+        List<String> mediaUrls = resp.mediaUrls() == null ? List.of() : resp.mediaUrls().stream()
+                .map(url -> assetStorageService.rewriteResultUrl(url, forAdmin))
+                .toList();
+        return resp.withRewrittenUrls(
+                coverUrl != null ? coverUrl : resp.coverUrl(),
+                mediaUrl != null ? mediaUrl : resp.mediaUrl(),
+                mediaUrls
         );
     }
 

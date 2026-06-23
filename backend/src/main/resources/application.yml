@@ -64,6 +64,9 @@ app:
     oss-access-key-secret: ${OSS_ACCESS_KEY_SECRET:${ALIYUN_ACCESS_KEY_SECRET:${ALIYUN_CAPTCHA_ACCESS_KEY_SECRET:}}}
     oss-key-prefix: ${OSS_KEY_PREFIX:}
     image-transform-options: ${ASSET_STORAGE_IMAGE_TRANSFORM_OPTIONS:}
+    cdn-private-base-url: ${CDN_PRIVATE_BASE_URL:}
+    cdn-auth-key: ${CDN_AUTH_KEY:}
+    cdn-auth-expiration: ${CDN_AUTH_EXPIRATION:3600}
   rabbitmq:
     task-exchange: ${RABBITMQ_TASK_EXCHANGE:ai.task.exchange}
     task-routing-key: ${RABBITMQ_TASK_ROUTING_KEY:tool.normal}

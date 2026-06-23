@@ -139,6 +139,18 @@ public record CommunityPostResponse(
         );
     }
 
+    public CommunityPostResponse withRewrittenUrls(String coverUrl, String mediaUrl, List<String> mediaUrls) {
+        return new CommunityPostResponse(
+                id, userId, authorNickname, authorAvatarUrl, taskId, modality,
+                coverUrl, mediaUrl, mediaUrls,
+                title, description, promptVisible, prompt, promptPreview,
+                toolCode, toolName, status, featured, pinned, topic, tags,
+                sameStyleCount, auditStatus, auditReason, viewCount,
+                detailClickCount, shareCount, qualityScore, likeCount, favoriteCount,
+                liked, favorited, createdAt, updatedAt
+        );
+    }
+
     private static List<String> defaultMediaUrls(CommunityPost post) {
         if (post.getMediaUrl() != null && !post.getMediaUrl().isBlank()) {
             return List.of(post.getMediaUrl());
