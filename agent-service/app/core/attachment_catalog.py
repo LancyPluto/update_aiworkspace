@@ -40,8 +40,10 @@ def build_reference_plan(context: RunContext) -> ReferencePlan:
 def reference_mentions_payload(plan: ReferencePlan) -> list[dict]:
     return [
         {
+            "alias": current_attachment_alias(index),
             "token": mention.token or mention.refLabel,
             "refLabel": mention.refLabel,
+            "originalLabel": llm_token_for_mention(mention),
             "llmLabel": llm_token_for_mention(mention),
             "url": mention.url,
             "kind": mention.kind,
@@ -51,8 +53,12 @@ def reference_mentions_payload(plan: ReferencePlan) -> list[dict]:
             "name": mention.name,
             "contentType": mention.contentType,
         }
-        for mention in plan.mentions
+        for index, mention in enumerate(plan.mentions, start=1)
     ]
+
+
+def current_attachment_alias(index: int) -> str:
+    return f"[当前参考图_{index}]"
 
 
 def llm_token_for_mention(mention: ReferenceMention) -> str:
@@ -186,6 +192,14 @@ def ordered_content_parts_for_llm(context: RunContext) -> list[str]:
 def _resolve_media_argument_value(context: RunContext, value, lookup: dict[str, ReferenceMention]):
     if isinstance(value, list):
         return [_resolve_media_argument_value(context, item, lookup) for item in value]
+    if isinstance(value, dict):
+        resolved = dict(value)
+        for key, nested in list(resolved.items()):
+            if _is_media_argument_key(str(key)):
+                resolved[key] = _resolve_media_argument_value(context, nested, lookup)
+            elif isinstance(nested, (dict, list)):
+                resolved[key] = _resolve_media_argument_value(context, nested, lookup)
+        return resolved
     if not isinstance(value, str):
         return value
     text = value.strip()
@@ -240,12 +254,17 @@ def _is_media_argument_key(key: str) -> bool:
         "base_images",
         "base_image_url",
         "base_image_urls",
+        "base_image_ref",
+        "base_image_refs",
         "initimage",
         "init_image",
         "firstframeimage",
         "firstframeurl",
         "first_frame_image",
         "first_frame_url",
+        "source_ref",
+        "source_refs",
+        "references",
     }
 
 
@@ -344,14 +363,16 @@ def _label_catalog(context: RunContext) -> dict[str, ReferenceMention]:
 
 def _mention_lookup(context: RunContext) -> dict[str, ReferenceMention]:
     lookup: dict[str, ReferenceMention] = {}
-    for mention in build_reference_plan(context).mentions:
+    for index, mention in enumerate(build_reference_plan(context).mentions, start=1):
         for key in (
+            current_attachment_alias(index),
             mention.assetKey,
             str(mention.fileId or "") if mention.fileId is not None else "",
             _normalize_media_url(mention.url),
             mention.url,
             mention.token,
             mention.refLabel,
+            llm_token_for_mention(mention),
             mention.name,
         ):
             normalized = (key or "").strip()
@@ -416,7 +437,8 @@ def _fuzzy_label_match(token: str, catalog: dict[str, ReferenceMention]) -> Refe
     if base and base in catalog:
         return catalog[base]
     for label, mention in catalog.items():
-        if label.startswith(token) or token.startswith(_base_image_label(label) or ""):
+        label_base = _base_image_label(label)
+        if label.startswith(token) or (label_base and token.startswith(label_base)):
             return mention
     return None
 

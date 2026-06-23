@@ -520,6 +520,24 @@ test("agent tool picker exposes disable and whitelist controls", async () => {
   assert.match(confirmationList, /加入白名单，后续调用无需确认/)
 })
 
+test("agent reference picker uses session-unique short @ labels", async () => {
+  const referenceMentions = await readSource("utils/agentReferenceMentions.ts")
+  const composer = await readSource("pages/AgentHome/AgentComposer.vue")
+  const chatPane = await readSource("pages/AgentHome/AgentChatPane.vue")
+
+  assert.match(referenceMentions, /function displayKindLabel/)
+  assert.match(referenceMentions, /return `@\$\{displayKindLabel\(mention\.kind\)\}\$\{index\}`/)
+  assert.match(referenceMentions, /function sessionRefLabel/)
+  assert.match(referenceMentions, /return `@\$\{prefix\}\$\{index\}-\$\{shortName\}`/)
+  assert.match(referenceMentions, /for \(const asset of sessionAssets\)[\s\S]*urlItems\.forEach/)
+  assert.doesNotMatch(referenceMentions, /refLabel\.match\(\/@图片\\\(\\d\+\\\)\//)
+  assert.match(referenceMentions, /findReferenceMentionByAsset/)
+  assert.match(composer, /referenceMentionCatalog/)
+  assert.match(composer, /findReferenceMentionByAsset\(referenceMentionCatalog\.value/)
+  assert.match(chatPane, /referenceLabelForUrlAttachment/)
+  assert.match(chatPane, /referenceLabelForAgentFile/)
+})
+
 test("local vite proxy does not forward temporary browser origins to backend CORS", async () => {
   const viteConfig = await readFile(new URL("../vite.config.ts", srcRoot), "utf8")
 

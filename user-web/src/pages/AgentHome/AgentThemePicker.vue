@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue"
+import { onMounted, onUnmounted, ref, watch } from "vue"
 import { Palette } from "lucide-vue-next"
 import {
   AGENT_AMBIENT_THEMES,
@@ -18,6 +18,7 @@ const emit = defineEmits<{
 }>()
 
 const open = ref(false)
+const rootRef = ref<HTMLElement | null>(null)
 const selectedId = ref<AgentAmbientThemeId>(getStoredAgentTheme())
 
 function applyTheme(id: AgentAmbientThemeId) {
@@ -33,6 +34,24 @@ function toggle() {
   open.value = !open.value
 }
 
+function close() {
+  open.value = false
+}
+
+function onDocumentPointerDown(event: MouseEvent) {
+  const root = rootRef.value
+  if (!root || root.contains(event.target as Node)) return
+  close()
+}
+
+onMounted(() => {
+  document.addEventListener("mousedown", onDocumentPointerDown)
+})
+
+onUnmounted(() => {
+  document.removeEventListener("mousedown", onDocumentPointerDown)
+})
+
 watch(
   () => props.targetSelector,
   () => {
@@ -43,7 +62,7 @@ watch(
 </script>
 
 <template>
-  <div class="theme-picker">
+  <div ref="rootRef" class="theme-picker">
     <button
       type="button"
       class="theme-picker__toggle"
@@ -56,7 +75,7 @@ watch(
 
     <Transition name="theme-pop">
       <div v-if="open" class="theme-picker__popover" @click.stop>
-        <p class="theme-picker__title">氛围主题</p>
+        <p class="theme-picker__title">选择氛围主题</p>
         <div class="theme-picker__grid">
           <button
             v-for="theme in AGENT_AMBIENT_THEMES"
@@ -72,78 +91,72 @@ watch(
         </div>
       </div>
     </Transition>
-    <div v-if="open" class="theme-picker__backdrop" @click="open = false" />
   </div>
 </template>
 
 <style scoped>
 .theme-picker {
   position: relative;
-  margin-top: auto;
-  padding-top: 12px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .theme-picker__toggle {
-  width: 100%;
-  min-height: 36px;
+  width: 40px;
+  height: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  border-radius: 12px;
-  border: 1px solid rgb(255 255 255 / 0.08);
-  background: rgb(255 255 255 / 0.04);
-  color: rgb(255 255 255 / 0.62);
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgb(255 255 255 / 0.40);
   cursor: pointer;
-  font-size: 12px;
-  transition: background 0.16s ease, color 0.16s ease;
+  transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease;
 }
 
 .theme-picker__toggle:hover {
-  background: rgb(255 255 255 / 0.07);
-  color: #fff;
-}
-
-.theme-picker__backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
+  background: rgb(255 255 255 / 0.08);
+  color: rgb(255 255 255 / 0.90);
+  transform: translateY(-1px);
 }
 
 .theme-picker__popover {
   position: absolute;
-  left: 0;
   right: 0;
-  bottom: calc(100% + 8px);
-  z-index: 21;
-  padding: 12px;
+  top: 100%;
+  z-index: 50;
+  margin-top: 8px;
+  width: 214px;
+  padding: 16px;
   border-radius: 16px;
-  background: rgb(22 22 26 / 0.96);
+  background: rgb(18 18 22 / 0.95);
   border: 1px solid rgb(255 255 255 / 0.08);
-  box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
-  backdrop-filter: blur(16px);
+  box-shadow: 0 20px 50px rgb(0 0 0 / 0.5);
+  backdrop-filter: blur(12px);
 }
 
 .theme-picker__title {
-  margin: 0 0 10px;
-  font-size: 11px;
-  color: rgb(255 255 255 / 0.45);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.40);
+  letter-spacing: 0;
 }
 
 .theme-picker__grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(4, 36px);
+  gap: 10px;
 }
 
 .theme-picker__swatch {
-  aspect-ratio: 1;
-  border-radius: 10px;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
   border: 2px solid transparent;
   cursor: pointer;
-  transition: transform 0.15s ease, border-color 0.15s ease;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.24), 0 10px 24px rgb(0 0 0 / 0.24);
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .theme-picker__swatch:hover {
@@ -152,17 +165,17 @@ watch(
 
 .theme-picker__swatch--active {
   border-color: #fff;
-  box-shadow: 0 0 0 2px var(--agent-accent);
+  box-shadow: 0 0 0 2px var(--agent-accent), inset 0 1px 0 rgb(255 255 255 / 0.30), 0 12px 28px rgb(0 0 0 / 0.30);
 }
 
 .theme-pop-enter-active,
 .theme-pop-leave-active {
-  transition: opacity 0.16s ease, transform 0.16s ease;
+  transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
 .theme-pop-enter-from,
 .theme-pop-leave-to {
   opacity: 0;
-  transform: translateY(6px);
+  transform: translateY(-4px) scale(0.98);
 }
 </style>

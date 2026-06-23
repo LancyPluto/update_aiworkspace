@@ -3,7 +3,7 @@
 import pytest
 
 from app.config import settings
-from app.core.schemas import AgentFileContext, ChatMessage, ReferenceMention, RunContext, RuntimeSettings, TaskDetailResponse, ToolDescriptor
+from app.core.schemas import AgentFileContext, ChatMessage, RecentToolCallContext, ReferenceMention, RunContext, RuntimeSettings, TaskDetailResponse, ToolDescriptor
 from app.tools.backend_tool import BackendToolBridge, ToolExecutionError, _with_attached_file_defaults, enforce_locked_field_defaults, finalize_generation_arguments
 
 
@@ -343,6 +343,157 @@ def test_finalize_generation_arguments_is_idempotent():
     twice = finalize_generation_arguments(ctx, tool, once)
 
     assert once["prompt"] == twice["prompt"]
+
+
+def _v2_lite_image_tool() -> ToolDescriptor:
+    return ToolDescriptor(
+        toolCode="ofox_gpt_image2",
+        toolName="GPT-image2",
+        autoCallable=True,
+        outputModality="image",
+        inputSchema={
+            "type": "object",
+            "required": ["operation"],
+            "properties": {
+                "operation": {"type": "string", "enum": ["generate", "edit", "variation", "composite"], "default": "generate"},
+                "generation_prompt": {"type": "string", "x-user-required": False, "x-agent-fill-strategy": "derive"},
+                "base_image_ref": {"type": "string", "x-user-required": False, "x-agent-fill-strategy": "llm"},
+                "base_prompt": {"type": "string", "x-user-required": False, "x-agent-fill-strategy": "llm"},
+                "modification_prompt": {"type": "string", "x-user-required": False, "x-agent-fill-strategy": "llm"},
+                "references": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "role": {"type": "string"},
+                            "source_ref": {"type": "string"},
+                            "notes": {"type": "string"},
+                        },
+                    },
+                },
+                "aspect_ratio": {"type": "string", "enum": ["auto", "1:1", "16:9"], "default": "auto"},
+                "count": {"type": "integer", "default": 1},
+            },
+        },
+    )
+
+
+def test_v2_lite_generate_uses_generation_prompt_even_with_session_state():
+    bridge = BackendToolBridge(backend_client=None)  # type: ignore[arg-type]
+    tool = _v2_lite_image_tool()
+    ctx = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        message="生成一张冷蓝电影海报",
+        recentToolCalls=[
+            RecentToolCallContext(
+                id=7,
+                toolCode="gpt_image2",
+                taskId=701,
+                argumentsJson={"prompt": "previous prompt"},
+                resultJson={},
+                resourceType="IMAGE",
+                mediaUrls=["/generated/images/701/image-1.png"],
+            )
+        ],
+    )
+
+    args = bridge.build_arguments(ctx, tool, apply_placeholder_defaults=True)
+
+    assert args["operation"] == "generate"
+    assert "生成一张冷蓝电影海报" in args["generation_prompt"]
+    assert args["aspect_ratio"] == "auto"
+    assert args["count"] == 1
+
+
+def test_v2_lite_edit_finalize_preserves_base_prompt_and_delta():
+    tool = _v2_lite_image_tool()
+    ctx = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        message="把刚刚那张图背景换成赛博朋克，但保留图1的脸",
+        recentToolCalls=[
+            RecentToolCallContext(
+                id=7,
+                toolCode="gpt_image2",
+                taskId=701,
+                argumentsJson={"generation_prompt": "original cinematic poster prompt"},
+                resultJson={},
+                resourceType="IMAGE",
+                mediaUrls=["/generated/images/701/image-1.png"],
+            )
+        ],
+    )
+
+    finalized = finalize_generation_arguments(ctx, tool, {"operation": "edit"})
+
+    assert finalized["operation"] == "edit"
+    assert finalized["base_image_ref"] == "latest_generated_image.url"
+    assert finalized["base_prompt"] == "original cinematic poster prompt"
+    assert "赛博朋克" in finalized["modification_prompt"]
+    assert "original cinematic poster prompt" not in finalized["modification_prompt"]
+
+
+def test_v2_lite_edit_finalize_sanitizes_base_prompt_and_namespaces_current_refs():
+    tool = _v2_lite_image_tool()
+    ctx = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        message="刚刚的人物模特换成这张参考图中的女性，人物自然融入场景 @图片1",
+        referenceMentions=[
+            ReferenceMention(
+                token="@图片1",
+                refLabel="@图片1-new-face.png",
+                assetKey="asset-new-face",
+                url="/generated/uploads/new-face.png",
+                kind="image",
+                source="current_turn",
+            )
+        ],
+        recentToolCalls=[
+            RecentToolCallContext(
+                id=7,
+                toolCode="gpt_image2",
+                taskId=701,
+                argumentsJson={
+                    "generation_prompt": (
+                        "冷蓝电影海报，柔焦真实光影。 "
+                        "参考图角色约束（必须严格执行，不可交换）：1) 主体身份参考：@图片1。"
+                        "最终输出需明确保证：主体来自1号参考。"
+                    )
+                },
+                resultJson={},
+                resourceType="IMAGE",
+                mediaUrls=["/generated/images/701/image-1.png"],
+            )
+        ],
+    )
+
+    finalized = finalize_generation_arguments(
+        ctx,
+        tool,
+        {
+            "operation": "edit",
+            "generation_prompt": "LLM incorrectly rewrote a full prompt",
+            "prompt": "legacy toxic prompt",
+            "modification_prompt": "将人物模特替换为 @图片1 中的女性，人物自然融入场景。",
+            "references": [
+                {"id": "face_ref_1", "role": "face_ref", "source_ref": "@图片1", "notes": "使用 @图片1 的脸"}
+            ],
+        },
+    )
+
+    assert "参考图角色约束" not in finalized["base_prompt"]
+    assert "冷蓝电影海报" in finalized["base_prompt"]
+    assert finalized["modification_prompt"] == "将人物模特替换为 [当前参考图_1] 中的女性，人物自然融入场景。"
+    assert finalized["references"][0]["source_ref"] == "[当前参考图_1]"
+    assert finalized["references"][0]["notes"] == "使用 [当前参考图_1] 的脸"
+    assert "generation_prompt" not in finalized
+    assert "prompt" not in finalized
 
 
 def test_attached_ready_image_fills_reference_image_field():

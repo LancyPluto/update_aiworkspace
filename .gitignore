@@ -36,6 +36,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.codex_pydeps/
 *.egg-info/
 
 # IDE

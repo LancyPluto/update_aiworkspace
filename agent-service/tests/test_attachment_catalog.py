@@ -55,6 +55,8 @@ def test_build_reference_plan_prefers_structured_reference_mentions():
     assert plan.ordered_urls[0].endswith("/generated/uploads/a.png")
     assert plan.ordered_urls[1].endswith("/generated/uploads/b.png")
     assert len(reference_mentions_payload(plan)) == 2
+    assert reference_mentions_payload(plan)[0]["alias"] == "[当前参考图_1]"
+    assert reference_mentions_payload(plan)[0]["originalLabel"] == "@图片1-角色"
 
 
 def test_build_reference_plan_falls_back_to_message_tokens_and_agent_files():
@@ -279,4 +281,92 @@ def test_resolve_media_argument_pointers_maps_latest_generated_image_alias():
     args = resolve_media_argument_pointers(ctx, {"base_image_url": "latest_generated_image.url"})
 
     assert args["base_image_url"] == "/generated/images/701/image-1.png"
+
+
+def test_resolve_media_argument_pointers_maps_v2_lite_nested_refs():
+    ctx = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        referenceMentions=[
+            ReferenceMention(
+                token="@图片1",
+                refLabel="@图片1-face.png",
+                assetKey="asset-face",
+                fileId=88,
+                url="/generated/uploads/face.png",
+                kind="image",
+                source="current_turn",
+            )
+        ],
+        recentToolCalls=[
+            RecentToolCallContext(
+                id=7,
+                toolCode="gpt_image2",
+                taskId=701,
+                argumentsJson={"prompt": "previous prompt"},
+                resultJson={},
+                resourceType="IMAGE",
+                mediaUrls=["/generated/images/701/image-1.png"],
+            )
+        ],
+    )
+
+    args = resolve_media_argument_pointers(
+        ctx,
+        {
+            "base_image_ref": "latest_generated_image.url",
+            "references": [
+                {"id": "face_ref_1", "role": "face_ref", "source_ref": "@图片1", "notes": "keep face"}
+            ],
+        },
+    )
+
+    assert args["base_image_ref"] == "/generated/images/701/image-1.png"
+    assert args["references"][0]["source_ref"].endswith("/generated/uploads/face.png")
+    assert args["references"][0]["role"] == "face_ref"
+
+
+def test_resolve_media_argument_pointers_maps_current_attachment_alias_even_with_reused_at_label():
+    ctx = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=1,
+        message="刚刚的人物模特换成这张参考图中的女性 @图片1",
+        referenceMentions=[
+            ReferenceMention(
+                token="@图片1",
+                refLabel="@图片1-new-face.png",
+                assetKey="asset-new-face",
+                fileId=99,
+                url="/generated/uploads/new-face.png",
+                kind="image",
+                source="current_turn",
+            )
+        ],
+        recentToolCalls=[
+            RecentToolCallContext(
+                id=7,
+                toolCode="gpt_image2",
+                taskId=701,
+                argumentsJson={"prompt": "旧 prompt 中也出现 @图片1，但它不应指向当前轮。"},
+                resultJson={},
+                resourceType="IMAGE",
+                mediaUrls=["/generated/images/701/image-1.png"],
+            )
+        ],
+    )
+
+    args = resolve_media_argument_pointers(
+        ctx,
+        {
+            "base_image_ref": "latest_generated_image.url",
+            "references": [
+                {"id": "face_ref_1", "role": "face_ref", "source_ref": "[当前参考图_1]"}
+            ],
+        },
+    )
+
+    assert args["base_image_ref"] == "/generated/images/701/image-1.png"
+    assert args["references"][0]["source_ref"].endswith("/generated/uploads/new-face.png")
 

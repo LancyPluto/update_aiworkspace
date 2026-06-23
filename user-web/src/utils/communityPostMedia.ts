@@ -3,6 +3,7 @@ import type { CommunityPost, TaskDetail } from "@/api/types"
 import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 
 export type CommunityMediaKind = "image" | "video" | "audio" | "text"
+export type CommunityDerivativeKind = "image-thumb" | "image-lqip" | "video-poster" | "video-preview"
 
 export function normalizeCommunityMediaUrl(value?: string | null): string {
   const raw = value?.trim()
@@ -11,6 +12,31 @@ export function normalizeCommunityMediaUrl(value?: string | null): string {
   const path = raw.startsWith("/") ? raw : `/${raw}`
   const apiOrigin = getApiOrigin()
   return apiOrigin ? `${apiOrigin}${path}` : path
+}
+
+function communityMediaDerivativeUrl(value: string, suffix: string, extension: string): string {
+  const source = normalizeCommunityMediaUrl(value)
+  if (!source || source.startsWith("data:")) return ""
+
+  const queryIndex = source.indexOf("?")
+  const hashIndex = source.indexOf("#")
+  const splitIndex = [queryIndex, hashIndex].filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? -1
+  const path = splitIndex >= 0 ? source.slice(0, splitIndex) : source
+  const tail = splitIndex >= 0 ? source.slice(splitIndex) : ""
+  const slashIndex = path.lastIndexOf("/")
+  const dotIndex = path.lastIndexOf(".")
+  const hasExtension = dotIndex > slashIndex
+  const base = hasExtension ? path.slice(0, dotIndex) : path
+
+  return `${base}.${suffix}.${extension}${tail}`
+}
+
+export function resolveCommunityDerivativeUrl(value?: string | null, kind?: CommunityDerivativeKind): string {
+  if (!value || !kind) return ""
+  if (kind === "image-thumb") return communityMediaDerivativeUrl(value, "thumb-640", "webp")
+  if (kind === "image-lqip") return communityMediaDerivativeUrl(value, "lqip-32", "webp")
+  if (kind === "video-poster") return communityMediaDerivativeUrl(value, "poster-640", "webp")
+  return communityMediaDerivativeUrl(value, "preview-480p", "mp4")
 }
 
 export function resolveCommunityPostKind(modality?: string | null): CommunityMediaKind {

@@ -4,7 +4,6 @@
   import { ChevronLeft, ChevronRight, Loader2, Plus, Sparkles, Trash2 } from "lucide-vue-next"
   import AppShell from "@/components/AppShell.vue"
   import AgentChatPane from "./AgentChatPane.vue"
-  import AgentThemePicker from "./AgentThemePicker.vue"
   import { confirmDelete } from "@/composables/useConfirmDelete"
   import { useAuthStore } from "@/store/authStore"
   import {
@@ -300,8 +299,6 @@
             </div>
           </section>
         </div>
-
-        <AgentThemePicker />
       </aside>
 
       <section class="chat-pane">

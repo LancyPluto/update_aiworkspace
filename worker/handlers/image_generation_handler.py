@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import threading
 import time
 from typing import Any
@@ -36,6 +37,17 @@ from utils.volcengine_config import is_volcengine_model_config, resolve_volcengi
 
 LOGGER = logging.getLogger(__name__)
 TERMINAL_TASK_STATUSES = {"SUCCESS", "FAILED", "CANCELLED"}
+REFERENCE_ROLE_DEFAULTS = {
+    "face_ref": {"default_strength": 0.9, "priority": 100, "adapter": "identity_or_reference_image"},
+    "identity_ref": {"default_strength": 0.9, "priority": 100, "adapter": "identity_or_reference_image"},
+    "style_ref": {"default_strength": 0.65, "priority": 60, "adapter": "style_reference"},
+    "pose_ref": {"default_strength": 0.8, "priority": 70, "adapter": "pose_reference"},
+    "composition_ref": {"default_strength": 0.75, "priority": 70, "adapter": "reference_image_plus_prompt_constraint"},
+    "controlnet_pose_ref": {"default_strength": 0.85, "priority": 80, "adapter": "controlnet_pose"},
+    "background_ref": {"default_strength": 0.65, "priority": 50, "adapter": "background_reference"},
+    "object_ref": {"default_strength": 0.75, "priority": 65, "adapter": "object_reference"},
+    "supplemental_ref": {"default_strength": 0.5, "priority": 10, "adapter": "reference_image"},
+}
 
 
 class ImageProgressTicker:
@@ -442,12 +454,16 @@ def _resolve_reference_image_sources(params: dict[str, Any]) -> list[str]:
                 sources.append(text)
 
     for key in (
+        "base_image_ref",
         "base_image_url",
         "baseImageUrl",
         "base_image",
         "baseImage",
     ):
         add(params.get(key))
+
+    for reference in _sorted_v2_references(params.get("references")):
+        add(reference.get("source_ref"))
 
     for key in (
         "reference_images",
@@ -497,6 +513,9 @@ def _build_prompt(
     *,
     include_style: bool = True,
 ) -> str:
+    v2_prompt = _build_v2_lite_prompt(params)
+    if v2_prompt:
+        return v2_prompt
     prompt = _first_text(params, "prompt", "text", "description")
     if not prompt:
         prompt = _default_image_prompt(params)
@@ -509,6 +528,129 @@ def _build_prompt(
     if prompt and style:
         return f"{prompt}\nStyle: {style}"
     return prompt
+
+
+def _build_v2_lite_prompt(params: dict[str, Any]) -> str:
+    operation = str(params.get("operation") or "").strip().lower()
+    if operation in {"edit", "variation"}:
+        base_prompt = _sanitize_visual_prompt(str(params.get("base_prompt") or ""))
+        modification_prompt = _sanitize_visual_prompt(str(params.get("modification_prompt") or ""))
+        if not base_prompt and not modification_prompt:
+            return ""
+        parts = []
+        if base_prompt:
+            parts.append(base_prompt)
+        if modification_prompt:
+            parts.extend(["EDIT INSTRUCTION:", modification_prompt])
+        reference_lines = _reference_routing_lines(params.get("references"))
+        if reference_lines:
+            parts.append("REFERENCE ROUTING:")
+            parts.extend(reference_lines)
+        parts.extend(["STRICT PRESERVATION:", *_strict_preservation_lines(modification_prompt, params.get("references"))])
+        return "\n\n".join(parts)
+    if operation in {"generate", "composite", "variation"} or params.get("generation_prompt"):
+        prompt = str(params.get("generation_prompt") or "").strip()
+        if not prompt:
+            return ""
+        reference_lines = _reference_routing_lines(params.get("references"))
+        if reference_lines:
+            return "\n\n".join([prompt, "REFERENCE ROUTING:", *reference_lines])
+        return prompt
+    return ""
+
+
+_PROMPT_SECTION_MARKERS = (
+    r"REFERENCE ROUTING\s*:",
+    r"STRICT PRESERVATION\s*:",
+    r"EDIT INSTRUCTION\s*:",
+)
+
+_CHINESE_REFERENCE_RULE_PATTERN = re.compile(
+    r"\s*参考图角色约束(?:（[^）]*）)?[:：].*?(?:最终输出需明确保证[:：][^。]*。?|$)",
+    re.DOTALL,
+)
+
+
+def _sanitize_visual_prompt(prompt: str) -> str:
+    text = str(prompt or "").strip()
+    if not text:
+        return ""
+    text = _CHINESE_REFERENCE_RULE_PATTERN.sub("", text)
+    for marker in _PROMPT_SECTION_MARKERS:
+        text = re.split(marker, text, maxsplit=1, flags=re.IGNORECASE | re.DOTALL)[0]
+    text = re.sub(r"\s*最终输出需明确保证[:：][^。]*。?", "", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text.strip()
+
+
+def _strict_preservation_lines(modification_prompt: str, references: Any) -> list[str]:
+    if _requests_identity_replacement(modification_prompt) and _has_identity_reference(references):
+        return [
+            "Allow identity and face to change according to the current face_ref or identity_ref.",
+            "Preserve pose, camera, composition, lighting style, background, outfit, and art direction unless explicitly changed.",
+        ]
+    return [
+        "Preserve all visual elements from the base image unless explicitly changed in EDIT INSTRUCTION.",
+        "Do not change identity, outfit, pose, camera, composition, lighting style, or art direction unless explicitly requested.",
+    ]
+
+
+def _requests_identity_replacement(text: str) -> bool:
+    compact = re.sub(r"\s+", "", (text or "").lower())
+    chinese_patterns = (
+        r"换脸",
+        r"(?:人物|模特|角色|主体|女性|男人|女人|女孩|男孩|脸|面部|五官).{0,12}(?:换成|替换|换为)",
+        r"(?:换成|替换为|换为).{0,12}(?:人物|模特|角色|主体|女性|男人|女人|女孩|男孩|脸|面部|五官)",
+    )
+    if any(re.search(pattern, compact) for pattern in chinese_patterns):
+        return True
+    return any(
+        token in compact
+        for token in ("replaceface", "faceswap", "swapface", "replaceperson", "replacecharacter", "changemodel")
+    )
+
+
+def _has_identity_reference(references: Any) -> bool:
+    if not isinstance(references, list):
+        return False
+    for reference in references:
+        if not isinstance(reference, dict):
+            continue
+        role = str(reference.get("role") or "").strip()
+        if role in {"face_ref", "identity_ref"}:
+            return True
+    return False
+
+
+def _reference_routing_lines(references: Any) -> list[str]:
+    lines: list[str] = []
+    for reference in _sorted_v2_references(references):
+        ref_id = str(reference.get("id") or "").strip()
+        source_ref = str(reference.get("source_ref") or "").strip()
+        role = str(reference.get("role") or "").strip()
+        notes = str(reference.get("notes") or "").strip()
+        role_defaults = REFERENCE_ROLE_DEFAULTS.get(role, REFERENCE_ROLE_DEFAULTS["supplemental_ref"])
+        prefix = f"- {ref_id} ({source_ref}): {role}" if ref_id else f"- {source_ref}: {role}"
+        suffix = f". {notes}" if notes else ""
+        lines.append(f"{prefix}; adapter={role_defaults['adapter']}; default_strength={role_defaults['default_strength']}{suffix}")
+    return lines
+
+
+def _sorted_v2_references(references: Any) -> list[dict[str, Any]]:
+    if not isinstance(references, list):
+        return []
+    normalized: list[tuple[int, int, dict[str, Any]]] = []
+    for index, item in enumerate(references):
+        if not isinstance(item, dict):
+            continue
+        source_ref = str(item.get("source_ref") or "").strip()
+        if not source_ref:
+            continue
+        role = str(item.get("role") or "supplemental_ref").strip()
+        priority = int(REFERENCE_ROLE_DEFAULTS.get(role, REFERENCE_ROLE_DEFAULTS["supplemental_ref"])["priority"])
+        normalized.append((-priority, index, item))
+    return [item for _, _, item in sorted(normalized, key=lambda value: (value[0], value[1]))]
 
 
 def _default_image_prompt(params: dict[str, Any]) -> str:

@@ -18,6 +18,7 @@ import {
 } from "lucide-vue-next"
 import CommunityAudioMedia from "@/components/community/CommunityAudioMedia.vue"
 import CommunityCollectionPickerModal from "@/components/community/CommunityCollectionPickerModal.vue"
+import CommunityOptimizedMedia from "@/components/community/CommunityOptimizedMedia.vue"
 import { ApiBusinessError } from "@/api/client"
 import {
   fetchCommunityTopics,
@@ -689,23 +690,13 @@ onUnmounted(() => {
                 class="card-clickable"
                 @click="openPost(post)"
               >
-                <img
-                  v-if="hasMediaCover(post) && postKind(post) === 'image'"
-                  :src="activePostImageUrl(post)"
+                <CommunityOptimizedMedia
+                  v-if="hasMediaCover(post) && (postKind(post) === 'image' || postKind(post) === 'video')"
+                  class="thumb-media"
+                  :kind="postKind(post)"
+                  :source-url="postKind(post) === 'image' ? activePostImageUrl(post) : normalizeCommunityMediaUrl(post.coverUrl)"
                   :alt="postTitle(post)"
-                  class="thumb-media"
-                  loading="lazy"
-                  decoding="async"
-                />
-                <video
-                  v-else-if="hasMediaCover(post) && postKind(post) === 'video'"
-                  :src="normalizeCommunityMediaUrl(post.coverUrl)"
-                  class="thumb-media"
-                  muted
-                  loop
-                  playsinline
-                  preload="metadata"
-                  loading="lazy"
+                  :fallback-text="cardDescription(post) || postTitle(post)"
                 />
                 <div v-else class="thumb-text">
                   <p>{{ cardDescription(post) || postTitle(post) }}</p>

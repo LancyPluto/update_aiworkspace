@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from "vue"
-import { AlertTriangle, Bot, CheckCircle2, ChevronDown, Database, FileText, Hammer, Loader2, Sparkles, Store } from "lucide-vue-next"
+import { computed, ref, watch } from "vue"
+import { CheckCircle2, ChevronDown, Loader2 } from "lucide-vue-next"
 import type { AgentRunEvent } from "@/api/types"
 import { filterUserFacingRunEvents } from "./runTimelineEvents"
 
@@ -8,14 +8,13 @@ const props = defineProps<{
   events: AgentRunEvent[]
   inlineMode?: boolean
   processMode?: boolean
+  running?: boolean
 }>()
 
 const emit = defineEmits<{
   "open-memory": [memoryId: number]
   "delete-memory": [memoryId: number]
 }>()
-
-type TimelineTone = "info" | "success" | "warning" | "error"
 
 interface MemoryTraceItem {
   id?: number
@@ -25,29 +24,26 @@ interface MemoryTraceItem {
   reason?: string
 }
 
-const TOOL_PROCESS_EVENT_TYPES = new Set([
-  "tool.started",
-  "tool.task_dispatched",
-  "tool.task_progress",
-  "tool.finished",
-])
-
 const expandedEventIds = ref<Set<number>>(new Set())
-const toolTimelineExpanded = ref(false)
+const timelineExpanded = ref(false)
 
 const visibleEvents = computed(() => filterUserFacingRunEvents(props.events, props.inlineMode).slice(-40))
+const latestEvent = computed(() => visibleEvents.value[visibleEvents.value.length - 1] ?? null)
+const activeEventId = computed(() => (props.running ? latestEvent.value?.id ?? null : null))
+const hasTerminalFailure = computed(() => visibleEvents.value.some((event) => event.eventType === "run.failed"))
+const summaryText = computed(() => {
+  const count = visibleEvents.value.length
+  const suffix = `（共 ${count} 步）`
+  if (props.running && latestEvent.value) return `${titleFor(latestEvent.value)} ${suffix}`
+  if (hasTerminalFailure.value) return `Agent 运行遇到问题 ${suffix}`
+  return `Agent 已完成运行与工具调用 ${suffix}`
+})
 
-const toolProcessEvents = computed(() => visibleEvents.value.filter((event) => TOOL_PROCESS_EVENT_TYPES.has(event.eventType)))
-
-const nonToolEvents = computed(() => visibleEvents.value.filter((event) => !TOOL_PROCESS_EVENT_TYPES.has(event.eventType)))
-
-const latestToolProcessEvent = computed(() => toolProcessEvents.value[toolProcessEvents.value.length - 1] ?? null)
-
-const shouldCollapseToolProcess = computed(
-  () =>
-    (props.processMode || props.inlineMode) &&
-    toolProcessEvents.value.length > 1 &&
-    !toolTimelineExpanded.value,
+watch(
+  () => props.running,
+  (running) => {
+    if (!running) timelineExpanded.value = false
+  },
 )
 
 function parseEventJson(value?: string | null | Record<string, unknown>) {
@@ -204,53 +200,6 @@ function detailFor(event: AgentRunEvent) {
   return ""
 }
 
-function toneFor(event: AgentRunEvent): TimelineTone {
-  const payload = parseEventJson(event.eventJson)
-  if (event.eventType === "run.failed" && payload.status === "CANCELLED") return "warning"
-  if (event.eventType === "reflect.retry") return "warning"
-  if (event.eventType === "plan.updated") return "info"
-  if (event.eventType === "agent.step") return "info"
-  if (event.eventType.endsWith(".failed") || event.eventType === "run.failed") return "error"
-  if (event.eventType.endsWith(".completed") || event.eventType === "run.completed") return "success"
-  if (event.eventType === "memory.saved") return "success"
-  if (event.eventType === "tool.finished") return payload.errorCode ? "error" : "success"
-  if (
-    [
-      "run.started",
-      "intent.detected",
-      "tool.selected",
-      "tool.started",
-      "tool.task_dispatched",
-      "tool.task_progress",
-      "workspace_file.read",
-      "memory.context_injected",
-      "memory.context_frozen",
-      "memory.retrieved",
-      "message.completed",
-    ].includes(event.eventType)
-  ) {
-    return "info"
-  }
-  return "warning"
-}
-
-function iconFor(event: AgentRunEvent) {
-  if (event.eventType === "run.started") return Loader2
-  if (event.eventType === "intent.detected") return Sparkles
-  if (event.eventType === "agent.step") return Sparkles
-  if (event.eventType === "plan.updated") return CheckCircle2
-  if (event.eventType === "reflect.retry") return AlertTriangle
-  if (event.eventType === "tool.confirmation_required") return Store
-  if (event.eventType.startsWith("subagent.")) return Bot
-  if (event.eventType.startsWith("tool.")) return Hammer
-  if (event.eventType.startsWith("workspace_file.")) return FileText
-  if (event.eventType.startsWith("memory.")) return Database
-  if (event.eventType === "message.completed") return Bot
-  if (event.eventType === "run.failed") return AlertTriangle
-  if (event.eventType === "run.completed") return CheckCircle2
-  return Loader2
-}
-
 function detailJson(event: AgentRunEvent) {
   const payload = parseEventJson(event.eventJson)
   if (Object.keys(payload).length === 0) return ""
@@ -264,8 +213,8 @@ function toggleExpanded(eventId: number) {
   expandedEventIds.value = next
 }
 
-function toggleToolTimelineExpanded() {
-  toolTimelineExpanded.value = !toolTimelineExpanded.value
+function toggleTimelineExpanded() {
+  timelineExpanded.value = !timelineExpanded.value
 }
 
 function isEventExpanded(eventId: number) {
@@ -275,181 +224,258 @@ function isEventExpanded(eventId: number) {
 function hasMemoryTrace(event: AgentRunEvent) {
   return memoryTraceItems(event).length > 0
 }
+
+function hasDetail(event: AgentRunEvent) {
+  return Boolean(detailFor(event) || detailJson(event) || hasMemoryTrace(event))
+}
+
+function stepTitleFor(event: AgentRunEvent, index: number) {
+  return `${index + 1}. ${titleFor(event)}`
+}
 </script>
 
 <template>
   <section
     v-if="visibleEvents.length > 0"
-    class="run-timeline"
-    :class="{ inline: inlineMode }"
+    class="run-timeline border border-white/[0.05] bg-[#121216]/50 rounded-xl"
+    :class="{ inline: inlineMode, open: timelineExpanded }"
     aria-label="Agent run timeline"
   >
-    <article v-for="event in nonToolEvents" :key="event.id" class="timeline-row" :class="toneFor(event)">
-      <div class="timeline-icon">
-        <component :is="iconFor(event)" class="h-4 w-4" />
-      </div>
-      <div class="timeline-body">
-        <p class="timeline-title">{{ titleFor(event) }}</p>
-        <p v-if="detailFor(event) && isEventExpanded(event.id)" class="timeline-detail">{{ detailFor(event) }}</p>
-        <ul v-if="isEventExpanded(event.id) && hasMemoryTrace(event)" class="memory-trace-list">
-          <li v-for="item in memoryTraceItems(event)" :key="`${event.id}-${item.id ?? item.title}`" class="memory-trace-item">
-            <div class="memory-trace-main">
-              <strong>#{{ item.id ?? "?" }} · {{ item.title || "未命名记忆" }}</strong>
-              <span>{{ memoryTypeLabel(item.type) }} · {{ memoryReasonLabel(item.reason) }}</span>
-              <p v-if="item.preview">{{ item.preview }}</p>
-            </div>
-            <div v-if="item.id" class="memory-trace-actions">
-              <button type="button" class="memory-trace-btn" @click="emit('open-memory', item.id!)">在记忆中查看</button>
-              <button type="button" class="memory-trace-btn danger" @click="emit('delete-memory', item.id!)">删除此记忆</button>
-            </div>
-          </li>
-        </ul>
-        <button
-          v-if="detailFor(event) || detailJson(event) || hasMemoryTrace(event)"
-          class="detail-toggle"
-          type="button"
-          @click="toggleExpanded(event.id)"
-        >
-          <ChevronDown class="h-3 w-3" :class="{ open: isEventExpanded(event.id) }" />
-          {{ isEventExpanded(event.id) ? "收起" : "详情" }}
-        </button>
-        <pre v-if="isEventExpanded(event.id) && detailJson(event)" class="detail-json">{{ detailJson(event) }}</pre>
-      </div>
-    </article>
-
-    <article
-      v-if="shouldCollapseToolProcess && latestToolProcessEvent"
-      :key="`tool-summary-${latestToolProcessEvent.id}`"
-      class="timeline-row"
-      :class="toneFor(latestToolProcessEvent)"
+    <button
+      type="button"
+      class="timeline-summary"
+      :aria-expanded="timelineExpanded"
+      @click="toggleTimelineExpanded"
     >
-      <div class="timeline-icon">
-        <component :is="iconFor(latestToolProcessEvent)" class="h-4 w-4" />
-      </div>
-      <div class="timeline-body">
-        <p class="timeline-title">{{ titleFor(latestToolProcessEvent) }}</p>
-        <button class="detail-toggle" type="button" @click="toggleToolTimelineExpanded">
-          <ChevronDown class="h-3 w-3" />
-          详情（{{ toolProcessEvents.length }}）
-        </button>
-      </div>
-    </article>
+      <span class="summary-leading" :class="{ running: props.running }">
+        <Loader2 v-if="props.running" class="h-3.5 w-3.5 animate-spin" />
+        <CheckCircle2 v-else class="h-3.5 w-3.5" />
+      </span>
+      <span class="summary-copy">{{ summaryText }}</span>
+      <ChevronDown class="summary-chevron h-4 w-4" :class="{ open: timelineExpanded }" />
+    </button>
 
-    <template v-else-if="toolProcessEvents.length > 0">
-      <article v-for="event in toolProcessEvents" :key="event.id" class="timeline-row" :class="toneFor(event)">
-        <div class="timeline-icon">
-          <component :is="iconFor(event)" class="h-4 w-4" />
-        </div>
-        <div class="timeline-body">
-          <p class="timeline-title">{{ titleFor(event) }}</p>
-          <p v-if="detailFor(event) && isEventExpanded(event.id)" class="timeline-detail">{{ detailFor(event) }}</p>
-          <button
-            v-if="detailFor(event) || detailJson(event)"
-            class="detail-toggle"
-            type="button"
-            @click="toggleExpanded(event.id)"
-          >
-            <ChevronDown class="h-3 w-3" :class="{ open: isEventExpanded(event.id) }" />
-            {{ isEventExpanded(event.id) ? "收起" : "详情" }}
-          </button>
-          <pre v-if="isEventExpanded(event.id) && detailJson(event)" class="detail-json">{{ detailJson(event) }}</pre>
-        </div>
-      </article>
-      <div v-if="toolProcessEvents.length > 1" class="timeline-collapse-row">
-        <button class="detail-toggle" type="button" @click="toggleToolTimelineExpanded">
-          <ChevronDown class="h-3 w-3 open" />
-          收起步骤
-        </button>
+    <div class="timeline-content transition-all duration-300" :aria-hidden="!timelineExpanded">
+      <div class="stepper">
+        <div class="stepper-line" aria-hidden="true" />
+        <article
+          v-for="(event, index) in visibleEvents"
+          :key="event.id"
+          class="timeline-step"
+          :class="{ active: event.id === activeEventId, failed: event.eventType === 'run.failed' }"
+        >
+          <span class="step-dot" aria-hidden="true" />
+          <div class="step-body">
+            <div class="step-main">
+              <span class="step-title">{{ stepTitleFor(event, index) }}</span>
+              <button
+                v-if="hasDetail(event)"
+                class="detail-toggle"
+                type="button"
+                @click="toggleExpanded(event.id)"
+              >
+                {{ isEventExpanded(event.id) ? "收起" : "详情" }}
+              </button>
+            </div>
+            <div v-if="isEventExpanded(event.id)" class="step-detail-wrap">
+              <p v-if="detailFor(event)" class="timeline-detail">{{ detailFor(event) }}</p>
+              <ul v-if="hasMemoryTrace(event)" class="memory-trace-list">
+                <li v-for="item in memoryTraceItems(event)" :key="`${event.id}-${item.id ?? item.title}`" class="memory-trace-item">
+                  <div class="memory-trace-main">
+                    <strong>#{{ item.id ?? "?" }} · {{ item.title || "未命名记忆" }}</strong>
+                    <span>{{ memoryTypeLabel(item.type) }} · {{ memoryReasonLabel(item.reason) }}</span>
+                    <p v-if="item.preview">{{ item.preview }}</p>
+                  </div>
+                  <div v-if="item.id" class="memory-trace-actions">
+                    <button type="button" class="memory-trace-btn" @click="emit('open-memory', item.id!)">在记忆中查看</button>
+                    <button type="button" class="memory-trace-btn danger" @click="emit('delete-memory', item.id!)">删除此记忆</button>
+                  </div>
+                </li>
+              </ul>
+              <pre v-if="detailJson(event)" class="detail-json">{{ detailJson(event) }}</pre>
+            </div>
+          </div>
+        </article>
       </div>
-    </template>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .run-timeline {
   width: 100%;
-  max-height: 200px;
-  overflow-y: auto;
+  max-height: 44px;
+  overflow: hidden;
   margin: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
+  transition: max-height 0.3s ease, border-color 0.2s ease, background 0.2s ease;
 }
 
 .run-timeline.inline {
-  max-height: 150px;
   margin: 0;
   padding: 0;
-  border: none;
+}
+
+.run-timeline.open {
+  max-height: 520px;
+}
+
+.timeline-summary {
+  width: 100%;
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
   background: transparent;
+  color: rgb(255 255 255 / 0.58);
+  padding: 0 12px;
+  cursor: pointer;
+  text-align: left;
 }
 
-.timeline-row {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
+.summary-leading {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgb(255 255 255 / 0.42);
 }
 
-.timeline-row:last-child {
-  border-bottom: 0;
+.summary-leading.running {
+  color: rgb(192 132 252);
 }
 
-.timeline-icon {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  background: var(--secondary);
-  color: var(--foreground);
-}
-
-.timeline-row.success .timeline-icon {
-  background: #ecfdf3;
-  color: #027a48;
-}
-
-.timeline-row.error .timeline-icon {
-  background: #fef3f2;
-  color: #b42318;
-}
-
-.timeline-row.warning .timeline-icon {
-  background: #fffaeb;
-  color: #b54708;
-}
-
-.timeline-title {
-  margin: 0;
-  font-size: 13px;
+.summary-copy {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--foreground);
+  letter-spacing: 0;
+}
+
+.summary-chevron {
+  color: rgb(255 255 255 / 0.34);
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.summary-chevron.open {
+  color: rgb(255 255 255 / 0.64);
+  transform: rotate(180deg);
+}
+
+.timeline-content {
+  max-height: 0;
+  opacity: 0;
+  overflow-y: auto;
+  padding: 0 12px;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.14) transparent;
+  transition-property: max-height, opacity, padding;
+}
+
+.run-timeline.open .timeline-content {
+  max-height: 470px;
+  opacity: 1;
+  padding: 4px 12px 12px;
+}
+
+.stepper {
+  position: relative;
+  display: grid;
+  gap: 0;
+  padding-left: 16px;
+}
+
+.stepper-line {
+  position: absolute;
+  left: 4px;
+  top: 11px;
+  bottom: 11px;
+  width: 1px;
+  background: rgb(255 255 255 / 0.10);
+}
+
+.timeline-step {
+  position: relative;
+  min-height: 28px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  padding: 5px 0 5px 8px;
+}
+
+.step-dot {
+  position: absolute;
+  left: -15px;
+  top: 12px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.20);
+  box-shadow: 0 0 0 3px rgb(18 18 22 / 0.92);
+}
+
+.timeline-step.active .step-dot {
+  background: rgb(168 85 247);
+  box-shadow: 0 0 0 3px rgb(18 18 22 / 0.92), 0 0 14px rgb(168 85 247 / 0.55);
+}
+
+.step-body {
+  min-width: 0;
+}
+
+.step-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+}
+
+.step-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgb(255 255 255 / 0.50);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.timeline-step.active .step-title {
+  color: rgb(255 255 255 / 0.72);
+}
+
+.timeline-step.failed .step-title {
+  color: rgb(252 165 165 / 0.82);
+}
+
+.step-detail-wrap {
+  margin: 4px 0 2px;
+  padding-left: 2px;
 }
 
 .timeline-detail {
-  margin: 6px 0 0;
+  margin: 0;
   font-size: 12px;
-  line-height: 1.5;
-  color: var(--muted-foreground);
+  line-height: 1.55;
+  color: rgb(255 255 255 / 0.46);
   white-space: pre-wrap;
 }
 
 .memory-trace-list {
   list-style: none;
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   padding: 0;
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .memory-trace-item {
-  border: 1px solid rgb(255 255 255 / 0.08);
-  border-radius: 8px;
-  padding: 8px 10px;
-  background: rgb(255 255 255 / 0.03);
+  padding: 0;
 }
 
 .memory-trace-main {
@@ -477,7 +503,7 @@ function hasMemoryTrace(event: AgentRunEvent) {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .memory-trace-btn {
@@ -498,23 +524,23 @@ function hasMemoryTrace(event: AgentRunEvent) {
 .detail-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 6px;
+  flex: 0 0 auto;
+  margin: 0;
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--muted-foreground);
+  color: rgb(255 255 255 / 0.38);
   font-size: 11px;
   cursor: pointer;
 }
 
-.detail-toggle .open {
-  transform: rotate(180deg);
+.detail-toggle:hover {
+  color: rgb(216 180 254 / 0.92);
 }
 
 .detail-json {
-  margin: 8px 0 0;
-  padding: 8px;
+  margin: 6px 0 0;
+  padding: 7px;
   border-radius: 6px;
   background: rgb(0 0 0 / 0.25);
   font-size: 10px;
@@ -522,9 +548,5 @@ function hasMemoryTrace(event: AgentRunEvent) {
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.timeline-collapse-row {
-  padding: 4px 12px 8px;
 }
 </style>

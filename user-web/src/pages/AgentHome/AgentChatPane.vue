@@ -14,7 +14,12 @@ import {
   X,
 } from "lucide-vue-next"
 import { collectSessionAssets } from "@/utils/agentChatAssetRefs"
-import { buildReferenceMentionsPayload, type AgentReferenceMention } from "@/utils/agentReferenceMentions"
+import {
+  buildAttachmentLabelCatalog,
+  buildReferenceMentionsPayload,
+  findReferenceMentionByAsset,
+  type AgentReferenceMention,
+} from "@/utils/agentReferenceMentions"
 import AgentComposer from "./AgentComposer.vue"
 import AgentMessageRow from "./AgentMessageRow.vue"
 import AgentAvatar from "./AgentAvatar.vue"
@@ -456,6 +461,7 @@ function messageContentJsonForFiles(
   },
 ) {
   const sessionAssets = collectSessionAssets(messages.value)
+  const referenceCatalog = buildAttachmentLabelCatalog(urlItems, items, sessionAssets)
   const referenceMentions = buildReferenceMentionsPayload(
     messageText,
     urlItems,
@@ -478,7 +484,7 @@ function messageContentJsonForFiles(
     payload.attachments = [
       ...urlItems.map((item, index) => ({
         id: item.id,
-        name: referenceAttachmentLabel(index, item.refLabel || item.name, item.contentType),
+        name: referenceLabelForUrlAttachment(referenceCatalog, item, index),
         contentType: item.contentType,
         size: item.size,
         url: item.url,
@@ -487,7 +493,7 @@ function messageContentJsonForFiles(
       })),
       ...items.map((file, index) => ({
         id: file.id,
-        name: referenceAttachmentLabel(urlItems.length + index, file.originalFilename, file.contentType),
+        name: referenceLabelForAgentFile(referenceCatalog, file, urlItems.length + index),
         contentType: file.contentType,
         size: file.fileSize,
         url: file.downloadUrl,
@@ -1124,6 +1130,32 @@ function referenceAttachmentLabel(index: number, name?: string | null, contentTy
   return isImageAttachment(contentType, name) ? `@图片${index + 1}-${shortReferenceName(name)}` : (name || "素材附件")
 }
 
+function referenceLabelForUrlAttachment(
+  catalog: Map<string, AgentReferenceMention>,
+  item: AgentUrlAttachment,
+  index: number,
+) {
+  const mention = findReferenceMentionByAsset(catalog, {
+    assetKey: String(item.id ?? item.url),
+    fileId: item.id,
+    url: item.url,
+  })
+  return mention?.refLabel || referenceAttachmentLabel(index, item.refLabel || item.name, item.contentType)
+}
+
+function referenceLabelForAgentFile(
+  catalog: Map<string, AgentReferenceMention>,
+  file: AgentFile,
+  index: number,
+) {
+  const mention = findReferenceMentionByAsset(catalog, {
+    assetKey: `agent_file:${file.id}`,
+    fileId: file.id,
+    url: file.downloadUrl || "",
+  })
+  return mention?.refLabel || referenceAttachmentLabel(index, file.originalFilename, file.contentType)
+}
+
 function selectUrlAttachment(item: AgentUrlAttachment) {
   const normalized = normalizeUrlAttachment(item)
   if (!normalized) return
@@ -1352,6 +1384,11 @@ async function submitMessage(content = input.value) {
   try {
     const submittedFiles = [...files.value]
     const submittedUrlAttachments = [...urlAttachments.value]
+    const submittedReferenceCatalog = buildAttachmentLabelCatalog(
+      submittedUrlAttachments,
+      submittedFiles,
+      collectSessionAssets(messages.value),
+    )
     const submittedPreferredToolCode = selectedToolCode.value
     const submittedMentions = [...(composerSnapshot?.mentions ?? draftReferenceMentions.value)]
     const submittedGlobalFileIds = globalFileIdsFor(submittedFiles, submittedUrlAttachments)
@@ -1396,7 +1433,7 @@ async function submitMessage(content = input.value) {
         fileIds: submittedFiles.map((item) => item.id),
         urlAttachments: submittedUrlAttachments.map((item, index) => ({
           id: item.id,
-          name: referenceAttachmentLabel(index, item.refLabel || item.name, item.contentType),
+          name: referenceLabelForUrlAttachment(submittedReferenceCatalog, item, index),
           contentType: item.contentType,
           size: item.size,
           url: item.url,
@@ -2548,6 +2585,7 @@ defineExpose({
             <RunTimeline
               :events="events"
               :inline-mode="true"
+              :running="hasActiveRun"
               @open-memory="openMemoryFromTrace"
               @delete-memory="deleteMemoryFromTrace"
             />

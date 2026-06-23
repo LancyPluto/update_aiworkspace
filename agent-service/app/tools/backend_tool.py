@@ -8,14 +8,14 @@ from typing import Any
 from app.clients.backend_client import BackendBusinessError
 from app.config import settings
 from app.credit_messages import credit_message_from_backend_error
-from app.core.attachment_catalog import build_reference_plan, llm_token_for_mention, readable_positional_prompt, resolve_media_argument_pointers
+from app.core.attachment_catalog import build_reference_plan, current_attachment_alias, llm_token_for_mention, readable_positional_prompt, resolve_media_argument_pointers
 from app.core.attachment_precheck import format_attachment_error, validate_attachment_arguments
 from app.core.event_types import ATTACHMENT_RESOLVED, MESSAGE_DELTA, TOOL_CALL_REJECTED, TOOL_TASK_DISPATCHED, TOOL_TASK_PROGRESS
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate, TaskCreate, TaskDetailResponse, ToolCallComplete, ToolCallCreate, ToolCallFail, ToolDescriptor
 from app.core.user_attachment_priority import apply_user_selected_attachment_priority, emit_attachment_resolved_payload
 from app.runtime.runtime_settings import runtime_bool, runtime_float, runtime_int
 from app.runtime.prompt_policy import PromptMode, reference_edit_prompt, resolve_prompt_mode
-from app.runtime.session_state import SESSION_STATE_INSTRUCTIONS, format_session_state_context
+from app.runtime.session_state import SESSION_STATE_INSTRUCTIONS, format_session_state_context, latest_generated_image_state, sanitize_visual_prompt
 from app.tools.stream_preview import extract_stream_preview
 from app.tools.registry import infer_output_modality
 
@@ -142,13 +142,15 @@ class BackendToolBridge:
             plan = build_reference_plan(context)
             if plan.mentions:
                 reference_info = (
-                    "\nStructured @ references (use ONLY these URLs for image/reference fields; "
-                    "do not copy URLs from history):\n"
+                    "\nStructured current-turn references (use alias/source refs for image/reference fields; "
+                    "do not copy local file paths or raw @图片 labels):\n"
                     f"{json.dumps(reference_mentions_payload(plan), ensure_ascii=False)}\n"
                     "When filling prompt-like fields, you MUST preserve each reference's role from the user request "
                     "(subject identity vs style vs composition). For dual-reference tasks, do not collapse into a "
-                    "single-image description. If the user says 图1/图2, map them to the numbered references above "
-                    "and write explicit role constraints into the prompt field.\n"
+                    "single-image description. If the schema has references[], fill one object per referenced image "
+                    "with source_ref set to the turn-local alias (for example [当前参考图_1]), and role set to "
+                    "face_ref/style_ref/pose_ref/composition_ref as appropriate. Do not put multi-image routing into "
+                    "the full prompt.\n"
                 )
         session_state_info = ""
         if context is not None:
@@ -164,10 +166,11 @@ class BackendToolBridge:
             "You are filling arguments for an AI tool call. Return a pure JSON object only.\n"
             "Fill safe, low-risk generation fields from the user's request, recent context, existing arguments, "
             f"workspace long-term memory, and the tool schema. {expand_instruction} "
-            "When multiple reference images apply, the prompt MUST state which reference supplies subject identity and which supplies style or other roles. "
+            "When multiple reference images apply, the prompt or references[] MUST state which reference supplies subject identity and which supplies style or other roles. "
+            "For edit or variation operations with fields base_prompt and modification_prompt, copy the original prompt from SessionState verbatim into base_prompt and put only the new user delta into modification_prompt. "
             "Do not invent credentials, account ids, payment, publishing authorization, personal private data, "
             "or other high-risk values. Preserve existing arguments unless a field is empty. "
-            "Do not populate image/reference URL fields when structured references are provided — leave them empty.\n\n"
+            "Do not populate legacy image/reference URL fields when structured v2 references[] are available.\n\n"
             f"Tool: {tool.toolName or tool.toolCode}\n"
             f"Description: {tool.description or 'none'}\n"
             f"Fields:\n{chr(10).join(field_descriptions)}\n"
@@ -187,8 +190,9 @@ class BackendToolBridge:
             return existing_args or {}
         merged = dict(existing_args or {})
         for key, value in parsed.items():
-            if isinstance(key, str) and isinstance(value, str) and value.strip() and key not in merged:
-                merged[key] = value.strip()
+            if not isinstance(key, str) or key in merged or _empty_value(value):
+                continue
+            merged[key] = value.strip() if isinstance(value, str) else value
         return merged
 
     def conversation_argument_text(self, context: RunContext) -> str:
@@ -542,6 +546,16 @@ def _schema_property_user_required(prop: Any) -> bool:
     return True
 
 
+def _empty_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (list, dict)):
+        return not value
+    return False
+
+
 def enforce_locked_field_defaults(
     tool: ToolDescriptor,
     arguments: dict[str, Any],
@@ -668,9 +682,14 @@ def _with_generation_argument_defaults(
         return normalized
 
     mode = prompt_mode or resolve_prompt_mode(context, tool)
+    if _is_v2_lite_image_schema(tool):
+        normalized = _with_v2_lite_image_defaults(context, normalized, mode=mode)
     prompt_key = _infer_prompt_field(tool)
     if prompt_key and not normalized.get(prompt_key):
-        if not _should_defer_prompt_to_session_state(context, tool):
+        should_defer = _should_defer_prompt_to_session_state(context, tool)
+        if _is_v2_lite_image_schema(tool) and str(normalized.get("operation") or "").lower() in {"generate", "composite"}:
+            should_defer = False
+        if not should_defer:
             prompt = _compose_generation_prompt(
                 context,
                 tool,
@@ -695,6 +714,29 @@ def _with_generation_argument_defaults(
         default_value = _safe_default_for_field(field)
         if default_value not in (None, ""):
             normalized[field.fieldKey] = default_value
+    return normalized
+
+
+def _is_v2_lite_image_schema(tool: ToolDescriptor) -> bool:
+    properties = tool.inputSchema.get("properties", {}) if isinstance(tool.inputSchema, dict) else {}
+    return isinstance(properties, dict) and {"operation", "references", "base_image_ref"}.issubset(properties.keys())
+
+
+def _with_v2_lite_image_defaults(
+    context: RunContext,
+    arguments: dict[str, Any],
+    *,
+    mode: PromptMode,
+) -> dict[str, Any]:
+    normalized = dict(arguments)
+    latest = latest_generated_image_state(context.recentToolCalls)
+    if mode == PromptMode.REFERENCE_EDIT_DELTA and latest is not None:
+        normalized.setdefault("operation", "edit")
+        normalized.setdefault("base_image_ref", "latest_generated_image.url")
+        normalized.setdefault("base_prompt", sanitize_visual_prompt(latest.prompt))
+        normalized.setdefault("modification_prompt", reference_edit_prompt(context.message))
+        return normalized
+    normalized.setdefault("operation", "generate")
     return normalized
 
 
@@ -727,6 +769,7 @@ def _infer_prompt_field(tool: ToolDescriptor) -> str | None:
     if not isinstance(properties, dict):
         return None
     preferred = (
+        "generation_prompt",
         "prompt",
         "positivePrompt",
         "imagePrompt",
@@ -763,9 +806,9 @@ def _tool_accepts_base_image(tool: ToolDescriptor) -> bool:
     properties = tool.inputSchema.get("properties", {}) if isinstance(tool.inputSchema, dict) else {}
     if not isinstance(properties, dict):
         properties = {}
-    if any(key in properties for key in ("base_image_url", "baseImageUrl", "base_image", "baseImage")):
+    if any(key in properties for key in ("base_image_url", "baseImageUrl", "base_image", "baseImage", "base_image_ref")):
         return True
-    return any((field.fieldKey or "") in {"base_image_url", "baseImageUrl", "base_image", "baseImage"} for field in tool.fields)
+    return any((field.fieldKey or "") in {"base_image_url", "baseImageUrl", "base_image", "baseImage", "base_image_ref"} for field in tool.fields)
 
 
 def _is_non_prompt_generation_control(key: str) -> bool:
@@ -905,6 +948,9 @@ def finalize_generation_arguments(
 ) -> dict[str, Any]:
     """Re-apply reference role constraints after LLM/enrich overwrites the prompt field."""
     mode = prompt_mode or resolve_prompt_mode(context, tool)
+    if _is_v2_lite_image_schema(tool):
+        arguments = _finalize_v2_lite_image_arguments(context, arguments, mode=mode)
+        return arguments
     if mode == PromptMode.REFERENCE_EDIT_DELTA:
         prompt_key = _infer_prompt_field(tool)
         if not prompt_key:
@@ -930,8 +976,87 @@ def finalize_generation_arguments(
     return updated
 
 
+def _finalize_v2_lite_image_arguments(
+    context: RunContext,
+    arguments: dict[str, Any],
+    *,
+    mode: PromptMode,
+) -> dict[str, Any]:
+    updated = dict(arguments)
+    latest = latest_generated_image_state(context.recentToolCalls)
+    operation = str(updated.get("operation") or "").strip().lower()
+    if mode == PromptMode.REFERENCE_EDIT_DELTA or operation in {"edit", "variation"}:
+        updated["operation"] = operation if operation in {"edit", "variation"} else "edit"
+        if latest is not None:
+            updated.setdefault("base_image_ref", "latest_generated_image.url")
+            updated.setdefault("base_prompt", latest.prompt)
+        updated["base_prompt"] = sanitize_visual_prompt(str(updated.get("base_prompt") or ""))
+        updated.setdefault("modification_prompt", reference_edit_prompt(context.message))
+        updated["modification_prompt"] = _namespace_current_attachment_labels(
+            context,
+            sanitize_visual_prompt(str(updated.get("modification_prompt") or "")),
+        )
+        if "references" in updated:
+            updated["references"] = _namespace_v2_references(context, updated.get("references"))
+        updated.pop("generation_prompt", None)
+        updated.pop("prompt", None)
+    elif not operation:
+        updated["operation"] = "generate"
+    elif operation in {"generate", "composite"} and "references" in updated:
+        updated["references"] = _namespace_v2_references(context, updated.get("references"))
+    return updated
+
+
+def _namespace_v2_references(context: RunContext, references: Any) -> Any:
+    if not isinstance(references, list):
+        return references
+    normalized: list[Any] = []
+    for item in references:
+        if not isinstance(item, dict):
+            normalized.append(item)
+            continue
+        ref = dict(item)
+        source_ref = ref.get("source_ref")
+        if isinstance(source_ref, str):
+            ref["source_ref"] = _namespace_current_attachment_labels(context, source_ref)
+        notes = ref.get("notes")
+        if isinstance(notes, str):
+            ref["notes"] = _namespace_current_attachment_labels(context, notes)
+        normalized.append(ref)
+    return normalized
+
+
+def _namespace_current_attachment_labels(context: RunContext, text: str) -> str:
+    value = str(text or "")
+    if not value:
+        return value
+    for original, alias in _current_attachment_label_replacements(context):
+        value = value.replace(original, alias)
+    return value
+
+
+def _current_attachment_label_replacements(context: RunContext) -> list[tuple[str, str]]:
+    plan = build_reference_plan(context)
+    replacements: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for index, mention in enumerate(plan.mentions, start=1):
+        alias = current_attachment_alias(index)
+        for label in (
+            llm_token_for_mention(mention),
+            mention.refLabel,
+            mention.token,
+            mention.name,
+        ):
+            raw = str(label or "").strip()
+            if raw and raw != alias and raw not in seen:
+                seen.add(raw)
+                replacements.append((raw, alias))
+    replacements.sort(key=lambda item: len(item[0]), reverse=True)
+    return replacements
+
+
 def _has_base_image_argument(arguments: dict[str, Any]) -> bool:
-    for key in ("base_image_url", "baseImageUrl", "base_image", "baseImage"):
+    for key in ("base_image_url", "baseImageUrl", "base_image", "baseImage", "base_image_ref"):
         value = arguments.get(key)
         if isinstance(value, str) and value.strip():
             return True
