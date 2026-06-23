@@ -339,6 +339,14 @@ def _build_video_request(params: dict[str, Any], model: str, provider_protocol: 
         "aspect_ratio": str(params.get("aspectRatio") or params.get("aspect_ratio") or ""),
         "resolution": str(params.get("resolution") or ""),
     }
+    if provider_protocol == "seedance":
+        if "generateAudio" in params or "generate_audio" in params:
+            request["generate_audio"] = _resolve_bool_param(
+                params.get("generateAudio") if "generateAudio" in params else params.get("generate_audio"),
+                default=False,
+            )
+        if "watermark" in params:
+            request["watermark"] = _resolve_bool_param(params.get("watermark"), default=False)
     if provider_protocol in {"kling_video", "agnes_video"}:
         request["image_tail"] = _first_text(params, "imageTail", "image_tail", "tailImage", "tailImageUrl", "lastFrameUrl")
         request["mode"] = str(params.get("mode") or params.get("qualityMode") or "")

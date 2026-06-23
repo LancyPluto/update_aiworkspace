@@ -47,7 +47,7 @@ DOCS_IMAGE = "https://www.volcengine.com/docs/82379/1541523"
 VIDEO_MODEL_OPTIONS = [
     {"label": "Seedance 1.5 Pro（推荐）", "value": "doubao-seedance-1-5-pro-251215"},
     {"label": "Seedance 2.0", "value": "doubao-seedance-2-0-260128"},
-    {"label": "Seedance 2.0 Fast", "value": "doubao-seedance-2-0-fast-260128"},
+    {"label": "Seedance 2.0 Mini", "value": "doubao-seedance-2-0-mini-260615"},
     {"label": "Seedance 1.0 Pro", "value": "doubao-seedance-1-0-pro-250528"},
     {"label": "Seedance 1.0 Pro Fast", "value": "doubao-seedance-1-0-pro-fast-251015"},
 ]
@@ -55,7 +55,6 @@ VIDEO_MODEL_OPTIONS = [
 IMAGE_MODEL_OPTIONS = [
     {"label": "Seedream 4.5（推荐）", "value": "doubao-seedream-4-5-251128"},
     {"label": "Seedream 5.0", "value": "doubao-seedream-5-0-260128"},
-    {"label": "Seedream 5.0 Lite", "value": "doubao-seedream-5-0-lite-260128"},
 ]
 
 VIDEO_PRICING_RULES = [
@@ -157,8 +156,16 @@ def _select_field(key: str, name: str, options: list[dict], default: str, sort_o
     )
 
 
-def _radio_field(key: str, name: str, options: list[dict], sort_order: int, *, default: str | None = None) -> dict:
-    payload: dict[str, Any] = {"uiTier": "all", "options": options}
+def _radio_field(
+    key: str,
+    name: str,
+    options: list[dict],
+    sort_order: int,
+    *,
+    default: str | None = None,
+    ui_tier: str = "all",
+) -> dict:
+    payload: dict[str, Any] = {"uiTier": ui_tier, "options": options}
     if default:
         payload["defaultValue"] = default
     return _field(
@@ -322,7 +329,7 @@ def _video_fields() -> list[dict]:
             core=True,
         ),
     ]
-    order += 1
+    order = 3
     fields.append(
         _field(
             "imageUrl",
@@ -365,6 +372,28 @@ def _video_fields() -> list[dict]:
     )
     order += 1
     fields.append(
+        _radio_field(
+            "generateAudio",
+            "生成音频",
+            [{"label": "关闭", "value": "false"}, {"label": "开启", "value": "true"}],
+            order,
+            default="false",
+            ui_tier="advanced",
+        )
+    )
+    order += 1
+    fields.append(
+        _radio_field(
+            "watermark",
+            "水印",
+            [{"label": "关闭", "value": "false"}, {"label": "开启", "value": "true"}],
+            order,
+            default="false",
+            ui_tier="advanced",
+        )
+    )
+    order += 1
+    fields.append(
         _field(
             "negativePrompt",
             "反向提示词",
@@ -391,7 +420,7 @@ def _image_fields() -> list[dict]:
             core=True,
         ),
     ]
-    order += 1
+    order = 3
     fields.append(
         _radio_field(
             "aspectRatio",
@@ -426,6 +455,28 @@ def _image_fields() -> list[dict]:
             sort_order=order,
             placeholder="可选，图生图参考",
             options_json='{"uiTier": "advanced", "libraryEnabled": true, "libraryKind": "image"}',
+        )
+    )
+    order += 1
+    fields.append(
+        _radio_field(
+            "outputFormat",
+            "输出格式",
+            [{"label": "PNG", "value": "png"}, {"label": "JPEG", "value": "jpeg"}],
+            order,
+            default="png",
+            ui_tier="advanced",
+        )
+    )
+    order += 1
+    fields.append(
+        _radio_field(
+            "watermark",
+            "水印",
+            [{"label": "关闭", "value": "false"}, {"label": "开启", "value": "true"}],
+            order,
+            default="false",
+            ui_tier="advanced",
         )
     )
     return fields
@@ -479,7 +530,7 @@ def build_volcengine_tools() -> list[dict[str, Any]]:
             tool_name="豆包视频生成",
             model_config_code="volcengine-gateway-video",
             fields=_video_fields(),
-            model_field=_select_field("model", "Seedance 模型", VIDEO_MODEL_OPTIONS, "doubao-seedance-1-5-pro-251215", 99),
+            model_field=_select_field("model", "Seedance 模型", VIDEO_MODEL_OPTIONS, "doubao-seedance-1-5-pro-251215", 2),
             tool_type="VIDEO_GENERATION",
             estimated_credit_cost=3,
             category_code="text-to-video",
@@ -489,7 +540,7 @@ def build_volcengine_tools() -> list[dict[str, Any]]:
             tool_name="豆包图像生成",
             model_config_code="volcengine-gateway-image",
             fields=_image_fields(),
-            model_field=_select_field("model", "Seedream 模型", IMAGE_MODEL_OPTIONS, "doubao-seedream-4-5-251128", 99),
+            model_field=_select_field("model", "Seedream 模型", IMAGE_MODEL_OPTIONS, "doubao-seedream-4-5-251128", 2),
             tool_type="IMAGE_GENERATION",
             estimated_credit_cost=2,
             category_code="text-to-image",
@@ -514,7 +565,9 @@ def _replace_legacy_codes_in_obj(value: Any) -> Any:
     if isinstance(value, str):
         replacements = {
             "seedance_video_generation": "volcengine-gateway-video",
+            "seedance2_0_2": "volcengine-gateway-video",
             "volcengine-seedance": "volcengine-gateway-video",
+            "doubao-seedream-image-generation": "volcengine-gateway-image",
             "volcengine-seedream": "volcengine-gateway-image",
         }
         updated = value

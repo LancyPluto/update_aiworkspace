@@ -102,6 +102,7 @@ class OpenAIImagesClient:
         style: str | None = None,
         output_format: str | None = None,
         response_format: str | None = None,
+        watermark: Any | None = None,
         image: str | list[str] | None = None,
         **_: Any,
     ) -> list[str]:
@@ -133,6 +134,7 @@ class OpenAIImagesClient:
                     style=style,
                     output_format=output_format,
                     response_format=response_format,
+                    watermark=watermark,
                 )
                 payload["image"] = reference_images
                 LOGGER.info(
@@ -218,6 +220,7 @@ class OpenAIImagesClient:
                 style=style,
                 output_format=output_format,
                 response_format=response_format,
+                watermark=watermark,
             )
             LOGGER.info(
                 "openai images request endpoint=%s model=%s n=%s size=%s quality=%s style=%s output_format=%s response_format=%s",
@@ -246,6 +249,7 @@ class OpenAIImagesClient:
         style: str | None,
         output_format: str | None,
         response_format: str | None,
+        watermark: Any | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": model,
@@ -268,7 +272,9 @@ class OpenAIImagesClient:
         if _is_volcengine_ark_base_url(self.base_url):
             payload.setdefault("response_format", "url")
             payload.setdefault("stream", False)
-            if "watermark" in self.extra_auth:
+            if watermark is not None and str(watermark).strip() != "":
+                payload["watermark"] = _as_bool(watermark, False)
+            elif "watermark" in self.extra_auth:
                 payload["watermark"] = _as_bool(self.extra_auth.get("watermark"), False)
             else:
                 payload.setdefault("watermark", False)

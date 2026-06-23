@@ -71,3 +71,25 @@ def test_seedance_keeps_public_image_url(monkeypatch) -> None:
     )
 
     assert payload["content"][1]["image_url"]["url"] == "https://cdn.example.com/input.png"
+
+
+def test_seedance_payload_includes_audio_and_watermark_flags() -> None:
+    client = SeedanceVideoClient(api_key="test-key")
+
+    payload = client._build_payload(
+        prompt="动起来",
+        image_size="auto",
+        negative_prompt="",
+        model="doubao-seedance-2-0-260128",
+        image="",
+        audio_data_url="",
+        seed=None,
+        duration="5",
+        aspect_ratio="16:9",
+        resolution="720p",
+        generate_audio=True,
+        watermark=False,
+    )
+
+    assert payload["generate_audio"] is True
+    assert payload["watermark"] is False

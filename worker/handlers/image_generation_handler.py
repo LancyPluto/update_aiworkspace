@@ -196,6 +196,8 @@ class ImageGenerationHandler:
                 image_request["style"] = _first_text(params, "style", "imageStyle", "image_style")
                 image_request["output_format"] = _first_text(params, "outputFormat", "output_format")
                 image_request["response_format"] = _first_text(params, "responseFormat", "response_format")
+                if "watermark" in params:
+                    image_request["watermark"] = params.get("watermark")
                 image_request["image_size"] = _resolve_openai_image_size(params, model_config)
                 reference_images = _resolve_reference_image_sources(params)
                 if reference_images:

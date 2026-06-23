@@ -212,6 +212,8 @@ export const OPTION_PRESETS: Record<
     label: "Seedance 视频模型",
     options: [
       { label: "Seedance 1.5 Pro（推荐）", value: "doubao-seedance-1-5-pro-251215" },
+      { label: "Seedance 2.0", value: "doubao-seedance-2-0-260128" },
+      { label: "Seedance 2.0 Mini", value: "doubao-seedance-2-0-mini-260615" },
       { label: "Seedance 1.0 Pro", value: "doubao-seedance-1-0-pro-250528" },
       { label: "Seedance 1.0 Pro Fast", value: "doubao-seedance-1-0-pro-fast-251015" },
     ],

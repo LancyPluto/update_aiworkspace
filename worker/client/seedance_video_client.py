@@ -79,6 +79,8 @@ class SeedanceVideoClient:
         duration: str = "",
         aspect_ratio: str = "",
         resolution: str = "480p",
+        generate_audio: bool | None = None,
+        watermark: bool | None = None,
         mode: str = "",
     ) -> dict[str, Any]:
         if not self._has_auth():
@@ -95,6 +97,8 @@ class SeedanceVideoClient:
             duration=duration,
             aspect_ratio=aspect_ratio,
             resolution=resolution,
+            generate_audio=generate_audio,
+            watermark=watermark,
         )
         created = self._request("POST", self.create_path, payload)
         task_id = self._extract_task_id(created)
@@ -142,6 +146,8 @@ class SeedanceVideoClient:
         duration: str,
         aspect_ratio: str,
         resolution: str,
+        generate_audio: bool | None = None,
+        watermark: bool | None = None,
     ) -> dict[str, Any]:
         text = prompt.strip()
         if negative_prompt.strip():
@@ -171,6 +177,10 @@ class SeedanceVideoClient:
             payload["aspect_ratio"] = ratio
         if seed is not None:
             payload["seed"] = seed
+        if generate_audio is not None:
+            payload["generate_audio"] = bool(generate_audio)
+        if watermark is not None:
+            payload["watermark"] = bool(watermark)
         return payload
 
     def _image_payload_value(self, value: str) -> str:

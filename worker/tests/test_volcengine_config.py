@@ -37,5 +37,17 @@ def test_resolve_volcengine_task_model_applies_chat_alias() -> None:
     assert resolved == "doubao-seed-2-0-lite-260215"
 
 
+def test_resolve_volcengine_task_model_applies_media_alias() -> None:
+    resolved = resolve_volcengine_task_model(
+        {"model": "doubao-seedream-4.5"},
+        {
+            "provider": "volcengine_images",
+            "modelName": "doubao-seedream-4-5-251128",
+            "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+        },
+    )
+    assert resolved == "doubao-seedream-4-5-251128"
+
+
 def test_is_volcengine_model_config_detects_seedance_provider() -> None:
     assert is_volcengine_model_config({"provider": "seedance", "modelName": "doubao-seedance-1-5-pro-251215"})
