@@ -13,6 +13,7 @@ public record InternalAgentRunContextResponse(
         List<InternalAgentFileContextResponse> agentFiles,
         List<InternalAgentFileChunkContextResponse> agentFileChunks,
         List<AgentToolDescriptorResponse> availableTools,
+        List<AgentSkillDescriptorResponse> availableSkills,
         List<AgentToolPreferenceResponse> toolPreferences,
         Integer creditBudget,
         AgentContextWindowResponse contextWindow,

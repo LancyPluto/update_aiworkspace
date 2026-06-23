@@ -37,9 +37,10 @@ function normalizeAssetUrl(url: string): string {
   return resolveAgentFileUrl(url) || url.trim()
 }
 
-export function mentionDedupeKey(mention: Pick<AgentReferenceMention, "assetKey" | "url">): string {
+export function mentionDedupeKey(mention: Pick<AgentReferenceMention, "assetKey" | "fileId" | "url">): string {
   const key = mention.assetKey?.trim()
   if (key) return key
+  if (mention.fileId != null && String(mention.fileId).trim()) return `file_${mention.fileId}`
   const url = normalizeAssetUrl(mention.url)
   if (url) return `url:${url}`
   return mention.url.trim()
@@ -52,7 +53,7 @@ function stripExtension(name: string): string {
 function sanitizeShortName(name: string, max = 14): string {
   const base = stripExtension(name)
     .replace(/^@+/, "")
-    .replace(/^图片\d+[-_]?/i, "")
+    .replace(/^(?:图|图片|视频|音频|文件)\d+[-_]?/i, "")
     .replace(/[@\s]+/g, "_")
     .replace(/_+/g, "_")
     .replace(/^_|_$/g, "")
@@ -64,15 +65,8 @@ function sanitizeShortName(name: string, max = 14): string {
 export function displayLabelForMention(
   mention: Pick<AgentReferenceMention, "kind" | "source">,
   index: number,
-  name?: string,
 ): string {
-  const kindLabel =
-    mention.kind === "video" ? "视频" : mention.kind === "audio" ? "音频" : mention.kind === "file" ? "文件" : "图片"
-  const shortName = sanitizeShortName(name || "")
-  if (shortName && shortName.length <= 12 && !/^图片\d+$/i.test(shortName)) {
-    return `@${shortName}`
-  }
-  return `@${kindLabel}${index}`
+  return `@${displayKindLabel(mention.kind)}${index}`
 }
 
 export function extractAtTokens(message: string): string[] {
@@ -88,7 +82,7 @@ export function extractAtTokens(message: string): string[] {
 }
 
 export function baseImageLabel(label: string): string | null {
-  const match = label.match(/^(@图片\d+)/)
+  const match = label.match(/^(@(?:图|图片)\d+)/)
   return match?.[1] ?? null
 }
 
@@ -97,16 +91,71 @@ function addCatalogEntry(
   mention: AgentReferenceMention,
 ) {
   const key = mentionDedupeKey(mention)
-  const existing = catalog.get(key)
-  if (!existing) {
+  const existingEntry = findCatalogEntry(catalog, mention)
+  if (!existingEntry) {
     catalog.set(key, mention)
     return
   }
+  const [existingKey, existing] = existingEntry
   const existingPriority = SOURCE_PRIORITY[existing.source ?? ""] ?? 99
   const nextPriority = SOURCE_PRIORITY[mention.source ?? ""] ?? 99
   if (nextPriority < existingPriority) {
-    catalog.set(key, mention)
+    catalog.set(existingKey, {
+      ...mention,
+      token: existing.token,
+      refLabel: existing.refLabel,
+    })
   }
+}
+
+function findCatalogEntry(
+  catalog: Map<string, AgentReferenceMention>,
+  asset: Pick<AgentReferenceMention, "assetKey" | "fileId" | "url">,
+): [string, AgentReferenceMention] | undefined {
+  const key = mentionDedupeKey(asset)
+  const direct = catalog.get(key)
+  if (direct) return [key, direct]
+  const normalizedUrl = normalizeAssetUrl(asset.url)
+  for (const entry of catalog.entries()) {
+    const [entryKey, mention] = entry
+    if (asset.assetKey && mention.assetKey === asset.assetKey) return entry
+    if (asset.fileId != null && mention.fileId != null && String(mention.fileId) === String(asset.fileId)) return entry
+    if (normalizedUrl && normalizeAssetUrl(mention.url) === normalizedUrl) return entry
+    if (entryKey === key) return entry
+  }
+  return undefined
+}
+
+function displayKindLabel(kind?: string): string {
+  if (kind === "video") return "视频"
+  if (kind === "audio") return "音频"
+  if (kind === "file") return "文件"
+  return "图"
+}
+
+function refKindLabel(kind?: string): string {
+  if (kind === "video") return "视频"
+  if (kind === "audio") return "音频"
+  if (kind === "file") return "文件"
+  return "图片"
+}
+
+function sessionRefLabel(kind: string | undefined, index: number, name?: string | null): string {
+  const prefix = refKindLabel(kind)
+  const shortName = sanitizeShortName(name || prefix, 18) || prefix
+  return `@${prefix}${index}-${shortName}`
+}
+
+function sourceSubtitle(source?: string, name?: string | null): string {
+  const prefix = source === "session_asset" ? "会话素材" : "本轮素材"
+  const cleanName = sanitizeShortName(name || "", 20)
+  return cleanName ? `${prefix} · ${cleanName}` : prefix
+}
+
+function nextIndex(counters: Record<string, number>, kind?: string): number {
+  const key = kind === "video" || kind === "audio" || kind === "file" ? kind : "image"
+  counters[key] = (counters[key] ?? 0) + 1
+  return counters[key]
 }
 
 export function buildAttachmentLabelCatalog(
@@ -115,66 +164,19 @@ export function buildAttachmentLabelCatalog(
   sessionAssets: ChatAssetRef[] = [],
 ): Map<string, AgentReferenceMention> {
   const catalog = new Map<string, AgentReferenceMention>()
-  let imageIndex = 0
-
-  urlItems.forEach((item) => {
-    imageIndex += 1
-    const name = item.refLabel || item.name
-    const refLabel = item.refLabel || `@图片${imageIndex}-${name}`
-    const kind = attachmentKind(item.contentType, item.name)
-    const displayLabel = displayLabelForMention(
-      { kind, source: item.source === "chat_reference" ? "session_asset" : "current_turn" },
-      imageIndex,
-      name,
-    )
-    addCatalogEntry(catalog, {
-      token: displayLabel,
-      refLabel,
-      assetKey: String(item.id ?? item.url),
-      fileId: item.id,
-      url: item.url,
-      kind,
-      name: item.name,
-      contentType: item.contentType,
-      previewUrl: kind === "image" ? resolveAgentFileUrl(item.url) : undefined,
-      source: item.source === "chat_reference" ? "session_asset" : "current_turn",
-    })
-  })
-
-  files.forEach((file) => {
-    if (!file.downloadUrl) return
-    imageIndex += 1
-    const name = file.originalFilename || `图片${imageIndex}`
-    const refLabel = `@图片${imageIndex}-${name}`
-    const displayLabel = displayLabelForMention({ kind: "image", source: "agent_file" }, imageIndex, name)
-    addCatalogEntry(catalog, {
-      token: displayLabel,
-      refLabel,
-      assetKey: `agent_file:${file.id}`,
-      fileId: file.id,
-      url: file.downloadUrl,
-      kind: attachmentKind(file.contentType, file.originalFilename),
-      name: file.originalFilename,
-      contentType: file.contentType,
-      previewUrl: resolveAgentFileUrl(file.downloadUrl),
-      source: "agent_file",
-    })
-  })
+  const counters: Record<string, number> = { image: 0, video: 0, audio: 0, file: 0 }
 
   for (const asset of sessionAssets) {
-    const match = asset.refLabel.match(/@图片(\d+)/)
-    const index = match ? Number(match[1]) : ++imageIndex
-    const displayLabel = displayLabelForMention(
-      { kind: asset.kind, source: "session_asset" },
-      index,
-      asset.name,
-    )
+    const kind = asset.kind
+    const existing = findCatalogEntry(catalog, asset)?.[1]
+    const index = existing ? 0 : nextIndex(counters, kind)
+    const refLabel = existing?.refLabel || sessionRefLabel(kind, index, asset.name || asset.refLabel)
     addCatalogEntry(catalog, {
-      token: displayLabel,
-      refLabel: asset.refLabel,
+      token: existing?.token || displayLabelForMention({ kind, source: "session_asset" }, index),
+      refLabel,
       assetKey: asset.assetKey,
       url: asset.url,
-      kind: asset.kind,
+      kind,
       name: asset.name,
       contentType: asset.contentType,
       previewUrl: asset.kind === "image" ? resolveAgentFileUrl(asset.url) : undefined,
@@ -182,7 +184,58 @@ export function buildAttachmentLabelCatalog(
     })
   }
 
+  urlItems.forEach((item) => {
+    const kind = attachmentKind(item.contentType, item.name)
+    const identity = { assetKey: String(item.id ?? item.url), fileId: item.id, url: item.url }
+    const existing = findCatalogEntry(catalog, identity)?.[1]
+    const index = existing ? 0 : nextIndex(counters, kind)
+    const name = item.name || item.refLabel || refKindLabel(kind)
+    const refLabel = existing?.refLabel || sessionRefLabel(kind, index, name)
+    const source = item.source === "chat_reference" ? "session_asset" : "current_turn"
+    addCatalogEntry(catalog, {
+      token: existing?.token || displayLabelForMention({ kind, source }, index),
+      refLabel,
+      assetKey: identity.assetKey,
+      fileId: identity.fileId,
+      url: item.url,
+      kind,
+      name: item.name,
+      contentType: item.contentType,
+      previewUrl: kind === "image" ? resolveAgentFileUrl(item.url) : undefined,
+      source,
+    })
+  })
+
+  files.forEach((file) => {
+    if (!file.downloadUrl) return
+    const kind = attachmentKind(file.contentType, file.originalFilename)
+    const identity = { assetKey: `agent_file:${file.id}`, fileId: file.id, url: file.downloadUrl }
+    const existing = findCatalogEntry(catalog, identity)?.[1]
+    const index = existing ? 0 : nextIndex(counters, kind)
+    const name = file.originalFilename || `${refKindLabel(kind)}${index}`
+    const refLabel = existing?.refLabel || sessionRefLabel(kind, index, name)
+    addCatalogEntry(catalog, {
+      token: existing?.token || displayLabelForMention({ kind, source: "agent_file" }, index),
+      refLabel,
+      assetKey: identity.assetKey,
+      fileId: identity.fileId,
+      url: identity.url,
+      kind,
+      name: file.originalFilename,
+      contentType: file.contentType,
+      previewUrl: resolveAgentFileUrl(file.downloadUrl),
+      source: "agent_file",
+    })
+  })
+
   return catalog
+}
+
+export function findReferenceMentionByAsset(
+  catalog: Map<string, AgentReferenceMention>,
+  asset: Pick<AgentReferenceMention, "assetKey" | "fileId" | "url">,
+): AgentReferenceMention | undefined {
+  return findCatalogEntry(catalog, asset)?.[1]
 }
 
 export function listReferencePickerOptions(
@@ -199,20 +252,13 @@ export function listReferencePickerOptions(
     if (seen.has(dedupeKey)) return
     seen.add(dedupeKey)
 
-    const match = mention.refLabel.match(/@图片(\d+)/)
-    const index = match ? Number(match[1]) : options.length + 1
-    const displayLabel =
-      mention.token.startsWith("@") && mention.token.length <= 16
-        ? mention.token
-        : displayLabelForMention(mention, index, mention.refLabel)
-
     options.push({
       dedupeKey,
-      displayLabel,
+      displayLabel: mention.token,
       refLabel: mention.refLabel,
-      subtitle: mention.source === "session_asset" ? "会话素材" : "本轮素材",
+      subtitle: sourceSubtitle(mention.source, mention.name || mention.refLabel),
       previewUrl: mention.kind === "image" ? resolveAgentFileUrl(mention.url) : undefined,
-      mention: { ...mention, token: displayLabel },
+      mention,
     })
   })
 
@@ -263,10 +309,20 @@ export function mergeExplicitReferenceMentions(
   sessionAssets: ChatAssetRef[] = [],
   explicitMentions: AgentReferenceMention[] = [],
 ): AgentReferenceMention[] {
-  if (explicitMentions.length > 0) {
-    return explicitMentions.filter((mention) => Boolean(mention.url))
-  }
   const catalog = buildAttachmentLabelCatalog(urlItems, files, sessionAssets)
+  if (explicitMentions.length > 0) {
+    return explicitMentions
+      .filter((mention) => Boolean(mention.url))
+      .map((mention) => {
+        const canonical = findReferenceMentionByAsset(catalog, mention)
+        if (!canonical) return mention
+        return {
+          ...canonical,
+          token: mention.token || canonical.token,
+          refLabel: canonical.refLabel,
+        }
+      })
+  }
   return resolveReferenceMentions(message, catalog)
 }
 

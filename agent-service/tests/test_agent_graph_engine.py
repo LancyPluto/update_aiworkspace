@@ -110,6 +110,25 @@ def _event_types(backend):
     return [event.eventType for event in backend.events]
 
 
+def _v2_image_tool():
+    return ToolDescriptor(
+        toolCode="gpt_image2",
+        toolName="GPT Image 2",
+        description="Generate an image",
+        autoCallable=True,
+        outputModality="image",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "operation": {"type": "string"},
+                "generation_prompt": {"type": "string"},
+                "base_image_ref": {"type": "string"},
+                "references": {"type": "array"},
+            },
+        },
+    )
+
+
 @pytest.mark.asyncio
 async def test_graph_engine_chat_only_completes_run():
     backend = FakeBackend()
@@ -159,6 +178,53 @@ async def test_graph_engine_executes_auto_tool_then_finalizes():
     assert backend.completed_runs[0].finalAnswer.startswith("图片已生成")
     # Two model turns: tool selection then finalization.
     assert len(model.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_graph_engine_forces_retry_when_schema_validation_reply_has_no_tool_call():
+    backend = FakeBackend(
+        task_detail=TaskDetailResponse(
+            taskId=101,
+            status="SUCCESS",
+            result=TaskResultResponse(
+                resourceType="image",
+                contentText='{"images":["https://cdn.example/fixed.png"]}',
+            ),
+        )
+    )
+    context = RunContext(
+        runId=22,
+        sessionId=2,
+        userId=3,
+        message="同样生成一张",
+        availableTools=[_v2_image_tool()],
+        creditBudget=100,
+    )
+    alias = "agent_tool__gpt_image2"
+    model = FakeModel(
+        [
+            ChatTurnResult(content="", tool_calls=[ChatToolCall(id="c1", name=alias, arguments={"operation": "generate"})]),
+            ChatTurnResult(content="我需要补全 generation_prompt 后才能继续。", tool_calls=[]),
+            ChatTurnResult(
+                content="",
+                tool_calls=[
+                    ChatToolCall(
+                        id="c2",
+                        name=alias,
+                        arguments={"operation": "generate", "generation_prompt": "完整视觉提示词，冷蓝电影海报，主体清晰。"},
+                    )
+                ],
+            ),
+            ChatTurnResult(content="图片已生成：https://cdn.example/fixed.png", tool_calls=[]),
+        ]
+    )
+    engine = AgentGraphEngine(backend, model)
+
+    await engine.run(context)
+
+    assert backend.completed_runs[0].finalAnswer.startswith("图片已生成")
+    assert backend.tool_calls[-1][1]["generation_prompt"] == "完整视觉提示词，冷蓝电影海报，主体清晰。"
+    assert len(model.calls) == 4
 
 
 @pytest.mark.asyncio

@@ -416,6 +416,71 @@ public class DataInitializer implements CommandLineRunner {
         return value == null ? "" : value.replace("'", "''");
     }
 
+    private void seedImageGenerationSkillBundle() {
+        String toolCodes = "[\"gpt_image\",\"gpt_image2\",\"openai_image\",\"openai_images\",\"image_generation\"]";
+        String examples = """
+                [
+                  {
+                    "user": "同样对这张图生成相同效果的图片，人物模特还是我刚刚上传的那张",
+                    "operation": "composite",
+                    "notes": "从 SessionState 继承上一张图的视觉 prompt，结合当前附件作为 face_ref/identity_ref。"
+                  }
+                ]
+                """;
+        String sop = """
+                You are using the image_generation Skill Bundle. These rules are mandatory for the next image tool call.
+
+                Contract:
+                - The image tool exposed to you is v2-lite. Use semantic fields such as operation, generation_prompt, base_image_ref, base_prompt, modification_prompt, references, aspect_ratio, count, negative_prompt, and routing_notes.
+                - Never send an empty prompt, placeholder prompt, or context-only phrase.
+                - Do not ask the user to write the prompt when the current <SessionState> contains enough visual context. Prompt synthesis is your core responsibility as an image agent.
+
+                Prompt completeness:
+                - Any image_generation call must contain a standalone visual prompt that can be executed without reading the chat history.
+                - For generate/composite, generation_prompt must fully describe subject, scene, composition, camera, lighting, style, mood, and requested changes.
+                - For edit/variation, copy the selected SessionState image visual prompt into base_prompt, then put only the new visual change into modification_prompt.
+                - If the user continues from previous output, read <SessionState> and merge the relevant visual base into the tool arguments yourself.
+
+                Reference routing:
+                - Put all current reference images in references[] with roles such as face_ref, identity_ref, style_ref, pose_ref, composition_ref, background_ref, object_ref, or supplemental_ref.
+                - Use current attachment aliases such as [当前参考图_1] in references[].source_ref.
+                - Never let old @图片 labels from a previous base prompt override current-turn attachment aliases.
+                - Explain routing briefly in routing_notes, for example: current attachment controls identity; latest generated image controls composition and style.
+                - If you cannot actually inspect the pixels of a reference image, do not invent specific visual details from it. State only the role constraints in generation_prompt and references[].notes, such as "follow [当前参考图_1] for pose/composition only".
+                - For pure multi-reference synthesis from current attachments, use operation=composite and do not set base_image_ref. Use base_image_ref only for edit/variation of an existing base image.
+
+                Self-correction:
+                - If a SchemaValidationError says a prompt field is missing, do not explain the error to the user.
+                - Immediately read <SessionState>, synthesize the missing complete visual prompt, and call the image tool again.
+                - Only ask the user for clarification after the runtime has already allowed the final failure.
+                """;
+        executeSql("""
+                INSERT INTO agent_skill_bundles (
+                  skill_code, display_name, description, tool_codes_json, sop_rules,
+                  when_to_use, when_not_to_use, field_policy_json, examples_json,
+                  status, version, published_at, created_at, updated_at
+                )
+                SELECT
+                  'image_generation',
+                  '图像生成',
+                  '生成、编辑、融合或续作图片；支持多参考图角色路由、上下文继承和 v2-lite 生图参数。',
+                  %s,
+                  %s,
+                  '用户请求生成图片、编辑已有图片、基于上一张图续作、融合多张参考图、迁移身份/风格/构图时使用。',
+                  '用户只是闲聊、询问解释、或请求视频/音乐/PPT 等非图片输出时不要使用。',
+                  '{}',
+                  %s,
+                  'PUBLISHED',
+                  1,
+                  CURRENT_TIMESTAMP,
+                  CURRENT_TIMESTAMP,
+                  CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (
+                  SELECT 1 FROM agent_skill_bundles WHERE skill_code = 'image_generation'
+                )
+                """.formatted(sqlNullableString(toolCodes), sqlNullableString(sop), sqlNullableString(examples)));
+    }
+
     private void seedModelProviderMetadata() {
         modelProviderRegistry.listAll().forEach(provider -> {
             Integer count = jdbcTemplate.queryForObject(
@@ -854,6 +919,28 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("agent_tool_descriptor_extension", "health_message", "ALTER TABLE agent_tool_descriptor_extension ADD COLUMN health_message VARCHAR(512) NULL");
         ensureColumn("agent_tool_descriptor_extension", "health_checked_at", "ALTER TABLE agent_tool_descriptor_extension ADD COLUMN health_checked_at DATETIME NULL");
         ensureIndex("agent_tool_descriptor_extension", "idx_agent_tool_health", "CREATE INDEX idx_agent_tool_health ON agent_tool_descriptor_extension(agent_enabled, health_status)");
+        ensureTable("agent_skill_bundles", """
+                CREATE TABLE agent_skill_bundles (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  skill_code VARCHAR(64) NOT NULL,
+                  display_name VARCHAR(128) NOT NULL,
+                  description VARCHAR(512) NOT NULL,
+                  tool_codes_json TEXT NOT NULL,
+                  sop_rules MEDIUMTEXT NULL,
+                  when_to_use TEXT NULL,
+                  when_not_to_use TEXT NULL,
+                  field_policy_json TEXT NULL,
+                  examples_json TEXT NULL,
+                  status VARCHAR(16) NOT NULL DEFAULT 'DRAFT',
+                  version INT NOT NULL DEFAULT 1,
+                  published_at DATETIME NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_agent_skill_version (skill_code, version),
+                  KEY idx_agent_skill_status (status, skill_code)
+                )
+                """);
+        seedImageGenerationSkillBundle();
         executeSqlIgnore("ALTER TABLE agent_run_events MODIFY COLUMN event_text MEDIUMTEXT NULL");
         ensureTable("agent_context_snapshots", """
                 CREATE TABLE agent_context_snapshots (

@@ -102,6 +102,10 @@ class OpenAIImagesClient:
         style: str | None = None,
         output_format: str | None = None,
         response_format: str | None = None,
+        watermark: Any | None = None,
+        sequential_image_generation: str | None = None,
+        max_images: Any | None = None,
+        optimize_prompt_mode: str | None = None,
         image: str | list[str] | None = None,
         **_: Any,
     ) -> list[str]:
@@ -133,6 +137,10 @@ class OpenAIImagesClient:
                     style=style,
                     output_format=output_format,
                     response_format=response_format,
+                    watermark=watermark,
+                    sequential_image_generation=sequential_image_generation,
+                    max_images=max_images,
+                    optimize_prompt_mode=optimize_prompt_mode,
                 )
                 payload["image"] = reference_images
                 LOGGER.info(
@@ -145,6 +153,11 @@ class OpenAIImagesClient:
                     _response_format_for_log(payload),
                 )
                 response = self._post(self.endpoint_path, payload)
+                response = self._top_up_json_generation_response(
+                    response,
+                    payload,
+                    requested_count=max(1, min(10, int(batch_size or 1))),
+                )
             else:
                 form_fields, image_files = self._build_edit_multipart(
                     prompt=prompt,
@@ -218,6 +231,10 @@ class OpenAIImagesClient:
                 style=style,
                 output_format=output_format,
                 response_format=response_format,
+                watermark=watermark,
+                sequential_image_generation=sequential_image_generation,
+                max_images=max_images,
+                optimize_prompt_mode=optimize_prompt_mode,
             )
             LOGGER.info(
                 "openai images request endpoint=%s model=%s n=%s size=%s quality=%s style=%s output_format=%s response_format=%s",
@@ -231,9 +248,65 @@ class OpenAIImagesClient:
                 payload.get("response_format"),
             )
             response = self._post(self.endpoint_path, payload)
+            response = self._top_up_json_generation_response(
+                response,
+                payload,
+                requested_count=max(1, min(10, int(batch_size or 1))),
+            )
         urls = self._extract_image_urls(response)
         self.last_usage = self._resolve_usage(response, payload, len(urls))
         return urls
+
+    def _top_up_json_generation_response(
+        self,
+        response: dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        requested_count: int,
+    ) -> dict[str, Any]:
+        urls = self._extract_image_urls(response)
+        if len(urls) >= requested_count:
+            return response
+        LOGGER.warning(
+            "openai images json generation returned fewer images than requested requested=%s received=%s endpoint=%s model=%s responseData=%s",
+            requested_count,
+            len(urls),
+            self.endpoint_path,
+            payload.get("model"),
+            _image_response_data_summary(response),
+        )
+        if not self._should_top_up_json_generation(payload):
+            return response
+        LOGGER.warning(
+            "openai images json generation top-up enabled; issuing single-image requests requested=%s received=%s endpoint=%s model=%s",
+            requested_count,
+            len(urls),
+            self.endpoint_path,
+            payload.get("model"),
+        )
+        responses = [response]
+        single_payload = {**payload, "n": 1}
+        while len(urls) < requested_count:
+            top_up_response = self._post(self.endpoint_path, single_payload)
+            top_up_urls = self._extract_image_urls(top_up_response)
+            responses.append(top_up_response)
+            if not top_up_urls:
+                break
+            urls.extend(top_up_urls)
+        combined = _combine_image_responses(responses)
+        data = combined.get("data")
+        if isinstance(data, list) and len(data) > requested_count:
+            combined["data"] = data[:requested_count]
+        return combined
+
+    def _should_top_up_json_generation(self, payload: dict[str, Any]) -> bool:
+        configured = self.extra_auth.get("topUpJsonBatch")
+        if configured is not None:
+            return _as_bool(configured, False)
+        sequence_mode = str(payload.get("sequential_image_generation") or "").strip().lower()
+        if sequence_mode == "auto":
+            return False
+        return _is_volcengine_ark_base_url(self.base_url)
 
     def _build_generation_payload(
         self,
@@ -246,6 +319,10 @@ class OpenAIImagesClient:
         style: str | None,
         output_format: str | None,
         response_format: str | None,
+        watermark: Any | None = None,
+        sequential_image_generation: str | None = None,
+        max_images: Any | None = None,
+        optimize_prompt_mode: str | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": model,
@@ -268,11 +345,29 @@ class OpenAIImagesClient:
         if _is_volcengine_ark_base_url(self.base_url):
             payload.setdefault("response_format", "url")
             payload.setdefault("stream", False)
-            if "watermark" in self.extra_auth:
+            if watermark is not None and str(watermark).strip() != "":
+                payload["watermark"] = _as_bool(watermark, False)
+            elif "watermark" in self.extra_auth:
                 payload["watermark"] = _as_bool(self.extra_auth.get("watermark"), False)
             else:
                 payload.setdefault("watermark", False)
-            payload.setdefault("sequential_image_generation", "disabled")
+            sequence_mode = (sequential_image_generation or self.extra_auth.get("sequentialImageGeneration") or "").strip()
+            if not sequence_mode:
+                sequence_mode = str(self.extra_auth.get("sequential_image_generation") or "").strip()
+            if sequence_mode:
+                payload["sequential_image_generation"] = sequence_mode
+            else:
+                payload.setdefault("sequential_image_generation", "disabled")
+            max_images_value = _as_int(max_images)
+            if max_images_value and str(payload.get("sequential_image_generation") or "").strip().lower() == "auto":
+                payload["sequential_image_generation_options"] = {
+                    "max_images": max(1, min(15, max_images_value))
+                }
+            prompt_mode = (optimize_prompt_mode or self.extra_auth.get("optimizePromptMode") or "").strip()
+            if not prompt_mode:
+                prompt_mode = str(self.extra_auth.get("optimize_prompt_mode") or "").strip()
+            if prompt_mode:
+                payload["optimize_prompt_options"] = {"mode": prompt_mode}
             model_name = str(payload.get("model") or "").lower()
             if "seedream-5" in model_name and "guidance_scale" in payload:
                 payload.pop("guidance_scale", None)

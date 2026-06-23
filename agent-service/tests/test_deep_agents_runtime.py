@@ -1,4 +1,5 @@
 import inspect
+import json
 from uuid import uuid4
 
 import pytest
@@ -15,8 +16,10 @@ from app.core.event_types import (
     WORKSPACE_FILE_CREATED,
     WORKSPACE_FILE_READ,
 )
-from app.core.schemas import AgentFileChunkContext, AgentFileContext, ChatMessage, RunContext, WorkspaceMemoryItem
+from app.core.schemas import AgentFileChunkContext, AgentFileContext, ChatMessage, RunContext, TaskDetailResponse, TaskResultResponse, ToolDescriptor, WorkspaceMemoryItem
 from app.runtime.legacy_engine import LegacyDispatcherEngine
+from app.clients.model_client import ChatToolCall, ChatTurnResult
+from app.core.intent_router import Intent, IntentResult
 from app.runtime.router import RuntimeRouter
 
 
@@ -39,7 +42,7 @@ def test_router_deep_agents_feature_flag_selects_preview_engine_only_when_enable
 
 
 class FakeBackend:
-    def __init__(self):
+    def __init__(self, task_detail=None):
         self.events = []
         self.failed_runs = []
         self.completed_runs = []
@@ -48,6 +51,11 @@ class FakeBackend:
         self.created_memories = []
         self.updated_memories = []
         self.created_artifacts = []
+        self.tool_calls = []
+        self.tasks = []
+        self.completed_tool_calls = []
+        self.failed_tool_calls = []
+        self._task_detail = task_detail
 
     async def append_event(self, run_id, event):
         self.events.append((run_id, event))
@@ -85,6 +93,63 @@ class FakeBackend:
     async def create_run_artifact(self, run_id: int, filename: str, content: str, content_type: str):
         self.created_artifacts.append((run_id, filename, content, content_type))
         return {"id": 31, "filename": filename, "contentType": content_type}
+
+    async def create_tool_call(self, run_id, payload):
+        call = type("ToolCall", (), {"id": len(self.tool_calls) + 1})()
+        self.tool_calls.append((payload.toolCode, payload.argumentsJson))
+        return call
+
+    async def create_task(self, payload):
+        task = type("Task", (), {"taskId": len(self.tasks) + 100, "status": "SUCCESS"})()
+        self.tasks.append(payload)
+        return task
+
+    async def bind_tool_call_task(self, tool_call_id, task_id):
+        return None
+
+    async def get_task_detail(self, user_id, task_id):
+        return self._task_detail
+
+    async def complete_tool_call(self, tool_call_id, payload):
+        self.completed_tool_calls.append(payload)
+
+    async def fail_tool_call(self, tool_call_id, payload):
+        self.failed_tool_calls.append(payload)
+
+
+class SequentialChatTurnModel:
+    model_name = "fake-model"
+
+    def __init__(self, turns):
+        self.turns = list(turns)
+        self.calls = []
+        self.usage = {"promptTokens": 3, "completionTokens": 5}
+
+    async def chat_turn(self, messages, tools=None, tool_choice=None):
+        self.calls.append({"messages": messages, "tools": tools, "tool_choice": tool_choice})
+        if self.turns:
+            return self.turns.pop(0)
+        return ChatTurnResult(content="", tool_calls=[])
+
+
+def _v2_image_tool():
+    return ToolDescriptor(
+        toolCode="gpt_image2",
+        toolName="GPT Image 2",
+        autoCallable=True,
+        outputModality="image",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "operation": {"type": "string"},
+                "generation_prompt": {"type": "string"},
+                "base_image_ref": {"type": "string"},
+                "base_prompt": {"type": "string"},
+                "modification_prompt": {"type": "string"},
+                "references": {"type": "array"},
+            },
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -327,6 +392,103 @@ async def test_memory_curator_skips_duplicate_when_tool_loop_already_saved():
 
     assert backend.created_memories == []
     assert not any(event.eventType == MEMORY_CANDIDATE_CREATED for _, event in backend.events)
+
+
+@pytest.mark.asyncio
+async def test_deep_agents_tool_path_self_heals_v2_edit_prompts_from_session_state_to_worker_params():
+    from app.runtime.deep_agents_engine import DeepAgentsRuntimeEngine
+
+    alias = "agent_tool__gpt_image2"
+    media_payload = json.dumps({"images": ["https://cdn.example/new.png"]}, ensure_ascii=False)
+    backend = FakeBackend(
+        task_detail=TaskDetailResponse(
+            taskId=100,
+            status="SUCCESS",
+            result=TaskResultResponse(resourceType="image", contentText=media_payload),
+        )
+    )
+    model = SequentialChatTurnModel(
+        [
+            ChatTurnResult(
+                content="",
+                tool_calls=[
+                    ChatToolCall(
+                        id="retry_empty",
+                        name=alias,
+                        arguments={
+                            "operation": "edit",
+                            "base_image_ref": "latest_generated_image.url",
+                            "base_prompt": "",
+                            "modification_prompt": "",
+                        },
+                    )
+                ],
+            ),
+            ChatTurnResult(content="我需要你补充原图提示词和修改提示词。", tool_calls=[]),
+            ChatTurnResult(
+                content="",
+                tool_calls=[
+                    ChatToolCall(
+                        id="retry_fixed",
+                        name=alias,
+                        arguments={
+                            "operation": "edit",
+                            "base_image_ref": "latest_generated_image.url",
+                            "base_prompt": "冷蓝电影海报，柔焦真实光影。",
+                            "modification_prompt": "把背景换成赛博朋克夜景，保留主体姿态和构图。",
+                        },
+                    )
+                ],
+            ),
+        ]
+    )
+    engine = DeepAgentsRuntimeEngine(backend, model)
+    context = RunContext(
+        runId=34,
+        sessionId=4,
+        userId=5,
+        message="把刚刚那张的背景换成赛博朋克夜景",
+        creditBudget=100,
+        availableTools=[_v2_image_tool()],
+        recentToolCalls=[
+            {
+                "id": 7,
+                "toolCode": "gpt_image2",
+                "taskId": 701,
+                "argumentsJson": {"generation_prompt": "冷蓝电影海报，柔焦真实光影。"},
+                "resourceType": "IMAGE",
+                "mediaUrls": ["https://cdn.example/old.png"],
+            }
+        ],
+    )
+    intent = IntentResult(
+        intent=Intent.TOOL_USE,
+        confidence=0.9,
+        selectedToolCode="gpt_image2",
+        candidateToolCodes=["gpt_image2"],
+        reason="test_empty_v2_edit_prompts",
+        arguments={
+            "operation": "edit",
+            "base_image_ref": "latest_generated_image.url",
+            "base_prompt": "",
+            "modification_prompt": "",
+        },
+    )
+
+    await engine._handle_tool_use(context, intent)
+
+    assert not backend.failed_runs
+    assert backend.completed_runs[0][1].intent == Intent.TOOL_USE.value
+    assert backend.tool_calls[-1][1]["base_prompt"] == "冷蓝电影海报，柔焦真实光影。"
+    assert backend.tool_calls[-1][1]["modification_prompt"] == "把背景换成赛博朋克夜景，保留主体姿态和构图。"
+    assert backend.tool_calls[-1][1]["base_image_ref"] == "https://cdn.example/old.png"
+    worker_params = backend.tasks[-1].params
+    assert worker_params["base_image_url"] == "https://cdn.example/old.png"
+    assert "冷蓝电影海报，柔焦真实光影。" in worker_params["prompt"]
+    assert "EDIT INSTRUCTION:" in worker_params["prompt"]
+    assert "把背景换成赛博朋克夜景" in worker_params["prompt"]
+    assert len(model.calls) == 3
+    assert any("<SessionState>" in message.content for message in model.calls[0]["messages"] if message.role == "system")
 
 
 @pytest.mark.asyncio

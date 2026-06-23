@@ -73,12 +73,17 @@ class SeedanceVideoClient:
         negative_prompt: str = "",
         model: str | None = None,
         image: str = "",
+        images: list[str] | None = None,
         image_tail: str = "",
+        video_url: str = "",
         audio_data_url: str = "",
         seed: int | None = None,
         duration: str = "",
         aspect_ratio: str = "",
         resolution: str = "480p",
+        generate_audio: bool | None = None,
+        watermark: bool | None = None,
+        camera_fixed: bool | None = None,
         mode: str = "",
     ) -> dict[str, Any]:
         if not self._has_auth():
@@ -90,11 +95,17 @@ class SeedanceVideoClient:
             negative_prompt=negative_prompt,
             model=model or self.default_model,
             image=image,
+            images=images,
             audio_data_url=audio_data_url,
+            image_tail=image_tail,
+            video_url=video_url,
             seed=seed,
             duration=duration,
             aspect_ratio=aspect_ratio,
             resolution=resolution,
+            generate_audio=generate_audio,
+            watermark=watermark,
+            camera_fixed=camera_fixed,
         )
         created = self._request("POST", self.create_path, payload)
         task_id = self._extract_task_id(created)
@@ -137,18 +148,38 @@ class SeedanceVideoClient:
         negative_prompt: str,
         model: str,
         image: str,
-        audio_data_url: str,
-        seed: int | None,
-        duration: str,
-        aspect_ratio: str,
-        resolution: str,
+        images: list[str] | None = None,
+        audio_data_url: str = "",
+        image_tail: str = "",
+        video_url: str = "",
+        seed: int | None = None,
+        duration: str = "",
+        aspect_ratio: str = "",
+        resolution: str = "480p",
+        generate_audio: bool | None = None,
+        watermark: bool | None = None,
+        camera_fixed: bool | None = None,
     ) -> dict[str, Any]:
         text = prompt.strip()
         if negative_prompt.strip():
             text = f"{text}\nNegative prompt: {negative_prompt.strip()}"
         content: list[dict[str, Any]] = [{"type": "text", "text": text}]
-        if image.strip():
-            content.append({"type": "image_url", "image_url": {"url": self._image_payload_value(image.strip())}})
+        resolved_images = _dedupe_texts([*(images or []), image])
+        tail_image = (image_tail or "").strip()
+        if tail_image:
+            resolved_images.append(tail_image)
+        if resolved_images:
+            image_payloads = [self._image_payload_value(item) for item in resolved_images[:9]]
+            if len(image_payloads) == 1:
+                content.append({"type": "image_url", "image_url": {"url": image_payloads[0]}})
+            elif len(image_payloads) == 2 and tail_image:
+                content.append({"type": "image_url", "image_url": {"url": image_payloads[0]}, "role": "first_frame"})
+                content.append({"type": "image_url", "image_url": {"url": image_payloads[1]}, "role": "last_frame"})
+            else:
+                for value in image_payloads:
+                    content.append({"type": "image_url", "image_url": {"url": value}, "role": "reference_image"})
+        if video_url.strip():
+            content.append({"type": "video_url", "video_url": {"url": video_url.strip()}, "role": "reference_video"})
         audio_payload = self._audio_payload(audio_data_url)
         if audio_payload:
             content.append(audio_payload)
@@ -171,6 +202,12 @@ class SeedanceVideoClient:
             payload["aspect_ratio"] = ratio
         if seed is not None:
             payload["seed"] = seed
+        if generate_audio is not None:
+            payload["generate_audio"] = bool(generate_audio)
+        if watermark is not None:
+            payload["watermark"] = bool(watermark)
+        if camera_fixed is not None:
+            payload["camera_fixed"] = bool(camera_fixed)
         return payload
 
     def _image_payload_value(self, value: str) -> str:
@@ -317,10 +354,27 @@ class SeedanceVideoClient:
     @staticmethod
     def _aspect_ratio(aspect_ratio: str, image_size: str) -> str:
         raw = str(aspect_ratio or "").strip().replace("：", ":").lower()
-        if raw in {"", "auto", "智能", "adaptive", "default"} or str(image_size or "").strip().lower() == "auto":
+        if raw == "adaptive":
+            return "adaptive"
+        if raw in {"", "auto", "智能", "default"} or str(image_size or "").strip().lower() == "auto":
             return ""
         if "9:16" in raw or image_size in {"480x854", "720x1280"}:
             return "9:16"
         if "1:1" in raw or image_size in {"480x480", "960x960"}:
             return "1:1"
+        if raw in {"4:3", "3:4", "21:9"}:
+            return raw
         return "16:9"
+
+
+def _dedupe_texts(values: list[Any]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        text = value.strip()
+        if text and text not in seen:
+            seen.add(text)
+            result.append(text)
+    return result

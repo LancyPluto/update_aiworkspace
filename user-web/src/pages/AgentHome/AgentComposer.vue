@@ -23,7 +23,13 @@ import {
 import type { AgentFile, AgentModelConfig, AgentToolPickerItem, AgentUrlAttachment } from "@/api/types"
 import { isImageAttachment, resolveAgentFileUrl } from "@/utils/agentAttachment"
 import { readAssetDragPayload, type ChatAssetRef } from "@/utils/agentChatAssetRefs"
-import { displayLabelForMention, listReferencePickerOptions, type AgentReferenceMention } from "@/utils/agentReferenceMentions"
+import {
+  buildAttachmentLabelCatalog,
+  displayLabelForMention,
+  findReferenceMentionByAsset,
+  listReferencePickerOptions,
+  type AgentReferenceMention,
+} from "@/utils/agentReferenceMentions"
 import ComposerMentionInput from "./ComposerMentionInput.vue"
 import type { ComposerEditorSnapshot } from "@/utils/agentComposerMentionEditor"
 import { useReducedMotion } from "@/composables/useReducedMotion"
@@ -162,6 +168,14 @@ interface StagedAsset {
   file?: AgentFile
 }
 
+const referenceMentionCatalog = computed(() =>
+  buildAttachmentLabelCatalog(
+    props.urlAttachments ?? [],
+    props.files,
+    props.sessionAssets ?? [],
+  ),
+)
+
 const referencePickerOptions = computed<ReferencePickerOption[]>(() => {
   const options = listReferencePickerOptions(
     props.urlAttachments ?? [],
@@ -244,12 +258,17 @@ const stagedAssets = computed<StagedAsset[]>(() => {
   const assets: StagedAsset[] = []
   selectedMaterialAttachments.value.forEach((file, index) => {
     const kind = attachmentKind(file.contentType, file.name)
+    const mention = findReferenceMentionByAsset(referenceMentionCatalog.value, {
+      assetKey: String(file.id ?? file.url),
+      fileId: file.id,
+      url: file.url,
+    })
     assets.push({
       assetKey: String(file.id ?? file.url),
       fileId: file.id,
       sourceType: "url",
       name: file.name,
-      displayLabel: selectedUrlAttachmentLabel(file, index),
+      displayLabel: mention?.token || selectedUrlAttachmentLabel(file, index),
       contentType: file.contentType,
       size: file.size,
       url: file.url,
@@ -260,12 +279,17 @@ const stagedAssets = computed<StagedAsset[]>(() => {
   })
   props.files.forEach((file, index) => {
     const kind = attachmentKind(file.contentType, file.originalFilename)
+    const mention = findReferenceMentionByAsset(referenceMentionCatalog.value, {
+      assetKey: `agent_file:${file.id}`,
+      fileId: file.id,
+      url: file.downloadUrl || "",
+    })
     assets.push({
       assetKey: `agent_file:${file.id}`,
       fileId: file.id,
       sourceType: "file",
       name: file.originalFilename,
-      displayLabel: selectedFileAttachmentLabel(file, selectedMaterialAttachments.value.length + index),
+      displayLabel: mention?.token || selectedFileAttachmentLabel(file, selectedMaterialAttachments.value.length + index),
       contentType: file.contentType,
       size: file.fileSize,
       url: file.downloadUrl,
@@ -463,28 +487,35 @@ function attachmentKind(contentType?: string | null, name?: string | null): "ima
 }
 
 function chipDisplayLabel(kind: string, index: number, name?: string | null) {
-  return displayLabelForMention({ kind }, index + 1, name || undefined)
+  return displayLabelForMention({ kind }, index + 1)
 }
 
 function mentionFromUrlAttachment(file: AgentUrlAttachment): { mention: AgentReferenceMention; displayLabel: string } {
   const existingIndex = stagedAssets.value.findIndex((item) => item.url === file.url)
   const index = existingIndex >= 0 ? existingIndex : stagedAssets.value.length
   const kind = attachmentKind(file.contentType, file.name)
-  const refLabel = file.refLabel || (isImageAttachment(file.contentType, file.name) ? imageReferenceLabel(index, file.name) : file.name)
+  const canonical = findReferenceMentionByAsset(referenceMentionCatalog.value, {
+    assetKey: String(file.id ?? file.url),
+    fileId: file.id,
+    url: file.url,
+  })
+  const refLabel = isImageAttachment(file.contentType, file.name)
+    ? imageReferenceLabel(index, file.refLabel || file.name || canonical?.refLabel)
+    : (canonical?.refLabel || file.refLabel || file.name || "素材附件")
   const displayLabel = chipDisplayLabel(kind, index, file.refLabel || file.name)
   return {
     displayLabel,
     mention: {
       token: displayLabel,
       refLabel,
-      assetKey: String(file.id ?? file.url),
-      fileId: file.id,
-      url: file.url,
-      kind,
-      name: file.name,
-      contentType: file.contentType,
-      previewUrl: kind === "image" ? resolveAgentFileUrl(file.url) : undefined,
-      source: file.source || "url",
+      assetKey: canonical?.assetKey || String(file.id ?? file.url),
+      fileId: canonical?.fileId ?? file.id,
+      url: canonical?.url || file.url,
+      kind: canonical?.kind || kind,
+      name: canonical?.name || file.name,
+      contentType: canonical?.contentType ?? file.contentType,
+      previewUrl: canonical?.previewUrl || (kind === "image" ? resolveAgentFileUrl(file.url) : undefined),
+      source: canonical?.source || file.source || "url",
     },
   }
 }
@@ -493,20 +524,25 @@ function mentionFromAgentFile(file: AgentFile): { mention: AgentReferenceMention
   const existingIndex = stagedAssets.value.findIndex((item) => item.fileId === file.id && item.sourceType === "file")
   const index = existingIndex >= 0 ? existingIndex : stagedAssets.value.length
   const kind = attachmentKind(file.contentType, file.originalFilename)
+  const canonical = findReferenceMentionByAsset(referenceMentionCatalog.value, {
+    assetKey: `agent_file:${file.id}`,
+    fileId: file.id,
+    url: file.downloadUrl || "",
+  })
   const displayLabel = chipDisplayLabel(kind, index, file.originalFilename)
   return {
     displayLabel,
     mention: {
       token: displayLabel,
       refLabel: selectedFileAttachmentLabel(file, index),
-      assetKey: `agent_file:${file.id}`,
-      fileId: file.id,
-      url: file.downloadUrl || "",
-      kind,
-      name: file.originalFilename,
-      contentType: file.contentType,
-      previewUrl: kind === "image" ? props.filePreviewUrls?.[file.id] || resolveAgentFileUrl(file.downloadUrl) : undefined,
-      source: "agent_file",
+      assetKey: canonical?.assetKey || `agent_file:${file.id}`,
+      fileId: canonical?.fileId ?? file.id,
+      url: canonical?.url || file.downloadUrl || "",
+      kind: canonical?.kind || kind,
+      name: canonical?.name || file.originalFilename,
+      contentType: canonical?.contentType ?? file.contentType,
+      previewUrl: canonical?.previewUrl || (kind === "image" ? props.filePreviewUrls?.[file.id] || resolveAgentFileUrl(file.downloadUrl) : undefined),
+      source: canonical?.source || "agent_file",
     },
   }
 }

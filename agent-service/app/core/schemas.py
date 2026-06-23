@@ -41,6 +41,16 @@ class ToolDescriptor(BaseModel):
     hints: dict[str, Any] = Field(default_factory=dict, validation_alias=AliasChoices("hints", "agentHints"))
 
 
+class AgentSkillDescriptor(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    skillCode: str = Field(validation_alias=AliasChoices("skillCode", "skill_code"))
+    displayName: str = Field(default="", validation_alias=AliasChoices("displayName", "display_name"))
+    description: str = ""
+    toolCodes: list[str] = Field(default_factory=list, validation_alias=AliasChoices("toolCodes", "tool_codes"))
+    version: int | None = None
+
+
 class ToolPreference(BaseModel):
     toolCode: str
     autoCallEnabled: bool = False
@@ -287,6 +297,7 @@ class RunContext(BaseModel):
     agentFiles: list[AgentFileContext] = Field(default_factory=list)
     agentFileChunks: list[AgentFileChunkContext] = Field(default_factory=list)
     availableTools: list[ToolDescriptor] = Field(default_factory=list, validation_alias=AliasChoices("availableTools", "tools"))
+    availableSkills: list[AgentSkillDescriptor] = Field(default_factory=list, validation_alias=AliasChoices("availableSkills", "skills"))
     toolPreferences: list[ToolPreference] = Field(default_factory=list)
     creditBudget: int = 0
     contextWindow: ContextWindow | None = None

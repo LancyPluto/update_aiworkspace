@@ -48,37 +48,116 @@ VIDEO_MODEL_OPTIONS = [
     {"label": "Seedance 1.5 Pro（推荐）", "value": "doubao-seedance-1-5-pro-251215"},
     {"label": "Seedance 2.0", "value": "doubao-seedance-2-0-260128"},
     {"label": "Seedance 2.0 Fast", "value": "doubao-seedance-2-0-fast-260128"},
+    {"label": "Seedance 2.0 Mini", "value": "doubao-seedance-2-0-mini-260615"},
     {"label": "Seedance 1.0 Pro", "value": "doubao-seedance-1-0-pro-250528"},
     {"label": "Seedance 1.0 Pro Fast", "value": "doubao-seedance-1-0-pro-fast-251015"},
 ]
 
 IMAGE_MODEL_OPTIONS = [
     {"label": "Seedream 4.5（推荐）", "value": "doubao-seedream-4-5-251128"},
-    {"label": "Seedream 5.0", "value": "doubao-seedream-5-0-260128"},
-    {"label": "Seedream 5.0 Lite", "value": "doubao-seedream-5-0-lite-260128"},
+    {"label": "Seedream 5.0 Lite", "value": "doubao-seedream-5-0-260128"},
+    {"label": "Seedream 4.0", "value": "doubao-seedream-4.0"},
 ]
 
 VIDEO_PRICING_RULES = [
     {
-        "paramKey": "duration",
+        "paramKey": "model",
         "ruleType": "MULTIPLIER",
-        "matchOp": "VALUE",
-        "factor": 1,
+        "matchOp": "EQ",
+        "matchValue": "doubao-seedance-2-0-260128",
+        "factor": 5.75,
         "extraCredits": 0,
-        "priority": 40,
+        "priority": 45,
         "enabled": True,
-        "remark": "按 duration 秒数倍率",
+        "remark": "Seedance 2.0 720p 无视频输入单价约 46 元/百万 token，相对 1.5 Pro 无声基线",
+    },
+    {
+        "paramKey": "model",
+        "ruleType": "MULTIPLIER",
+        "matchOp": "EQ",
+        "matchValue": "doubao-seedance-2-0-fast-260128",
+        "factor": 4.625,
+        "extraCredits": 0,
+        "priority": 45,
+        "enabled": True,
+        "remark": "Seedance 2.0 Fast 720p 无视频输入单价约 37 元/百万 token",
+    },
+    {
+        "paramKey": "model",
+        "ruleType": "MULTIPLIER",
+        "matchOp": "EQ",
+        "matchValue": "doubao-seedance-2-0-mini-260615",
+        "factor": 2.875,
+        "extraCredits": 0,
+        "priority": 45,
+        "enabled": True,
+        "remark": "Seedance 2.0 Mini 720p 无视频输入单价约 23 元/百万 token",
+    },
+    {
+        "paramKey": "model",
+        "ruleType": "MULTIPLIER",
+        "matchOp": "EQ",
+        "matchValue": "doubao-seedance-1-0-pro-250528",
+        "factor": 1.875,
+        "extraCredits": 0,
+        "priority": 45,
+        "enabled": True,
+        "remark": "Seedance 1.0 Pro 单价约 15 元/百万 token",
+    },
+    {
+        "paramKey": "model",
+        "ruleType": "MULTIPLIER",
+        "matchOp": "EQ",
+        "matchValue": "doubao-seedance-1-0-pro-fast-251015",
+        "factor": 0.525,
+        "extraCredits": 0,
+        "priority": 45,
+        "enabled": True,
+        "remark": "Seedance 1.0 Pro Fast 单价约 4.2 元/百万 token",
+    },
+    {
+        "paramKey": "resolution",
+        "ruleType": "MULTIPLIER",
+        "matchOp": "EQ",
+        "matchValue": "480p",
+        "factor": 0.465,
+        "extraCredits": 0,
+        "priority": 50,
+        "enabled": True,
+        "remark": "480p 相对 720p，按官方 5 秒示例 2.31/4.97 折算",
     },
     {
         "paramKey": "resolution",
         "ruleType": "MULTIPLIER",
         "matchOp": "EQ",
         "matchValue": "1080p",
-        "factor": 1.5,
+        "factor": 2.493,
         "extraCredits": 0,
         "priority": 50,
         "enabled": True,
-        "remark": "1080p 相对 720p",
+        "remark": "1080p 相对 720p，按官方 5 秒示例 12.39/4.97 折算",
+    },
+    {
+        "paramKey": "resolution",
+        "ruleType": "MULTIPLIER",
+        "matchOp": "EQ",
+        "matchValue": "4k",
+        "factor": 5.086,
+        "extraCredits": 0,
+        "priority": 50,
+        "enabled": True,
+        "remark": "4K 相对 720p，按 token 公式和 4K 单价折算",
+    },
+    {
+        "paramKey": "generateAudio",
+        "ruleType": "MULTIPLIER",
+        "matchOp": "EQ",
+        "matchValue": "true",
+        "factor": 2,
+        "extraCredits": 0,
+        "priority": 55,
+        "enabled": True,
+        "remark": "Seedance 1.5 Pro 有声/无声官方单价约 16/8 元/百万 token",
     },
 ]
 
@@ -92,6 +171,28 @@ IMAGE_PRICING_RULES = [
         "priority": 40,
         "enabled": True,
         "remark": "按生成张数 count 倍率",
+    },
+    {
+        "paramKey": "model",
+        "ruleType": "MULTIPLIER",
+        "matchOp": "EQ",
+        "matchValue": "doubao-seedream-5-0-260128",
+        "factor": 0.88,
+        "extraCredits": 0,
+        "priority": 50,
+        "enabled": True,
+        "remark": "Seedream 5.0 Lite 0.22 元/张，相对 4.5 的 0.25 元/张",
+    },
+    {
+        "paramKey": "model",
+        "ruleType": "MULTIPLIER",
+        "matchOp": "EQ",
+        "matchValue": "doubao-seedream-4.0",
+        "factor": 0.8,
+        "extraCredits": 0,
+        "priority": 50,
+        "enabled": True,
+        "remark": "Seedream 4.0 0.20 元/张，相对 4.5 的 0.25 元/张",
     },
 ]
 
@@ -157,8 +258,16 @@ def _select_field(key: str, name: str, options: list[dict], default: str, sort_o
     )
 
 
-def _radio_field(key: str, name: str, options: list[dict], sort_order: int, *, default: str | None = None) -> dict:
-    payload: dict[str, Any] = {"uiTier": "all", "options": options}
+def _radio_field(
+    key: str,
+    name: str,
+    options: list[dict],
+    sort_order: int,
+    *,
+    default: str | None = None,
+    ui_tier: str = "all",
+) -> dict:
+    payload: dict[str, Any] = {"uiTier": ui_tier, "options": options}
     if default:
         payload["defaultValue"] = default
     return _field(
@@ -274,8 +383,8 @@ def build_volcengine_gateways(api_key: str = "") -> list[dict[str, Any]]:
             model_name="doubao-seedance-1-5-pro-251215",
             execution_task="video_generation",
             capabilities=["VIDEO_GENERATION", "DIGITAL_HUMAN"],
-            billing_unit="PER_CALL",
-            unit_price=0.875,
+            billing_unit="PER_SECOND",
+            unit_price=0.1728,
             pricing_rules=VIDEO_PRICING_RULES,
             docs_url=DOCS_VIDEO,
             extra_auth={
@@ -322,15 +431,15 @@ def _video_fields() -> list[dict]:
             core=True,
         ),
     ]
-    order += 1
+    order = 3
     fields.append(
         _field(
-            "imageUrl",
+            "referenceImages",
             "参考图片",
-            "image",
+            "multi_image",
             sort_order=order,
-            placeholder="可选，图生视频时上传首帧",
-            options_json='{"uiTier": "all", "libraryEnabled": true, "libraryKind": "image"}',
+            placeholder="可选，首帧/末帧或 2.0 多图参考，最多 9 张",
+            options_json='{"uiTier": "all", "minCount": 0, "maxCount": 9, "accept": "image/*", "libraryEnabled": true, "libraryKind": "image", "helpText": "1 张默认作为首帧；2 张可作为首尾帧；Seedance 2.0 系列支持 1-9 张 reference_image。"}',
         )
     )
     order += 1
@@ -338,7 +447,15 @@ def _video_fields() -> list[dict]:
         _radio_field(
             "aspectRatio",
             "画面比例",
-            [{"label": "16:9", "value": "16:9"}, {"label": "9:16", "value": "9:16"}, {"label": "1:1", "value": "1:1"}],
+            [
+                {"label": "智能", "value": "adaptive"},
+                {"label": "16:9", "value": "16:9"},
+                {"label": "9:16", "value": "9:16"},
+                {"label": "1:1", "value": "1:1"},
+                {"label": "4:3", "value": "4:3"},
+                {"label": "3:4", "value": "3:4"},
+                {"label": "21:9", "value": "21:9"},
+            ],
             order,
             default="16:9",
         )
@@ -348,7 +465,7 @@ def _video_fields() -> list[dict]:
         _radio_field(
             "duration",
             "时长",
-            [{"label": "5 秒", "value": "5"}, {"label": "10 秒", "value": "10"}],
+            [{"label": "5 秒", "value": "5"}, {"label": "10 秒", "value": "10"}, {"label": "12 秒", "value": "12"}],
             order,
             default="5",
         )
@@ -358,9 +475,80 @@ def _video_fields() -> list[dict]:
         _radio_field(
             "resolution",
             "分辨率",
-            [{"label": "480p", "value": "480p"}, {"label": "720p", "value": "720p"}, {"label": "1080p", "value": "1080p"}],
+            [
+                {"label": "480p", "value": "480p"},
+                {"label": "720p", "value": "720p"},
+                {"label": "1080p", "value": "1080p"},
+                {"label": "4K", "value": "4k"},
+            ],
             order,
             default="720p",
+        )
+    )
+    order += 1
+    fields.append(
+        _field(
+            "sourceVideoUrl",
+            "参考视频",
+            "file",
+            sort_order=order,
+            placeholder="可选，Seedance 2.0 系列支持参考视频 URL",
+            options_json='{"uiTier": "advanced", "accept": "video/*", "libraryKind": "video", "helpText": "最多 3 段参考视频，总时长建议不超过 15 秒。"}',
+        )
+    )
+    order += 1
+    fields.append(
+        _field(
+            "audioUrl",
+            "参考音频",
+            "file",
+            sort_order=order,
+            placeholder="可选，Seedance 2.0 系列支持参考音频 URL",
+            options_json='{"uiTier": "advanced", "accept": "audio/*", "libraryKind": "audio", "helpText": "需搭配参考图或参考视频使用。"}',
+        )
+    )
+    order += 1
+    fields.append(
+        _radio_field(
+            "generateAudio",
+            "生成音频",
+            [{"label": "关闭", "value": "false"}, {"label": "开启", "value": "true"}],
+            order,
+            default="false",
+            ui_tier="advanced",
+        )
+    )
+    order += 1
+    fields.append(
+        _radio_field(
+            "cameraFixed",
+            "固定镜头",
+            [{"label": "关闭", "value": "false"}, {"label": "开启", "value": "true"}],
+            order,
+            default="false",
+            ui_tier="advanced",
+        )
+    )
+    order += 1
+    fields.append(
+        _radio_field(
+            "watermark",
+            "水印",
+            [{"label": "关闭", "value": "false"}, {"label": "开启", "value": "true"}],
+            order,
+            default="false",
+            ui_tier="advanced",
+        )
+    )
+    order += 1
+    fields.append(
+        _field(
+            "seed",
+            "随机种子",
+            "number",
+            sort_order=order,
+            placeholder="可选，填写整数便于复现",
+            options_json='{"uiTier": "advanced"}',
         )
     )
     order += 1
@@ -391,7 +579,7 @@ def _image_fields() -> list[dict]:
             core=True,
         ),
     ]
-    order += 1
+    order = 3
     fields.append(
         _radio_field(
             "aspectRatio",
@@ -402,6 +590,9 @@ def _image_fields() -> list[dict]:
                 {"label": "9:16", "value": "9:16"},
                 {"label": "4:3", "value": "4:3"},
                 {"label": "3:4", "value": "3:4"},
+                {"label": "3:2", "value": "3:2"},
+                {"label": "2:3", "value": "2:3"},
+                {"label": "21:9", "value": "21:9"},
             ],
             order,
             default="1:1",
@@ -420,12 +611,78 @@ def _image_fields() -> list[dict]:
     order += 1
     fields.append(
         _field(
-            "imageUrl",
+            "referenceImages",
             "参考图片",
-            "image",
+            "multi_image",
             sort_order=order,
-            placeholder="可选，图生图参考",
-            options_json='{"uiTier": "advanced", "libraryEnabled": true, "libraryKind": "image"}',
+            placeholder="可选，Seedream 5.0 Lite / 4.5 / 4.0 支持单图或多图输入，最多 14 张",
+            options_json='{"uiTier": "all", "minCount": 0, "maxCount": 14, "accept": "image/*", "libraryEnabled": true, "libraryKind": "image", "helpText": "参考图 + 组图输出总数最多 15 张；支持 URL、上传图片或素材库。"}',
+        )
+    )
+    order += 1
+    fields.append(
+        _radio_field(
+            "size",
+            "输出规格",
+            [{"label": "2K", "value": "2K"}, {"label": "3K", "value": "3K"}, {"label": "4K", "value": "4K"}],
+            order,
+            default="2K",
+        )
+    )
+    order += 1
+    fields.append(
+        _radio_field(
+            "sequentialImageGeneration",
+            "组图模式",
+            [{"label": "关闭", "value": "disabled"}, {"label": "自动", "value": "auto"}],
+            order,
+            default="disabled",
+            ui_tier="advanced",
+        )
+    )
+    order += 1
+    fields.append(
+        _field(
+            "maxImages",
+            "组图上限",
+            "number",
+            sort_order=order,
+            placeholder="1-15，仅组图模式自动时生效",
+            options_json='{"uiTier": "advanced", "min": 1, "max": 15, "step": 1}',
+            default_value="15",
+        )
+    )
+    order += 1
+    fields.append(
+        _radio_field(
+            "outputFormat",
+            "输出格式",
+            [{"label": "PNG", "value": "png"}, {"label": "JPEG", "value": "jpeg"}],
+            order,
+            default="jpeg",
+            ui_tier="advanced",
+        )
+    )
+    order += 1
+    fields.append(
+        _radio_field(
+            "responseFormat",
+            "返回格式",
+            [{"label": "URL", "value": "url"}, {"label": "Base64", "value": "b64_json"}],
+            order,
+            default="url",
+            ui_tier="advanced",
+        )
+    )
+    order += 1
+    fields.append(
+        _radio_field(
+            "watermark",
+            "水印",
+            [{"label": "关闭", "value": "false"}, {"label": "开启", "value": "true"}],
+            order,
+            default="false",
+            ui_tier="advanced",
         )
     )
     return fields
@@ -479,7 +736,7 @@ def build_volcengine_tools() -> list[dict[str, Any]]:
             tool_name="豆包视频生成",
             model_config_code="volcengine-gateway-video",
             fields=_video_fields(),
-            model_field=_select_field("model", "Seedance 模型", VIDEO_MODEL_OPTIONS, "doubao-seedance-1-5-pro-251215", 99),
+            model_field=_select_field("model", "Seedance 模型", VIDEO_MODEL_OPTIONS, "doubao-seedance-1-5-pro-251215", 2),
             tool_type="VIDEO_GENERATION",
             estimated_credit_cost=3,
             category_code="text-to-video",
@@ -489,7 +746,7 @@ def build_volcengine_tools() -> list[dict[str, Any]]:
             tool_name="豆包图像生成",
             model_config_code="volcengine-gateway-image",
             fields=_image_fields(),
-            model_field=_select_field("model", "Seedream 模型", IMAGE_MODEL_OPTIONS, "doubao-seedream-4-5-251128", 99),
+            model_field=_select_field("model", "Seedream 模型", IMAGE_MODEL_OPTIONS, "doubao-seedream-4-5-251128", 2),
             tool_type="IMAGE_GENERATION",
             estimated_credit_cost=2,
             category_code="text-to-image",
@@ -501,7 +758,7 @@ def _merge_gateway(existing: dict[str, Any] | None, fresh: dict[str, Any]) -> di
     merged = deepcopy(fresh)
     if not existing:
         return merged
-    for key in ("apiKey", "vendorAccountRef", "unitPrice", "billingUnit", "pricingRules", "timeoutSeconds"):
+    for key in ("apiKey", "vendorAccountRef", "timeoutSeconds"):
         value = existing.get(key)
         if value not in (None, "", []):
             merged[key] = value
@@ -514,7 +771,9 @@ def _replace_legacy_codes_in_obj(value: Any) -> Any:
     if isinstance(value, str):
         replacements = {
             "seedance_video_generation": "volcengine-gateway-video",
+            "seedance2_0_2": "volcengine-gateway-video",
             "volcengine-seedance": "volcengine-gateway-video",
+            "doubao-seedream-image-generation": "volcengine-gateway-image",
             "volcengine-seedream": "volcengine-gateway-image",
         }
         updated = value

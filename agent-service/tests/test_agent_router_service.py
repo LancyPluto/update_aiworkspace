@@ -156,7 +156,7 @@ async def test_router_falls_back_on_unknown_tool():
 
 
 @pytest.mark.asyncio
-async def test_router_falls_back_on_low_confidence():
+async def test_router_accepts_low_confidence_tool_selection_without_fallback():
     backend = FakeBackend()
     model = FakeModel({
         "intent": "tool_use",
@@ -172,8 +172,11 @@ async def test_router_falls_back_on_low_confidence():
         IntentResult(intent=Intent.GENERAL_CHAT, confidence=0.6, reason="rule_fallback"),
     )
 
-    assert result is None
-    assert any(event.eventType == ROUTER_FALLBACK for _, event in backend.events)
+    assert result is not None
+    assert result.intent == Intent.TOOL_USE
+    assert result.selectedToolCode == "kling_image_v21"
+    assert result.confidence == 0.2
+    assert not any(event.eventType == ROUTER_FALLBACK for _, event in backend.events)
 
 
 @pytest.mark.asyncio

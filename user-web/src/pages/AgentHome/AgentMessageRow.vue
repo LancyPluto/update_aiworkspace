@@ -228,6 +228,7 @@ function openAttachmentPreview(file: MessageAttachment) {
             :events="runEvents"
             :inline-mode="true"
             :process-mode="true"
+            :running="Boolean(isStreaming)"
             @open-memory="emit('open-memory-from-trace', $event)"
             @delete-memory="emit('delete-memory-from-trace', $event)"
           />

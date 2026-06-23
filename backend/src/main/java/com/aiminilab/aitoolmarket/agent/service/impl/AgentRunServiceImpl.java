@@ -60,6 +60,7 @@ import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.AgentRateLimitService;
 import com.aiminilab.aitoolmarket.agent.service.AgentFileService;
 import com.aiminilab.aitoolmarket.agent.service.AgentRunService;
+import com.aiminilab.aitoolmarket.agent.service.AgentSkillBundleService;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolDescriptorService;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolPreferenceService;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
@@ -133,6 +134,7 @@ public class AgentRunServiceImpl implements AgentRunService {
     private final AgentPendingToolContextMapper agentPendingToolContextMapper;
     private final AgentRateLimitService agentRateLimitService;
     private final AgentToolDescriptorService agentToolDescriptorService;
+    private final AgentSkillBundleService agentSkillBundleService;
     private final AgentToolPreferenceService agentToolPreferenceService;
     private final AgentModelConfigService agentModelConfigService;
     private final AgentServiceClient agentServiceClient;
@@ -159,6 +161,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             AgentPendingToolContextMapper agentPendingToolContextMapper,
             AgentRateLimitService agentRateLimitService,
             AgentToolDescriptorService agentToolDescriptorService,
+            AgentSkillBundleService agentSkillBundleService,
             AgentToolPreferenceService agentToolPreferenceService,
             AgentModelConfigService agentModelConfigService,
             AgentServiceClient agentServiceClient,
@@ -184,6 +187,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         this.agentPendingToolContextMapper = agentPendingToolContextMapper;
         this.agentRateLimitService = agentRateLimitService;
         this.agentToolDescriptorService = agentToolDescriptorService;
+        this.agentSkillBundleService = agentSkillBundleService;
         this.agentToolPreferenceService = agentToolPreferenceService;
         this.agentModelConfigService = agentModelConfigService;
         this.agentServiceClient = agentServiceClient;
@@ -496,6 +500,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                 filenames
         );
         List<AgentToolDescriptorResponse> tools = agentToolDescriptorService.listAvailableToolsForUser(run.getUserId());
+        var availableSkills = agentSkillBundleService.listAvailableSkillDescriptors(tools);
         var preferences = agentToolPreferenceMapper.findByUserId(run.getUserId())
                 .stream()
                 .map(com.aiminilab.aitoolmarket.agent.dto.AgentToolPreferenceResponse::from)
@@ -593,6 +598,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                 agentFiles,
                 agentFileChunks,
                 tools,
+                availableSkills,
                 preferences,
                 run.getEstimatedCredits(),
                 com.aiminilab.aitoolmarket.agent.dto.AgentContextWindowResponse.from(

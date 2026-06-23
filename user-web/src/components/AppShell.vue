@@ -37,6 +37,7 @@ import { useAuthStore } from "@/store/authStore"
 import MemberBadge from "@/components/MemberBadge/MemberBadge.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import { applyAppTheme } from "@/utils/theme"
+import AgentThemePicker from "@/pages/AgentHome/AgentThemePicker.vue"
 
 withDefaults(
   defineProps<{
@@ -599,6 +600,7 @@ watch(
           <Plus class="h-4 w-4" />
           创建
         </RouterLink>
+        <AgentThemePicker v-if="isAgentRoute" target-selector=".agent-page" />
         <button
           type="button"
           class="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full text-white/55 hover:bg-white/8 hover:text-white md:inline-flex"

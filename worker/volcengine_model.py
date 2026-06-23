@@ -9,6 +9,16 @@ VOLCENGINE_MODEL_ALIASES: dict[str, str] = {
     "doubao-seed-2.0-pro": "doubao-seed-2-0-pro-260215",
     "doubao-seed-2.0-mini": "doubao-seed-2-0-mini-260215",
     "doubao-seed-2.0-code": "doubao-seed-2-0-code-preview-260215",
+    "doubao-seedream-4.5": "doubao-seedream-4-5-251128",
+    "doubao-seedream-4.0": "doubao-seedream-4.0",
+    "doubao-seedream-5.0": "doubao-seedream-5-0-260128",
+    "doubao-seedream-5.0-lite": "doubao-seedream-5-0-260128",
+    "doubao-seedance-1-5-pro-251215": "doubao-seedance-1-5-pro-251215",
+    "doubao-seedance-2-0": "doubao-seedance-2-0-260128",
+    "doubao-seedance-2.0": "doubao-seedance-2-0-260128",
+    "doubao-seedance-2.0-fast": "doubao-seedance-2-0-fast-260128",
+    "doubao-seedance-2-0-fast": "doubao-seedance-2-0-fast-260128",
+    "doubao-seedance-2.0-mini": "doubao-seedance-2-0-mini-260615",
 }
 
 

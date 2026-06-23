@@ -62,6 +62,18 @@ class FakeProductToolModel:
         return self.turn
 
 
+class SequentialProductToolModel:
+    def __init__(self, turns):
+        self.turns = list(turns)
+        self.calls = []
+
+    async def chat_turn(self, messages, tools=None, tool_choice=None):
+        self.calls.append((messages, tools, tool_choice))
+        if self.turns:
+            return self.turns.pop(0)
+        return ChatTurnResult(content="", tool_calls=[])
+
+
 @pytest.mark.asyncio
 async def test_tool_call_loop_executes_memory_add_before_final_answer():
     backend = FakeToolLoopBackend()
@@ -315,6 +327,147 @@ async def test_product_tool_call_loop_includes_workspace_memory_in_model_message
     assert any("GPT生图默认选最低质量" in content for content in system_messages)
     assert result.intent is not None
     assert result.intent.arguments["quality"] == "low"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("first_args", "fixed_args", "missing_field"),
+    [
+        (
+            {"operation": "generate", "generation_prompt": ""},
+            {"operation": "generate", "generation_prompt": "冷蓝电影海报，主体清晰，柔焦真实光影。"},
+            "generation_prompt",
+        ),
+        (
+            {"operation": "edit", "base_image_ref": "latest_generated_image.url", "base_prompt": "", "modification_prompt": "换成赛博朋克夜景。"},
+            {
+                "operation": "edit",
+                "base_image_ref": "latest_generated_image.url",
+                "base_prompt": "冷蓝电影海报，柔焦真实光影。",
+                "modification_prompt": "换成赛博朋克夜景。",
+            },
+            "base_prompt",
+        ),
+        (
+            {
+                "operation": "edit",
+                "base_image_ref": "latest_generated_image.url",
+                "base_prompt": "冷蓝电影海报，柔焦真实光影。",
+                "modification_prompt": "",
+            },
+            {
+                "operation": "edit",
+                "base_image_ref": "latest_generated_image.url",
+                "base_prompt": "冷蓝电影海报，柔焦真实光影。",
+                "modification_prompt": "换成赛博朋克夜景。",
+            },
+            "modification_prompt",
+        ),
+    ],
+)
+async def test_product_tool_call_loop_self_heals_empty_v2_image_prompt_fields(first_args, fixed_args, missing_field):
+    backend = FakeToolLoopBackend()
+    alias = "agent_tool__gpt_image2"
+    model = SequentialProductToolModel(
+        [
+            ChatTurnResult(tool_calls=[ChatToolCall(id="call_empty", name=alias, arguments=first_args)]),
+            ChatTurnResult(content=f"我需要补全 {missing_field} 后才能继续。", tool_calls=[]),
+            ChatTurnResult(tool_calls=[ChatToolCall(id="call_fixed", name=alias, arguments=fixed_args)]),
+        ]
+    )
+    loop = ProductToolCallLoopExecutor(backend=backend, model=model)
+    context = RunContext(
+        runId=46,
+        sessionId=1,
+        userId=2,
+        message="把刚刚那张继续改成赛博朋克夜景",
+        availableTools=[
+            ToolDescriptor(
+                toolCode="gpt_image2",
+                toolName="GPT Image 2",
+                description="图片生成与编辑",
+                outputModality="image",
+                autoCallable=True,
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "operation": {"type": "string"},
+                        "generation_prompt": {"type": "string"},
+                        "base_image_ref": {"type": "string"},
+                        "base_prompt": {"type": "string"},
+                        "modification_prompt": {"type": "string"},
+                        "references": {"type": "array"},
+                    },
+                },
+            )
+        ],
+        recentToolCalls=[
+            {
+                "id": 7,
+                "toolCode": "gpt_image2",
+                "argumentsJson": {"generation_prompt": "冷蓝电影海报，柔焦真实光影。"},
+                "resourceType": "IMAGE",
+                "mediaUrls": ["https://cdn.example/old.png"],
+            }
+        ],
+    )
+
+    result = await loop.run(context)
+
+    assert result.intent is not None
+    assert result.intent.arguments == fixed_args
+    assert len(model.calls) == 3
+    assert any("<SessionState>" in message.content for message in model.calls[0][0] if message.role == "system")
+    assert any("SchemaValidationError" in message.content for message in model.calls[1][0] if message.role == "system")
+    assert any("without a tool call" in message.content for message in model.calls[2][0] if message.role == "system")
+    rejected_events = [event for _, event in backend.events if event.eventType == TOOL_CALL_REJECTED]
+    assert rejected_events[-1].eventJson["missingFields"] == [missing_field]
+
+
+@pytest.mark.asyncio
+async def test_product_tool_call_loop_stops_after_two_repeated_v2_prompt_failures():
+    backend = FakeToolLoopBackend()
+    alias = "agent_tool__gpt_image2"
+    model = SequentialProductToolModel(
+        [
+            ChatTurnResult(tool_calls=[ChatToolCall(id="call_empty_1", name=alias, arguments={"operation": "composite"})]),
+            ChatTurnResult(tool_calls=[ChatToolCall(id="call_empty_2", name=alias, arguments={"operation": "composite"})]),
+            ChatTurnResult(tool_calls=[ChatToolCall(id="call_empty_3", name=alias, arguments={"operation": "composite"})]),
+        ]
+    )
+    loop = ProductToolCallLoopExecutor(backend=backend, model=model)
+    context = RunContext(
+        runId=47,
+        sessionId=1,
+        userId=2,
+        message="为图2女性角色生成图1动作构图风格的电影海报",
+        availableTools=[
+            ToolDescriptor(
+                toolCode="gpt_image2",
+                toolName="GPT Image 2",
+                outputModality="image",
+                autoCallable=True,
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "operation": {"type": "string"},
+                        "generation_prompt": {"type": "string"},
+                        "base_image_ref": {"type": "string"},
+                        "references": {"type": "array"},
+                    },
+                },
+            )
+        ],
+    )
+
+    result = await loop.run(context)
+
+    assert result.intent is None
+    assert len(model.calls) == 2
+    assert model.calls[1][2] == {"type": "function", "function": {"name": alias}}
+    rejected_events = [event for _, event in backend.events if event.eventType == TOOL_CALL_REJECTED]
+    assert len(rejected_events) == 2
+    assert rejected_events[-1].eventJson["retryAttempt"] == 2
 
 
 @pytest.mark.asyncio

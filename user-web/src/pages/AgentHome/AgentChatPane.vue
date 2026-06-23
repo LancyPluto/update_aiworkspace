@@ -14,7 +14,14 @@ import {
   X,
 } from "lucide-vue-next"
 import { collectSessionAssets } from "@/utils/agentChatAssetRefs"
-import { buildReferenceMentionsPayload, type AgentReferenceMention } from "@/utils/agentReferenceMentions"
+import {
+  baseImageLabel,
+  buildAttachmentLabelCatalog,
+  buildReferenceMentionsPayload,
+  displayLabelForMention,
+  findReferenceMentionByAsset,
+  type AgentReferenceMention,
+} from "@/utils/agentReferenceMentions"
 import AgentComposer from "./AgentComposer.vue"
 import AgentMessageRow from "./AgentMessageRow.vue"
 import AgentAvatar from "./AgentAvatar.vue"
@@ -456,6 +463,7 @@ function messageContentJsonForFiles(
   },
 ) {
   const sessionAssets = collectSessionAssets(messages.value)
+  const referenceCatalog = buildAttachmentLabelCatalog(urlItems, items, sessionAssets)
   const referenceMentions = buildReferenceMentionsPayload(
     messageText,
     urlItems,
@@ -478,7 +486,7 @@ function messageContentJsonForFiles(
     payload.attachments = [
       ...urlItems.map((item, index) => ({
         id: item.id,
-        name: referenceAttachmentLabel(index, item.refLabel || item.name, item.contentType),
+        name: referenceLabelForUrlAttachment(referenceCatalog, item, index),
         contentType: item.contentType,
         size: item.size,
         url: item.url,
@@ -487,7 +495,7 @@ function messageContentJsonForFiles(
       })),
       ...items.map((file, index) => ({
         id: file.id,
-        name: referenceAttachmentLabel(urlItems.length + index, file.originalFilename, file.contentType),
+        name: referenceLabelForAgentFile(referenceCatalog, file, urlItems.length + index),
         contentType: file.contentType,
         size: file.fileSize,
         url: file.downloadUrl,
@@ -512,7 +520,7 @@ function messageContentJsonForFiles(
 }
 
 function referenceMentionsForApi(mentions: AgentReferenceMention[]) {
-  return mentions.map((mention) => ({
+  return normalizeTurnReferenceMentions(mentions).map((mention) => ({
     token: mention.token,
     refLabel: mention.refLabel,
     assetKey: mention.assetKey,
@@ -524,6 +532,45 @@ function referenceMentionsForApi(mentions: AgentReferenceMention[]) {
     previewUrl: mention.previewUrl,
     source: mention.source,
   }))
+}
+
+function normalizeTurnReferenceMentions(mentions: AgentReferenceMention[]) {
+  if (mentions.length <= 1) return mentions
+  const baseCounts = new Map<string, number>()
+  for (const mention of mentions) {
+    const key = normalizedReferenceBaseKey(mention.token || "")
+      || normalizedReferenceBaseKey(mention.refLabel || "")
+      || mention.token
+      || mention.refLabel
+    if (!key) continue
+    baseCounts.set(key, (baseCounts.get(key) ?? 0) + 1)
+  }
+  const needsRenumber = Array.from(baseCounts.values()).some((count) => count > 1)
+  if (!needsRenumber) return mentions
+
+  const counters: Record<string, number> = { image: 0, video: 0, audio: 0, file: 0 }
+  return mentions.map((mention) => {
+    const kind = normalizedMentionKind(mention)
+    counters[kind] += 1
+    const index = counters[kind]
+    const token = displayLabelForMention({ kind }, index)
+    const refLabel = referenceAttachmentLabel(index - 1, mention.refLabel || mention.name || mention.token, mention.contentType)
+    return {
+      ...mention,
+      token,
+      refLabel,
+    }
+  })
+}
+
+function normalizedMentionKind(mention: AgentReferenceMention): "image" | "video" | "audio" | "file" {
+  if (mention.kind === "video" || mention.kind === "audio" || mention.kind === "file") return mention.kind
+  if (isImageAttachment(mention.contentType, mention.name || mention.refLabel || mention.token)) return "image"
+  return "file"
+}
+
+function normalizedReferenceBaseKey(label: string) {
+  return baseImageLabel(label)?.replace(/^@图片/, "@图") ?? ""
 }
 
 function globalFileIdsFor(items: AgentFile[], urlItems: AgentUrlAttachment[]): Array<string | number> {
@@ -1124,6 +1171,32 @@ function referenceAttachmentLabel(index: number, name?: string | null, contentTy
   return isImageAttachment(contentType, name) ? `@图片${index + 1}-${shortReferenceName(name)}` : (name || "素材附件")
 }
 
+function referenceLabelForUrlAttachment(
+  catalog: Map<string, AgentReferenceMention>,
+  item: AgentUrlAttachment,
+  index: number,
+) {
+  const mention = findReferenceMentionByAsset(catalog, {
+    assetKey: String(item.id ?? item.url),
+    fileId: item.id,
+    url: item.url,
+  })
+  return mention?.refLabel || referenceAttachmentLabel(index, item.refLabel || item.name, item.contentType)
+}
+
+function referenceLabelForAgentFile(
+  catalog: Map<string, AgentReferenceMention>,
+  file: AgentFile,
+  index: number,
+) {
+  const mention = findReferenceMentionByAsset(catalog, {
+    assetKey: `agent_file:${file.id}`,
+    fileId: file.id,
+    url: file.downloadUrl || "",
+  })
+  return mention?.refLabel || referenceAttachmentLabel(index, file.originalFilename, file.contentType)
+}
+
 function selectUrlAttachment(item: AgentUrlAttachment) {
   const normalized = normalizeUrlAttachment(item)
   if (!normalized) return
@@ -1352,6 +1425,11 @@ async function submitMessage(content = input.value) {
   try {
     const submittedFiles = [...files.value]
     const submittedUrlAttachments = [...urlAttachments.value]
+    const submittedReferenceCatalog = buildAttachmentLabelCatalog(
+      submittedUrlAttachments,
+      submittedFiles,
+      collectSessionAssets(messages.value),
+    )
     const submittedPreferredToolCode = selectedToolCode.value
     const submittedMentions = [...(composerSnapshot?.mentions ?? draftReferenceMentions.value)]
     const submittedGlobalFileIds = globalFileIdsFor(submittedFiles, submittedUrlAttachments)
@@ -1396,7 +1474,7 @@ async function submitMessage(content = input.value) {
         fileIds: submittedFiles.map((item) => item.id),
         urlAttachments: submittedUrlAttachments.map((item, index) => ({
           id: item.id,
-          name: referenceAttachmentLabel(index, item.refLabel || item.name, item.contentType),
+          name: referenceLabelForUrlAttachment(submittedReferenceCatalog, item, index),
           contentType: item.contentType,
           size: item.size,
           url: item.url,
@@ -2548,6 +2626,7 @@ defineExpose({
             <RunTimeline
               :events="events"
               :inline-mode="true"
+              :running="hasActiveRun"
               @open-memory="openMemoryFromTrace"
               @delete-memory="deleteMemoryFromTrace"
             />

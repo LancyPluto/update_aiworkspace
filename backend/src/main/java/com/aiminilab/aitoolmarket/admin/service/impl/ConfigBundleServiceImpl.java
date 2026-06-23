@@ -136,7 +136,13 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             "seedance_video_generation",
             "volcengine-seedream"
     );
-    private static final Set<String> LEGACY_VOLCENGINE_TOOL_CODES = Set.of();
+    private static final Set<String> LEGACY_VOLCENGINE_TOOL_CODES = Set.of(
+            "seedance2_0_2",
+            "doubao-seedream-image-generation",
+            "seedance_video_generation",
+            "volcengine-seedance",
+            "volcengine-seedream"
+    );
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final SystemSettingService systemSettingService;
@@ -625,7 +631,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                         + ": use consolidated kling-gateway-* configs instead");
                 continue;
             }
-            if (LEGACY_VOLCENGINE_MODEL_CONFIG_CODES.contains(config.configCode().trim())) {
+            if (isLegacyVolcengineModelConfigCode(config.configCode())) {
                 warnings.add("Skipped legacy Volcengine model config " + config.configCode()
                         + ": use consolidated volcengine-gateway-* configs instead");
                 continue;
@@ -949,7 +955,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                     + ": use consolidated kling-* gateway tools instead");
             return;
         }
-        if (LEGACY_VOLCENGINE_TOOL_CODES.contains(item.toolCode().trim())) {
+        if (isLegacyVolcengineToolCode(item.toolCode())) {
             warnings.add("Skipped legacy Volcengine tool " + item.toolCode()
                     + ": use consolidated volcengine-* gateway tools instead");
             return;
@@ -1240,6 +1246,32 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         }
         String normalized = configCode.trim().toLowerCase(Locale.ROOT);
         return normalized.matches("\\d+") || normalized.matches("model_\\d+");
+    }
+
+    private boolean isLegacyVolcengineModelConfigCode(String configCode) {
+        if (isBlank(configCode)) {
+            return false;
+        }
+        String normalized = configCode.trim().toLowerCase(Locale.ROOT);
+        if ("volcengine-gateway-video".equals(normalized) || "volcengine-gateway-image".equals(normalized)) {
+            return false;
+        }
+        return LEGACY_VOLCENGINE_MODEL_CONFIG_CODES.contains(normalized)
+                || normalized.startsWith("volcengine-seedance-")
+                || normalized.startsWith("volcengine-seedream-");
+    }
+
+    private boolean isLegacyVolcengineToolCode(String toolCode) {
+        if (isBlank(toolCode)) {
+            return false;
+        }
+        String normalized = toolCode.trim().toLowerCase(Locale.ROOT);
+        if ("volcengine-video".equals(normalized) || "volcengine-image".equals(normalized)) {
+            return false;
+        }
+        return LEGACY_VOLCENGINE_TOOL_CODES.contains(normalized)
+                || normalized.startsWith("volcengine-seedance-")
+                || normalized.startsWith("volcengine-seedream-");
     }
 
     private boolean sameModelIdentity(AgentModelConfigResponse existing, ConfigBundleDto.ModelConfig imported) {

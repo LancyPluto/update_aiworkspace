@@ -75,9 +75,12 @@ import {
   deleteTool,
   fetchAdminToolCategories,
   fetchAllAdminTools,
+  fetchAgentSkill,
   fetchToolFields,
   offlineTool,
+  publishAgentSkill,
   publishTool,
+  saveAgentSkillDraft,
   updateTool,
   updateToolFields,
   uploadToolCover,
@@ -106,7 +109,7 @@ import {
   pricingRulesForModelExport,
 } from "@/lib/pricing-rules-json"
 import { isWorkflowTool } from "@/lib/workflow-tools"
-import type { AgentModelConfig, ConfigBundleImportResult, ModelProviderDescriptor, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
+import type { AgentModelConfig, AgentSkillBundle, ConfigBundleImportResult, ModelProviderDescriptor, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
 
 const adminBasePath = (process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || "").replace(/\/$/, "")
 
@@ -136,6 +139,34 @@ interface ToolRow {
   modelConfigName: string | null
   modelName: string | null
   executionHandler?: string | null
+}
+
+interface AgentSkillForm {
+  skillCode: string
+  displayName: string
+  description: string
+  toolCodesText: string
+  whenToUse: string
+  whenNotToUse: string
+  sopRules: string
+  examplesJson: string
+  fieldPolicyJson: string
+  status: string
+  version?: number | null
+}
+
+const emptySkillForm: AgentSkillForm = {
+  skillCode: "",
+  displayName: "",
+  description: "",
+  toolCodesText: "",
+  whenToUse: "",
+  whenNotToUse: "",
+  sopRules: "",
+  examplesJson: "[]",
+  fieldPolicyJson: "{}",
+  status: "DRAFT",
+  version: null,
 }
 
 interface ToolForm {
@@ -563,6 +594,12 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
   const [fieldSaving, setFieldSaving] = useState(false)
   const [fieldEditorMode, setFieldEditorMode] = useState<"visual" | "json">("visual")
   const [editableFields, setEditableFields] = useState<EditableField[]>([])
+  const [skillDialogOpen, setSkillDialogOpen] = useState(false)
+  const [skillTool, setSkillTool] = useState<ToolRow | null>(null)
+  const [skillForm, setSkillForm] = useState<AgentSkillForm>(emptySkillForm)
+  const [skillLoading, setSkillLoading] = useState(false)
+  const [skillSaving, setSkillSaving] = useState(false)
+  const [skillError, setSkillError] = useState<string | null>(null)
   const [toolTemplates, setToolTemplates] = useState<ToolTemplateSummary[]>([])
   const [openVendorGroups, setOpenVendorGroups] = useState<Record<string, boolean>>({})
 
@@ -1158,6 +1195,106 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       setFieldError(err instanceof ApiError ? err.message : "保存字段配置失败")
     } finally {
       setFieldSaving(false)
+    }
+  }
+
+  function defaultSkillCodeForTool(tool: ToolRow): string {
+    const code = `${tool.toolCode} ${tool.toolType} ${tool.outputModality}`.toLowerCase()
+    if (code.includes("image") || code.includes("图")) return "image_generation"
+    if (code.includes("video")) return "video_generation"
+    if (code.includes("music") || code.includes("audio")) return "audio_generation"
+    return `${tool.toolCode}_skill`.replace(/[^a-zA-Z0-9_]/g, "_").replace(/_+/g, "_")
+  }
+
+  function formFromSkill(skill: AgentSkillBundle): AgentSkillForm {
+    return {
+      skillCode: skill.skillCode,
+      displayName: skill.displayName || skill.skillCode,
+      description: skill.description || "",
+      toolCodesText: (skill.toolCodes || []).join(", "),
+      whenToUse: skill.whenToUse || "",
+      whenNotToUse: skill.whenNotToUse || "",
+      sopRules: skill.sopRules || "",
+      examplesJson: JSON.stringify(skill.examples ?? [], null, 2),
+      fieldPolicyJson: JSON.stringify(skill.fieldPolicy ?? {}, null, 2),
+      status: skill.status || "DRAFT",
+      version: skill.version,
+    }
+  }
+
+  async function openSkillDialog(tool: ToolRow) {
+    const skillCode = defaultSkillCodeForTool(tool)
+    setSkillTool(tool)
+    setSkillDialogOpen(true)
+    setSkillError(null)
+    setSkillLoading(true)
+    setSkillForm({ ...emptySkillForm, skillCode, displayName: skillCode })
+    try {
+      const skill = await fetchAgentSkill(skillCode)
+      setSkillForm(formFromSkill(skill))
+    } catch (err) {
+      setSkillError(err instanceof ApiError ? err.message : "加载 Agent Skill 失败，可先保存为新草稿")
+      setSkillForm({
+        ...emptySkillForm,
+        skillCode,
+        displayName: skillCode === "image_generation" ? "图像生成" : skillCode,
+        description: tool.description || tool.name,
+        toolCodesText: tool.toolCode,
+      })
+    } finally {
+      setSkillLoading(false)
+    }
+  }
+
+  function skillPayloadFromForm() {
+    let examples: unknown
+    let fieldPolicy: unknown
+    try {
+      examples = skillForm.examplesJson.trim() ? JSON.parse(skillForm.examplesJson) : []
+      fieldPolicy = skillForm.fieldPolicyJson.trim() ? JSON.parse(skillForm.fieldPolicyJson) : {}
+    } catch {
+      throw new Error("示例或字段策略 JSON 格式错误")
+    }
+    return {
+      displayName: skillForm.displayName,
+      description: skillForm.description,
+      toolCodes: skillForm.toolCodesText.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean),
+      whenToUse: skillForm.whenToUse,
+      whenNotToUse: skillForm.whenNotToUse,
+      sopRules: skillForm.sopRules,
+      examples,
+      fieldPolicy,
+    }
+  }
+
+  async function saveSkillDraft() {
+    if (!skillForm.skillCode) return
+    setSkillSaving(true)
+    setSkillError(null)
+    try {
+      const saved = await saveAgentSkillDraft(skillForm.skillCode, skillPayloadFromForm())
+      setSkillForm(formFromSkill(saved))
+      toast.success("Agent Skill 草稿已保存")
+    } catch (err) {
+      setSkillError(err instanceof Error ? err.message : "保存 Agent Skill 失败")
+    } finally {
+      setSkillSaving(false)
+    }
+  }
+
+  async function publishSkillDraft() {
+    if (!skillForm.skillCode) return
+    setSkillSaving(true)
+    setSkillError(null)
+    try {
+      await saveAgentSkillDraft(skillForm.skillCode, skillPayloadFromForm())
+      const saved = await publishAgentSkill(skillForm.skillCode)
+      setSkillForm(formFromSkill(saved))
+      toast.success("Agent Skill 已发布")
+    } catch (err) {
+      setSkillError(err instanceof ApiError ? err.message : "发布 Agent Skill 失败")
+    } finally {
+      setSkillSaving(false)
     }
   }
 
@@ -1906,6 +2043,9 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                                   <DropdownMenuItem className="gap-2" onClick={() => openFieldDialog(tool)}>
                                     <FileText className="h-4 w-4" /> 字段配置
                                   </DropdownMenuItem>
+                                  <DropdownMenuItem className="gap-2" onClick={() => openSkillDialog(tool)}>
+                                    <Sparkles className="h-4 w-4" /> Agent Skill
+                                  </DropdownMenuItem>
                                   <DropdownMenuItem className="gap-2" disabled>
                                     <Copy className="h-4 w-4" /> 复制
                                   </DropdownMenuItem>
@@ -2059,6 +2199,131 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
             </Button>
             <Button onClick={saveFields} disabled={fieldLoading || fieldSaving}>
               {fieldSaving ? "保存中..." : "保存字段"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={skillDialogOpen} onOpenChange={setSkillDialogOpen}>
+        <DialogContent className="!w-[980px] !max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto bg-card border-border">
+          <DialogHeader>
+            <DialogTitle>Agent Skill</DialogTitle>
+            <DialogDescription className={skillError ? "text-destructive" : undefined}>
+              {skillError || `配置 ${skillTool?.name || ""} 的 Agent 技能包；运行时首轮只注入能力菜单，SOP 会在工具调用前按需水合。`}
+            </DialogDescription>
+          </DialogHeader>
+          {skillLoading ? (
+            <div className="flex min-h-60 items-center justify-center text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 正在读取 Skill Bundle...
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label>Skill Code</Label>
+                  <Input
+                    value={skillForm.skillCode}
+                    disabled={skillSaving}
+                    onChange={(event) => setSkillForm((prev) => ({ ...prev, skillCode: event.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>显示名</Label>
+                  <Input
+                    value={skillForm.displayName}
+                    disabled={skillSaving}
+                    onChange={(event) => setSkillForm((prev) => ({ ...prev, displayName: event.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>状态</Label>
+                  <div className="flex h-10 items-center gap-2 rounded-md border border-border px-3 text-sm">
+                    <Badge variant={skillForm.status === "PUBLISHED" ? "default" : "secondary"}>{skillForm.status}</Badge>
+                    <span className="text-muted-foreground">v{skillForm.version || 1}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>轻量菜单描述</Label>
+                <Textarea
+                  value={skillForm.description}
+                  disabled={skillSaving}
+                  rows={2}
+                  onChange={(event) => setSkillForm((prev) => ({ ...prev, description: event.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>绑定工具 Codes</Label>
+                <Input
+                  value={skillForm.toolCodesText}
+                  disabled={skillSaving}
+                  placeholder="gpt_image, gpt_image2, openai_image"
+                  onChange={(event) => setSkillForm((prev) => ({ ...prev, toolCodesText: event.target.value }))}
+                />
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>什么时候使用</Label>
+                  <Textarea
+                    value={skillForm.whenToUse}
+                    disabled={skillSaving}
+                    rows={4}
+                    onChange={(event) => setSkillForm((prev) => ({ ...prev, whenToUse: event.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>什么时候不要使用</Label>
+                  <Textarea
+                    value={skillForm.whenNotToUse}
+                    disabled={skillSaving}
+                    rows={4}
+                    onChange={(event) => setSkillForm((prev) => ({ ...prev, whenNotToUse: event.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>SOP Rules（JIT 注入）</Label>
+                <Textarea
+                  value={skillForm.sopRules}
+                  disabled={skillSaving}
+                  rows={12}
+                  className="font-mono text-xs"
+                  onChange={(event) => setSkillForm((prev) => ({ ...prev, sopRules: event.target.value }))}
+                />
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>字段策略 JSON</Label>
+                  <Textarea
+                    value={skillForm.fieldPolicyJson}
+                    disabled={skillSaving}
+                    rows={6}
+                    className="font-mono text-xs"
+                    onChange={(event) => setSkillForm((prev) => ({ ...prev, fieldPolicyJson: event.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>示例 JSON</Label>
+                  <Textarea
+                    value={skillForm.examplesJson}
+                    disabled={skillSaving}
+                    rows={6}
+                    className="font-mono text-xs"
+                    onChange={(event) => setSkillForm((prev) => ({ ...prev, examplesJson: event.target.value }))}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setSkillDialogOpen(false)} disabled={skillSaving}>
+              关闭
+            </Button>
+            <Button variant="outline" onClick={saveSkillDraft} disabled={skillLoading || skillSaving}>
+              {skillSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}保存草稿
+            </Button>
+            <Button onClick={publishSkillDraft} disabled={skillLoading || skillSaving}>
+              发布版本
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -198,11 +198,26 @@ function setIfField(
 
 function uploadFields(fields: ToolField[]): ToolField[] {
   return fields.filter((field) => {
-    if (field.fieldType === "image" || field.fieldType === "file") return true
+    if (field.fieldType === "image" || field.fieldType === "file" || field.fieldType === "multi_image") return true
     if (field.fieldType === "image_upload" || field.fieldType === "video_upload" || field.fieldType === "audio_upload") return true
     const text = fieldText(field)
     return ["image", "file", "asset", "参考", "上传"].some((keyword) => matchesFieldKeyword(text, keyword))
   })
+}
+
+function multiUploadField(fields: ToolField[], handled: Set<string>): ToolField | undefined {
+  return uploadFields(fields).find((field) => field.fieldType === "multi_image" && !handled.has(field.fieldKey))
+}
+
+function mediaListMaxCount(field: ToolField, fallback = 14): number {
+  try {
+    const parsed = field.optionsJson ? JSON.parse(field.optionsJson) : null
+    const raw = parsed?.maxCount ?? parsed?.maxItems
+    const value = Number(raw)
+    return Number.isFinite(value) && value > 0 ? value : fallback
+  } catch {
+    return fallback
+  }
 }
 
 function compactLabel(value?: string | null): string {
@@ -695,11 +710,18 @@ export function resolveCreatorTask(
     ...(state.uploadedAssetUrls || []),
   ].filter((url, index, urls) => Boolean(url) && urls.indexOf(url) === index)
   const mappedUploadedAssetUrls = new Set<string>()
-  for (const url of uploadedAssetUrls) {
-    const targetField = uploadFields(fields).find((field) => !handled.has(field.fieldKey))
-    if (!targetField) break
-    setIfField(params, handled, targetField, url)
-    mappedUploadedAssetUrls.add(url)
+  const targetMultiUploadField = uploadedAssetUrls.length > 0 ? multiUploadField(fields, handled) : undefined
+  if (targetMultiUploadField) {
+    const values = uploadedAssetUrls.slice(0, mediaListMaxCount(targetMultiUploadField))
+    setIfField(params, handled, targetMultiUploadField, values)
+    values.forEach((url) => mappedUploadedAssetUrls.add(url))
+  } else {
+    for (const url of uploadedAssetUrls) {
+      const targetField = uploadFields(fields).find((field) => !handled.has(field.fieldKey))
+      if (!targetField) break
+      setIfField(params, handled, targetField, url)
+      mappedUploadedAssetUrls.add(url)
+    }
   }
   if (state.mode === "image") {
     const firstUnmappedImageUrl = uploadedAssetUrls.find((url) => !mappedUploadedAssetUrls.has(url))
