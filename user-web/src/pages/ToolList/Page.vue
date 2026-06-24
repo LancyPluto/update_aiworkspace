@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onActivated, onMounted, ref, watch } from "vue"
 import { RouterLink, useRoute } from "vue-router"
-import { ExternalLink, Sparkles, Zap } from "lucide-vue-next"
+import { ExternalLink, Sparkles } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import { fetchEnabledAITools } from "@/api/toolApi"
 import { fetchTasks } from "@/api/taskApi"
@@ -18,7 +18,6 @@ import {
   resolveToolCoverFallback,
   resolveToolCoverUrl,
 } from "@/utils/toolCoverMedia"
-import { formatMarketplaceCostLabel } from "@/utils/toolCreditLabel"
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -481,7 +480,6 @@ watch(
             </template>
 
             <span class="marketplace-modality-badge">{{ modalityLabel(tool.outputModality) }}</span>
-            <span class="marketplace-cost-badge"><Zap class="h-3 w-3" />{{ formatMarketplaceCostLabel(tool) }}</span>
           </div>
           <div class="marketplace-tool-overlay">
             <div class="marketplace-tool-content">

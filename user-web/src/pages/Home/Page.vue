@@ -14,7 +14,6 @@ import {
   Video,
   WandSparkles,
   X,
-  Zap,
 } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import { searchCommunityPosts } from "@/api/communityApi"
@@ -493,7 +492,6 @@ watch(
                 <WandSparkles class="h-10 w-10 text-white/48" />
               </div>
               <span class="modality-badge">{{ modalityLabel(tool.outputModality) }}</span>
-              <span class="cost-badge"><Zap class="h-3.5 w-3.5" />{{ costLabel(tool) }}</span>
               <button
                 type="button"
                 class="detail-icon"
