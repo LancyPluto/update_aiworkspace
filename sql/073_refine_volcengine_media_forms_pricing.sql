@@ -44,14 +44,14 @@ JOIN (
   UNION ALL SELECT 'volcengine-gateway-image', 'model', 'EQ', 'doubao-seedream-4.0', 0.8000, 50, 'Seedream 4.0 0.20 元/张，相对 4.5 的 0.25 元/张'
 ) seed ON seed.config_code = m.config_code;
 
-DELETE f FROM tool_fields f
+DELETE f FROM tool_field_schema_items f
 INNER JOIN tool_field_schemas s ON s.id = f.schema_id
 INNER JOIN ai_tools t ON t.id = s.tool_id
 WHERE t.tool_code IN ('volcengine-video', 'volcengine-image')
   AND s.schema_version = 'v1'
   AND s.status = 'ACTIVE';
 
-INSERT INTO tool_fields (
+INSERT INTO tool_field_schema_items (
   schema_id,
   field_key,
   field_name,
