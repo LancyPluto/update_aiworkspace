@@ -99,12 +99,18 @@ const afterImageUrl = computed(() =>
   tool.value?.coverUrl ||
   "",
 )
-const beforeVideoUrl = computed(() => frontendStyle.value?.beforeVideoUrl || tool.value?.coverUrl || "")
+const beforeVideoUrl = computed(() =>
+  frontendStyle.value?.comparisonOriginalUrl ||
+  frontendStyle.value?.beforeVideoUrl ||
+  tool.value?.coverUrl ||
+  ""
+)
 const afterVideoUrl = computed(() =>
+  frontendStyle.value?.comparisonEffectUrl ||
   frontendStyle.value?.afterVideoUrl ||
   frontendStyle.value?.demoThumbnails?.[0] ||
   tool.value?.coverUrl ||
-  "",
+  ""
 )
 const mediaToolBadge = computed(() => (toolKind.value === "digitalHuman" ? "AI Digital Human" : "AI Video Tool"))
 const imageUploadAccept = computed(() => uploadAccept(imageField.value, "image"))

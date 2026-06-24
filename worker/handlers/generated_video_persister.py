@@ -1,4 +1,8 @@
+import logging
 import mimetypes
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -6,6 +10,8 @@ from urllib.parse import urlparse
 import requests
 
 from storage.asset_storage import asset_storage
+
+logger = logging.getLogger(__name__)
 
 
 class GeneratedVideoPersistError(RuntimeError):
@@ -46,6 +52,7 @@ class GeneratedVideoPersister:
     def persist_video_url(self, *, task_id: int, source_url: str, index: int = 1) -> dict[str, str]:
         video_bytes, content_type = self._download(source_url)
         extension = self._resolve_extension(source_url, content_type)
+        video_bytes = self._compress_video(video_bytes, extension)
         relative_key = f"video/{task_id}/video-{max(1, index)}{extension}"
         try:
             url = asset_storage.put_bytes_public(relative_key, video_bytes, content_type)
@@ -89,6 +96,58 @@ class GeneratedVideoPersister:
         except requests.RequestException as exc:
             raise GeneratedVideoPersistError(f"download generated video failed: {exc}") from exc
         return b"".join(chunks), content_type or None
+
+    def _resolve_ffmpeg_binary(self) -> str | None:
+        if shutil.which("ffmpeg"):
+            return "ffmpeg"
+        try:
+            import imageio_ffmpeg
+            return imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            return None
+
+    def _compress_video(self, video_bytes: bytes, extension: str) -> bytes:
+        ffmpeg = self._resolve_ffmpeg_binary()
+        if not ffmpeg:
+            logger.warning("ffmpeg not found, skipping video compression")
+            return video_bytes
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            input_path = Path(tmp_dir) / f"input{extension}"
+            output_path = Path(tmp_dir) / f"output{extension}"
+            input_path.write_bytes(video_bytes)
+
+            cmd = [
+                ffmpeg, "-y", "-i", str(input_path),
+                "-c:v", "libx264", "-crf", "28",
+                "-preset", "medium",
+                "-c:a", "aac", "-b:a", "128k",
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                "-loglevel", "warning",
+                str(output_path),
+            ]
+            try:
+                completed = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                if completed.returncode != 0:
+                    logger.warning("ffmpeg compression failed: %s", completed.stderr.strip())
+                    return video_bytes
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                logger.warning("ffmpeg compression error: %s", exc)
+                return video_bytes
+
+            compressed = output_path.read_bytes()
+            original_size = len(video_bytes)
+            compressed_size = len(compressed)
+            if compressed_size < original_size:
+                logger.info(
+                    "video compressed: %d -> %d bytes (%.0f%% reduction)",
+                    original_size, compressed_size,
+                    (1 - compressed_size / original_size) * 100,
+                )
+                return compressed
+            logger.info("compression did not reduce size, using original")
+            return video_bytes
 
     def _resolve_extension(self, source_url: str, content_type: str | None) -> str:
         if content_type:

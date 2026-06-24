@@ -1314,14 +1314,22 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="刷新该厂商余额" onClick={() => runRefreshBalance(primaryAccount, vendor.label)}>
                   <RefreshCw className="h-4 w-4" />
                 </Button>
+                <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="添加账户" onClick={() => openCreateAccount(vendor.vendorCode, vendor.label)}>
+                  <Plus className="h-4 w-4" />
+                </Button>
                 <Button type="button" variant="outline" size="icon" className="h-8 w-8 text-destructive" title="删除厂商" onClick={() => deleteVendor(vendor)}>
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
             ) : (
-              <Button type="button" variant="outline" size="icon" className="h-8 w-8 text-destructive" title="删除厂商" onClick={() => deleteVendor(vendor)}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              <>
+                <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="添加账户" onClick={() => openCreateAccount(vendor.vendorCode, vendor.label)}>
+                  <Plus className="h-4 w-4" />
+                </Button>
+                <Button type="button" variant="outline" size="icon" className="h-8 w-8 text-destructive" title="删除厂商" onClick={() => deleteVendor(vendor)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </>
             )}
           </div>
         </div>
