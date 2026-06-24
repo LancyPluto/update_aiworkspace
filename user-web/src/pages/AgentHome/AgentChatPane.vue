@@ -1053,7 +1053,11 @@ function normalizeUrlAttachment(item: AgentUrlAttachment): AgentMaterialAttachme
     url,
     source: item.source || "url",
     kind: materialKind(item.contentType, name),
-    previewUrl: item.contentType?.startsWith("image/") || isImageAttachment(item.contentType, name) ? resolveAgentFileUrl(url) : undefined,
+    previewUrl: item.contentType?.startsWith("image/") || isImageAttachment(item.contentType, name)
+      ? resolveAgentFileUrl(url)
+      : item.contentType?.startsWith("video/")
+        ? resolveAgentFileUrl(url)
+        : undefined,
     uploadedAt: record.uploadedAt,
     subtitle: record.subtitle,
   }
@@ -1252,6 +1256,7 @@ function createMaterialAssets(task: TaskDetail): AgentMaterialAttachment[] {
         name: block.title || taskTitle,
         contentType: "video/*",
         url: block.url,
+        previewUrl: block.url,
         source: "url",
         subtitle,
       })

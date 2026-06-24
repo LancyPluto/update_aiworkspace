@@ -28,4 +28,8 @@ public record UserUploadAssetResponse(
                 asset.getUpdatedAt()
         );
     }
+
+    public UserUploadAssetResponse withRewrittenUrl(String rewrittenUrl) {
+        return new UserUploadAssetResponse(id, fileId, kind, name, contentType, size, rewrittenUrl, createdAt, updatedAt);
+    }
 }

@@ -6,10 +6,10 @@ def classify_model_error(message: str) -> str:
 
     if _is_risk_control(normalized):
         return "MODEL_RISK_CONTROL_REJECTED"
-    if _is_auth_error(normalized):
-        return "MODEL_AUTH_FAILED"
     if _is_credit_error(normalized):
         return "MODEL_CREDIT_INSUFFICIENT"
+    if _is_auth_error(normalized):
+        return "MODEL_AUTH_FAILED"
     if _is_rate_limited(normalized):
         return "MODEL_RATE_LIMITED"
     if _is_timeout(normalized):
@@ -52,6 +52,9 @@ def _is_credit_error(text: str) -> bool:
         or "balance not enough" in text
         or "insufficient balance" in text
         or '"code":1102' in text
+        or "allocationquota" in text
+        or "free quota" in text
+        or "free tier" in text
     )
 
 

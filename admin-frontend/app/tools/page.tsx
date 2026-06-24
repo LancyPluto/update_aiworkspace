@@ -131,6 +131,8 @@ interface ToolRow {
   comparisonOriginalUrl: string
   comparisonEffectUrl: string
   audioPreviewUrl: string
+  beforeVideoUrl: string
+  afterVideoUrl: string
   icon: LucideIcon
   credits: number
   status: boolean
@@ -184,6 +186,8 @@ interface ToolForm {
   comparisonOriginalUrl: string
   comparisonEffectUrl: string
   audioPreviewUrl: string
+  beforeVideoUrl: string
+  afterVideoUrl: string
   estimatedCreditCost: string
   pricingRulesJson: string
   modelConfigId: string
@@ -205,6 +209,8 @@ const initialForm: ToolForm = {
   comparisonOriginalUrl: "",
   comparisonEffectUrl: "",
   audioPreviewUrl: "",
+  beforeVideoUrl: "",
+  afterVideoUrl: "",
   estimatedCreditCost: "5",
   pricingRulesJson: "[]",
   modelConfigId: "",
@@ -500,6 +506,8 @@ function mapTool(tool: ToolSummary): ToolRow {
     comparisonOriginalUrl: style.comparisonOriginalUrl,
     comparisonEffectUrl: style.comparisonEffectUrl,
     audioPreviewUrl: style.audioPreviewUrl,
+    beforeVideoUrl: style.beforeVideoUrl,
+    afterVideoUrl: style.afterVideoUrl,
     icon: pickIcon(tool.categoryName),
     credits: tool.estimatedCreditCost ?? 0,
     status: (tool.status || "").toUpperCase() === "ONLINE",
@@ -890,7 +898,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
 
   async function handleCoverUpload(
     file?: File | null,
-    target: "coverUrl" | "comparisonOriginalUrl" | "comparisonEffectUrl" = "coverUrl",
+    target: "coverUrl" | "comparisonOriginalUrl" | "comparisonEffectUrl" | "beforeVideoUrl" | "afterVideoUrl" = "coverUrl",
   ) {
     if (!file) return
     setFormError(null)
@@ -968,6 +976,8 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       comparisonOriginalUrl: tool.comparisonOriginalUrl || "",
       comparisonEffectUrl: tool.comparisonEffectUrl || "",
       audioPreviewUrl: tool.audioPreviewUrl || "",
+      beforeVideoUrl: tool.beforeVideoUrl || "",
+      afterVideoUrl: tool.afterVideoUrl || "",
       estimatedCreditCost: String(tool.credits),
       pricingRulesJson: "[]",
       modelConfigId: modelId,
@@ -1026,6 +1036,8 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
         comparisonOriginalUrl: form.comparisonOriginalUrl,
         comparisonEffectUrl: form.comparisonEffectUrl,
         audioPreviewUrl: form.audioPreviewUrl,
+        beforeVideoUrl: form.beforeVideoUrl,
+        afterVideoUrl: form.afterVideoUrl,
       }
       let preservedMarkers: string[] | undefined
       if (integrationPluginId && editingTool) {
@@ -1659,6 +1671,60 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                                 }}
                               />
                             </label>
+                          </div>
+                        </div>
+                        <div className="mt-3">
+                          <Label>效果对比视频（可选）</Label>
+                          <p className="mt-1 text-xs text-muted-foreground">适合视频生成、视频编辑类模型。左侧放原始视频，右侧放模型效果视频。</p>
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label>原始视频 URL</Label>
+                            <Input
+                              value={form.beforeVideoUrl}
+                              onChange={(event) => updateForm("beforeVideoUrl", event.target.value)}
+                              placeholder="上传或填写原始视频地址"
+                            />
+                            <label className="inline-flex cursor-pointer items-center rounded-md border px-3 py-2 text-xs font-medium hover:bg-secondary">
+                              上传原始视频
+                              <input
+                                type="file"
+                                accept="video/mp4,video/webm,video/quicktime"
+                                className="hidden"
+                                onChange={(event) => {
+                                  const file = event.target.files?.[0]
+                                  void handleCoverUpload(file, "beforeVideoUrl")
+                                  event.currentTarget.value = ""
+                                }}
+                              />
+                            </label>
+                            {form.beforeVideoUrl.trim() ? (
+                              <video src={normalizeToolMediaUrl(form.beforeVideoUrl)} controls preload="metadata" className="w-full rounded" />
+                            ) : null}
+                          </div>
+                          <div className="space-y-2">
+                            <Label>效果视频 URL</Label>
+                            <Input
+                              value={form.afterVideoUrl}
+                              onChange={(event) => updateForm("afterVideoUrl", event.target.value)}
+                              placeholder="上传或填写效果视频地址"
+                            />
+                            <label className="inline-flex cursor-pointer items-center rounded-md border px-3 py-2 text-xs font-medium hover:bg-secondary">
+                              上传效果视频
+                              <input
+                                type="file"
+                                accept="video/mp4,video/webm,video/quicktime"
+                                className="hidden"
+                                onChange={(event) => {
+                                  const file = event.target.files?.[0]
+                                  void handleCoverUpload(file, "afterVideoUrl")
+                                  event.currentTarget.value = ""
+                                }}
+                              />
+                            </label>
+                            {form.afterVideoUrl.trim() ? (
+                              <video src={normalizeToolMediaUrl(form.afterVideoUrl)} controls preload="metadata" className="w-full rounded" />
+                            ) : null}
                           </div>
                         </div>
                       </div>
