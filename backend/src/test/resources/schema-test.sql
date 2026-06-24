@@ -662,6 +662,8 @@ CREATE TABLE model_vendor_accounts (
   extra_auth_json TEXT,
   console_url VARCHAR(512),
   balance_url VARCHAR(512),
+  console_cookie TEXT,
+  console_cookie_status VARCHAR(20) DEFAULT 'UNKNOWN',
   balance_query_mode VARCHAR(32) NOT NULL DEFAULT 'MANUAL',
   balance_amount DECIMAL(18,4),
   balance_currency VARCHAR(8) DEFAULT 'CNY',

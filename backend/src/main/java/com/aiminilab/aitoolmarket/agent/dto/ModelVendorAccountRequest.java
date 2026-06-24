@@ -14,6 +14,8 @@ public record ModelVendorAccountRequest(
         Boolean clearExtraAuthJson,
         String consoleUrl,
         String balanceUrl,
+        String consoleCookie,
+        Boolean clearConsoleCookie,
         String balanceQueryMode,
         BigDecimal balanceAmount,
         String balanceCurrency,
