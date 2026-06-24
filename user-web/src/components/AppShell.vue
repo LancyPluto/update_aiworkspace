@@ -348,14 +348,14 @@ watch(
       class="hidden h-full w-[248px] shrink-0 flex-col border-r border-white/[0.06] bg-[#08090d]"
       :class="sidebarOpen ? 'lg:flex' : 'lg:hidden'"
     >
-      <div class="flex h-[76px] shrink-0 items-center gap-2 px-3">
-        <RouterLink to="/agent" class="flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden">
-          <img src="/logo.svg" class="h-8 w-8 shrink-0 rounded-lg object-contain" alt="" />
-          <span class="app-shell-agent-brand truncate text-xl leading-none">科创点AI</span>
+      <div class="app-shell-brand-row flex h-[92px] shrink-0 items-center justify-between px-6 pb-4 pt-6">
+        <div class="app-shell-brand-ambient" aria-hidden="true" />
+        <RouterLink to="/agent" class="app-shell-agent-logo-link min-w-0 flex-1">
+          <img src="/logo.png" class="app-shell-agent-logo" alt="科创点AI" />
         </RouterLink>
         <button
           type="button"
-          class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/[0.06] bg-white/[0.035] text-white/58 transition hover:border-[rgb(255_63_121_/_0.36)] hover:bg-[#32101c] hover:text-[#ff3f79]"
+          class="z-20 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/[0.06] bg-white/[0.035] text-white/58 transition hover:border-[rgb(255_63_121_/_0.36)] hover:bg-[#32101c] hover:text-[#ff3f79]"
           :aria-label="sidebarOpen ? '隐藏侧栏' : '显示侧栏'"
           :aria-expanded="sidebarOpen"
           @click="toggleSidebar"
@@ -761,14 +761,44 @@ watch(
   letter-spacing: 1px;
 }
 
-.app-shell-agent-brand {
-  width: fit-content;
-  max-width: 100%;
-  background: linear-gradient(120deg, #ffffff 0%, #ffd4e2 36%, #ff5b8a 72%, #ffffff 100%);
-  background-clip: text;
-  color: transparent;
-  font-weight: 800;
-  letter-spacing: 0;
-  text-shadow: 0 0 28px rgb(255 63 121 / 0.18);
+.app-shell-brand-row {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+}
+
+.app-shell-brand-ambient {
+  pointer-events: none;
+  position: absolute;
+  inset: 0 0 -34px;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 178px 112px at 42px 34px, rgb(34 211 238 / 0.46) 0%, rgb(52 211 153 / 0.28) 38%, transparent 74%),
+    radial-gradient(ellipse 164px 108px at 134px 52px, rgb(59 130 246 / 0.24) 0%, rgb(99 102 241 / 0.12) 44%, transparent 78%);
+  filter: blur(18px);
+  opacity: 0.95;
+}
+
+.app-shell-agent-logo-link {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  height: 40px;
+  align-items: center;
+  overflow: visible;
+  border-radius: 16px;
+  padding-right: 10px;
+}
+
+.app-shell-agent-logo {
+  display: block;
+  width: auto;
+  max-width: 156px;
+  height: 40px;
+  object-fit: contain;
+  object-position: left center;
+  filter:
+    drop-shadow(0 0 8px rgb(34 211 238 / 0.45))
+    drop-shadow(0 0 16px rgb(52 211 153 / 0.24));
 }
 </style>

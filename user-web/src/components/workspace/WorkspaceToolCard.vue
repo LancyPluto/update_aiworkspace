@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { RouterLink } from "vue-router"
 import { computed, ref } from "vue"
-import { ArrowRight, Sparkles, Zap } from "lucide-vue-next"
+import { ArrowRight, Sparkles } from "lucide-vue-next"
 import { DEFAULT_TOOL_COVER_URL, type ToolCardModel } from "@/adapters/toolPresentationAdapter"
 import ToolLaunchModal from "@/components/workspace/ToolLaunchModal.vue"
 
@@ -74,7 +74,6 @@ function openLaunch() {
     <div class="workspace-official-tool-copy">
       <RouterLink :to="tool.to">{{ tool.title }}</RouterLink>
       <p>{{ tool.description }}</p>
-      <span><Zap :size="13" />{{ tool.costLabel }}</span>
     </div>
 
     <ToolLaunchModal
