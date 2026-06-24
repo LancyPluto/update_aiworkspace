@@ -136,10 +136,10 @@ onUnmounted(() => {
     <div class="comparison-divider" :style="{ left: `${position}%` }">
       <div class="comparison-line" />
       <div class="comparison-handle">
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-          <circle cx="10" cy="10" r="9" fill="white" stroke="rgba(0,0,0,0.3)" stroke-width="1.5" />
-          <path d="M7 7L4 10L7 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-          <path d="M13 7L16 10L13 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <circle cx="14" cy="14" r="13" fill="white" stroke="rgba(0,0,0,0.3)" stroke-width="1.5" />
+          <path d="M10 10L6 14L10 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M18 10L22 14L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
       </div>
     </div>
@@ -192,16 +192,16 @@ onUnmounted(() => {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 2px;
+  width: 3px;
   background: white;
-  box-shadow: 0 0 6px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.5), 0 0 20px rgba(255, 255, 255, 0.3);
 }
 
 .comparison-handle {
   position: relative;
   z-index: 3;
   color: var(--foreground, #333);
-  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.3));
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.4));
 }
 
 .comparison-label {
