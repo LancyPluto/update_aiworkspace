@@ -7,14 +7,16 @@ const props = withDefaults(
     afterSrc: string
     beforeLabel?: string
     afterLabel?: string
-    isVideo?: boolean
+    beforeIsVideo?: boolean
+    afterIsVideo?: boolean
     autoPlay?: boolean
     aspectRatio?: string
   }>(),
   {
     beforeLabel: "Before",
     afterLabel: "After",
-    isVideo: false,
+    beforeIsVideo: false,
+    afterIsVideo: false,
     autoPlay: true,
     aspectRatio: "4/3",
   },
@@ -105,7 +107,7 @@ onUnmounted(() => {
   >
     <div class="comparison-layer comparison-before">
       <video
-        v-if="isVideo"
+        v-if="beforeIsVideo"
         :src="beforeSrc"
         class="comparison-media"
         muted
@@ -119,7 +121,7 @@ onUnmounted(() => {
 
     <div class="comparison-layer comparison-after" :style="{ clipPath: `inset(0 0 0 ${position}%)` }">
       <video
-        v-if="isVideo"
+        v-if="afterIsVideo"
         :src="afterSrc"
         class="comparison-media"
         muted
