@@ -4,6 +4,7 @@ import {
   Check,
   Clock,
   Database,
+  Film,
   FileText,
   Image,
   Images,
@@ -1432,7 +1433,7 @@ defineExpose({
               >
                 <Loader2 v-if="uploading" class="h-5 w-5 animate-spin" />
                 <Upload v-else class="h-5 w-5" />
-                <span>{{ uploading ? "上传中..." : (materialUploadDropActive ? "松开上传素材" : "上传或拖拽图片/文件") }}</span>
+                <span>{{ uploading ? "上传中..." : (materialUploadDropActive ? "松开上传素材" : "上传或拖拽图片/视频/文件") }}</span>
               </button>
 
               <section class="material-section">
@@ -1460,7 +1461,15 @@ defineExpose({
                       class="material-tile-thumb"
                       loading="lazy"
                     />
+                    <video
+                      v-else-if="item.kind === 'video' && item.previewUrl"
+                      :src="item.previewUrl"
+                      class="material-tile-thumb"
+                      muted
+                      preload="metadata"
+                    />
                     <Image v-else-if="item.kind === 'image'" class="h-5 w-5" />
+                    <Film v-else-if="item.kind === 'video'" class="h-5 w-5" />
                     <Paperclip v-else class="h-5 w-5" />
                     <span class="material-tile-name">{{ item.name }}</span>
                     <span v-if="isPickerSelected(item)" class="material-tile-check">
@@ -1514,7 +1523,15 @@ defineExpose({
                     class="material-tile-thumb"
                     loading="lazy"
                   />
+                  <video
+                    v-else-if="item.kind === 'video' && item.previewUrl"
+                    :src="item.previewUrl"
+                    class="material-tile-thumb"
+                    muted
+                    preload="metadata"
+                  />
                   <Image v-else-if="item.kind === 'image'" class="h-5 w-5" />
+                  <Film v-else-if="item.kind === 'video'" class="h-5 w-5" />
                   <Paperclip v-else class="h-5 w-5" />
                   <span class="material-tile-name">{{ item.name }}</span>
                   <small class="material-tile-subtitle">{{ item.subtitle || materialKindLabel(item.kind) }}</small>

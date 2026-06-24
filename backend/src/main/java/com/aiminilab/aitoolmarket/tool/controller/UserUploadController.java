@@ -99,10 +99,11 @@ public class UserUploadController {
         userUploadAssetMapper.insertAsset(asset);
         log.info("User uploaded file: url={}, originalName={}, contentType={}, size={}",
                 url, originalName, file.getContentType(), file.getSize());
+        String displayUrl = assetStorageService.rewriteResultUrl(url, false);
         return ApiResponse.success(new FileUploadResponse(
                 asset.getId(),
                 fileId,
-                url,
+                displayUrl,
                 originalName,
                 file.getContentType() == null ? "" : file.getContentType(),
                 file.getSize()
@@ -122,6 +123,7 @@ public class UserUploadController {
                 .findRecentByUser(userId, normalizedKind, normalizedPageSize, offset)
                 .stream()
                 .map(UserUploadAssetResponse::from)
+                .map(item -> item.withRewrittenUrl(assetStorageService.rewriteResultUrl(item.url(), false)))
                 .toList();
         return ApiResponse.success(PageResponse.of(items, total, pageNo, pageSize));
     }
