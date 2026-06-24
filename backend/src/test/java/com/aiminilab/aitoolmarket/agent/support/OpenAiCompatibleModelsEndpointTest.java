@@ -35,4 +35,16 @@ class OpenAiCompatibleModelsEndpointTest {
         assertThat(OpenAiCompatibleModelsEndpoint.resolve("https://api.ofox.ai/v1/models"))
                 .isEqualTo("https://api.ofox.ai/v1/models");
     }
+
+    @Test
+    void resolvesDashScopeDedicatedEndpoint() {
+        assertThat(OpenAiCompatibleModelsEndpoint.resolve("https://ws-abc123.cn-beijing.maas.aliyuncs.com/api/v1"))
+                .isEqualTo("https://ws-abc123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/models");
+    }
+
+    @Test
+    void resolvesDashScopeDedicatedEndpointWithTrailingSlash() {
+        assertThat(OpenAiCompatibleModelsEndpoint.resolve("https://ws-abc123.cn-beijing.maas.aliyuncs.com/api/v1/"))
+                .isEqualTo("https://ws-abc123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/models");
+    }
 }
