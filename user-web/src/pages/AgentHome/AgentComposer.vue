@@ -273,7 +273,7 @@ const stagedAssets = computed<StagedAsset[]>(() => {
       contentType: file.contentType,
       size: file.size,
       url: file.url,
-      previewUrl: kind === "image" ? urlAttachmentPreviewUrl(file) : undefined,
+      previewUrl: kind === "image" || kind === "video" ? urlAttachmentPreviewUrl(file) : undefined,
       kind,
       urlAttachment: file,
     })
@@ -294,7 +294,7 @@ const stagedAssets = computed<StagedAsset[]>(() => {
       contentType: file.contentType,
       size: file.fileSize,
       url: file.downloadUrl,
-      previewUrl: kind === "image" ? props.filePreviewUrls?.[file.id] || resolveAgentFileUrl(file.downloadUrl) : undefined,
+      previewUrl: kind === "image" || kind === "video" ? props.filePreviewUrls?.[file.id] || resolveAgentFileUrl(file.downloadUrl) : undefined,
       kind,
       file,
     })
@@ -515,7 +515,7 @@ function mentionFromUrlAttachment(file: AgentUrlAttachment): { mention: AgentRef
       kind: canonical?.kind || kind,
       name: canonical?.name || file.name,
       contentType: canonical?.contentType ?? file.contentType,
-      previewUrl: canonical?.previewUrl || (kind === "image" ? resolveAgentFileUrl(file.url) : undefined),
+      previewUrl: canonical?.previewUrl || (kind === "image" || kind === "video" ? resolveAgentFileUrl(file.url) : undefined),
       source: canonical?.source || file.source || "url",
     },
   }
@@ -542,7 +542,7 @@ function mentionFromAgentFile(file: AgentFile): { mention: AgentReferenceMention
       kind: canonical?.kind || kind,
       name: canonical?.name || file.originalFilename,
       contentType: canonical?.contentType ?? file.contentType,
-      previewUrl: canonical?.previewUrl || (kind === "image" ? props.filePreviewUrls?.[file.id] || resolveAgentFileUrl(file.downloadUrl) : undefined),
+      previewUrl: canonical?.previewUrl || (kind === "image" || kind === "video" ? props.filePreviewUrls?.[file.id] || resolveAgentFileUrl(file.downloadUrl) : undefined),
       source: canonical?.source || "agent_file",
     },
   }
