@@ -28,6 +28,7 @@ import {
   normalizeCommunityMediaUrl,
   resolveCommunityImageUrls,
   resolveCommunityPostKind,
+  resolveOssVideoPosterUrl,
 } from "@/utils/communityPostMedia"
 import { useTypingPlaceholder } from "@/composables/useTypingPlaceholder"
 import { isVideoPreviewUrl, normalizeMediaUrl } from "@/utils/toolCoverMedia"
@@ -389,6 +390,7 @@ watch(
                   <video
                     v-if="isVideoPreviewUrl(communityPostMediaUrl(post))"
                     :src="communityPostMediaUrl(post)"
+                    :poster="resolveOssVideoPosterUrl(post.coverUrl)"
                     muted
                     loop
                     autoplay
