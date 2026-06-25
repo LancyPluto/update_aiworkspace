@@ -50,6 +50,26 @@ def test_openai_images_uses_http_proxy_env_when_configured(monkeypatch):
     assert client.session.proxies["https"] == "http://127.0.0.1:7890"
 
 
+def test_openai_images_uses_execution_proxy_policy():
+    client = OpenAIImagesClient(
+        base_url="https://api.ofox.ai/v1",
+        api_key="test-key",
+        extra_auth_json='{"proxyUrl":"http://legacy:7890"}',
+        model_config={
+            "proxyPolicy": {
+                "enabled": True,
+                "proxyUrl": "http://policy:7890",
+                "noProxyHosts": ["backend"],
+            }
+        },
+    )
+
+    assert client.session.trust_env is False
+    assert client.session.proxies["http"] == "http://policy:7890"
+    assert client.session.proxies["https"] == "http://policy:7890"
+    assert client.session.policy.no_proxy_hosts == frozenset({"backend"})
+
+
 def test_openai_images_multipart_request_uses_form_data_content_type() -> None:
     client = OpenAIImagesClient(base_url="https://api.ofox.ai/v1", api_key="fake-key")
     multipart = [

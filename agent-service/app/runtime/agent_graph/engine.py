@@ -56,7 +56,7 @@ from app.runtime.agent_graph.state import (
     deserialize_checkpoint,
     serialize_checkpoint,
 )
-from app.runtime.context_manager import ContextManager, trim_tool_output
+from app.runtime.context_manager import ContextManager, trim_tool_output_by_tokens
 from app.runtime.product_tool_call_loop import _alias_for_tool_code
 from app.runtime.product_tool_call_loop import _format_skill_catalog
 from app.runtime.skill_hydration import SkillHydrationService, hydration_message
@@ -740,6 +740,10 @@ class AgentGraphEngine:
                 context.runId,
                 RunEventCreate(eventType=MEMORY_CONTEXT_FROZEN, eventJson=memory_context_trace_payload(memory_context, source="agent_graph", items=memory_items)),
             )
+        context_manager = ContextManager.from_settings(settings, context.runtimeSettings)
+        summary_message = context_manager.format_conversation_summary(context.conversationSummary)
+        if summary_message:
+            messages.append(summary_message)
         file_context = _format_file_context(context)
         if file_context:
             messages.append(ChatMessage(role="system", content=file_context))
@@ -747,7 +751,7 @@ class AgentGraphEngine:
         if session_state_context:
             messages.append(ChatMessage(role="system", content=session_state_context))
         await self._emit_context_compaction(context)
-        messages.extend(self.context_manager.build_history(context.history))
+        messages.extend(context_manager.build_working_memory(context.history))
         messages.append(ChatMessage(role="user", content=context.message))
         return messages
 
@@ -901,7 +905,7 @@ class AgentGraphEngine:
             "toolCode": result.get("toolCode"),
             "taskId": result.get("taskId"),
             "resourceType": data.get("resourceType") if isinstance(data, dict) else None,
-            "result": trim_tool_output(content_text, self.context_manager.tool_output_char_limit),
+            "result": trim_tool_output_by_tokens(content_text, self.context_manager.tool_output_token_soft_limit),
         }
 
     def _artifact_from_result(self, tool: ToolDescriptor, result: dict[str, Any]) -> dict[str, Any]:

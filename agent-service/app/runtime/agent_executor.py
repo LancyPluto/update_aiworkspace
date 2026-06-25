@@ -43,7 +43,7 @@ from app.runtime.agent_graph.tool_specs import (
     redact_large,
     tool_call_message_payload,
 )
-from app.runtime.context_manager import ContextManager, trim_tool_output
+from app.runtime.context_manager import ContextManager, trim_tool_output_by_tokens
 from app.runtime.memory_curator import looks_like_memory_management_turn
 from app.runtime.memory_runtime import (
     WorkspaceMemoryRuntime,
@@ -400,6 +400,10 @@ class AgentExecutor:
                     eventJson=memory_context_trace_payload("", source="agent_executor", items=[]),
                 ),
             )
+        context_manager = ContextManager.from_settings(settings, context.runtimeSettings)
+        summary_message = context_manager.format_conversation_summary(context.conversationSummary)
+        if summary_message:
+            messages.append(summary_message)
         file_context = _format_file_context(context)
         if file_context:
             messages.append(ChatMessage(role="system", content=file_context))
@@ -410,7 +414,7 @@ class AgentExecutor:
         if skill_catalog:
             messages.append(ChatMessage(role="system", content=skill_catalog))
         await self._emit_context_compaction(context)
-        messages.extend(self.context_manager.build_history(context.history))
+        messages.extend(context_manager.build_working_memory(context.history))
         messages.append(ChatMessage(role="user", content=user_message_for_llm(context)))
         return messages
 
@@ -727,9 +731,9 @@ class AgentExecutor:
     def _tool_message(self, call_id: str, name: str, payload: dict[str, Any]) -> ChatMessage:
         return ChatMessage(
             role="tool",
-            content=trim_tool_output(
+            content=trim_tool_output_by_tokens(
                 json.dumps(payload, ensure_ascii=False),
-                max(1, settings.agent_tool_output_char_limit),
+                self.context_manager.tool_output_token_soft_limit,
             ),
             toolCallId=call_id,
             name=name,
@@ -743,7 +747,7 @@ class AgentExecutor:
             "toolCode": result.get("toolCode"),
             "taskId": result.get("taskId"),
             "resourceType": data.get("resourceType") if isinstance(data, dict) else None,
-            "result": trim_tool_output(content_text, self.context_manager.tool_output_char_limit),
+            "result": trim_tool_output_by_tokens(content_text, self.context_manager.tool_output_token_soft_limit),
         }
 
     def _artifact_from_result(self, tool: ToolDescriptor, result: dict[str, Any]) -> dict[str, Any]:

@@ -2,7 +2,6 @@ import json
 import logging
 import math
 import mimetypes
-import os
 import socket
 import time
 from io import BytesIO
@@ -11,6 +10,7 @@ from urllib.parse import urlparse
 
 import requests
 
+from utils.outbound_http import OutboundRequestsClient
 from utils.input_image import InputImageError, decode_reference_image_data_url
 from volcengine_model import resolve_volcengine_images_paths
 from requests.exceptions import (
@@ -49,6 +49,7 @@ class OpenAIImagesClient:
         endpoint_path: str | None = None,
         timeout_seconds: int | None = None,
         extra_auth_json: str | None = None,
+        model_config: dict[str, Any] | None = None,
     ) -> None:
         self.base_url = (base_url or "").rstrip("/")
         self.api_key = (api_key or "").strip()
@@ -66,8 +67,7 @@ class OpenAIImagesClient:
         self.retry_backoff_seconds = _as_float(self.extra_auth.get("retryBackoffSeconds"), 2.0)
         self.retry_backoff_max_seconds = _as_float(self.extra_auth.get("retryBackoffMaxSeconds"), 30.0)
         self.last_usage: dict[str, int] = {}
-        self.session = requests.Session()
-        self.session.trust_env = _as_bool(self.extra_auth.get("trustEnv"), False)
+        self.session = OutboundRequestsClient.from_model_config(model_config, extra_auth_json=extra_auth_json)
         # Do not set Content-Type on the session: multipart edits need requests to
         # inject multipart/form-data; a session-level application/json leaks through.
         self.session.headers.update(
@@ -76,20 +76,6 @@ class OpenAIImagesClient:
                 "Connection": "close",
             }
         )
-        proxy_url = str(self.extra_auth.get("proxyUrl") or "").strip()
-        if proxy_url:
-            self.session.proxies.update({"http": proxy_url, "https": proxy_url})
-        elif "trustEnv" not in self.extra_auth:
-            env_http_proxy = (os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy") or "").strip()
-            env_https_proxy = (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or "").strip()
-            env_proxy = env_http_proxy or env_https_proxy
-            if env_proxy:
-                self.session.proxies.update(
-                    {
-                        "http": env_http_proxy or env_proxy,
-                        "https": env_https_proxy or env_proxy,
-                    }
-                )
 
     def generate_images(
         self,
@@ -486,7 +472,7 @@ class OpenAIImagesClient:
     def _create_httpx_client(self) -> Any:
         import httpx
 
-        proxy_url = str(self.extra_auth.get("proxyUrl") or "").strip() or None
+        proxy_url = self.session.proxy_url or None
         return httpx.Client(
             trust_env=self.session.trust_env,
             timeout=httpx.Timeout(

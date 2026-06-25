@@ -56,6 +56,8 @@ interface ModelForm {
   timeoutSeconds: string
   connectTimeoutSeconds: string
   readTimeoutSeconds: string
+  proxyMode: string
+  proxyUrl: string
   inputTokenPricePer1m: string
   outputTokenPricePer1m: string
   billingUnit: "TOKEN_PER_M" | "PER_CALL" | "IMAGE_TOKEN" | "PER_SECOND"
@@ -278,6 +280,8 @@ const emptyForm: ModelForm = {
   timeoutSeconds: "60",
   connectTimeoutSeconds: "",
   readTimeoutSeconds: "",
+  proxyMode: "inherit",
+  proxyUrl: "",
   inputTokenPricePer1m: "0",
   outputTokenPricePer1m: "0",
   billingUnit: "TOKEN_PER_M",
@@ -311,6 +315,8 @@ function toForm(config: AgentModelConfig, catalog: ModelProviderDescriptor[]): M
     timeoutSeconds: String(config.timeoutSeconds || 60),
     connectTimeoutSeconds: config.connectTimeoutSeconds != null ? String(config.connectTimeoutSeconds) : "",
     readTimeoutSeconds: config.readTimeoutSeconds != null ? String(config.readTimeoutSeconds) : "",
+    proxyMode: config.proxyMode || "inherit",
+    proxyUrl: config.proxyUrl || "",
     inputTokenPricePer1m: String(config.inputTokenPricePer1m ?? ((config.inputTokenPricePer1k ?? 0) * 1000)),
     outputTokenPricePer1m: String(config.outputTokenPricePer1m ?? ((config.outputTokenPricePer1k ?? 0) * 1000)),
     billingUnit:
@@ -346,6 +352,8 @@ function toPayload(form: ModelForm): AgentModelConfigPayload {
     timeoutSeconds: Number(form.timeoutSeconds) || 60,
     connectTimeoutSeconds: form.connectTimeoutSeconds.trim() ? Number(form.connectTimeoutSeconds) : undefined,
     readTimeoutSeconds: form.readTimeoutSeconds.trim() ? Number(form.readTimeoutSeconds) : undefined,
+    proxyMode: form.proxyMode,
+    proxyUrl: form.proxyUrl.trim(),
     inputTokenPricePer1m: Number(form.inputTokenPricePer1m) || 0,
     outputTokenPricePer1m: Number(form.outputTokenPricePer1m) || 0,
     billingUnit: form.billingUnit,
@@ -1075,6 +1083,30 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
 
             <div className="grid gap-5 md:grid-cols-2">
               <div className="space-y-2">
+                <Label>代理策略</Label>
+                <Select value={form.proxyMode} onValueChange={(value) => updateForm("proxyMode", value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="继承" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="inherit">继承上级/系统默认</SelectItem>
+                    <SelectItem value="enabled">启用代理</SelectItem>
+                    <SelectItem value="disabled">禁用代理</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>代理地址</Label>
+                <Input
+                  value={form.proxyUrl}
+                  placeholder="http://127.0.0.1:7890"
+                  onChange={(event) => updateForm("proxyUrl", event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-5 md:grid-cols-2">
+              <div className="space-y-2">
                 <Label>输入 Token 单价 / 1M</Label>
                 <Input
                   type="number"
@@ -1228,7 +1260,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
             <Textarea
               readOnly
               className="min-h-24 font-mono text-xs"
-              value={`provider=${form.provider}\nprovider_protocol=${meta.providerProtocol || form.provider}\nvendor_kind=${meta.vendorKind || "direct"}\nupstream_vendor=${meta.upstreamVendor || ""}\nmodel=${form.modelName}\nbase_url=${form.baseUrl}\ntimeout=${form.timeoutSeconds}s\nconnect_timeout=${form.connectTimeoutSeconds || "default"}s\nread_timeout=${form.readTimeoutSeconds || "default"}s\nagent_enabled=${form.agentEnabled}\nbilling_unit=${form.billingUnit}\ninput_price_per_1m=${form.inputTokenPricePer1m}\noutput_price_per_1m=${form.outputTokenPricePer1m}\nunit_price=${form.unitPrice}\nextra_auth=${form.extraAuthJson || form.extraAuthJsonMasked || form.connectTimeoutSeconds || form.readTimeoutSeconds ? "configured" : "empty"}`}
+              value={`provider=${form.provider}\nprovider_protocol=${meta.providerProtocol || form.provider}\nvendor_kind=${meta.vendorKind || "direct"}\nupstream_vendor=${meta.upstreamVendor || ""}\nmodel=${form.modelName}\nbase_url=${form.baseUrl}\ntimeout=${form.timeoutSeconds}s\nconnect_timeout=${form.connectTimeoutSeconds || "default"}s\nread_timeout=${form.readTimeoutSeconds || "default"}s\nproxy_mode=${form.proxyMode}\nproxy_url=${form.proxyUrl || "inherit"}\nagent_enabled=${form.agentEnabled}\nbilling_unit=${form.billingUnit}\ninput_price_per_1m=${form.inputTokenPricePer1m}\noutput_price_per_1m=${form.outputTokenPricePer1m}\nunit_price=${form.unitPrice}\nextra_auth=${form.extraAuthJson || form.extraAuthJsonMasked || form.connectTimeoutSeconds || form.readTimeoutSeconds || form.proxyMode !== "inherit" || form.proxyUrl ? "configured" : "empty"}`}
             />
 
             {testResult ? (

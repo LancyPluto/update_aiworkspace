@@ -572,8 +572,8 @@ watch(
 .home-page {
   min-height: 100%;
   background:
-    radial-gradient(circle at 22% 0%, rgb(255 63 121 / 0.12), transparent 28%),
-    radial-gradient(circle at 78% 10%, rgb(124 92 255 / 0.14), transparent 30%),
+    radial-gradient(circle at 22% 0%, rgb(var(--brand-primary-rgb) / 0.12), transparent 28%),
+    radial-gradient(circle at 78% 10%, rgb(var(--brand-secondary-rgb) / 0.14), transparent 30%),
     #08080a;
   padding: clamp(24px, 4vw, 56px);
   color: #fff;
@@ -607,13 +607,13 @@ watch(
 .hero-glow--pink {
   right: -90px;
   top: -120px;
-  background: #ff3f79;
+  background: var(--brand-primary);
 }
 
 .hero-glow--blue {
   bottom: -150px;
   left: 18%;
-  background: #7c5cff;
+  background: var(--brand-secondary);
 }
 
 .hero-layout {
@@ -724,8 +724,8 @@ watch(
 
 .route-button:hover {
   transform: translateY(-1px);
-  border-color: rgb(255 63 121 / 0.34);
-  background: linear-gradient(135deg, rgb(255 63 121 / 0.2), rgb(124 92 255 / 0.18));
+  border-color: var(--brand-border);
+  background: var(--brand-gradient-soft);
   color: #fff;
 }
 
@@ -748,7 +748,7 @@ watch(
   border-left: 1px solid rgb(255 255 255 / 0.055);
   background:
     linear-gradient(90deg, rgb(18 18 22 / 0.08), rgb(18 18 22 / 0.56)),
-    radial-gradient(circle at 66% 12%, rgb(255 63 121 / 0.12), transparent 34%);
+    radial-gradient(circle at 66% 12%, rgb(var(--brand-primary-rgb) / 0.12), transparent 34%);
   content: "";
   pointer-events: none;
 }
@@ -809,7 +809,7 @@ watch(
 .hero-wall-card:hover {
   z-index: 3;
   transform: scale(1.035);
-  border-color: rgb(255 63 121 / 0.45);
+  border-color: var(--brand-border);
   box-shadow: 0 22px 58px rgb(0 0 0 / 0.48), 0 0 0 1px rgb(255 255 255 / 0.04);
 }
 
@@ -856,8 +856,8 @@ watch(
   border: 1px dashed rgb(255 255 255 / 0.08);
   border-radius: 24px;
   background:
-    radial-gradient(circle at 42% 34%, rgb(255 63 121 / 0.2), transparent 30%),
-    radial-gradient(circle at 64% 62%, rgb(124 92 255 / 0.18), transparent 34%),
+    radial-gradient(circle at 42% 34%, rgb(var(--brand-primary-rgb) / 0.2), transparent 30%),
+    radial-gradient(circle at 64% 62%, rgb(var(--brand-secondary-rgb) / 0.18), transparent 34%),
     rgb(255 255 255 / 0.025);
   color: rgb(255 255 255 / 0.42);
   font-size: 13px;
@@ -982,7 +982,7 @@ watch(
 }
 
 .quick-button:hover {
-  background: rgb(255 63 121 / 0.18);
+  background: var(--brand-soft);
   color: #fff;
 }
 
@@ -1007,7 +1007,7 @@ watch(
 }
 
 .tab-bar button.active {
-  background: linear-gradient(135deg, rgb(255 63 121 / 0.22), rgb(124 92 255 / 0.2));
+  background: var(--brand-gradient-soft);
   color: #fff;
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.06);
 }
@@ -1031,7 +1031,7 @@ watch(
 
 .tool-card:hover {
   transform: translateY(-3px);
-  border-color: rgb(168 85 247 / 0.34);
+  border-color: var(--brand-border);
   background: #15151b;
   box-shadow: 0 26px 70px rgb(0 0 0 / 0.5);
 }
@@ -1044,9 +1044,9 @@ watch(
   place-items: center;
   overflow: hidden;
   background:
-    radial-gradient(circle at 18% 14%, rgb(255 63 121 / 0.32), transparent 34%),
-    radial-gradient(circle at 74% 34%, rgb(124 92 255 / 0.28), transparent 36%),
-    radial-gradient(circle at 48% 100%, rgb(18 215 178 / 0.16), transparent 42%),
+    radial-gradient(circle at 18% 14%, rgb(var(--brand-primary-rgb) / 0.32), transparent 34%),
+    radial-gradient(circle at 74% 34%, rgb(var(--brand-secondary-rgb) / 0.28), transparent 36%),
+    radial-gradient(circle at 48% 100%, rgb(var(--brand-tertiary-rgb) / 0.16), transparent 42%),
     #0d0d12;
 }
 
@@ -1066,9 +1066,9 @@ watch(
   place-items: center;
   background:
     linear-gradient(135deg, rgb(255 255 255 / 0.06), transparent 42%),
-    radial-gradient(circle at 25% 35%, rgb(255 63 121 / 0.34), transparent 26%),
-    radial-gradient(circle at 70% 52%, rgb(124 92 255 / 0.34), transparent 30%),
-    radial-gradient(circle at 48% 82%, rgb(24 198 174 / 0.18), transparent 32%);
+    radial-gradient(circle at 25% 35%, rgb(var(--brand-primary-rgb) / 0.34), transparent 26%),
+    radial-gradient(circle at 70% 52%, rgb(var(--brand-secondary-rgb) / 0.34), transparent 30%),
+    radial-gradient(circle at 48% 82%, rgb(var(--brand-tertiary-rgb) / 0.18), transparent 32%);
 }
 
 .modality-badge,
@@ -1127,7 +1127,7 @@ watch(
 }
 
 .detail-icon:hover {
-  background: rgb(255 63 121 / 0.2);
+  background: var(--brand-soft);
   color: #fff;
 }
 
@@ -1237,12 +1237,12 @@ watch(
   gap: 6px;
   border: 0;
   border-radius: 10px;
-  background: linear-gradient(135deg, #ff3f79, #8f5cff);
+  background: var(--brand-gradient);
   color: #fff;
   font-size: 12px;
   font-weight: 650;
   margin-top: 14px;
-  box-shadow: 0 12px 32px rgb(255 63 121 / 0.18);
+  box-shadow: 0 12px 32px var(--brand-glow);
   transition: filter 160ms ease, transform 160ms ease;
 }
 
@@ -1310,7 +1310,7 @@ watch(
 }
 
 .community-preview-close:hover {
-  background: rgb(255 63 121 / 0.18);
+  background: var(--brand-soft);
   color: #fff;
 }
 
@@ -1320,8 +1320,8 @@ watch(
   place-items: center;
   overflow: hidden;
   background:
-    radial-gradient(circle at 25% 18%, rgb(255 63 121 / 0.12), transparent 28%),
-    radial-gradient(circle at 68% 76%, rgb(124 92 255 / 0.14), transparent 32%),
+    radial-gradient(circle at 25% 18%, rgb(var(--brand-primary-rgb) / 0.12), transparent 28%),
+    radial-gradient(circle at 68% 76%, rgb(var(--brand-secondary-rgb) / 0.14), transparent 32%),
     #09090c;
 }
 
@@ -1343,7 +1343,7 @@ watch(
 
 .community-preview-kicker {
   margin: 0;
-  color: #ff3f79;
+  color: var(--brand-active-text);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -1390,9 +1390,9 @@ watch(
 
 .community-preview-primary {
   border: 0;
-  background: linear-gradient(135deg, #ff3f79, #8f5cff);
+  background: var(--brand-gradient);
   color: #fff;
-  box-shadow: 0 14px 34px rgb(255 63 121 / 0.18);
+  box-shadow: 0 14px 34px var(--brand-glow);
 }
 
 .community-preview-primary:disabled {

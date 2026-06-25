@@ -522,6 +522,10 @@ public class AgentRunServiceImpl implements AgentRunService {
                 maxModelCalls,
                 parseIntSetting(settings.get(AgentRuntimeSettings.MAX_TOOL_CALLS_KEY), AgentRuntimeSettings.DEFAULT_MAX_TOOL_CALLS, 1, 50),
                 maxHistoryMessages,
+                parseIntSetting(settings.get(AgentRuntimeSettings.WORKING_MEMORY_TOKEN_BUDGET_KEY), AgentRuntimeSettings.DEFAULT_WORKING_MEMORY_TOKEN_BUDGET, 500, 50000),
+                parseIntSetting(settings.get(AgentRuntimeSettings.MESSAGE_TOKEN_SOFT_LIMIT_KEY), AgentRuntimeSettings.DEFAULT_MESSAGE_TOKEN_SOFT_LIMIT, 100, 10000),
+                parseIntSetting(settings.get(AgentRuntimeSettings.TOOL_OUTPUT_TOKEN_SOFT_LIMIT_KEY), AgentRuntimeSettings.DEFAULT_TOOL_OUTPUT_TOKEN_SOFT_LIMIT, 100, 10000),
+                parseIntSetting(settings.get(AgentRuntimeSettings.SUMMARY_TOKEN_LIMIT_KEY), AgentRuntimeSettings.DEFAULT_SUMMARY_TOKEN_LIMIT, 100, 10000),
                 parseIntSetting(settings.get(AgentRuntimeSettings.TOOL_EXECUTION_TIMEOUT_SECONDS_KEY), AgentRuntimeSettings.DEFAULT_TOOL_EXECUTION_TIMEOUT_SECONDS, 10, 3600),
                 parseIntSetting(settings.get(AgentRuntimeSettings.IMAGE_TOOL_EXECUTION_TIMEOUT_SECONDS_KEY), AgentRuntimeSettings.DEFAULT_IMAGE_TOOL_EXECUTION_TIMEOUT_SECONDS, 10, 3600),
                 parseIntSetting(settings.get(AgentRuntimeSettings.VIDEO_TOOL_EXECUTION_TIMEOUT_SECONDS_KEY), AgentRuntimeSettings.DEFAULT_VIDEO_TOOL_EXECUTION_TIMEOUT_SECONDS, 10, 7200),
@@ -587,14 +591,16 @@ public class AgentRunServiceImpl implements AgentRunService {
                     pendingCtx.getStatus()
             );
         }
+        AgentSession session = findSession(run.getUserId(), run.getSessionId());
         return new InternalAgentRunContextResponse(
                 run.getId(),
                 run.getSessionId(),
-                findSession(run.getUserId(), run.getSessionId()).getWorkspaceId(),
+                session.getWorkspaceId(),
                 run.getUserId(),
                 run.getStatus(),
                 userMessage == null ? "" : userMessage.getContentText(),
                 history,
+                session.getConversationSummary(),
                 agentFiles,
                 agentFileChunks,
                 tools,
@@ -1122,6 +1128,21 @@ public class AgentRunServiceImpl implements AgentRunService {
                 now
         );
         return AgentRunResponse.from(findRun(runId));
+    }
+
+    @Override
+    @Transactional
+    public AgentRunResponse updateConversationSummary(Long runId, String conversationSummary) {
+        AgentRun run = findRun(runId);
+        String summary = conversationSummary == null ? "" : conversationSummary.trim();
+        if (summary.isEmpty()) {
+            return AgentRunResponse.from(run);
+        }
+        if (summary.length() > 12000) {
+            summary = summary.substring(0, 12000);
+        }
+        agentSessionMapper.updateConversationSummary(run.getSessionId(), summary, LocalDateTime.now());
+        return AgentRunResponse.from(run);
     }
 
     @Override

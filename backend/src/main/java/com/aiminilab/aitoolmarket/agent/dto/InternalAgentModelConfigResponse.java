@@ -16,9 +16,14 @@ public record InternalAgentModelConfigResponse(
         String billingUnit,
         java.math.BigDecimal unitPrice,
         Boolean enabled,
-        Boolean agentEnabled
+        Boolean agentEnabled,
+        ProxyPolicy proxyPolicy
 ) {
     public static InternalAgentModelConfigResponse from(AgentModelConfig config) {
+        return from(config, null);
+    }
+
+    public static InternalAgentModelConfigResponse from(AgentModelConfig config, ProxyPolicy proxyPolicy) {
         return new InternalAgentModelConfigResponse(
                 config.getId(),
                 config.getProvider(),
@@ -33,7 +38,8 @@ public record InternalAgentModelConfigResponse(
                 config.getBillingUnit(),
                 config.getUnitPrice(),
                 config.getEnabled(),
-                config.getAgentEnabled()
+                config.getAgentEnabled(),
+                proxyPolicy
         );
     }
 }

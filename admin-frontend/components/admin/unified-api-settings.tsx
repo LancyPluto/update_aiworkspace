@@ -364,6 +364,8 @@ const emptyAccountForm = (): AccountFormState => ({
   baseUrl: "",
   balanceQueryMode: "MANUAL",
   balanceCurrency: "CNY",
+  proxyMode: "inherit",
+  proxyUrl: "",
   enabled: true,
 })
 
@@ -960,6 +962,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
           balanceAmount: account.balanceAmount ?? undefined,
           balanceCurrency: account.balanceCurrency || "CNY",
           balanceLowThreshold: account.balanceLowThreshold ?? undefined,
+          proxyMode: account.proxyMode || "inherit",
+          proxyUrl: account.proxyUrl || "",
           enabled,
         })
         patchVendorAccount(updated)
@@ -1076,6 +1080,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       balanceAmount: account.balanceAmount ?? undefined,
       balanceCurrency: account.balanceCurrency || "CNY",
       balanceLowThreshold: account.balanceLowThreshold ?? undefined,
+      proxyMode: account.proxyMode || "inherit",
+      proxyUrl: account.proxyUrl || "",
       enabled: account.enabled,
     })
     setAccountDialogOpen(true)
@@ -1100,6 +1106,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         balanceAmount: accountForm.balanceAmount,
         balanceCurrency: accountForm.balanceCurrency,
         balanceLowThreshold: accountForm.balanceLowThreshold,
+        proxyMode: accountForm.proxyMode,
+        proxyUrl: accountForm.proxyUrl,
         enabled: accountForm.enabled,
       }
       if (accountForm.id) {
@@ -1819,6 +1827,32 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 onChange={(e) => setAccountForm((f) => ({ ...f, extraAuthJson: e.target.value }))}
               />
               <p className="text-xs text-muted-foreground">用于可灵 Access Key / Secret Key、代理、超时等账号级扩展配置。</p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>账号级代理策略</Label>
+                <Select
+                  value={accountForm.proxyMode || "inherit"}
+                  onValueChange={(proxyMode) => setAccountForm((f) => ({ ...f, proxyMode }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="继承" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="inherit">继承系统默认</SelectItem>
+                    <SelectItem value="enabled">启用代理</SelectItem>
+                    <SelectItem value="disabled">禁用代理</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>代理地址</Label>
+                <Input
+                  value={accountForm.proxyUrl || ""}
+                  placeholder="http://127.0.0.1:7890"
+                  onChange={(e) => setAccountForm((f) => ({ ...f, proxyUrl: e.target.value }))}
+                />
+              </div>
             </div>
             <div className="rounded-xl border bg-muted/30 p-3">
               <div className="flex items-start justify-between gap-4">

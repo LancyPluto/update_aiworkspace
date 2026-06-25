@@ -49,7 +49,8 @@ public class ModelConfigCredentialResolver {
         }
         // Shallow-merge extraAuthJson: vendor account keys (auth/region/endpoints) override
         // the model row, but model-private keys (e.g. allowedSizes, capabilities, taskMode)
-        // survive. Falls back to account value when either side is not a JSON object.
+        // survive. Proxy routing is intentionally model-over-account so a single model can
+        // opt in/out of a provider's default network path.
         String mergedExtraAuth = mergeExtraAuthJson(merged.getExtraAuthJson(), account.getExtraAuthJson());
         if (mergedExtraAuth != null) {
             merged.setExtraAuthJson(mergedExtraAuth);
@@ -139,9 +140,25 @@ public class ModelConfigCredentialResolver {
                 Map.Entry<String, JsonNode> entry = fields.next();
                 result.set(entry.getKey(), entry.getValue());
             }
+            copyProxyOverride(modelNode, result, "proxyMode");
+            copyProxyUrlOverride(modelNode, result);
             return objectMapper.writeValueAsString(result);
         } catch (Exception ignored) {
             return accountExtraAuthJson;
+        }
+    }
+
+    private void copyProxyOverride(JsonNode modelNode, ObjectNode result, String key) {
+        JsonNode value = modelNode.get(key);
+        if (value != null && !value.isNull()) {
+            result.set(key, value);
+        }
+    }
+
+    private void copyProxyUrlOverride(JsonNode modelNode, ObjectNode result) {
+        JsonNode value = modelNode.get("proxyUrl");
+        if (value != null && !value.isNull() && !value.asText("").isBlank()) {
+            result.set("proxyUrl", value);
         }
     }
 

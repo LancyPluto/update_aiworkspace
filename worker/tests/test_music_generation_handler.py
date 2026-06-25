@@ -89,6 +89,7 @@ class MusicGenerationHandlerTest(unittest.TestCase):
                 "modelName": "V5",
                 "baseUrl": "https://api.sunoapi.org",
                 "apiKey": "secret",
+                "extraAuthJson": '{"proxyUrl":"http://127.0.0.1:7890"}',
             },
         }
         result = SunoGenerationResult(
@@ -109,6 +110,7 @@ class MusicGenerationHandlerTest(unittest.TestCase):
         self.assertEqual(handled["status"], "SUCCESS")
         self.assertEqual(handled["externalTaskId"], "suno-task-1")
         self.assertEqual(music_client.calls[0]["prompt"], "warm cinematic pop about a city sunrise")
+        self.assertEqual(music_client.calls[0]["model_config"]["extraAuthJson"], '{"proxyUrl":"http://127.0.0.1:7890"}')
         self.assertEqual(persister.calls[0]["index"], 1)
         self.assertEqual(persister.calls[1]["index"], 2)
         success_payload = backend.successes[0][1]

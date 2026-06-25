@@ -5,6 +5,7 @@ import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingVersionMapper;
 import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentRouterSettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentMemorySettings;
+import com.aiminilab.aitoolmarket.agent.config.AgentOutboundProxySettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentRuntimeSettings;
 import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountMigrationService;
@@ -83,6 +84,7 @@ public class DataInitializer implements CommandLineRunner {
         seedSettingDefaults(AgentRouterSettings.defaults(), "agent", "Agent router setting");
         seedSettingDefaults(AgentMemorySettings.defaults(), "agent", "Agent memory setting");
         seedSettingDefaults(AgentRuntimeSettings.defaults(), "agent", "Agent runtime setting");
+        seedSettingDefaults(AgentOutboundProxySettings.defaults(), "agent", "Outbound proxy setting");
     }
 
     private void seedSettingDefaults(java.util.Map<String, String> defaults, String group, String description) {

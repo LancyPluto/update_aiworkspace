@@ -51,7 +51,7 @@ from app.core.schemas import (
     ToolDescriptor,
     WorkspaceMemoryItem,
 )
-from app.runtime.context_manager import ContextManager, trim_tool_output
+from app.runtime.context_manager import ContextManager, trim_tool_output_by_tokens
 from app.runtime.file_context_runtime import WorkspaceFileRuntime
 from app.runtime.memory_curator import MemoryCuratorService, looks_like_memory_management_turn
 from app.runtime.memory_runtime import (
@@ -583,7 +583,7 @@ class DeepAgentsRuntimeEngine:
         history = list(context.history or [])
         if not history:
             return
-        metrics = _context_manager().build_history_metrics(history)
+        metrics = _context_manager(context).build_history_metrics(history)
         before = int(metrics["estimatedTokensBefore"])
         after = int(metrics["estimatedTokensAfter"])
         saved_pct = round((before - after) / before * 100, 1) if before else 0.0
@@ -1295,6 +1295,11 @@ class DeepAgentsRuntimeEngine:
             ),
         )
 
+        context_manager = _context_manager(context)
+        summary_message = context_manager.format_conversation_summary(context.conversationSummary)
+        if summary_message:
+            messages.append(summary_message)
+
         file_context = _format_file_context(context)
         if file_context:
             messages.append(ChatMessage(role="system", content=file_context))
@@ -1464,7 +1469,7 @@ class DeepAgentsRuntimeEngine:
                     content=(
                         f"User request: {context.message}\n"
                         f"Tool arguments: {tool_arguments}\n"
-                        f"Tool output:\n{trim_tool_output(content_text, max(1, settings.agent_tool_output_char_limit))}\n\n"
+                        f"Tool output:\n{trim_tool_output_by_tokens(content_text, max(1, settings.agent_tool_output_token_soft_limit))}\n\n"
                         "Use the tool output as the source of truth. Do not repeat identical paragraphs."
                     ),
                 )
@@ -1940,9 +1945,12 @@ def _task_description_from_inputs(inputs: dict[str, Any] | None, input_str: str)
 
 
 def _messages(context: RunContext, workspace_memory_context: str = "", workspace_file_context: str = "") -> list[dict[str, str]]:
-    messages_list = [_message(message) for message in _context_manager().build_history(context.history)]
+    context_manager = _context_manager(context)
+    messages_list: list[dict[str, str]] = []
     if workspace_memory_context:
         messages_list.append({"role": "system", "content": workspace_memory_context})
+    context_messages = context_manager.build_context_messages(context.history, context.conversationSummary)
+    messages_list.extend(_message(message) for message in context_messages)
     if workspace_file_context:
         messages_list.append({"role": "system", "content": workspace_file_context})
     session_state_context = format_session_state_context(context)
@@ -2273,8 +2281,8 @@ def _compose_system_prompt(
     return f"{base_prompt}\n\n{tools_prompt}"
 
 
-def _context_manager() -> ContextManager:
-    return ContextManager.from_settings(settings)
+def _context_manager(context: RunContext | None = None) -> ContextManager:
+    return ContextManager.from_settings(settings, context.runtimeSettings if context is not None else None)
 
 
 def _history_for_chat(context: RunContext, *, memory_management: bool = False) -> list[ChatMessage]:
@@ -2283,7 +2291,7 @@ def _history_for_chat(context: RunContext, *, memory_management: bool = False) -
         limit = MEMORY_MANAGEMENT_HISTORY_LIMIT
         selected = history[-limit:]
         return [_compact_message_for_memory_history(message) for message in selected]
-    return _context_manager().build_history(history)
+    return _context_manager(context).build_working_memory(history)
 
 
 def _compact_message_for_memory_history(message: ChatMessage) -> ChatMessage:

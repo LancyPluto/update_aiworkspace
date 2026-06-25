@@ -262,6 +262,13 @@ class BackendClient:
             {"contentText": content_text},
         )
 
+    async def update_conversation_summary(self, run_id: int, conversation_summary: str) -> None:
+        await self._request(
+            "PUT",
+            f"/api/internal/v1/agent/runs/{run_id}/conversation-summary",
+            {"conversationSummary": conversation_summary},
+        )
+
     async def complete_run(self, run_id: int, request: RunComplete) -> None:
         await self._request("POST", f"/api/internal/v1/agent/runs/{run_id}/complete", request)
 

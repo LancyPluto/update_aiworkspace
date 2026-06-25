@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.task.dto;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.dto.ModelExecutionSnapshot;
+import com.aiminilab.aitoolmarket.agent.dto.ProxyPolicy;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -24,9 +25,14 @@ public record ExecutionModelConfigResponse(
         Integer timeoutSeconds,
         List<String> capabilities,
         String credentialSource,
-        String credentialFingerprint
+        String credentialFingerprint,
+        ProxyPolicy proxyPolicy
 ) {
     public static ExecutionModelConfigResponse from(AgentModelConfig config, List<String> capabilities) {
+        return from(config, capabilities, null);
+    }
+
+    public static ExecutionModelConfigResponse from(AgentModelConfig config, List<String> capabilities, ProxyPolicy proxyPolicy) {
         if (config == null) {
             return null;
         }
@@ -46,7 +52,8 @@ public record ExecutionModelConfigResponse(
                 config.getTimeoutSeconds(),
                 capabilities == null ? List.of() : capabilities,
                 credentialSource(config.getVendorAccountId(), config.getApiKey(), config.getExtraAuthJson()),
-                credentialFingerprint(config.getApiKey(), config.getExtraAuthJson())
+                credentialFingerprint(config.getApiKey(), config.getExtraAuthJson()),
+                proxyPolicy
         );
     }
 
@@ -70,7 +77,8 @@ public record ExecutionModelConfigResponse(
                 snapshot.timeoutSeconds(),
                 snapshot.capabilities() == null ? List.of() : snapshot.capabilities(),
                 credentialSource(snapshot.vendorAccountId(), snapshot.apiKey(), snapshot.extraAuthJson()),
-                credentialFingerprint(snapshot.apiKey(), snapshot.extraAuthJson())
+                credentialFingerprint(snapshot.apiKey(), snapshot.extraAuthJson()),
+                snapshot.proxyPolicy()
         );
     }
 

@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 import requests
 
 from config import settings
+from utils.outbound_http import OutboundRequestsClient
 
 
 LOGGER = logging.getLogger(__name__)
@@ -57,7 +58,10 @@ class SunoMusicClient:
         base_url: str | None,
         api_key: str | None,
         params: dict[str, Any],
+        extra_auth_json: str | None = None,
+        model_config: dict[str, Any] | None = None,
     ) -> SunoGenerationResult:
+        http = OutboundRequestsClient.from_model_config(model_config, extra_auth_json=extra_auth_json)
         resolved_api_key = _resolve_api_key(api_key)
         if not resolved_api_key:
             raise SunoMusicError("Suno api key is not configured")
@@ -90,6 +94,7 @@ class SunoMusicClient:
             prompt=prompt_text,
             params=params,
             api_key=resolved_api_key,
+            http=http,
         )
         upload_url = payload.get("uploadUrl")
         mode_label = "upload-cover" if upload_url else "generate"
@@ -100,8 +105,8 @@ class SunoMusicClient:
             payload.get("customMode"),
             bool(upload_url),
         )
-        task_id = self._create_task(root_url=root_url, headers=headers, payload=payload, upload_cover=bool(upload_url))
-        tracks, detail = self._poll_task(root_url=root_url, headers=headers, task_id=task_id)
+        task_id = self._create_task(root_url=root_url, headers=headers, payload=payload, upload_cover=bool(upload_url), http=http)
+        tracks, detail = self._poll_task(root_url=root_url, headers=headers, task_id=task_id, http=http)
         return SunoGenerationResult(task_id=task_id, tracks=tracks, metadata={"record": detail, "payload": _safe_payload(payload)})
 
     def _create_task(
@@ -110,23 +115,31 @@ class SunoMusicClient:
         root_url: str,
         headers: dict[str, str],
         payload: dict[str, Any],
+        http: OutboundRequestsClient,
         upload_cover: bool = False,
     ) -> str:
         path = "/api/v1/generate/upload-cover" if upload_cover else "/api/v1/generate"
         url = f"{root_url}{path}"
-        response = self._request_with_retry("POST", url, headers=headers, json=payload)
+        response = self._request_with_retry("POST", url, http=http, headers=headers, json=payload)
         data = _json_response(response)
         task_id = _string_from_path(data, "data.taskId", "taskId", "id")
         if not task_id:
             raise SunoMusicError("Suno generate response missing taskId")
         return task_id
 
-    def _poll_task(self, *, root_url: str, headers: dict[str, str], task_id: str) -> tuple[list[SunoTrack], dict[str, Any]]:
+    def _poll_task(
+        self,
+        *,
+        root_url: str,
+        headers: dict[str, str],
+        task_id: str,
+        http: OutboundRequestsClient,
+    ) -> tuple[list[SunoTrack], dict[str, Any]]:
         deadline = time.monotonic() + max(self.timeout_seconds, 30)
         url = f"{root_url}/api/v1/generate/record-info"
         last_status = ""
         while True:
-            response = self._request_with_retry("GET", url, headers=headers, params={"taskId": task_id})
+            response = self._request_with_retry("GET", url, http=http, headers=headers, params={"taskId": task_id})
             data = _json_response(response)
             detail = data.get("data") if isinstance(data.get("data"), dict) else data
             status = str(detail.get("status") or data.get("status") or "").upper()
@@ -155,11 +168,11 @@ class SunoMusicClient:
                 raise SunoMusicTimeoutError(f"Suno task timed out: taskId={task_id} status={last_status or 'UNKNOWN'}")
             time.sleep(self.poll_interval_seconds)
 
-    def _request_with_retry(self, method: str, url: str, **kwargs: Any) -> requests.Response:
+    def _request_with_retry(self, method: str, url: str, *, http: OutboundRequestsClient, **kwargs: Any) -> requests.Response:
         last_exc: Exception | None = None
         for attempt in range(3):
             try:
-                response = requests.request(method, url, timeout=self.timeout, **kwargs)
+                response = http.request(method, url, timeout=self.timeout, **kwargs)
                 if response.status_code in {405, 430, 500, 502, 503, 504} and attempt < 2:
                     time.sleep(1.5 * (attempt + 1))
                     continue
@@ -180,6 +193,7 @@ class SunoMusicClient:
         prompt: str,
         params: dict[str, Any],
         api_key: str,
+        http: OutboundRequestsClient | None = None,
     ) -> dict[str, Any]:
         custom_mode = _bool_param(params, "customMode", "custom_mode", default=False)
         instrumental = _bool_param(params, "instrumental", "makeInstrumental", "isInstrumental", default=False)
@@ -189,7 +203,7 @@ class SunoMusicClient:
         is_upload_cover = generation_type == "upload_cover" or bool(upload_source)
         upload_url = ""
         if is_upload_cover:
-            upload_url = _ensure_suno_upload_url(upload_source, api_key=api_key)
+            upload_url = _ensure_suno_upload_url(upload_source, api_key=api_key, http=http)
 
         payload: dict[str, Any] = {
             "customMode": custom_mode,
@@ -249,17 +263,17 @@ def _resolve_upload_source(params: dict[str, Any]) -> str:
     )
 
 
-def _ensure_suno_upload_url(source: str, *, api_key: str) -> str:
+def _ensure_suno_upload_url(source: str, *, api_key: str, http: OutboundRequestsClient | None = None) -> str:
     normalized = (source or "").strip()
     if not normalized:
         return ""
     if normalized.startswith("http://") or normalized.startswith("https://"):
         if not _should_reupload_to_suno(normalized):
             return normalized
-    audio_bytes, content_type = _read_audio_bytes(normalized)
+    audio_bytes, content_type = _read_audio_bytes(normalized, http=http)
     extension = _guess_audio_extension(normalized, content_type)
     file_name = f"reference{extension}"
-    return _upload_base64_to_suno(api_key=api_key, audio_bytes=audio_bytes, content_type=content_type, file_name=file_name)
+    return _upload_base64_to_suno(api_key=api_key, audio_bytes=audio_bytes, content_type=content_type, file_name=file_name, http=http)
 
 
 def _should_reupload_to_suno(url: str) -> bool:
@@ -276,7 +290,7 @@ def _should_reupload_to_suno(url: str) -> bool:
     return False
 
 
-def _read_audio_bytes(source: str) -> tuple[bytes, str | None]:
+def _read_audio_bytes(source: str, *, http: OutboundRequestsClient | None = None) -> tuple[bytes, str | None]:
     if source.startswith("data:"):
         header, separator, encoded = source.partition(",")
         if not separator or ";base64" not in header:
@@ -301,7 +315,10 @@ def _read_audio_bytes(source: str) -> tuple[bytes, str | None]:
         fetch_url = _rewrite_backend_generated_url(source)
 
     try:
-        response = requests.get(fetch_url, timeout=(10, 120))
+        if http is None or _is_local_or_internal_url(fetch_url):
+            response = requests.get(fetch_url, timeout=(10, 120))
+        else:
+            response = http.get(fetch_url, timeout=(10, 120))
         response.raise_for_status()
     except requests.RequestException as exc:
         raise SunoMusicError(f"download reference audio failed: {exc}") from exc
@@ -353,6 +370,12 @@ def _rewrite_backend_generated_url(value: str) -> str:
     return f"{backend}{path}{query}"
 
 
+def _is_local_or_internal_url(value: str) -> bool:
+    parsed = urlparse(value)
+    hostname = (parsed.hostname or "").lower()
+    return hostname in {"", "localhost", "127.0.0.1", "::1", "0.0.0.0", "backend", "host.docker.internal"}
+
+
 def _guess_audio_extension(source: str, content_type: str | None) -> str:
     if content_type:
         extension = mimetypes.guess_extension(content_type) or ""
@@ -364,7 +387,14 @@ def _guess_audio_extension(source: str, content_type: str | None) -> str:
     return suffix if suffix else ".mp3"
 
 
-def _upload_base64_to_suno(*, api_key: str, audio_bytes: bytes, content_type: str | None, file_name: str) -> str:
+def _upload_base64_to_suno(
+    *,
+    api_key: str,
+    audio_bytes: bytes,
+    content_type: str | None,
+    file_name: str,
+    http: OutboundRequestsClient | None = None,
+) -> str:
     root_url = (settings.suno_file_upload_base_url or "https://sunoapiorg.redpandaai.co").rstrip("/")
     url = f"{root_url}/api/file-base64-upload"
     mime = content_type or "audio/mpeg"
@@ -381,7 +411,10 @@ def _upload_base64_to_suno(*, api_key: str, audio_bytes: bytes, content_type: st
         "User-Agent": "ai-tool-market-worker/suno-upload",
     }
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=(10, 180))
+        if http is None:
+            response = requests.post(url, headers=headers, json=payload, timeout=(10, 180))
+        else:
+            response = http.post(url, headers=headers, json=payload, timeout=(10, 180))
         response.raise_for_status()
     except requests.RequestException as exc:
         raise SunoMusicError(f"Suno file upload failed: {exc}") from exc

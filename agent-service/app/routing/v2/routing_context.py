@@ -11,7 +11,7 @@ from app.routing.attachment_signals import attachment_signal_payload, build_atta
 from app.core.attachment_catalog import build_reference_plan, reference_mentions_payload, user_message_for_llm
 from app.routing.context_builder import capability_flags_payload, default_capability_flags
 from app.routing.v2.thread_state import RoutingThreadState, format_thread_state_block
-from app.runtime.context_manager import ContextManager, middle_truncate
+from app.runtime.context_manager import ContextManager, token_middle_truncate
 from app.runtime.tool_disclosure import format_tool_catalog
 
 
@@ -28,8 +28,8 @@ UNIFIED_ROUTER_SYSTEM_PROMPT = (
 
 
 def _clip_history_content(content: str) -> str:
-    limit = max(200, int(getattr(settings, "agent_router_history_clip", 800)))
-    return middle_truncate(content or "", limit)
+    limit = max(100, int(getattr(settings, "agent_router_message_token_limit", 300)))
+    return token_middle_truncate(content or "", limit)
 
 
 def _normalize_role(role: str) -> str:
@@ -73,13 +73,28 @@ def build_routing_messages(
             messages.append(ChatMessage(role="system", content=catalog))
 
     if workspace_memory_context.strip():
-        clipped = middle_truncate(workspace_memory_context.strip(), 1200)
+        clipped = token_middle_truncate(workspace_memory_context.strip(), 500)
         messages.append(
             ChatMessage(
                 role="system",
                 content=(
                     "Workspace memory (use for low-risk argument defaults; user instruction wins):\n"
                     f"{clipped}"
+                ),
+            )
+        )
+
+    summary = ContextManager.from_settings(settings, context.runtimeSettings).format_conversation_summary(
+        context.conversationSummary
+    )
+    if summary is not None:
+        messages.append(
+            ChatMessage(
+                role="system",
+                content=(
+                    "Conversation summary for long-range context only. "
+                    "Current user message and active tool clarification take precedence.\n"
+                    f"{summary.content}"
                 ),
             )
         )
@@ -96,8 +111,8 @@ def build_routing_messages(
             )
         )
 
-    cm = ContextManager.from_settings(settings)
-    for item in cm.build_history(context.history):
+    cm = ContextManager.from_settings(settings, context.runtimeSettings)
+    for item in cm.build_working_memory(context.history):
         role = _normalize_role(item.role)
         content = _clip_history_content(item.content or "")
         if content:

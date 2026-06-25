@@ -4,6 +4,8 @@ from app.clients.backend_client import BackendClient, BackendClientError
 from app.clients.model_client import ModelClient, ModelClientError
 from app.config import Settings
 from app.core.schemas import RunFail
+from app.runtime.context_manager import ContextManager
+from app.runtime.conversation_summary import ensure_rolling_conversation_summary
 from app.runtime.router import RuntimeRouter
 from app.tools.backend_tool import ToolExecutionError
 
@@ -54,6 +56,7 @@ class AgentRuntime:
             if getattr(context, "status", None) in TERMINAL_RUN_STATUSES:
                 return
             model_client = await self._model_client(context)
+            context = await self._with_rolling_summary(context, model_client)
             engine = self.runtime_router_factory(
                 self.backend,
                 model_client,
@@ -80,6 +83,7 @@ class AgentRuntime:
             if getattr(context, "status", None) in TERMINAL_RUN_STATUSES:
                 return
             model_client = await self._model_client(context)
+            context = await self._with_rolling_summary(context, model_client)
             engine = self.runtime_router_factory(
                 self.backend,
                 model_client,
@@ -136,6 +140,15 @@ class AgentRuntime:
                 model_timeout_seconds=config.timeoutSeconds,
             )
         return self.model_client_factory(settings)
+
+    async def _with_rolling_summary(self, context, model_client):
+        context_manager = ContextManager.from_settings(self.default_settings, getattr(context, "runtimeSettings", None))
+        return await ensure_rolling_conversation_summary(
+            context=context,
+            context_manager=context_manager,
+            model=model_client,
+            backend=self.backend,
+        )
 
     async def _fail(self, run_id: int, error_code: str, error_message: str) -> None:
         try:

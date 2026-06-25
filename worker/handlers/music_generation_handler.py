@@ -55,6 +55,7 @@ class MusicGenerationHandler:
                 base_url=model_config.get("baseUrl"),
                 api_key=model_config.get("apiKey"),
                 params=params,
+                model_config=model_config,
             )
             self.backend_client.mark_processing(
                 task_id,

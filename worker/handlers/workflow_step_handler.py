@@ -594,6 +594,7 @@ def _resolve_image_generator(model_config: dict[str, Any]):
             endpoint_path=model_config.get("imagePath") or model_config.get("endpointPath"),
             timeout_seconds=model_config.get("timeoutSeconds"),
             extra_auth_json=model_config.get("extraAuthJson"),
+            model_config=model_config,
         )
 
         def _gen(prompt: str) -> str:

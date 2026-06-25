@@ -7,6 +7,7 @@ import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolDescriptorService;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.agent.service.ModelExecutionSnapshotService;
+import com.aiminilab.aitoolmarket.agent.support.OutboundProxyPolicyResolver;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.admin.service.BillingService;
@@ -60,6 +61,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     private final AgentModelConfigService agentModelConfigService;
     private final ModelCapabilityService modelCapabilityService;
     private final ModelExecutionSnapshotService modelExecutionSnapshotService;
+    private final OutboundProxyPolicyResolver outboundProxyPolicyResolver;
     private final ToolFieldItemMapper toolFieldItemMapper;
     private final ObjectMapper objectMapper;
     private final CreditService creditService;
@@ -76,6 +78,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                                    AgentModelConfigService agentModelConfigService,
                                    ModelCapabilityService modelCapabilityService,
                                    ModelExecutionSnapshotService modelExecutionSnapshotService,
+                                   OutboundProxyPolicyResolver outboundProxyPolicyResolver,
                                    ToolFieldItemMapper toolFieldItemMapper, ObjectMapper objectMapper,
                                    CreditService creditService, PricingService pricingService,
                                    BillingService billingService,
@@ -89,6 +92,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         this.agentModelConfigService = agentModelConfigService;
         this.modelCapabilityService = modelCapabilityService;
         this.modelExecutionSnapshotService = modelExecutionSnapshotService;
+        this.outboundProxyPolicyResolver = outboundProxyPolicyResolver;
         this.toolFieldItemMapper = toolFieldItemMapper;
         this.objectMapper = objectMapper;
         this.creditService = creditService;
@@ -121,7 +125,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         List<String> caps = modelCapabilityService.resolveCapabilities(modelConfig);
         AgentModelConfig executionConfig = agentModelConfigService.resolveForExecution(modelConfig);
         return ExecutionContextResponse.of(task, workerParams,
-                ExecutionModelConfigResponse.from(executionConfig, caps), fields,
+                ExecutionModelConfigResponse.from(executionConfig, caps, outboundProxyPolicyResolver.resolve(executionConfig)), fields,
                 runtimeConfig.systemPrompt(), runtimeConfig.adminPrompt());
     }
 

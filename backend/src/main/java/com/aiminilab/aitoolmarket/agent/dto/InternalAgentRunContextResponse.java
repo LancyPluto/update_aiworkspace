@@ -10,6 +10,7 @@ public record InternalAgentRunContextResponse(
         String status,
         String message,
         List<InternalAgentMessageResponse> history,
+        String conversationSummary,
         List<InternalAgentFileContextResponse> agentFiles,
         List<InternalAgentFileChunkContextResponse> agentFileChunks,
         List<AgentToolDescriptorResponse> availableTools,

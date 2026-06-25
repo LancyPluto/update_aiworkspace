@@ -107,6 +107,7 @@ public class AdminAgentToolAccessController {
                 "DEBUG",
                 request.message(),
                 List.of(),
+                null,
                 List.of(),
                 List.of(),
                 availableTools,

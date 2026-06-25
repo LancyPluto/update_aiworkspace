@@ -44,10 +44,12 @@ const toggleMobileMenu = () => {
    <div class="max-w-[1400px] mx-auto px-6 lg:px-12">
   <div class="flex items-center justify-between h-16 lg:h-20">
     <!-- Logo -->
-    <a href="#" class="flex items-center gap-2">
-      <!-- 这里已经换成你的 logo.svg -->
-      <img src="/logo.svg" class="w-8 h-8 rounded-lg object-contain" alt="logo">
-      <span class="font-semibold text-lg">科创点AI</span>
+    <a href="#" class="flex items-center">
+      <img
+        src="/logo.png"
+        class="h-10 w-auto max-w-[150px] object-contain [filter:drop-shadow(0_0_8px_rgb(34_211_238_/_0.35))]"
+        alt="科创点AI"
+      >
     </a>
         
         <!-- Desktop Navigation -->

@@ -160,12 +160,23 @@ export function AdminSidebar() {
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-border bg-sidebar">
       <div className="flex h-full flex-col">
-        <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-6">
-          <img src={`${basePath}/logo.svg`} alt="科创点AI" className="h-9 w-9 rounded-xl object-contain" />
-          <div>
-            <h1 className="text-base font-semibold text-sidebar-foreground">科创点AI</h1>
-            <p className="text-xs text-muted-foreground">管理后台</p>
-          </div>
+        <div className="relative isolate flex h-[92px] items-center overflow-hidden border-b border-sidebar-border px-6 pb-4 pt-6">
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 bottom-[-34px] top-0 z-0 opacity-95 blur-[18px]"
+            style={{
+              background:
+                "radial-gradient(ellipse 178px 112px at 42px 34px, rgb(34 211 238 / 0.46) 0%, rgb(52 211 153 / 0.28) 38%, transparent 74%), radial-gradient(ellipse 164px 108px at 134px 52px, rgb(59 130 246 / 0.24) 0%, rgb(99 102 241 / 0.12) 44%, transparent 78%)",
+            }}
+          />
+          <Link href="/" className="relative z-10 flex min-w-0 flex-col items-start">
+            <img
+              src={`${basePath}/logo.png`}
+              alt="科创点AI"
+              className="h-10 w-auto max-w-[156px] object-contain [filter:drop-shadow(0_0_8px_rgb(34_211_238_/_0.45))_drop-shadow(0_0_16px_rgb(52_211_153_/_0.24))]"
+            />
+            <span className="mt-0.5 text-xs font-medium text-muted-foreground">管理后台</span>
+          </Link>
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">

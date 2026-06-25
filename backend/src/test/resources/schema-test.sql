@@ -304,6 +304,7 @@ CREATE TABLE agent_sessions (
   user_id BIGINT NOT NULL,
   workspace_id BIGINT,
   title VARCHAR(120) NOT NULL,
+  conversation_summary CLOB,
   status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP

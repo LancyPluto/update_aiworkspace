@@ -10,6 +10,7 @@ if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
 from client.suno_music_client import SunoMusicClient, SunoMusicError, _extract_tracks, _read_audio_bytes
+from utils.outbound_http import OutboundRequestsClient
 
 
 class FakeCreateResponse:
@@ -65,10 +66,18 @@ class FakeValidationErrorResponse:
     reason = "Payload Too Large"
 
 
+class FakeAudioResponse:
+    headers = {"Content-Type": "audio/mpeg"}
+    content = b"fake mp3"
+
+    def raise_for_status(self):
+        return None
+
+
 class SunoMusicClientTest(unittest.TestCase):
     def test_generate_creates_task_polls_and_extracts_tracks(self):
         client = SunoMusicClient()
-        with patch("client.suno_music_client.requests.request", side_effect=[FakeCreateResponse(), FakeRecordResponse()]) as request:
+        with patch.object(OutboundRequestsClient, "request", autospec=True, side_effect=[FakeCreateResponse(), FakeRecordResponse()]) as request:
             result = client.generate(
                 model="V5",
                 prompt="city sunrise pop",
@@ -106,7 +115,7 @@ class SunoMusicClientTest(unittest.TestCase):
 
     def test_generate_supports_legacy_flat_suno_data(self):
         client = SunoMusicClient()
-        with patch("client.suno_music_client.requests.request", side_effect=[FakeCreateResponse(), FakeLegacyRecordResponse()]):
+        with patch.object(OutboundRequestsClient, "request", autospec=True, side_effect=[FakeCreateResponse(), FakeLegacyRecordResponse()]):
             result = client.generate(
                 model="V5",
                 prompt="city sunrise pop",
@@ -188,7 +197,7 @@ class SunoMusicClientTest(unittest.TestCase):
 
     def test_validation_error_is_reported_without_retry_loop(self):
         client = SunoMusicClient()
-        with patch("client.suno_music_client.requests.request", return_value=FakeValidationErrorResponse()) as request:
+        with patch.object(OutboundRequestsClient, "request", autospec=True, return_value=FakeValidationErrorResponse()) as request:
             with self.assertRaises(SunoMusicError) as raised:
                 client.generate(
                     model="V5",
@@ -221,7 +230,7 @@ class SunoMusicClientTest(unittest.TestCase):
     @patch("client.suno_music_client._ensure_suno_upload_url", return_value="https://tempfile.redpandaai.co/ref.mp3")
     def test_upload_cover_uses_upload_cover_endpoint(self, _mock_upload):
         client = SunoMusicClient()
-        with patch("client.suno_music_client.requests.request", side_effect=[FakeCreateResponse(), FakeRecordResponse()]) as request:
+        with patch.object(OutboundRequestsClient, "request", autospec=True, side_effect=[FakeCreateResponse(), FakeRecordResponse()]) as request:
             client.generate(
                 model="V5_5",
                 prompt="rock remix",
@@ -232,10 +241,34 @@ class SunoMusicClientTest(unittest.TestCase):
                     "referenceAudio": "https://cdn.example.com/original.mp3",
                 },
             )
-        create_url = request.call_args_list[0].args[1]
+        create_url = request.call_args_list[0].args[2]
         self.assertTrue(create_url.endswith("/api/v1/generate/upload-cover"))
         create_payload = request.call_args_list[0].kwargs["json"]
         self.assertEqual(create_payload["uploadUrl"], "https://tempfile.redpandaai.co/ref.mp3")
+
+    def test_extra_auth_proxy_url_configures_suno_requests(self):
+        client = SunoMusicClient()
+        with patch.object(OutboundRequestsClient, "request", autospec=True, side_effect=[FakeCreateResponse(), FakeRecordResponse()]) as request:
+            client.generate(
+                model="V5",
+                prompt="city sunrise pop",
+                base_url="https://api.sunoapi.org",
+                api_key="secret",
+                params={},
+                model_config={"proxyPolicy": {"enabled": True, "proxyUrl": "http://127.0.0.1:7890"}},
+            )
+
+        http = request.call_args_list[0].args[0]
+        self.assertEqual(http.proxies["http"], "http://127.0.0.1:7890")
+        self.assertEqual(http.proxies["https"], "http://127.0.0.1:7890")
+        self.assertFalse(http.trust_env)
+
+    def test_extra_auth_trust_env_false_disables_environment_proxy(self):
+        with patch.dict("utils.outbound_http.os.environ", {"HTTP_PROXY": "http://127.0.0.1:7890"}, clear=True):
+            http = OutboundRequestsClient.from_model_config(extra_auth_json='{"trustEnv": false}')
+
+        self.assertEqual(http.proxies, {})
+        self.assertFalse(http.trust_env)
 
     def test_upload_cover_requires_reference_audio(self):
         client = SunoMusicClient()
@@ -260,6 +293,21 @@ class SunoMusicClientTest(unittest.TestCase):
 
         self.assertEqual(content, b"fake mp3")
         self.assertEqual(content_type, "audio/mpeg")
+
+    def test_read_audio_bytes_bypasses_proxy_client_for_internal_host(self):
+        http = OutboundRequestsClient.from_model_config(
+            {"proxyPolicy": {"enabled": True, "proxyUrl": "http://127.0.0.1:7890"}}
+        )
+        with patch.object(http, "get", side_effect=AssertionError("internal host must not use proxy client")):
+            with patch("client.suno_music_client.requests.get", return_value=FakeAudioResponse()) as direct_get:
+                content, content_type = _read_audio_bytes(
+                    "http://host.docker.internal:8080/generated/audio/ref.mp3",
+                    http=http,
+                )
+
+        self.assertEqual(content, b"fake mp3")
+        self.assertEqual(content_type, "audio/mpeg")
+        self.assertEqual(direct_get.call_args.args[0], "http://host.docker.internal:8080/generated/audio/ref.mp3")
 
 
 if __name__ == "__main__":

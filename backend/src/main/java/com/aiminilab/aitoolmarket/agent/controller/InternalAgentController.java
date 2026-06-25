@@ -26,6 +26,7 @@ import com.aiminilab.aitoolmarket.agent.dto.InternalCreateWorkspaceMemoryRequest
 import com.aiminilab.aitoolmarket.agent.dto.InternalWorkspaceMemoryItemResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalWorkspaceMemoryRetrieveRequest;
 import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentWorkspaceMemoryRequest;
+import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentConversationSummaryRequest;
 import com.aiminilab.aitoolmarket.agent.service.AgentFileService;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.AgentRunService;
@@ -210,6 +211,17 @@ public class InternalAgentController {
             @Valid @RequestBody UpsertStreamingAgentAnswerRequest request
     ) {
         return ApiResponse.success(agentRunService.upsertStreamingAnswer(runId, request));
+    }
+
+    @PutMapping("/runs/{runId}/conversation-summary")
+    public ApiResponse<AgentRunResponse> updateConversationSummary(
+            @PathVariable Long runId,
+            @RequestBody UpdateAgentConversationSummaryRequest request
+    ) {
+        return ApiResponse.success(agentRunService.updateConversationSummary(
+                runId,
+                request == null ? null : request.conversationSummary()
+        ));
     }
 
     @PutMapping("/runs/{runId}/graph-checkpoint")
