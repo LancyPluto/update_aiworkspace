@@ -115,6 +115,44 @@ def test_agnes_video_client_uses_extra_body_image_for_multi_image_requests():
     }
 
 
+def test_agnes_video_client_accepts_explicit_multi_image_list():
+    session = RecordingSession(
+        [
+            FakeResponse({"task_id": "task_123", "video_id": "video_456", "status": "queued"}),
+            FakeResponse({"status": "completed", "video_url": "https://cdn.example/video.mp4"}),
+        ]
+    )
+    client = AgnesVideoClient(
+        base_url="https://apihub.agnes-ai.com",
+        api_key="test-key",
+        poll_interval_seconds=0,
+        timeout_seconds=2,
+    )
+    client.session = session
+
+    client.generate_video(
+        prompt="Preserve character prop and location continuity",
+        image_size="1280x720",
+        model="agnes-video-v2.0",
+        image="https://cdn.example/ignored-when-list-present.png",
+        images=[
+            "https://cdn.example/scene.png",
+            "https://cdn.example/character-board.png",
+            "https://cdn.example/prop-board.png",
+            "https://cdn.example/location-board.png",
+        ],
+    )
+
+    payload = session.calls[0]["json"]
+    assert "image" not in payload
+    assert payload["extra_body"]["image"] == [
+        "https://cdn.example/scene.png",
+        "https://cdn.example/character-board.png",
+        "https://cdn.example/prop-board.png",
+        "https://cdn.example/location-board.png",
+    ]
+
+
 def test_agnes_video_client_encodes_local_generated_images_as_base64(tmp_path, monkeypatch):
     media_root = tmp_path / "generated-media"
     image_path = media_root / "market-files" / "2" / "reference.png"

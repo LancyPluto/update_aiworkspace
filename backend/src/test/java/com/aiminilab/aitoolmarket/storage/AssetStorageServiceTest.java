@@ -34,9 +34,11 @@ class AssetStorageServiceTest {
         AssetStorageService service = new AssetStorageService(properties);
         service.init();
 
-        StoredAsset stored = service.storeBytes("uploads/20260611/demo.txt", "hello".getBytes(), "text/plain");
-        assertEquals("/generated/uploads/20260611/demo.txt", stored.publicUrl());
-        assertTrue(Files.exists(tempDir.resolve("uploads/20260611/demo.txt")));
+        byte[] data = "hello".getBytes();
+        StoredAsset stored = service.storeBytes("uploads/20260611/demo.txt", data, "text/plain");
+        String expectedKey = AssetStorageService.contentHashKey("uploads/20260611/demo.txt", data);
+        assertEquals("/generated/" + expectedKey, stored.publicUrl());
+        assertTrue(Files.exists(tempDir.resolve(expectedKey)));
         assertNotNull(service.resolveExistingPublicUrl(stored.publicUrl()));
     }
 
@@ -77,6 +79,35 @@ class AssetStorageServiceTest {
                         && "wlcloudai-assets-public".equals(request.getDestinationBucketName())
                         && "tasks/1/result.png".equals(request.getDestinationKey())));
         verify(oss).deleteObject("wlcloudai-assets-private", "tasks/1/result.png");
+    }
+
+    @Test
+    void resolvesLegacyToolCoverUrlToOssPublicBaseWhenObjectExists() throws Exception {
+        AppProperties properties = new AppProperties();
+        properties.getAssetStorage().setProvider("oss");
+        properties.getAssetStorage().setOssEndpoint("oss-cn-guangzhou.aliyuncs.com");
+        properties.getAssetStorage().setOssPublicBucket("wlcloudai-assets-public");
+        properties.getAssetStorage().setOssPrivateBucket("wlcloudai-assets-private");
+        properties.getAssetStorage().setPublicBaseUrl(
+                "https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com"
+        );
+
+        AssetStorageService service = new AssetStorageService(properties);
+        OSS oss = mock(OSS.class);
+        Field field = AssetStorageService.class.getDeclaredField("ossClient");
+        field.setAccessible(true);
+        field.set(service, oss);
+        when(oss.doesObjectExist("wlcloudai-assets-public", "tool-covers/kling-preview.mp4")).thenReturn(true);
+
+        String legacy = "/generated/tool-covers/kling-preview.mp4";
+        assertEquals(
+                "https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com/tool-covers/kling-preview.mp4",
+                service.resolveExistingPublicUrl(legacy)
+        );
+        assertEquals(
+                "https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com/tool-covers/kling-preview.mp4",
+                service.normalizeLegacyPublicUrl(legacy)
+        );
     }
 
     @Test

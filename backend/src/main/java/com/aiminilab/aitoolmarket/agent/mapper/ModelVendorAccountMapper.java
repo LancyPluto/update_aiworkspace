@@ -58,12 +58,14 @@ public interface ModelVendorAccountMapper extends BaseMapper<ModelVendorAccount>
 
     @Insert("""
             INSERT INTO model_vendor_accounts(vendor_code, account_name, base_url, api_key, extra_auth_json,
-                                              console_url, balance_url, balance_query_mode, balance_amount,
+                                              console_url, balance_url, console_cookie, console_cookie_status,
+                                              balance_query_mode, balance_amount,
                                               balance_currency, balance_status, balance_low_threshold,
                                               balance_updated_at, balance_error_message, health_status,
                                               enabled, is_deleted, created_at, updated_at)
             VALUES(#{account.vendorCode}, #{account.accountName}, #{account.baseUrl}, #{account.apiKey},
                    #{account.extraAuthJson}, #{account.consoleUrl}, #{account.balanceUrl},
+                   #{account.consoleCookie}, #{account.consoleCookieStatus},
                    #{account.balanceQueryMode}, #{account.balanceAmount}, #{account.balanceCurrency},
                    #{account.balanceStatus}, #{account.balanceLowThreshold}, #{account.balanceUpdatedAt},
                    #{account.balanceErrorMessage}, #{account.healthStatus}, #{account.enabled},
@@ -81,6 +83,8 @@ public interface ModelVendorAccountMapper extends BaseMapper<ModelVendorAccount>
                 extra_auth_json = #{account.extraAuthJson},
                 console_url = #{account.consoleUrl},
                 balance_url = #{account.balanceUrl},
+                console_cookie = #{account.consoleCookie},
+                console_cookie_status = #{account.consoleCookieStatus},
                 balance_query_mode = #{account.balanceQueryMode},
                 balance_amount = #{account.balanceAmount},
                 balance_currency = #{account.balanceCurrency},

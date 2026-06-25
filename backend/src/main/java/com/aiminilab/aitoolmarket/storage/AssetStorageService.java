@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.storage;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.model.CopyObjectRequest;
+import com.aliyun.oss.model.GeneratePresignedUrlRequest;
 import com.aliyun.oss.model.ObjectMetadata;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
@@ -22,8 +23,11 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -39,6 +43,7 @@ public class AssetStorageService {
     private static final String GENERATED_PREFIX = "/generated/";
     private static final Set<String> IMAGE_EXTENSIONS = Set.of("png", "jpg", "jpeg", "gif", "webp", "avif", "bmp");
     private static final Pattern CF_IMAGE_TRANSFORM = Pattern.compile("^(https?://[^/]+)/cdn-cgi/image/[^/]+(/.*)");
+    private static final Pattern OSS_PROCESS_SUFFIX = Pattern.compile("^(.*?)\\?x-oss-process=.*$");
 
     private final AppProperties appProperties;
     private final Path localRoot;
@@ -135,27 +140,25 @@ public class AssetStorageService {
 
     private StoredAsset storeBytesForVisibility(String relativeKey, byte[] data, String contentType, AssetVisibility visibility) {
         String normalizedKey = normalizeRelativeKey(relativeKey);
+        String hashedKey = contentHashKey(normalizedKey, data);
         if (isOssMode()) {
-            return storeToOss(normalizedKey, data, contentType, visibility);
+            return storeToOss(hashedKey, data, contentType, visibility);
         }
-        return storeToLocal(normalizedKey, data);
+        return storeToLocal(hashedKey, data);
     }
 
     public StoredAsset storeStream(String relativeKey, InputStream stream, long size, String contentType) {
         String normalizedKey = normalizeRelativeKey(relativeKey);
-        if (isOssMode()) {
-            try {
-                byte[] data = stream.readAllBytes();
-                return storeToOss(normalizedKey, data, contentType, AssetVisibility.PRIVATE);
-            } catch (IOException exception) {
-                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "file save failed");
-            }
-        }
-        Path target = localAbsolutePath(normalizedKey);
         try {
+            byte[] data = stream.readAllBytes();
+            String hashedKey = contentHashKey(normalizedKey, data);
+            if (isOssMode()) {
+                return storeToOss(hashedKey, data, contentType, AssetVisibility.PRIVATE);
+            }
+            Path target = localAbsolutePath(hashedKey);
             Files.createDirectories(target.getParent());
-            Files.copy(stream, target);
-            return new StoredAsset(normalizedKey, publicUrlForKey(normalizedKey), target.toString());
+            Files.write(target, data);
+            return new StoredAsset(hashedKey, publicUrlForKey(hashedKey), target.toString());
         } catch (IOException exception) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "file save failed");
         }
@@ -191,6 +194,12 @@ public class AssetStorageService {
         String normalized = url.trim();
         if (normalized.startsWith("http://") || normalized.startsWith("https://")) {
             if (isOssMode()) {
+                if (normalized.contains("/cdn/")) {
+                    AssetReference ref = parseManagedAssetUrl(normalized);
+                    if (ref != null) {
+                        return urlForKey(ref.relativeKey(), AssetVisibility.PUBLIC);
+                    }
+                }
                 return normalized;
             }
             String relative = relativeKeyFromPublicUrl(normalized);
@@ -212,10 +221,89 @@ public class AssetStorageService {
             return null;
         }
         if (isOssMode()) {
+            if (isLegacyPublicKey(relative)) {
+                if (publicObjectExists(relative)) {
+                    return urlForKey(relative, AssetVisibility.PUBLIC);
+                }
+                Path file = localAbsolutePath(relative);
+                if (Files.exists(file)) {
+                    return normalized;
+                }
+            }
             return normalized;
         }
         Path file = localAbsolutePath(relative);
         return Files.exists(file) ? normalized : null;
+    }
+
+    /**
+     * Rewrites legacy {@code /generated/...} public asset URLs to the configured OSS public base URL
+     * when the object already exists in the public bucket.
+     */
+    public String normalizeLegacyPublicUrl(String url) {
+        if (url == null || url.isBlank() || !isOssMode()) {
+            return url;
+        }
+        AssetReference ref = parseManagedAssetUrl(url.trim());
+        if (ref == null || !isLegacyPublicKey(ref.relativeKey())) {
+            return url;
+        }
+        if (!publicObjectExists(ref.relativeKey())) {
+            return url;
+        }
+        return urlForKey(ref.relativeKey(), AssetVisibility.PUBLIC);
+    }
+
+    public String migrateLegacyPublicUrl(String url) {
+        if (url == null || url.isBlank() || !isOssMode()) {
+            return url;
+        }
+        String trimmed = url.trim();
+        if (!trimmed.startsWith(GENERATED_PREFIX)) {
+            return normalizeLegacyPublicUrl(trimmed);
+        }
+        String relativeKey = trimmed.substring(GENERATED_PREFIX.length());
+        if (relativeKey.isBlank() || relativeKey.contains("..") || !isLegacyPublicKey(relativeKey)) {
+            return url;
+        }
+        try {
+            relativeKey = URLDecoder.decode(relativeKey, StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException ignored) {
+            return url;
+        }
+        if (publicObjectExists(relativeKey)) {
+            return urlForKey(relativeKey, AssetVisibility.PUBLIC);
+        }
+        Path localFile = localAbsolutePath(relativeKey);
+        if (!Files.exists(localFile)) {
+            return url;
+        }
+        try {
+            byte[] data = Files.readAllBytes(localFile);
+            String contentType = Files.probeContentType(localFile);
+            return storeBytesPublic(relativeKey, data, contentType).publicUrl();
+        } catch (IOException exception) {
+            log.warn("Failed to migrate legacy public asset: key={}", relativeKey, exception);
+            return url;
+        }
+    }
+
+    public boolean publicObjectExists(String relativeKey) {
+        if (!isOssMode() || ossClient == null) {
+            return false;
+        }
+        AppProperties.AssetStorage storage = appProperties.getAssetStorage();
+        String bucket = storage.getOssPublicBucket();
+        if (bucket.isBlank()) {
+            return false;
+        }
+        String objectKey = storage.getOssKeyPrefix() + normalizeRelativeKey(relativeKey);
+        try {
+            return ossClient.doesObjectExist(bucket, objectKey);
+        } catch (RuntimeException exception) {
+            log.warn("OSS existence check failed: bucket={}, key={}", bucket, objectKey, exception);
+            return false;
+        }
     }
 
     public Path localAbsolutePath(String relativeKey) {
@@ -284,6 +372,19 @@ public class AssetStorageService {
         String targetBucket = bucketFor(targetVisibility, storage);
         String targetKey = storage.getOssKeyPrefix() + source.relativeKey();
         if (source.bucket().equals(targetBucket) && source.objectKey().equals(targetKey)) {
+            if (ossClient.doesObjectExist(targetBucket, targetKey)) {
+                return urlForKey(source.relativeKey(), targetVisibility);
+            }
+            for (String fallback : knownBuckets(storage)) {
+                if (fallback.equals(targetBucket)) continue;
+                if (ossClient.doesObjectExist(fallback, targetKey)) {
+                    ossClient.copyObject(new CopyObjectRequest(fallback, targetKey, targetBucket, targetKey));
+                    ossClient.deleteObject(fallback, targetKey);
+                    log.info("OSS asset recovered: oss://{}/{} -> oss://{}/{}", fallback, targetKey, targetBucket, targetKey);
+                    return urlForKey(source.relativeKey(), targetVisibility);
+                }
+            }
+            log.warn("OSS asset missing from all buckets: key={}", targetKey);
             return urlForKey(source.relativeKey(), targetVisibility);
         }
         try {
@@ -302,10 +403,19 @@ public class AssetStorageService {
         String base = visibility == AssetVisibility.PUBLIC ? getPublicBaseUrl() : getPrivateBaseUrl();
         if (base != null && !base.isBlank()) {
             String rawUrl = base.replaceAll("/+$", "") + "/" + normalizedKey;
-            if (visibility == AssetVisibility.PUBLIC && isImageKey(normalizedKey)) {
+            if (isImageKey(normalizedKey)) {
                 return applyImageTransform(rawUrl);
             }
             return rawUrl;
+        }
+        return GENERATED_PREFIX + normalizedKey;
+    }
+
+    private String rawUrlForKey(String relativeKey, AssetVisibility visibility) {
+        String normalizedKey = normalizeRelativeKey(relativeKey);
+        String base = visibility == AssetVisibility.PUBLIC ? getPublicBaseUrl() : getPrivateBaseUrl();
+        if (base != null && !base.isBlank()) {
+            return base.replaceAll("/+$", "") + "/" + normalizedKey;
         }
         return GENERATED_PREFIX + normalizedKey;
     }
@@ -319,13 +429,7 @@ public class AssetStorageService {
     private String applyImageTransform(String url) {
         String options = appProperties.getAssetStorage().getImageTransformOptions();
         if (options.isBlank()) return url;
-        try {
-            java.net.URI uri = java.net.URI.create(url);
-            String authority = uri.getScheme() + "://" + uri.getAuthority();
-            return authority + "/cdn-cgi/image/" + options + uri.getPath();
-        } catch (Exception e) {
-            return url;
-        }
+        return url + "?x-oss-process=" + options;
     }
 
     private String relativeKeyFromPublicUrl(String url) {
@@ -362,10 +466,17 @@ public class AssetStorageService {
                 return new AssetReference(storage.getOssPrivateBucket(), storage.getOssKeyPrefix() + relative, relative);
             }
         }
-        // Handle legacy /generated/ paths
+        // Handle legacy /generated/ paths. Some historical public assets were also
+        // stored under /generated/, so route them back to the correct bucket by key.
         if (normalized.startsWith(GENERATED_PREFIX) && !storage.getOssPrivateBucket().isBlank()) {
             String relative = normalizeRelativeKey(normalized.substring(GENERATED_PREFIX.length()));
-            return new AssetReference(storage.getOssPrivateBucket(), storage.getOssKeyPrefix() + relative, relative);
+            String bucket = legacyGeneratedBucket(storage, relative);
+            return new AssetReference(bucket, storage.getOssKeyPrefix() + relative, relative);
+        }
+        int cdnPrefixIdx = normalized.indexOf("/cdn/");
+        if (cdnPrefixIdx >= 0 && !storage.getOssPublicBucket().isBlank()) {
+            String relative = normalizeRelativeKey(normalized.substring(cdnPrefixIdx + "/cdn/".length()));
+            return new AssetReference(storage.getOssPublicBucket(), storage.getOssKeyPrefix() + relative, relative);
         }
         String bucketFromHost = bucketFromOssHost(normalized);
         if (bucketFromHost == null || !knownBuckets(storage).contains(bucketFromHost)) {
@@ -410,6 +521,21 @@ public class AssetStorageService {
         return buckets;
     }
 
+    private static String legacyGeneratedBucket(AppProperties.AssetStorage storage, String relativeKey) {
+        String normalized = normalizeRelativeKey(relativeKey);
+        if (isLegacyPublicKey(normalized) && !storage.getOssPublicBucket().isBlank()) {
+            return storage.getOssPublicBucket();
+        }
+        return storage.getOssPrivateBucket();
+    }
+
+    private static boolean isLegacyPublicKey(String relativeKey) {
+        return relativeKey.startsWith("tool-covers/")
+                || relativeKey.startsWith("avatars/")
+                || relativeKey.startsWith("icons/")
+                || relativeKey.startsWith("customer-service/");
+    }
+
     private static String bucketFor(AssetVisibility visibility, AppProperties.AssetStorage storage) {
         return visibility == AssetVisibility.PUBLIC ? storage.getOssPublicBucket() : storage.getOssPrivateBucket();
     }
@@ -427,8 +553,11 @@ public class AssetStorageService {
     }
 
     private static String stripImageTransformPrefix(String url) {
-        Matcher m = CF_IMAGE_TRANSFORM.matcher(url);
-        return m.matches() ? m.group(1) + m.group(2) : url;
+        Matcher cfMatcher = CF_IMAGE_TRANSFORM.matcher(url);
+        if (cfMatcher.matches()) return cfMatcher.group(1) + cfMatcher.group(2);
+        Matcher ossMatcher = OSS_PROCESS_SUFFIX.matcher(url);
+        if (ossMatcher.matches()) return ossMatcher.group(1);
+        return url;
     }
 
     private static String stripQueryAndFragment(String value) {
@@ -438,6 +567,22 @@ public class AssetStorageService {
         if (query >= 0) end = Math.min(end, query);
         if (hash >= 0) end = Math.min(end, hash);
         return value.substring(0, end);
+    }
+
+    static String contentHashKey(String relativeKey, byte[] data) {
+        int lastSlash = relativeKey.lastIndexOf('/');
+        String dir = lastSlash >= 0 ? relativeKey.substring(0, lastSlash + 1) : "";
+        String ext = "";
+        int dot = relativeKey.lastIndexOf('.');
+        if (dot > Math.max(lastSlash, 0)) {
+            ext = relativeKey.substring(dot);
+        }
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest(data);
+            return dir + HexFormat.of().formatHex(hash).substring(0, 40) + ext;
+        } catch (NoSuchAlgorithmException e) {
+            return relativeKey;
+        }
     }
 
     private static String normalizeRelativeKey(String relativeKey) {
@@ -462,7 +607,66 @@ public class AssetStorageService {
         return "https://" + value;
     }
 
+    public String ossDirectUrl(String relativeKey, String bucket) {
+        AppProperties.AssetStorage storage = appProperties.getAssetStorage();
+        String normalizedKey = normalizeRelativeKey(relativeKey);
+        String objectKey = storage.getOssKeyPrefix() + normalizedKey;
+        String endpoint = storage.getOssEndpoint();
+        if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) {
+            int schemeEnd = endpoint.indexOf("://") + 3;
+            return endpoint.substring(0, schemeEnd) + bucket + "." + endpoint.substring(schemeEnd) + "/" + objectKey;
+        }
+        return "https://" + bucket + "." + endpoint + "/" + objectKey;
+    }
+
+    public String rewriteResultUrl(String url, boolean forAdmin) {
+        if (url == null || url.isBlank()) {
+            return url;
+        }
+        AssetReference ref = parseManagedAssetUrl(url);
+        if (ref == null) {
+            return url;
+        }
+        if (forAdmin) {
+            if (!isOssMode()) {
+                return rawUrlForKey(ref.relativeKey(), AssetVisibility.PRIVATE);
+            }
+            return ossDirectUrl(ref.relativeKey(), ref.bucket());
+        }
+        AppProperties.AssetStorage storage = appProperties.getAssetStorage();
+        if (ref.bucket().equals(storage.getOssPublicBucket())) {
+            return urlForKey(ref.relativeKey(), AssetVisibility.PUBLIC);
+        }
+        if (storage.isCdnAuthConfigured()) {
+            return generateCdnSignedUrl(ref.relativeKey(), true);
+        }
+        return urlForKey(ref.relativeKey(), AssetVisibility.PRIVATE);
+    }
+
+    public String rewriteDownloadUrl(String url) {
+        if (url == null || url.isBlank()) {
+            return url;
+        }
+        AssetReference ref = parseManagedAssetUrl(url);
+        if (ref == null) {
+            return url;
+        }
+        AppProperties.AssetStorage storage = appProperties.getAssetStorage();
+        if (ref.bucket().equals(storage.getOssPublicBucket())) {
+            return rawUrlForKey(ref.relativeKey(), AssetVisibility.PUBLIC);
+        }
+        if (storage.isCdnAuthConfigured()) {
+            return generateCdnSignedUrl(ref.relativeKey(), false);
+        }
+        return rawUrlForKey(ref.relativeKey(), AssetVisibility.PRIVATE);
+    }
+
     public String generateSignedUrl(String relativeKey, AssetVisibility visibility, int expirationSeconds) {
+        return generateSignedUrl(relativeKey, visibility, expirationSeconds, null);
+    }
+
+    public String generateSignedUrl(String relativeKey, AssetVisibility visibility, int expirationSeconds,
+                                    String process) {
         if (!isOssMode() || ossClient == null) {
             return urlForKey(relativeKey, visibility);
         }
@@ -470,12 +674,53 @@ public class AssetStorageService {
         String bucket = bucketFor(visibility, storage);
         String objectKey = storage.getOssKeyPrefix() + normalizeRelativeKey(relativeKey);
         Date expiration = new Date(System.currentTimeMillis() + (long) expirationSeconds * 1000);
-        URL url = ossClient.generatePresignedUrl(bucket, objectKey, expiration);
-        return url.toString();
+        if (process != null && !process.isBlank()) {
+            GeneratePresignedUrlRequest request = new GeneratePresignedUrlRequest(bucket, objectKey);
+            request.setExpiration(expiration);
+            request.setProcess(process);
+            return ossClient.generatePresignedUrl(request).toString();
+        }
+        return ossClient.generatePresignedUrl(bucket, objectKey, expiration).toString();
     }
 
     public String generateSignedPrivateUrl(String relativeKey) {
         return generateSignedUrl(relativeKey, AssetVisibility.PRIVATE, 3600);
+    }
+
+    public String generateCdnSignedUrl(String relativeKey, boolean withImageTransform) {
+        AppProperties.AssetStorage storage = appProperties.getAssetStorage();
+        if (!storage.isCdnAuthConfigured()) {
+            return withImageTransform
+                    ? urlForKey(relativeKey, AssetVisibility.PRIVATE)
+                    : rawUrlForKey(relativeKey, AssetVisibility.PRIVATE);
+        }
+        String normalizedKey = normalizeRelativeKey(relativeKey);
+        String objectKey = storage.getOssKeyPrefix() + normalizedKey;
+        String path = "/" + objectKey;
+        String cdnBase = storage.getCdnPrivateBaseUrl().replaceAll("/+$", "");
+        String authKey = storage.getCdnAuthKey();
+        long timestamp = System.currentTimeMillis() / 1000 + storage.getCdnAuthExpiration();
+        String rand = "0";
+        String uid = "0";
+        String toSign = path + "-" + timestamp + "-" + rand + "-" + uid + "-" + authKey;
+        String md5 = md5Hex(toSign);
+        String url = cdnBase + path + "?auth_key=" + timestamp + "-" + rand + "-" + uid + "-" + md5;
+        if (withImageTransform && isImageKey(normalizedKey)) {
+            String options = storage.getImageTransformOptions();
+            if (!options.isBlank()) {
+                url += "&x-oss-process=" + options;
+            }
+        }
+        return url;
+    }
+
+    private static String md5Hex(String input) {
+        try {
+            byte[] digest = MessageDigest.getInstance("MD5").digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("MD5 not available", e);
+        }
     }
 
     public enum AssetVisibility {

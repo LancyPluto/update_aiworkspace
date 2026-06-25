@@ -21,6 +21,7 @@ import {
 } from "lucide-vue-next"
 import { computed, ref, onMounted, watch } from "vue"
 import AppShell from "@/components/AppShell.vue"
+import MediaComparisonSlider from "@/components/MediaComparisonSlider.vue"
 import { fetchToolByCode } from "@/api/toolApi"
 import { createTask } from "@/api/taskApi"
 import { uploadChatFile } from "@/api/aiToolApi"
@@ -98,12 +99,18 @@ const afterImageUrl = computed(() =>
   tool.value?.coverUrl ||
   "",
 )
-const beforeVideoUrl = computed(() => frontendStyle.value?.beforeVideoUrl || tool.value?.coverUrl || "")
+const beforeVideoUrl = computed(() =>
+  frontendStyle.value?.comparisonOriginalUrl ||
+  frontendStyle.value?.beforeVideoUrl ||
+  tool.value?.coverUrl ||
+  ""
+)
 const afterVideoUrl = computed(() =>
+  frontendStyle.value?.comparisonEffectUrl ||
   frontendStyle.value?.afterVideoUrl ||
   frontendStyle.value?.demoThumbnails?.[0] ||
   tool.value?.coverUrl ||
-  "",
+  ""
 )
 const mediaToolBadge = computed(() => (toolKind.value === "digitalHuman" ? "AI Digital Human" : "AI Video Tool"))
 const imageUploadAccept = computed(() => uploadAccept(imageField.value, "image"))
@@ -518,42 +525,16 @@ onMounted(async () => {
                 </div>
               </div>
 
-              <div class="grid gap-4 sm:grid-cols-2">
-                <div class="overflow-hidden rounded-lg border border-border bg-card">
-                  <div class="flex items-center justify-between px-4 py-3 text-xs font-medium text-muted-foreground">
-                    <span>Before</span>
-                    <span>Original</span>
-                  </div>
-                  <div class="aspect-[4/3] bg-muted">
-                    <img
-                      v-if="beforeImageUrl"
-                      :src="normalizedMediaUrl(beforeImageUrl)"
-                      :alt="`${title} before`"
-                      class="h-full w-full object-cover"
-                    />
-                    <div v-else class="flex h-full items-center justify-center text-sm text-muted-foreground">
-                      <ImageIcon class="mr-2 h-4 w-4" /> Before
-                    </div>
-                  </div>
-                </div>
-                <div class="overflow-hidden rounded-lg border border-primary/35 bg-card shadow-sm shadow-primary/10">
-                  <div class="flex items-center justify-between px-4 py-3 text-xs font-medium text-primary">
-                    <span>After</span>
-                    <span>AI Result</span>
-                  </div>
-                  <div class="aspect-[4/3] bg-muted">
-                    <img
-                      v-if="afterImageUrl"
-                      :src="normalizedMediaUrl(afterImageUrl)"
-                      :alt="`${title} after`"
-                      class="h-full w-full object-cover"
-                    />
-                    <div v-else class="flex h-full items-center justify-center text-sm text-muted-foreground">
-                      <Sparkles class="mr-2 h-4 w-4" /> After
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <MediaComparisonSlider
+                v-if="beforeImageUrl && afterImageUrl"
+                :before-src="normalizedMediaUrl(beforeImageUrl)"
+                :after-src="normalizedMediaUrl(afterImageUrl)"
+                :before-is-video="isVideoUrl(beforeImageUrl)"
+                :after-is-video="isVideoUrl(afterImageUrl)"
+                before-label="Original"
+                after-label="AI Result"
+                aspect-ratio="4/3"
+              />
 
               <div v-if="frontendStyle?.demoThumbnails?.length" class="flex gap-3 overflow-x-auto pb-1">
                 <img
@@ -737,60 +718,16 @@ onMounted(async () => {
                 </div>
               </div>
 
-              <div class="grid gap-4 sm:grid-cols-2">
-                <div class="overflow-hidden rounded-lg border border-border bg-card">
-                  <div class="flex items-center justify-between px-4 py-3 text-xs font-medium text-muted-foreground">
-                    <span>Before</span>
-                    <span>Source</span>
-                  </div>
-                  <div class="aspect-video bg-muted">
-                    <video
-                      v-if="beforeVideoUrl && isVideoUrl(beforeVideoUrl)"
-                      :src="normalizedMediaUrl(beforeVideoUrl)"
-                      class="h-full w-full object-cover"
-                      muted
-                      loop
-                      playsinline
-                      controls
-                    />
-                    <img
-                      v-else-if="beforeVideoUrl"
-                      :src="normalizedMediaUrl(beforeVideoUrl)"
-                      :alt="`${title} before`"
-                      class="h-full w-full object-cover"
-                    />
-                    <div v-else class="flex h-full items-center justify-center text-sm text-muted-foreground">
-                      <Video class="mr-2 h-4 w-4" /> Before
-                    </div>
-                  </div>
-                </div>
-                <div class="overflow-hidden rounded-lg border border-primary/35 bg-card shadow-sm shadow-primary/10">
-                  <div class="flex items-center justify-between px-4 py-3 text-xs font-medium text-primary">
-                    <span>After</span>
-                    <span>AI Result</span>
-                  </div>
-                  <div class="aspect-video bg-muted">
-                    <video
-                      v-if="afterVideoUrl && isVideoUrl(afterVideoUrl)"
-                      :src="normalizedMediaUrl(afterVideoUrl)"
-                      class="h-full w-full object-cover"
-                      muted
-                      loop
-                      playsinline
-                      controls
-                    />
-                    <img
-                      v-else-if="afterVideoUrl"
-                      :src="normalizedMediaUrl(afterVideoUrl)"
-                      :alt="`${title} after`"
-                      class="h-full w-full object-cover"
-                    />
-                    <div v-else class="flex h-full items-center justify-center text-sm text-muted-foreground">
-                      <Sparkles class="mr-2 h-4 w-4" /> After
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <MediaComparisonSlider
+                v-if="beforeVideoUrl && afterVideoUrl"
+                :before-src="normalizedMediaUrl(beforeVideoUrl)"
+                :after-src="normalizedMediaUrl(afterVideoUrl)"
+                :before-is-video="isVideoUrl(beforeVideoUrl)"
+                :after-is-video="isVideoUrl(afterVideoUrl)"
+                before-label="Source"
+                after-label="AI Result"
+                aspect-ratio="16/9"
+              />
             </div>
 
             <aside v-if="false" class="rounded-lg border border-border bg-card p-5 shadow-sm">

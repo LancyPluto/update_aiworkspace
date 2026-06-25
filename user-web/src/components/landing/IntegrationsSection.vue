@@ -1,20 +1,20 @@
 <script setup lang="ts">
 const topRow = [
-  { type: 'image', src: '/AI生成的梦幻风景.png', title: 'AI 生成的梦幻风景' },
+  { type: 'image', src: 'https://cdn.wlcloudai.com/static/AI生成的梦幻风景.png', title: 'AI 生成的梦幻风景' },
   { type: 'video', src: 'https://www.w3schools.com/html/mov_bbb.mp4', thumbnail: 'https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=600&h=400&fit=crop', title: 'AI 视频生成示例' },
-  { type: 'image', src: '/产品图生成.png', title: '产品图生成' },
-  { type: 'image', src: '/抽象.png', title: 'AI 抽象画作' },
-  { type: 'video', src: '/猴子视频.mp4', thumbnail: 'https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=600&h=400&fit=crop', title: 'AI 视频创作' },
-  { type: 'image', src: '/赛博朋克.png', title: '赛博朋克风格' },
-  { type: 'video', src: '/3D动画生成.mp4', thumbnail: 'https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=600&h=400&fit=crop', title: '3D 动画生成' },
+  { type: 'image', src: 'https://cdn.wlcloudai.com/static/产品图生成.png', title: '产品图生成' },
+  { type: 'image', src: 'https://cdn.wlcloudai.com/static/抽象.png', title: 'AI 抽象画作' },
+  { type: 'video', src: 'https://cdn.wlcloudai.com/static/猴子视频.mp4', thumbnail: 'https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=600&h=400&fit=crop', title: 'AI 视频创作' },
+  { type: 'image', src: 'https://cdn.wlcloudai.com/static/赛博朋克.png', title: '赛博朋克风格' },
+  { type: 'video', src: 'https://cdn.wlcloudai.com/static/3D动画生成.mp4', thumbnail: 'https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=600&h=400&fit=crop', title: '3D 动画生成' },
 ]
 
 const bottomRow = [
-  { type: 'image', src: '/人像艺术.png', title: '人像艺术' },
-  { type: 'image', src: '/油画风.png', title: '油画风格转换' },
+  { type: 'image', src: 'https://cdn.wlcloudai.com/static/人像艺术.png', title: '人像艺术' },
+  { type: 'image', src: 'https://cdn.wlcloudai.com/static/油画风.png', title: '油画风格转换' },
   { type: 'video', src: 'https://www.w3schools.com/html/movie.mp4', thumbnail: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=600&h=400&fit=crop', title: '风景视频生成' },
-  { type: 'image', src: '/动物肖像图.png', title: '动物肖像' },
-  { type: 'image', src: '/漫剧.png', title: '动漫插画' },
+  { type: 'image', src: 'https://cdn.wlcloudai.com/static/动物肖像图.png', title: '动物肖像' },
+  { type: 'image', src: 'https://cdn.wlcloudai.com/static/漫剧.png', title: '动漫插画' },
   { type: 'video', src: 'https://www.w3schools.com/html/mov_bbb.mp4', thumbnail: 'https://images.unsplash.com/photo-1614854262318-831574f15f1f?w=600&h=400&fit=crop', title: '产品视频' },
   { type: 'image', src: 'https://images.unsplash.com/photo-1614851099511-773084f6911d?w=600&h=400&fit=crop', title: '渐变艺术' },
 ]

@@ -4,6 +4,7 @@ import { ImageOff, Play } from "lucide-vue-next"
 import {
   normalizeCommunityMediaUrl,
   resolveCommunityDerivativeUrl,
+  resolveOssVideoPosterUrl,
   type CommunityMediaKind,
 } from "@/utils/communityPostMedia"
 
@@ -36,9 +37,7 @@ const imageThumbUrl = computed(() =>
 const imageLqipUrl = computed(() =>
   useDerivativeMedia ? resolveCommunityDerivativeUrl(props.sourceUrl, "image-lqip") : "",
 )
-const videoPosterUrl = computed(() =>
-  useDerivativeMedia ? resolveCommunityDerivativeUrl(props.sourceUrl, "video-poster") : "",
-)
+const videoPosterUrl = computed(() => resolveOssVideoPosterUrl(props.sourceUrl))
 const videoPreviewUrl = computed(() =>
   useDerivativeMedia ? resolveCommunityDerivativeUrl(props.sourceUrl, "video-preview") : normalizedSourceUrl.value,
 )

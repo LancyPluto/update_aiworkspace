@@ -105,7 +105,7 @@ export function resolveModelBrand(tool: ModelBrandInput): ModelBrand {
 
   return {
     name: tool.modelConfigName || tool.modelName || "WLCloud AI",
-    iconUrl: "/logo.svg",
+    iconUrl: "https://cdn.wlcloudai.com/static/logo.svg",
     color: tool.primaryColor || "#2563eb",
   }
 }

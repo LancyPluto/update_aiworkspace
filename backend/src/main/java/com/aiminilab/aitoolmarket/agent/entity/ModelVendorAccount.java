@@ -17,6 +17,8 @@ public class ModelVendorAccount {
     private String extraAuthJson;
     private String consoleUrl;
     private String balanceUrl;
+    private String consoleCookie;
+    private String consoleCookieStatus;
     private String balanceQueryMode;
     private BigDecimal balanceAmount;
     private String balanceCurrency;
@@ -46,6 +48,10 @@ public class ModelVendorAccount {
     public void setConsoleUrl(String consoleUrl) { this.consoleUrl = consoleUrl; }
     public String getBalanceUrl() { return balanceUrl; }
     public void setBalanceUrl(String balanceUrl) { this.balanceUrl = balanceUrl; }
+    public String getConsoleCookie() { return consoleCookie; }
+    public void setConsoleCookie(String consoleCookie) { this.consoleCookie = consoleCookie; }
+    public String getConsoleCookieStatus() { return consoleCookieStatus; }
+    public void setConsoleCookieStatus(String consoleCookieStatus) { this.consoleCookieStatus = consoleCookieStatus; }
     public String getBalanceQueryMode() { return balanceQueryMode; }
     public void setBalanceQueryMode(String balanceQueryMode) { this.balanceQueryMode = balanceQueryMode; }
     public BigDecimal getBalanceAmount() { return balanceAmount; }

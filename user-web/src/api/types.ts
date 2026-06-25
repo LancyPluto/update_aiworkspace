@@ -476,6 +476,9 @@ export interface WorkflowSceneScript {
   imageToVideoPrompt?: string
   multiImageVideoPrompt?: string
   keyframeTransitionPrompt?: string
+  characterRefs?: string[]
+  propRefs?: string[]
+  locationRefs?: string[]
 }
 
 export interface WorkflowStagePreview {
@@ -488,6 +491,7 @@ export interface WorkflowStagePreview {
     screenplay?: string
     genre?: string
     characters?: Array<{ name?: string; appearance?: string; personality?: string }>
+    props?: Array<{ name?: string; description?: string }>
     locations?: Array<{ name?: string; description?: string }>
     sceneTitle?: string
     sceneDescription?: string
@@ -501,11 +505,13 @@ export interface WorkflowStagePreview {
   }
   imageUrl?: string
   /** 多分镜关键帧（与 script.scenes 按 sceneIndex 对应） */
-  images?: Array<{ sceneIndex?: number; imageUrl: string }>
+  images?: Array<{ sceneIndex?: number; imageUrl: string; referenceAssetIds?: string[] }>
+  referenceAssets?: Array<{ assetType?: string; assetId?: string; name?: string; imageUrl: string }>
   audioUrl?: string
   /** 多分镜配音 */
   audios?: Array<{ sceneIndex?: number; audioUrl: string; speechText?: string }>
   videoUrl?: string
+  clips?: Array<{ sceneIndex?: number; videoUrl: string; referenceImages?: string[] }>
   finalVideoUrl?: string
 }
 

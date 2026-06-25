@@ -54,7 +54,8 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
             "minimax", List.of("minimax", "anthropic_compatible", "minimax_speech", "minimax_music"),
             "siliconflow", List.of("siliconflow_images", "siliconflow_speech", "openai_compatible"),
             "volcengine", List.of("volcengine_images", "seedance", "openai_compatible"),
-            "kling", List.of("kling_video", "openai_compatible")
+            "kling", List.of("kling_video", "openai_compatible"),
+            "dashscope", List.of("bailian_happyhorse", "openai_compatible")
     );
 
     private static final int DISCOVER_TIMEOUT_SECONDS = 30;
@@ -905,6 +906,16 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         }
         account.setConsoleUrl(blankToNull(request.consoleUrl()));
         account.setBalanceUrl(blankToNull(request.balanceUrl()));
+        if (request.consoleCookie() != null && !request.consoleCookie().isBlank()) {
+            account.setConsoleCookie(request.consoleCookie().trim());
+            account.setConsoleCookieStatus("ACTIVE");
+        } else if (Boolean.TRUE.equals(request.clearConsoleCookie())) {
+            account.setConsoleCookie(null);
+            account.setConsoleCookieStatus("UNKNOWN");
+        } else if (existing != null) {
+            account.setConsoleCookie(existing.getConsoleCookie());
+            account.setConsoleCookieStatus(existing.getConsoleCookieStatus());
+        }
         account.setBalanceQueryMode(resolveBalanceQueryMode(request, existing));
         if (request.balanceAmount() != null) {
             account.setBalanceAmount(request.balanceAmount());
@@ -1055,6 +1066,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
             case "siliconflow" -> "siliconflow_images";
             case "volcengine" -> "volcengine_images";
             case "kling" -> "kling_video";
+            case "dashscope" -> "bailian_happyhorse";
             case "minimax" -> "minimax";
             case "openai_gateway" -> "openai_images_gateway";
             case "mock" -> "mock";

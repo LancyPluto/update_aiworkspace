@@ -593,6 +593,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                             null,
                             item.consoleUrl(),
                             item.balanceUrl(),
+                            null,
+                            null,
                             item.balanceQueryMode(),
                             item.balanceAmount(),
                             item.balanceCurrency(),

@@ -6,6 +6,7 @@ import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.community.mapper.CommunityEventMapper;
+import com.aiminilab.aitoolmarket.community.entity.CommunityPost;
 import com.aiminilab.aitoolmarket.community.mapper.CommunityPostMapper;
 import com.aiminilab.aitoolmarket.credit.dto.PricingBreakdownItem;
 import com.aiminilab.aitoolmarket.credit.dto.PricingQuote;
@@ -35,6 +36,7 @@ import com.aiminilab.aitoolmarket.task.metrics.TaskMetrics;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.AgentToolCall;
 import com.aiminilab.aitoolmarket.agent.service.AgentAttachmentUrlResolver;
+import com.aiminilab.aitoolmarket.storage.AssetStorageService;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -49,8 +51,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class TaskServiceImpl implements TaskService {
@@ -72,6 +80,7 @@ public class TaskServiceImpl implements TaskService {
     private final CommunityEventMapper communityEventMapper;
     private final CommunityPostMapper communityPostMapper;
     private final AgentAttachmentUrlResolver agentAttachmentUrlResolver;
+    private final AssetStorageService assetStorageService;
     private final WorkflowExecutionService workflowExecutionService;
 
     public TaskServiceImpl(
@@ -90,6 +99,7 @@ public class TaskServiceImpl implements TaskService {
             CommunityEventMapper communityEventMapper,
             CommunityPostMapper communityPostMapper,
             AgentAttachmentUrlResolver agentAttachmentUrlResolver,
+            AssetStorageService assetStorageService,
             @Lazy WorkflowExecutionService workflowExecutionService
     ) {
         this.taskMapper = taskMapper;
@@ -107,6 +117,7 @@ public class TaskServiceImpl implements TaskService {
         this.communityEventMapper = communityEventMapper;
         this.communityPostMapper = communityPostMapper;
         this.agentAttachmentUrlResolver = agentAttachmentUrlResolver;
+        this.assetStorageService = assetStorageService;
         this.workflowExecutionService = workflowExecutionService;
     }
 
@@ -179,18 +190,15 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public TaskDetailResponse detail(Long userId, Long taskId) {
-        return toDetail(findTask(taskId, userId));
+        return toDetail(findTask(taskId, userId), false);
     }
 
     @Override
     public PageResponse<TaskDetailResponse> list(Long userId, String status, String toolCode, Integer pageNo, Integer pageSize) {
         int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
         int offset = PageResponse.offset(pageNo, pageSize);
-        List<TaskDetailResponse> tasks = taskMapper
-                .findByUserId(userId, status, toolCode, normalizedPageSize, offset)
-                .stream()
-                .map(this::toDetail)
-                .toList();
+        List<AiTask> rawTasks = taskMapper.findByUserId(userId, status, toolCode, normalizedPageSize, offset);
+        List<TaskDetailResponse> tasks = toDetailBatch(rawTasks, false);
         long total = taskMapper.countByUserId(userId, status, toolCode);
         return PageResponse.of(tasks, total, pageNo, pageSize);
     }
@@ -236,16 +244,15 @@ public class TaskServiceImpl implements TaskService {
                                                       Integer pageNo, Integer pageSize) {
         int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
         int offset = PageResponse.offset(pageNo, pageSize);
-        List<TaskDetailResponse> tasks = taskMapper.findForAdmin(status, toolCode, userId, taskId, normalizedPageSize, offset).stream()
-                .map(this::toDetail)
-                .toList();
+        List<AiTask> rawTasks = taskMapper.findForAdmin(status, toolCode, userId, taskId, normalizedPageSize, offset);
+        List<TaskDetailResponse> tasks = toDetailBatch(rawTasks, true);
         long total = taskMapper.countForAdmin(status, toolCode, userId, taskId);
         return PageResponse.of(tasks, total, pageNo, pageSize);
     }
 
     @Override
     public TaskDetailResponse adminDetail(Long taskId) {
-        return toDetail(findTask(taskId));
+        return toDetail(findTask(taskId), true);
     }
 
     @Override
@@ -331,8 +338,9 @@ public class TaskServiceImpl implements TaskService {
         return taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig, params);
     }
 
-    private TaskDetailResponse toDetail(AiTask task) {
+    private TaskDetailResponse toDetail(AiTask task, boolean forAdmin) {
         TaskResultResponse result = taskMapper.findFirstResult(task.getId()).orElse(null);
+        result = rewriteResultUrls(result, forAdmin);
         int consumedCredits = taskMapper.sumConsumedCreditsByTaskId(task.getId());
         AgentTaskSourceResponse agentSource = agentToolCallMapper.findByTaskId(task.getId())
                 .map(this::toAgentTaskSource)
@@ -343,6 +351,122 @@ public class TaskServiceImpl implements TaskService {
                 .map(post -> post.getId())
                 .orElse(null);
         return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result, agentSource, communityPostId, consumedCredits);
+    }
+
+    private List<TaskDetailResponse> toDetailBatch(List<AiTask> tasks, boolean forAdmin) {
+        if (tasks == null || tasks.isEmpty()) return List.of();
+
+        List<Long> taskIds = tasks.stream().map(AiTask::getId).toList();
+
+        List<Map<String, Object>> firstResultRows = taskMapper.batchSelectFirstResults(taskIds);
+        Map<Long, String> firstResults = firstResultRows.stream()
+                .collect(Collectors.toMap(
+                        row -> ((Number) row.get("task_id")).longValue(),
+                        row -> {
+                            Object ct = row.get("content_text");
+                            return ct != null ? (String) ct : "";
+                        },
+                        (l, r) -> l
+                ));
+        Map<Long, String> resourceTypes = firstResultRows.stream()
+                .collect(Collectors.toMap(
+                        row -> ((Number) row.get("task_id")).longValue(),
+                        row -> {
+                            Object rt = row.get("resource_type");
+                            return rt != null ? (String) rt : "";
+                        },
+                        (l, r) -> l
+                ));
+
+        Map<Long, Integer> creditsByTask = taskMapper.batchSumConsumedCredits(taskIds).stream()
+                .collect(Collectors.toMap(
+                        row -> ((Number) row.get("task_id")).longValue(),
+                        row -> ((Number) row.get("total_credits")).intValue(),
+                        (l, r) -> l
+                ));
+
+        Map<Long, AgentToolCall> agentCallsByTask = agentToolCallMapper.batchFindByTaskIds(taskIds).stream()
+                .collect(Collectors.toMap(
+                        AgentToolCall::getTaskId,
+                        Function.identity(),
+                        (l, r) -> l
+                ));
+
+        Map<Long, CommunityPost> postsByTask = communityPostMapper.batchFindByTaskIds(taskIds).stream()
+                .collect(Collectors.toMap(
+                        CommunityPost::getTaskId,
+                        Function.identity(),
+                        (l, r) -> l
+                ));
+
+        return tasks.stream().map(task -> {
+            String contentText = firstResults.getOrDefault(task.getId(), null);
+            String resourceType = resourceTypes.getOrDefault(task.getId(), null);
+            TaskResultResponse result = (contentText != null)
+                    ? new TaskResultResponse(resourceType, contentText)
+                    : null;
+            result = rewriteResultUrls(result, forAdmin);
+
+            int consumedCredits = creditsByTask.getOrDefault(task.getId(), 0);
+
+            AgentToolCall agentCall = agentCallsByTask.get(task.getId());
+            AgentTaskSourceResponse agentSource = agentCall != null ? toAgentTaskSource(agentCall) : null;
+
+            CommunityPost post = postsByTask.get(task.getId());
+            Long communityPostId = null;
+            if (post != null
+                    && "PUBLISHED".equalsIgnoreCase(post.getStatus())
+                    && (post.getAuditStatus() == null || "APPROVED".equalsIgnoreCase(post.getAuditStatus()))) {
+                communityPostId = post.getId();
+            }
+
+            return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result, agentSource, communityPostId, consumedCredits);
+        }).toList();
+    }
+
+    private TaskResultResponse rewriteResultUrls(TaskResultResponse result, boolean forAdmin) {
+        if (result == null || result.contentText() == null || result.contentText().isBlank()) {
+            return result;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(result.contentText());
+            if (root.isObject()) {
+                rewriteUrlFields((ObjectNode) root, forAdmin);
+                return new TaskResultResponse(result.resourceType(), objectMapper.writeValueAsString(root));
+            }
+        } catch (Exception ignored) {
+        }
+        return result;
+    }
+
+    private void rewriteUrlFields(ObjectNode node, boolean forAdmin) {
+        List<Map.Entry<String, JsonNode>> entries = new ArrayList<>();
+        node.fields().forEachRemaining(entries::add);
+        for (Map.Entry<String, JsonNode> entry : entries) {
+            JsonNode value = entry.getValue();
+            if (value == null || value.isNull()) continue;
+            if (value.isTextual() && "url".equals(entry.getKey())) {
+                String original = value.asText();
+                String rewritten = assetStorageService.rewriteResultUrl(original, forAdmin);
+                if (rewritten != null && !rewritten.equals(original)) {
+                    node.put(entry.getKey(), rewritten);
+                }
+                if (!forAdmin) {
+                    String downloadUrl = assetStorageService.rewriteDownloadUrl(original);
+                    if (downloadUrl != null) {
+                        node.put("downloadUrl", downloadUrl);
+                    }
+                }
+            } else if (value.isObject()) {
+                rewriteUrlFields((ObjectNode) value, forAdmin);
+            } else if (value.isArray()) {
+                for (JsonNode item : value) {
+                    if (item.isObject()) {
+                        rewriteUrlFields((ObjectNode) item, forAdmin);
+                    }
+                }
+            }
+        }
     }
 
     private AgentTaskSourceResponse toAgentTaskSource(AgentToolCall call) {

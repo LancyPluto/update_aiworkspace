@@ -19,6 +19,8 @@ public record ModelVendorAccountResponse(
         String extraAuthJsonMasked,
         String consoleUrl,
         String balanceUrl,
+        String consoleCookieMasked,
+        String consoleCookieStatus,
         String balanceQueryMode,
         BigDecimal balanceAmount,
         String balanceCurrency,
@@ -47,6 +49,8 @@ public record ModelVendorAccountResponse(
                 maskJson(account.getExtraAuthJson()),
                 account.getConsoleUrl(),
                 account.getBalanceUrl(),
+                maskCookie(account.getConsoleCookie()),
+                account.getConsoleCookieStatus(),
                 account.getBalanceQueryMode(),
                 account.getBalanceAmount(),
                 account.getBalanceCurrency(),
@@ -72,6 +76,16 @@ public record ModelVendorAccountResponse(
             return "****";
         }
         return value.substring(0, 2) + "***" + value.substring(value.length() - 2);
+    }
+
+    private static String maskCookie(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        if (value.length() <= 10) {
+            return "****";
+        }
+        return value.substring(0, 6) + "***" + value.substring(value.length() - 4);
     }
 
     private static String maskJson(String value) {

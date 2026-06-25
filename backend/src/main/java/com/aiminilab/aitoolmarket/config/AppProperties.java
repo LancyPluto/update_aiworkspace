@@ -871,8 +871,11 @@ public class AppProperties {
         private String ossAccessKeySecret = "";
         /** Optional key prefix inside the bucket, e.g. {@code prod/} or {@code dev/}. */
         private String ossKeyPrefix = "";
-        /** Cloudflare Image Transformations options, e.g. {@code format=auto,quality=85}. When set, public image URLs use {@code /cdn-cgi/image/<options>/} prefix. */
+        /** OSS Image Processing options, e.g. {@code image/format,webp/quality,Q_85}. When set, public image URLs append {@code ?x-oss-process=<options>}. */
         private String imageTransformOptions = "";
+        private String cdnPrivateBaseUrl = "";
+        private String cdnAuthKey = "";
+        private int cdnAuthExpiration = 3600;
 
         public String getProvider() {
             return provider == null || provider.isBlank() ? "local" : provider.trim().toLowerCase(Locale.ROOT);
@@ -978,6 +981,34 @@ public class AppProperties {
 
         public void setImageTransformOptions(String imageTransformOptions) {
             this.imageTransformOptions = imageTransformOptions;
+        }
+
+        public String getCdnPrivateBaseUrl() {
+            return cdnPrivateBaseUrl == null ? "" : cdnPrivateBaseUrl.trim();
+        }
+
+        public void setCdnPrivateBaseUrl(String cdnPrivateBaseUrl) {
+            this.cdnPrivateBaseUrl = cdnPrivateBaseUrl;
+        }
+
+        public String getCdnAuthKey() {
+            return cdnAuthKey == null ? "" : cdnAuthKey.trim();
+        }
+
+        public void setCdnAuthKey(String cdnAuthKey) {
+            this.cdnAuthKey = cdnAuthKey;
+        }
+
+        public int getCdnAuthExpiration() {
+            return cdnAuthExpiration > 0 ? cdnAuthExpiration : 3600;
+        }
+
+        public void setCdnAuthExpiration(int cdnAuthExpiration) {
+            this.cdnAuthExpiration = cdnAuthExpiration;
+        }
+
+        public boolean isCdnAuthConfigured() {
+            return !getCdnPrivateBaseUrl().isBlank() && !getCdnAuthKey().isBlank();
         }
 
         public boolean isOss() {

@@ -355,6 +355,8 @@ type AccountFormState = ModelVendorAccountPayload & {
   id?: number
   apiKeyMasked?: string
   extraAuthJsonMasked?: string
+  consoleCookieMasked?: string
+  consoleCookieStatus?: string
   topUpEditBatch?: boolean
 }
 
@@ -1076,6 +1078,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       topUpEditBatch: hasTopUpEditBatch(account.extraAuthJson),
       consoleUrl: account.consoleUrl || "",
       balanceUrl: account.balanceUrl || "",
+      consoleCookieMasked: account.consoleCookieMasked || "",
+      consoleCookieStatus: account.consoleCookieStatus || "UNKNOWN",
       balanceQueryMode: account.balanceQueryMode || "MANUAL",
       balanceAmount: account.balanceAmount ?? undefined,
       balanceCurrency: account.balanceCurrency || "CNY",
@@ -1102,6 +1106,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         clearExtraAuthJson: accountForm.clearExtraAuthJson || (accountForm.topUpEditBatch !== undefined && !extraAuthJson),
         consoleUrl: accountForm.consoleUrl,
         balanceUrl: accountForm.balanceUrl,
+        consoleCookie: accountForm.consoleCookie,
+        clearConsoleCookie: accountForm.clearConsoleCookie,
         balanceQueryMode: accountForm.balanceQueryMode,
         balanceAmount: accountForm.balanceAmount,
         balanceCurrency: accountForm.balanceCurrency,
@@ -1251,17 +1257,41 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
           <Settings2 className="h-4 w-4" />
         </Button>
         {account.consoleUrl ? (
-          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" asChild title="打开控制台">
-            <a href={account.consoleUrl} target="_blank" rel="noreferrer" aria-label={`${vendorLabel} 控制台`}>
-              <ExternalLink className="h-4 w-4" />
-            </a>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            title="打开控制台"
+            onClick={() => {
+              if (account.consoleCookieStatus === "EXPIRED") {
+                window.alert("Cookie 已过期，请编辑该账户并填写新的 Cookie 后再访问控制台")
+                openEditAccount(account)
+              } else {
+                window.open(account.consoleUrl!, "_blank", "noreferrer")
+              }
+            }}
+          >
+            <ExternalLink className={`h-4 w-4 ${account.consoleCookieStatus === "EXPIRED" ? "text-red-500" : ""}`} />
           </Button>
         ) : null}
         {account.balanceUrl ? (
-          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" asChild title="打开余额页">
-            <a href={account.balanceUrl} target="_blank" rel="noreferrer" aria-label={`${vendorLabel} 余额页`}>
-              <Wallet className="h-4 w-4" />
-            </a>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            title="查看余额"
+            onClick={() => {
+              if (account.consoleCookieStatus === "EXPIRED") {
+                window.alert("Cookie 已过期，请编辑该账户并填写新的 Cookie")
+                openEditAccount(account)
+              } else {
+                window.open(account.balanceUrl!, "_blank", "noreferrer")
+              }
+            }}
+          >
+            <Wallet className={`h-4 w-4 ${account.consoleCookieStatus === "EXPIRED" ? "text-red-500" : ""}`} />
           </Button>
         ) : null}
       </div>
@@ -1322,14 +1352,22 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="刷新该厂商余额" onClick={() => runRefreshBalance(primaryAccount, vendor.label)}>
                   <RefreshCw className="h-4 w-4" />
                 </Button>
+                <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="添加账户" onClick={() => openCreateAccount(vendor.vendorCode, vendor.label)}>
+                  <Plus className="h-4 w-4" />
+                </Button>
                 <Button type="button" variant="outline" size="icon" className="h-8 w-8 text-destructive" title="删除厂商" onClick={() => deleteVendor(vendor)}>
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
             ) : (
-              <Button type="button" variant="outline" size="icon" className="h-8 w-8 text-destructive" title="删除厂商" onClick={() => deleteVendor(vendor)}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              <>
+                <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="添加账户" onClick={() => openCreateAccount(vendor.vendorCode, vendor.label)}>
+                  <Plus className="h-4 w-4" />
+                </Button>
+                <Button type="button" variant="outline" size="icon" className="h-8 w-8 text-destructive" title="删除厂商" onClick={() => deleteVendor(vendor)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </>
             )}
           </div>
         </div>
@@ -1920,6 +1958,26 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
             <div className="space-y-2">
               <Label>余额页链接</Label>
               <Input value={accountForm.balanceUrl || ""} onChange={(e) => setAccountForm((f) => ({ ...f, balanceUrl: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                控制台 Cookie
+                {accountForm.consoleCookieStatus === "EXPIRED" && (
+                  <span className="text-xs text-red-500 font-normal">Cookie 已过期，请重新登录并填写新 Cookie</span>
+                )}
+                {accountForm.consoleCookieStatus === "ACTIVE" && (
+                  <span className="text-xs text-green-600 font-normal">有效</span>
+                )}
+              </Label>
+              <textarea
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 min-h-[60px] max-h-[120px] resize-y"
+                placeholder={accountForm.consoleCookieMasked || "粘贴厂商控制台的 Cookie（用于后端查询余额等）"}
+                value={accountForm.consoleCookie || ""}
+                onChange={(e) => setAccountForm((f) => ({ ...f, consoleCookie: e.target.value, clearConsoleCookie: false }))}
+              />
+              {accountForm.consoleCookieMasked && !accountForm.consoleCookie && (
+                <p className="text-xs text-muted-foreground">已保存: {accountForm.consoleCookieMasked}</p>
+              )}
             </div>
           </div>
           <DialogFooter className="gap-2 sm:justify-between">

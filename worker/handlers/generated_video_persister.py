@@ -1,3 +1,4 @@
+import logging
 import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
@@ -6,6 +7,8 @@ from urllib.parse import urlparse
 import requests
 
 from storage.asset_storage import asset_storage
+
+logger = logging.getLogger(__name__)
 
 
 class GeneratedVideoPersistError(RuntimeError):
@@ -48,7 +51,7 @@ class GeneratedVideoPersister:
         extension = self._resolve_extension(source_url, content_type)
         relative_key = f"video/{task_id}/video-{max(1, index)}{extension}"
         try:
-            url = asset_storage.put_bytes(relative_key, video_bytes, content_type)
+            url = asset_storage.put_bytes_public(relative_key, video_bytes, content_type)
         except Exception as exc:
             raise GeneratedVideoPersistError(f"write generated video failed: {exc}") from exc
         path = asset_storage.local_path(relative_key)

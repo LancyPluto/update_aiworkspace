@@ -29,9 +29,16 @@ public final class OpenAiCompatibleModelsEndpoint {
         if (normalized.equals("https://ark.cn-beijing.volces.com")) {
             return normalized + "/api/v3/models";
         }
+        if (isDashScopeDedicatedEndpoint(normalized)) {
+            return normalized.replaceFirst("/api/v1$", "/compatible-mode/v1") + "/models";
+        }
         if (normalized.endsWith("/v1") || normalized.endsWith("/api/v3")) {
             return normalized + "/models";
         }
         return normalized + "/v1/models";
+    }
+
+    private static boolean isDashScopeDedicatedEndpoint(String url) {
+        return url.contains(".maas.aliyuncs.com") && url.endsWith("/api/v1");
     }
 }

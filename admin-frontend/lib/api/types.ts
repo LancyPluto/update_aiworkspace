@@ -472,6 +472,8 @@ export interface ModelVendorAccount {
   extraAuthJsonMasked?: string | null
   consoleUrl?: string | null
   balanceUrl?: string | null
+  consoleCookieMasked?: string | null
+  consoleCookieStatus?: string | null
   balanceQueryMode: string
   balanceAmount?: number | null
   balanceCurrency?: string | null
@@ -525,6 +527,8 @@ export interface ModelVendorAccountPayload {
   clearExtraAuthJson?: boolean
   consoleUrl?: string
   balanceUrl?: string
+  consoleCookie?: string
+  clearConsoleCookie?: boolean
   balanceQueryMode?: string
   balanceAmount?: number
   balanceCurrency?: string

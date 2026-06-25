@@ -69,6 +69,11 @@ public class AdminToolController {
         return ApiResponse.success(toolService.uploadToolCover(file, toolName, toolCode, modelName));
     }
 
+    @PostMapping("/migrate-covers")
+    public ApiResponse<Integer> migrateCovers() {
+        return ApiResponse.success(toolService.adminMigrateCovers());
+    }
+
     @PostMapping("/prompt-draft")
     public ApiResponse<ToolPromptDraftResponse> promptDraft(@RequestBody ToolPromptDraftRequest request) {
         return ApiResponse.success(promptDraftService.generate(request));

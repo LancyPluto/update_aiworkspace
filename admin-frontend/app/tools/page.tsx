@@ -131,6 +131,8 @@ interface ToolRow {
   comparisonOriginalUrl: string
   comparisonEffectUrl: string
   audioPreviewUrl: string
+  beforeVideoUrl: string
+  afterVideoUrl: string
   icon: LucideIcon
   credits: number
   status: boolean
@@ -184,6 +186,8 @@ interface ToolForm {
   comparisonOriginalUrl: string
   comparisonEffectUrl: string
   audioPreviewUrl: string
+  beforeVideoUrl: string
+  afterVideoUrl: string
   estimatedCreditCost: string
   pricingRulesJson: string
   modelConfigId: string
@@ -205,6 +209,8 @@ const initialForm: ToolForm = {
   comparisonOriginalUrl: "",
   comparisonEffectUrl: "",
   audioPreviewUrl: "",
+  beforeVideoUrl: "",
+  afterVideoUrl: "",
   estimatedCreditCost: "5",
   pricingRulesJson: "[]",
   modelConfigId: "",
@@ -500,6 +506,8 @@ function mapTool(tool: ToolSummary): ToolRow {
     comparisonOriginalUrl: style.comparisonOriginalUrl,
     comparisonEffectUrl: style.comparisonEffectUrl,
     audioPreviewUrl: style.audioPreviewUrl,
+    beforeVideoUrl: style.beforeVideoUrl,
+    afterVideoUrl: style.afterVideoUrl,
     icon: pickIcon(tool.categoryName),
     credits: tool.estimatedCreditCost ?? 0,
     status: (tool.status || "").toUpperCase() === "ONLINE",
@@ -890,7 +898,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
 
   async function handleCoverUpload(
     file?: File | null,
-    target: "coverUrl" | "comparisonOriginalUrl" | "comparisonEffectUrl" = "coverUrl",
+    target: "coverUrl" | "comparisonOriginalUrl" | "comparisonEffectUrl" | "beforeVideoUrl" | "afterVideoUrl" = "coverUrl",
   ) {
     if (!file) return
     setFormError(null)
@@ -968,6 +976,8 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       comparisonOriginalUrl: tool.comparisonOriginalUrl || "",
       comparisonEffectUrl: tool.comparisonEffectUrl || "",
       audioPreviewUrl: tool.audioPreviewUrl || "",
+      beforeVideoUrl: tool.beforeVideoUrl || "",
+      afterVideoUrl: tool.afterVideoUrl || "",
       estimatedCreditCost: String(tool.credits),
       pricingRulesJson: "[]",
       modelConfigId: modelId,
@@ -1026,6 +1036,8 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
         comparisonOriginalUrl: form.comparisonOriginalUrl,
         comparisonEffectUrl: form.comparisonEffectUrl,
         audioPreviewUrl: form.audioPreviewUrl,
+        beforeVideoUrl: form.beforeVideoUrl,
+        afterVideoUrl: form.afterVideoUrl,
       }
       let preservedMarkers: string[] | undefined
       if (integrationPluginId && editingTool) {
@@ -1614,22 +1626,22 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                     {form.mediaDisplayMode === "comparison" ? (
                       <div className="space-y-3 rounded-lg border border-border bg-card p-3 sm:col-span-2">
                         <div>
-                          <Label>效果对比图片</Label>
-                          <p className="mt-1 text-xs text-muted-foreground">适合风格转换、图像编辑类模型。左侧放原图，右侧放模型效果图。</p>
+                          <Label>模型效果对比</Label>
+                          <p className="mt-1 text-xs text-muted-foreground">左侧放原始素材，右侧放模型效果。每侧可独立上传图片或视频，支持任意组合（图-图、图-视频、视频-图、视频-视频）。</p>
                         </div>
                         <div className="grid gap-3 sm:grid-cols-2">
                           <div className="space-y-2">
-                            <Label>原图 URL</Label>
+                            <Label>原始素材 URL（图片/视频）</Label>
                             <Input
                               value={form.comparisonOriginalUrl}
                               onChange={(event) => updateForm("comparisonOriginalUrl", event.target.value)}
-                              placeholder="上传或填写原图地址"
+                              placeholder="上传或填写原始素材地址"
                             />
                             <label className="inline-flex cursor-pointer items-center rounded-md border px-3 py-2 text-xs font-medium hover:bg-secondary">
-                              上传原图
+                              上传原始素材
                               <input
                                 type="file"
-                                accept="image/jpeg,image/png,image/webp,image/gif"
+                                accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime"
                                 className="hidden"
                                 onChange={(event) => {
                                   const file = event.target.files?.[0]
@@ -1638,19 +1650,26 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                                 }}
                               />
                             </label>
+                            {form.comparisonOriginalUrl.trim() ? (
+                              /\.(mp4|webm|mov|m4v)(\?|$)/i.test(form.comparisonOriginalUrl) ? (
+                                <video src={normalizeToolMediaUrl(form.comparisonOriginalUrl)} controls preload="metadata" className="w-full rounded" />
+                              ) : (
+                                <img src={normalizeToolMediaUrl(form.comparisonOriginalUrl)} alt="original preview" className="w-full rounded" />
+                              )
+                            ) : null}
                           </div>
                           <div className="space-y-2">
-                            <Label>模型效果图 URL</Label>
+                            <Label>模型效果 URL（图片/视频）</Label>
                             <Input
                               value={form.comparisonEffectUrl}
                               onChange={(event) => updateForm("comparisonEffectUrl", event.target.value)}
-                              placeholder="上传或填写效果图地址"
+                              placeholder="上传或填写效果素材地址"
                             />
                             <label className="inline-flex cursor-pointer items-center rounded-md border px-3 py-2 text-xs font-medium hover:bg-secondary">
-                              上传效果图
+                              上传效果素材
                               <input
                                 type="file"
-                                accept="image/jpeg,image/png,image/webp,image/gif"
+                                accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime"
                                 className="hidden"
                                 onChange={(event) => {
                                   const file = event.target.files?.[0]
@@ -1659,6 +1678,13 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                                 }}
                               />
                             </label>
+                            {form.comparisonEffectUrl.trim() ? (
+                              /\.(mp4|webm|mov|m4v)(\?|$)/i.test(form.comparisonEffectUrl) ? (
+                                <video src={normalizeToolMediaUrl(form.comparisonEffectUrl)} controls preload="metadata" className="w-full rounded" />
+                              ) : (
+                                <img src={normalizeToolMediaUrl(form.comparisonEffectUrl)} alt="effect preview" className="w-full rounded" />
+                              )
+                            ) : null}
                           </div>
                         </div>
                       </div>

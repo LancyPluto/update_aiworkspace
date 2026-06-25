@@ -341,7 +341,7 @@ class WorkerInternalApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.result.resourceType").value("VIDEO"))
-                .andExpect(jsonPath("$.data.result.contentText").value("{\"videos\":[{\"url\":\"/generated/video.mp4\"}]}"));
+                .andExpect(jsonPath("$.data.result.contentText").value("{\"videos\":[{\"url\":\"/generated/video.mp4\",\"downloadUrl\":\"/generated/video.mp4\"}]}"));
 
         mockMvc.perform(get("/api/admin/v1/billing/usage-logs")
                         .header("Authorization", "Bearer " + adminToken)

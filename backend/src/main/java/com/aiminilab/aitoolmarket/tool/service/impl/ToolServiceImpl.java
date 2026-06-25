@@ -264,7 +264,7 @@ public class ToolServiceImpl implements ToolService {
         List<ToolSummaryResponse> list = toolMapper
                 .findTools(false, keyword, categoryId, status, normalizedPageSize, offset)
                 .stream()
-                .map(this::toEstimatedSummary)
+                .map(this::toAdminSummary)
                 .toList();
         long total = toolMapper.countTools(false, keyword, categoryId, status);
         return PageResponse.of(list, total, pageNo, pageSize);
@@ -272,7 +272,7 @@ public class ToolServiceImpl implements ToolService {
 
     @Override
     public ToolDetailResponse adminToolDetail(Long toolId) {
-        ToolSummaryResponse summary = findToolSummary(toolId);
+        ToolSummaryResponse summary = findAdminToolSummary(toolId);
         return ToolDetailResponse.of(summary, fields(toolId));
     }
 
@@ -344,7 +344,10 @@ public class ToolServiceImpl implements ToolService {
                     originalFilename, file.getContentType(), file.getSize(), ex);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "工具展示素材保存失败，请查看后端日志");
         }
-        String url = stored.publicUrl();
+        String url = assetStorageService.rewriteResultUrl(stored.publicUrl(), true);
+        if (url == null || url.isBlank()) {
+            url = stored.publicUrl();
+        }
         log.info("Admin uploaded tool cover: url={}, originalFilename={}, contentType={}, size={}",
                 url, originalFilename, file.getContentType(), file.getSize());
         return new ToolCoverUploadResponse(url, filename, defaultString(file.getContentType()), file.getSize());
@@ -576,14 +579,37 @@ public class ToolServiceImpl implements ToolService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
     }
 
+    private ToolSummaryResponse findAdminToolSummary(Long toolId) {
+        return toolMapper.findById(toolId)
+                .map(this::toAdminSummary)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+    }
+
     private ToolSummaryResponse toEstimatedSummary(AiTool tool) {
         return sanitizeCoverUrl(
                 ToolSummaryResponse.from(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool)));
     }
 
+    private ToolSummaryResponse toAdminSummary(AiTool tool) {
+        return sanitizeCoverUrlForAdmin(
+                ToolSummaryResponse.from(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool)));
+    }
+
     private ToolSummaryResponse sanitizeCoverUrl(ToolSummaryResponse summary) {
         return summary.withSanitizedCoverUrl(
-                generatedMediaPathSupport.resolveExistingPublicUrl(summary.coverUrl()));
+                assetStorageService.rewriteResultUrl(summary.coverUrl(), false));
+    }
+
+    private ToolSummaryResponse sanitizeCoverUrlForAdmin(ToolSummaryResponse summary) {
+        return summary.withSanitizedCoverUrl(
+                assetStorageService.rewriteResultUrl(summary.coverUrl(), true));
+    }
+
+    private String normalizeStoredCoverUrl(String coverUrl) {
+        if (coverUrl == null || coverUrl.isBlank()) {
+            return coverUrl;
+        }
+        return assetStorageService.migrateLegacyPublicUrl(coverUrl.trim());
     }
 
     private AiTool fromRequest(UpsertToolRequest request) {
@@ -592,7 +618,7 @@ public class ToolServiceImpl implements ToolService {
         tool.setToolName(request.toolName());
         tool.setCategoryId(request.categoryId());
         tool.setDescription(request.description());
-        tool.setCoverUrl(request.coverUrl());
+        tool.setCoverUrl(normalizeStoredCoverUrl(request.coverUrl()));
         ToolType toolType = ToolType.fromNullable(request.toolType());
         tool.setToolType(toolType.name());
         tool.setInputModality(normalizeInputModality(toolType, request.inputModality()).name());
@@ -925,6 +951,33 @@ public class ToolServiceImpl implements ToolService {
         } catch (Exception ignored) {
             return false;
         }
+    }
+
+    @Override
+    @Transactional
+    public int adminMigrateCovers() {
+        if (!assetStorageService.isOssMode()) {
+            return 0;
+        }
+        List<AiTool> tools = toolMapper.selectList(
+                new LambdaQueryWrapper<AiTool>().eq(AiTool::getDeleted, false));
+        int migrated = 0;
+        for (AiTool tool : tools) {
+            String coverUrl = tool.getCoverUrl();
+            if (coverUrl == null || coverUrl.isBlank()) continue;
+            try {
+                String migratedUrl = assetStorageService.migrateLegacyPublicUrl(coverUrl);
+                if (!migratedUrl.equals(coverUrl)) {
+                    toolMapper.updateCoverUrl(tool.getId(), migratedUrl);
+                    migrated++;
+                    log.info("Migrated tool cover to OSS: toolId={}, from={}, to={}",
+                            tool.getId(), coverUrl, migratedUrl);
+                }
+            } catch (Exception e) {
+                log.warn("Failed to migrate tool cover: toolId={}, coverUrl={}", tool.getId(), coverUrl, e);
+            }
+        }
+        return migrated;
     }
 
     private void invalidateUserToolCaches(Long toolId) {

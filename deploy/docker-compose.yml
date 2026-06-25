@@ -116,6 +116,7 @@ services:
       AGENT_MAX_RUNS_PER_HOUR: ${AGENT_MAX_RUNS_PER_HOUR:-30}
       AGENT_DEFAULT_CREDIT_BUDGET: ${AGENT_DEFAULT_CREDIT_BUDGET:-20}
       GENERATED_MEDIA_DIR: /data/generated-media
+      JAVA_TOOL_OPTIONS: ${BACKEND_JAVA_TOOL_OPTIONS:--XX:InitialRAMPercentage=10.0 -XX:MaxRAMPercentage=50.0 -XX:+UseG1GC -XX:+UseStringDeduplication -XX:MaxGCPauseMillis=200 -Djava.security.egd=file:/dev/./urandom}
       # OSS / ASSET_STORAGE_* 由 env_file ../.env 注入，勿在此写默认值以免覆盖
       # Use explicit container proxy vars only. Host HTTP_PROXY often points at 127.0.0.1, which is invalid inside containers.
       HTTP_PROXY: ${CONTAINER_HTTP_PROXY:-}
@@ -169,6 +170,7 @@ services:
       # APP_PRODUCTION_MODE 仅由 ../.env 控制；勿在此覆盖（此前 default false 导致生产走 Vite dev 并 403）
       # 留空：浏览器请求走当前页面的 /api，由 nginx 反代到后端
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+      VITE_COMMUNITY_MEDIA_OPTIMIZATION: "0"
       VITE_ALIYUN_CAPTCHA_ENABLED: ${VITE_ALIYUN_CAPTCHA_ENABLED:-false}
       VITE_ALIYUN_CAPTCHA_REGION: ${VITE_ALIYUN_CAPTCHA_REGION:-cn}
       VITE_ALIYUN_CAPTCHA_PREFIX: ${VITE_ALIYUN_CAPTCHA_PREFIX:-}

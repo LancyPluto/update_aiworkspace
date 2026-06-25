@@ -167,8 +167,9 @@ class WorkflowStepHandler:
         title = str(parsed.get("title") or story_theme).strip()
         synopsis = str(parsed.get("synopsis") or "").strip()
         screenplay = str(parsed.get("screenplay") or "").strip()
-        characters = [item for item in parsed.get("characters", []) if isinstance(item, dict)]
-        locations = [item for item in parsed.get("locations", []) if isinstance(item, dict)]
+        characters = _normalize_assets(parsed.get("characters"), "character")
+        props = _normalize_assets(parsed.get("props"), "prop")
+        locations = _normalize_assets(parsed.get("locations"), "location")
 
         output: dict[str, Any] = {
             "title": title,
@@ -176,6 +177,7 @@ class WorkflowStepHandler:
             "screenplay": screenplay,
             "genre": genre or parsed.get("genre") or "",
             "characters": characters,
+            "props": props,
             "locations": locations,
             "sceneCount": len(scenes),
             "sceneSeconds": SCENE_SECONDS,
@@ -203,16 +205,23 @@ class WorkflowStepHandler:
 
         gen_image = _resolve_image_generator(model_config)
         total = len(scenes)
+        reference_specs = _build_reference_asset_specs(script, form)
         source_urls: list[str] = []
-        prompts: list[str] = []
+        prompt_entries: list[dict[str, Any]] = []
+        for spec in reference_specs:
+            prompt = _build_three_view_reference_prompt(spec, form)
+            source_urls.append(gen_image(prompt))
+            prompt_entries.append({**spec, "prompt": prompt, "kind": "reference"})
         for position, scene in enumerate(scenes, start=1):
             scene_description = scene.get("sceneDescription") or scene.get("narration") or form.get("plotOutline") or ""
             merged = {**form, "plotOutline": scene_description, "mainCharacters": scene.get("dialogue") or form.get("mainCharacters")}
             feedback_parts = [part for part in (script_global, storyboard_global, storyboard_per_scene.get(position)) if part]
+            reference_asset_ids = _scene_reference_asset_ids(scene, reference_specs)
+            reference_hint = _reference_prompt_hint(reference_asset_ids, reference_specs)
             prompt = (
                 f"{DigitalHumanVideoHandler._build_comic_image_prompt(merged)}, "
                 f"cinematic close-up, warm indoor lighting, shallow depth of field, emotional expression, "
-                f"scene detail: {scene_description}, no text, no watermark, 16:9 composition."
+                f"scene detail: {scene_description}, {reference_hint} no text, no watermark, 16:9 composition."
             )
             if feedback_parts:
                 prompt = f"{prompt}\nUser revision notes: {'；'.join(feedback_parts)}"
@@ -223,22 +232,45 @@ class WorkflowStepHandler:
                 trace_id=trace_id,
             )
             source_urls.append(gen_image(prompt))
-            prompts.append(prompt)
+            prompt_entries.append(
+                {
+                    "kind": "scene",
+                    "sceneIndex": position,
+                    "prompt": prompt,
+                    "referenceAssetIds": reference_asset_ids,
+                }
+            )
 
         persisted = GeneratedImagePersister().persist_images(task_id=task_id, urls=source_urls)
+        reference_assets: list[dict[str, Any]] = []
         images: list[dict[str, Any]] = []
-        for position, source_url in enumerate(source_urls, start=1):
-            stable_url = persisted[position - 1]["url"] if len(persisted) >= position else source_url
+        for index, entry in enumerate(prompt_entries):
+            source_url = source_urls[index]
+            stable_url = persisted[index]["url"] if len(persisted) > index else source_url
+            if entry.get("kind") == "reference":
+                reference_assets.append(
+                    {
+                        "assetType": entry.get("assetType") or "",
+                        "assetId": entry.get("assetId") or "",
+                        "name": entry.get("name") or "",
+                        "imageUrl": stable_url,
+                        "sourceImageUrl": source_url,
+                        "prompt": entry.get("prompt") or "",
+                    }
+                )
+                continue
             images.append(
                 {
-                    "sceneIndex": position,
+                    "sceneIndex": entry.get("sceneIndex") or len(images) + 1,
                     "imageUrl": stable_url,
                     "sourceImageUrl": source_url,
-                    "prompt": prompts[position - 1],
+                    "prompt": entry.get("prompt") or "",
+                    "referenceAssetIds": entry.get("referenceAssetIds") or [],
                 }
             )
         return {
             "images": images,
+            "referenceAssets": reference_assets,
             "sceneCount": total,
             # 向后兼容字段
             "imageUrl": images[0]["imageUrl"] if images else "",
@@ -316,6 +348,7 @@ class WorkflowStepHandler:
             if not single:
                 raise SeedanceVideoError("keyframe image is required")
             keyframe_images = [{"sceneIndex": index + 1, "imageUrl": single} for index in range(len(scenes))]
+        reference_assets = keyframe.get("referenceAssets") if isinstance(keyframe.get("referenceAssets"), list) else []
         scene_global, scene_per_scene = _parse_per_scene_feedback(form.get("sceneFeedback"))
 
         gen_video = _resolve_video_generator(model_config)
@@ -327,9 +360,15 @@ class WorkflowStepHandler:
             image_url = (image_entry or {}).get("imageUrl")
             if not image_url:
                 raise SeedanceVideoError(f"keyframe image missing for scene {position}")
+            reference_images = _reference_images_for_scene(scene, image_entry, reference_assets)
             prompt = DigitalHumanVideoHandler._build_comic_video_prompt(form)
             if scene.get("sceneDescription"):
                 prompt = f"{prompt}\nScene focus: {scene.get('sceneDescription')}"
+            if reference_images:
+                prompt = (
+                    f"{prompt}\nUse the injected reference boards to preserve character, prop, "
+                    f"and location consistency for this scene."
+                )
             feedback_parts = [part for part in (scene_global, scene_per_scene.get(position)) if part]
             if feedback_parts:
                 prompt = f"{prompt}\nUser revision notes: {'；'.join(feedback_parts)}"
@@ -339,13 +378,14 @@ class WorkflowStepHandler:
                 progress_message=f"正在生成分镜视频 {position}/{total}",
                 trace_id=trace_id,
             )
-            result = gen_video(prompt=prompt, image=image_url)
+            result = gen_video(prompt=prompt, image=image_url, reference_images=reference_images)
             persisted = persister.persist_video_url(task_id=task_id, source_url=result["videoUrl"], index=position)
             clips.append(
                 {
                     "sceneIndex": position,
                     "videoUrl": persisted["url"],
                     "sourceVideoUrl": result["videoUrl"],
+                    "referenceImages": reference_images,
                 }
             )
         first = clips[0] if clips else {}
@@ -475,6 +515,129 @@ class WorkflowStepHandler:
             )
         except BackendClientError:
             LOGGER.exception("failed to report workflow step failure taskId=%s", task_id)
+
+
+def _normalize_assets(value: Any, asset_type: str) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    assets: list[dict[str, Any]] = []
+    for index, raw in enumerate(value, start=1):
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or raw.get("title") or raw.get("label") or "").strip()
+        if not name:
+            continue
+        asset_id = str(raw.get("id") or raw.get("assetId") or f"{asset_type}-{index}").strip()
+        item = {**raw, "id": asset_id, "assetId": asset_id, "assetType": asset_type, "name": name}
+        assets.append(item)
+    return assets
+
+
+def _build_reference_asset_specs(script: dict[str, Any], form: dict[str, Any]) -> list[dict[str, Any]]:
+    specs: list[dict[str, Any]] = []
+    for asset_type, field in (("character", "characters"), ("prop", "props"), ("location", "locations")):
+        for asset in _normalize_assets(script.get(field), asset_type):
+            description = (
+                asset.get("appearance")
+                or asset.get("description")
+                or asset.get("personality")
+                or form.get("visualStyle")
+                or asset.get("name")
+            )
+            specs.append(
+                {
+                    "assetType": asset_type,
+                    "assetId": str(asset.get("assetId") or asset.get("id") or asset.get("name")),
+                    "name": str(asset.get("name") or ""),
+                    "description": str(description or ""),
+                }
+            )
+    return specs
+
+
+def _build_three_view_reference_prompt(spec: dict[str, Any], form: dict[str, Any]) -> str:
+    asset_type = str(spec.get("assetType") or "asset").strip()
+    name = str(spec.get("name") or "").strip()
+    description = str(spec.get("description") or "").strip()
+    visual_style = str(form.get("visualStyle") or "cinematic comic style").strip()
+    if asset_type == "location":
+        views = "wide establishing view, side angle view, top-down layout view"
+    else:
+        views = "front view, side view, back view"
+    return (
+        f"Create a single three-view reference board for the {asset_type} '{name}'. "
+        f"Show {views} in one image, clean separation between views, pure white background, "
+        f"no text, no labels, no watermark, full-body/object/location consistency, {visual_style}. "
+        f"Stable reusable visual details: {description}."
+    )
+
+
+def _scene_reference_asset_ids(scene: dict[str, Any], reference_specs: list[dict[str, Any]]) -> list[str]:
+    explicit: list[str] = []
+    for key in ("characterRefs", "characterRef", "propRefs", "propRef", "locationRefs", "locationRef", "referenceAssetIds"):
+        explicit.extend(_as_string_list(scene.get(key)))
+    if explicit:
+        return _dedupe(explicit)
+
+    searchable = " ".join(
+        str(scene.get(key) or "")
+        for key in ("characterScene", "sceneDescription", "plot", "dialogue", "narration")
+    ).lower()
+    inferred: list[str] = []
+    for spec in reference_specs:
+        name = str(spec.get("name") or "").strip()
+        asset_id = str(spec.get("assetId") or "").strip()
+        if name and name.lower() in searchable:
+            inferred.append(asset_id)
+    return _dedupe(inferred)
+
+
+def _reference_prompt_hint(reference_asset_ids: list[str], reference_specs: list[dict[str, Any]]) -> str:
+    if not reference_asset_ids:
+        return ""
+    by_id = {str(item.get("assetId") or ""): item for item in reference_specs}
+    names = [str(by_id.get(asset_id, {}).get("name") or asset_id) for asset_id in reference_asset_ids]
+    return "Preserve these reference assets exactly: " + ", ".join(names) + "."
+
+
+def _reference_images_for_scene(
+    scene: dict[str, Any],
+    image_entry: dict[str, Any],
+    reference_assets: list[Any],
+) -> list[str]:
+    asset_ids = _as_string_list((image_entry or {}).get("referenceAssetIds"))
+    if not asset_ids:
+        asset_ids = _scene_reference_asset_ids(scene, [item for item in reference_assets if isinstance(item, dict)])
+    by_id: dict[str, str] = {}
+    for raw in reference_assets:
+        if not isinstance(raw, dict):
+            continue
+        asset_id = str(raw.get("assetId") or raw.get("id") or "").strip()
+        image_url = str(raw.get("imageUrl") or raw.get("url") or "").strip()
+        if asset_id and image_url:
+            by_id[asset_id] = image_url
+    return [by_id[asset_id] for asset_id in _dedupe(asset_ids) if asset_id in by_id]
+
+
+def _as_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        raw_items = value
+    else:
+        raw_items = re.split(r"[,，、/|]\s*", str(value))
+    return [str(item).strip() for item in raw_items if str(item).strip()]
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
 
 
 def _persist_audio_data_url(task_id: int, audio_data_url: str, index: int = 1) -> str:
@@ -633,10 +796,11 @@ def _resolve_video_generator(model_config: dict[str, Any]):
             timeout_seconds=model_config.get("timeoutSeconds"),
         )
 
-        def _gen(*, prompt: str, image: str):
+        def _gen(*, prompt: str, image: str, reference_images: list[str] | None = None):
+            images = [image, *(reference_images or [])]
             return _retry_transient(
                 lambda: client.generate_video(
-                    prompt=prompt, image=image, model=model_name, image_size="1024x576",
+                    prompt=prompt, image=image, images=images, model=model_name, image_size="1024x576",
                     duration=str(SCENE_SECONDS), resolution="480p", aspect_ratio="16:9",
                 )
             )
@@ -645,7 +809,7 @@ def _resolve_video_generator(model_config: dict[str, Any]):
 
     seedance = SeedanceVideoClient.from_model_config(model_config)
 
-    def _gen(*, prompt: str, image: str):
+    def _gen(*, prompt: str, image: str, reference_images: list[str] | None = None):
         return _retry_transient(
             lambda: seedance.generate_video(
                 prompt=prompt, image=image, model=model_name, duration=str(SCENE_SECONDS),
@@ -903,6 +1067,9 @@ def _normalize_scenes(parsed: dict[str, Any] | None, count: int, form: dict[str,
                     source.get("keyframeTransitionPrompt")
                     or "Maintain character identity, outfit, spatial continuity, and cinematic pacing between keyframes."
                 ),
+                "characterRefs": _as_string_list(source.get("characterRefs") or source.get("characterRef")),
+                "propRefs": _as_string_list(source.get("propRefs") or source.get("propRef")),
+                "locationRefs": _as_string_list(source.get("locationRefs") or source.get("locationRef")),
             }
         )
     return scenes
