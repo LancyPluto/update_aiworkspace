@@ -98,7 +98,6 @@ const SIDEBAR_OPEN_KEY = "ai_tool_market_sidebar_open"
 const credit = ref<CreditAccount | null>(null)
 const sidebarOpen = ref(true)
 const customerServiceOpen = ref(false)
-/** Vite publicDir=asset，kf.jpg 对外路径为 /kf.jpg */
 const DEFAULT_CUSTOMER_SERVICE_QR = "https://cdn.wlcloudai.com/static/kf.jpg"
 
 const customerService = ref<CustomerServiceSettings>({
