@@ -84,4 +84,13 @@ public interface AgentSessionMapper extends BaseMapper<AgentSession> {
     void updateConversationSummary(@Param("sessionId") Long sessionId,
                                    @Param("conversationSummary") String conversationSummary,
                                    @Param("updatedAt") LocalDateTime updatedAt);
+
+    @Update("""
+            UPDATE agent_sessions
+            SET active_leaf_message_id = #{activeLeafMessageId}, updated_at = #{updatedAt}
+            WHERE id = #{sessionId}
+            """)
+    void updateActiveLeaf(@Param("sessionId") Long sessionId,
+                          @Param("activeLeafMessageId") Long activeLeafMessageId,
+                          @Param("updatedAt") LocalDateTime updatedAt);
 }

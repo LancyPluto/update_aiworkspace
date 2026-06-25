@@ -44,6 +44,7 @@ import type { AgentAvatarState } from "./AgentAvatar.vue"
 import { useAuthStore } from "@/store/authStore"
 import {
   ApiBusinessError,
+  activateAgentBranch,
   cancelAgentRun,
   confirmAgentTool,
   deleteAgentFile,
@@ -120,6 +121,23 @@ const props = defineProps<{
   modelsLoading: boolean
 }>()
 
+interface MessageBranchVariant {
+  id: string
+  messages: AgentMessage[]
+  createdAt: string
+}
+
+interface MessageBranchGroup {
+  anchorMessageId: number
+  activeIndex: number
+  variants: MessageBranchVariant[]
+}
+
+interface BranchSwitcherState {
+  activeIndex: number
+  total: number
+}
+
 const emit = defineEmits<{
   "update:draft": [value: string]
   "change-model": [value: number | null]
@@ -127,6 +145,7 @@ const emit = defineEmits<{
 }>()
 
 const messages = ref<AgentMessage[]>([])
+const branchGroups = ref<Record<number, MessageBranchGroup>>({})
 const files = ref<AgentFile[]>([])
 const urlAttachments = ref<AgentUrlAttachment[]>([])
 const filePreviewUrls = ref<Record<number, string>>({})
@@ -239,6 +258,220 @@ function persistRunEventCache() {
     // ignore quota
   }
 }
+
+function cloneBranchMessages(list: AgentMessage[]): AgentMessage[] {
+  return list.map((message) => ({ ...message }))
+}
+
+function normalizeBranchGroup(group: MessageBranchGroup | undefined): MessageBranchGroup | null {
+  if (!group || !Number.isFinite(group.anchorMessageId) || !Array.isArray(group.variants)) return null
+  const variants = group.variants
+    .filter((variant) => Array.isArray(variant.messages) && variant.messages.length > 0)
+    .map((variant) => ({
+      id: typeof variant.id === "string" && variant.id ? variant.id : randomUUID(),
+      createdAt: typeof variant.createdAt === "string" && variant.createdAt ? variant.createdAt : new Date().toISOString(),
+      messages: cloneBranchMessages(variant.messages),
+    }))
+  if (!variants.length) return null
+  return {
+    anchorMessageId: group.anchorMessageId,
+    activeIndex: Math.min(Math.max(0, Number(group.activeIndex) || 0), variants.length - 1),
+    variants,
+  }
+}
+
+function loadPersistedMessageBranches() {
+  try {
+    const raw = localStorage.getItem(branchStorageKey.value)
+    if (!raw) {
+      branchGroups.value = {}
+      return
+    }
+    const parsed = JSON.parse(raw) as Record<string, MessageBranchGroup>
+    const restored: Record<number, MessageBranchGroup> = {}
+    for (const [key, group] of Object.entries(parsed || {})) {
+      const anchorId = Number(key)
+      const normalized = normalizeBranchGroup(group)
+      if (!Number.isFinite(anchorId) || !normalized) continue
+      restored[anchorId] = { ...normalized, anchorMessageId: anchorId }
+    }
+    branchGroups.value = restored
+  } catch {
+    branchGroups.value = {}
+  }
+}
+
+function persistMessageBranches() {
+  try {
+    localStorage.setItem(branchStorageKey.value, JSON.stringify(branchGroups.value))
+  } catch {
+    // ignore quota
+  }
+}
+
+function branchStateForMessage(message: AgentMessage): BranchSwitcherState | null {
+  const total = message.branchTotal ?? 0
+  if (total <= 1) return null
+  return {
+    activeIndex: message.branchIndex ?? 0,
+    total,
+  }
+}
+
+function visiblePrefixBeforeMessage(messageId: number) {
+  const index = messages.value.findIndex((item) => item.id === messageId)
+  return index < 0 ? [] : messages.value.slice(0, index)
+}
+
+function variantMatchesCurrentSuffix(group: MessageBranchGroup, suffix: AgentMessage[]) {
+  const first = suffix[0]
+  if (!first) return false
+  return group.variants.some((variant) => {
+    const candidate = variant.messages[0]
+    return (
+      candidate?.id === first.id &&
+      candidate?.contentText === first.contentText &&
+      variant.messages.length === suffix.length
+    )
+  })
+}
+
+function captureCurrentBranchVariant(anchorMessageId: number) {
+  void anchorMessageId
+  return
+  const anchorIndex = messages.value.findIndex((item) => item.id === anchorMessageId)
+  if (anchorIndex < 0) return
+  const suffix = cloneBranchMessages(messages.value.slice(anchorIndex))
+  if (!suffix.length) return
+  const current = branchGroups.value[anchorMessageId]
+  if (current && variantMatchesCurrentSuffix(current, suffix)) return
+  const group: MessageBranchGroup = current ?? {
+    anchorMessageId,
+    activeIndex: 0,
+    variants: [],
+  }
+  group.variants.push({
+    id: randomUUID(),
+    createdAt: new Date().toISOString(),
+    messages: suffix,
+  })
+  group.activeIndex = group.variants.length - 1
+  branchGroups.value = { ...branchGroups.value, [anchorMessageId]: group }
+  persistMessageBranches()
+}
+
+function beginPendingEditedBranch(anchorMessageId: number, editedMessage: AgentMessage) {
+  void anchorMessageId
+  void editedMessage
+  return
+  const current = branchGroups.value[anchorMessageId]
+  const group: MessageBranchGroup = current ?? {
+    anchorMessageId,
+    activeIndex: 0,
+    variants: [],
+  }
+  group.variants.push({
+    id: randomUUID(),
+    createdAt: new Date().toISOString(),
+    messages: cloneBranchMessages([editedMessage]),
+  })
+  group.activeIndex = group.variants.length - 1
+  branchGroups.value = { ...branchGroups.value, [anchorMessageId]: group }
+  persistMessageBranches()
+}
+
+function syncActiveBranchVariantFromVisibleMessages(anchorMessageId: number) {
+  void anchorMessageId
+  return
+  const group = branchGroups.value[anchorMessageId]
+  if (!group) return
+  const anchorIndex = messages.value.findIndex((item) => item.id === anchorMessageId)
+  if (anchorIndex < 0) return
+  group.variants[group.activeIndex] = {
+    ...group.variants[group.activeIndex],
+    messages: cloneBranchMessages(messages.value.slice(anchorIndex)),
+  }
+  branchGroups.value = { ...branchGroups.value, [anchorMessageId]: group }
+  persistMessageBranches()
+}
+
+function syncActiveBranchVariantFromBaseMessages(anchorMessageId: number, baseMessages: AgentMessage[]) {
+  void anchorMessageId
+  void baseMessages
+  return
+  const group = branchGroups.value[anchorMessageId]
+  if (!group) return
+  const active = group.variants[group.activeIndex]
+  const activeAnchor = active?.messages[0]
+  const anchorIndex = baseMessages.findIndex((item) => item.id === anchorMessageId)
+  const baseAnchor = anchorIndex >= 0 ? baseMessages[anchorIndex] : null
+  if (!activeAnchor || !baseAnchor || activeAnchor.contentText !== baseAnchor.contentText) return
+  group.variants[group.activeIndex] = {
+    ...active,
+    messages: cloneBranchMessages(baseMessages.slice(anchorIndex)),
+  }
+  branchGroups.value = { ...branchGroups.value, [anchorMessageId]: group }
+  persistMessageBranches()
+}
+
+function mergeActiveBranchRunMessagesFromBase(group: MessageBranchGroup, baseMessages: AgentMessage[]) {
+  void group
+  void baseMessages
+  return
+  const active = group.variants[group.activeIndex]
+  if (!active) return
+  const activeRunIds = new Set(
+    active.messages
+      .map((message) => message.runId)
+      .filter((runId): runId is number => typeof runId === "number"),
+  )
+  if (!activeRunIds.size) return
+  const nextMessages = active.messages.map((message) => {
+    if (typeof message.runId !== "number") return message
+    const replacement = baseMessages.find((candidate) => candidate.runId === message.runId && candidate.role === message.role)
+    return replacement ? { ...replacement } : message
+  })
+  for (const baseMessage of baseMessages) {
+    if (typeof baseMessage.runId !== "number" || !activeRunIds.has(baseMessage.runId)) continue
+    const alreadyPresent = nextMessages.some(
+      (message) => message.runId === baseMessage.runId && message.role === baseMessage.role,
+    )
+    if (!alreadyPresent) {
+      nextMessages.push({ ...baseMessage })
+    }
+  }
+  group.variants[group.activeIndex] = {
+    ...active,
+    messages: cloneBranchMessages(nextMessages),
+  }
+  branchGroups.value = { ...branchGroups.value, [group.anchorMessageId]: group }
+  persistMessageBranches()
+}
+
+function applyActiveBranchView(baseMessages: AgentMessage[]) {
+  return cloneBranchMessages(baseMessages)
+}
+
+async function switchMessageBranch(anchorMessageId: number, delta: -1 | 1) {
+  if (!props.token) return
+  const anchor = messages.value.find((message) => message.id === anchorMessageId)
+  if (!anchor?.branchVariantMessageIds?.length) return
+  const currentIndex = anchor.branchIndex ?? 0
+  const nextIndex = Math.min(Math.max(currentIndex + delta, 0), anchor.branchVariantMessageIds.length - 1)
+  const variantMessageId = anchor.branchVariantMessageIds[nextIndex]
+  if (nextIndex === currentIndex || variantMessageId == null) return
+  const res = await activateAgentBranch(
+    props.sessionId,
+    {
+      anchorMessageId,
+      variantMessageId,
+    },
+    { token: props.token },
+  )
+  messages.value = res.list
+  await nextTick()
+  scheduleNavLayoutUpdate()
+}
 const lastFailedRunId = ref<number | null>(null)
 const showActiveRunLimitHint = ref(false)
 const cancellingRun = ref(false)
@@ -258,6 +491,7 @@ const scrollOffset = ref(0)
 const stickToBottom = ref(true)
 const navLayoutTick = ref(0)
 const messagesKey = computed(() => `agent_messages_${props.sessionId}`)
+const branchStorageKey = computed(() => `agent_message_branches_${props.sessionId}`)
 const sessionAssetsForComposer = computed(() => collectSessionAssets(messages.value))
 let runStreamAbort: AbortController | null = null
 let runStatusWatchdog: number | null = null
@@ -685,7 +919,8 @@ async function loadPane() {
   agentError.value = null
   try {
     const res = await fetchAgentMessages(props.sessionId, { token: props.token })
-    messages.value = res.list
+    loadPersistedMessageBranches()
+    messages.value = applyActiveBranchView(res.list)
     await loadFiles()
     await hydrateHistoricalRunEvents()
     await resumePendingRunForSession()
@@ -1427,6 +1662,7 @@ async function submitMessage(content = input.value) {
   confirmationError.value = null
   lastFailedRunId.value = null
   runConnectionStatus.value = "running"
+  const submittedParentMessageId = messages.value.at(-1)?.id ?? null
   try {
     const submittedFiles = [...files.value]
     const submittedUrlAttachments = [...urlAttachments.value]
@@ -1476,6 +1712,7 @@ async function submitMessage(content = input.value) {
         modelConfigId: props.modelConfigId ?? null,
         preferredToolCode: submittedPreferredToolCode,
         intelligenceLevel: intelligenceLevel.value,
+        parentMessageId: submittedParentMessageId,
         fileIds: submittedFiles.map((item) => item.id),
         urlAttachments: submittedUrlAttachments.map((item, index) => ({
           id: item.id,
@@ -1730,6 +1967,8 @@ async function submitEditedMessage(message: AgentMessage) {
     editingMessageId.value = null
     editingMessageDraft.value = ""
     try {
+      captureCurrentBranchVariant(message.id)
+      beginPendingEditedBranch(message.id, message)
       const res = await regenerateAgentRun(
         sourceRunId,
         {
@@ -1741,7 +1980,16 @@ async function submitEditedMessage(message: AgentMessage) {
       activeRunId.value = res.runId
       messages.value = messages.value.filter((item) => item.id <= message.id)
       await waitForRunComplete(res.runId)
+      await refreshMessages()
+      syncActiveBranchVariantFromVisibleMessages(message.id)
     } catch (error) {
+      const group = branchGroups.value[message.id]
+      if (group && group.variants.length > 1) {
+        group.variants.pop()
+        group.activeIndex = Math.max(0, group.variants.length - 1)
+        branchGroups.value = { ...branchGroups.value, [message.id]: group }
+        persistMessageBranches()
+      }
       runConnectionStatus.value = "failed"
       activeRunId.value = null
       applyAgentFailure(error)
@@ -1755,6 +2003,7 @@ async function submitEditedMessage(message: AgentMessage) {
 
   const previousText = message.contentText
   const previousEditedAt = message.editedAt ?? null
+  captureCurrentBranchVariant(message.id)
   editingRegenerating.value = true
   agentError.value = null
   confirmationError.value = null
@@ -1763,6 +2012,7 @@ async function submitEditedMessage(message: AgentMessage) {
   events.value = []
   message.contentText = text
   message.editedAt = new Date().toISOString()
+  beginPendingEditedBranch(message.id, message)
   editingMessageId.value = null
   editingMessageDraft.value = ""
   try {
@@ -1779,9 +2029,18 @@ async function submitEditedMessage(message: AgentMessage) {
     activeRunId.value = res.runId
     messages.value = messages.value.filter((item) => item.id <= message.id)
     await waitForRunComplete(res.runId)
+    await refreshMessages()
+    syncActiveBranchVariantFromVisibleMessages(message.id)
   } catch (error) {
     message.contentText = previousText
     message.editedAt = previousEditedAt
+    const group = branchGroups.value[message.id]
+    if (group && group.variants.length > 1) {
+      group.variants.pop()
+      group.activeIndex = Math.max(0, group.variants.length - 1)
+      branchGroups.value = { ...branchGroups.value, [message.id]: group }
+      persistMessageBranches()
+    }
     runConnectionStatus.value = "failed"
     activeRunId.value = null
     applyAgentFailure(error)
@@ -2186,10 +2445,10 @@ async function refreshMessages(options?: { preserveStreamingRunId?: number }) {
     !isStructuredMediaContent(preserved.contentText) &&
     !mergedMessages.some((message) => message.runId === preserved.runId && message.role === "ASSISTANT")
   ) {
-    messages.value = [...mergedMessages, preserved]
+    messages.value = applyActiveBranchView([...mergedMessages, preserved])
     return
   }
-  messages.value = mergedMessages
+  messages.value = applyActiveBranchView(mergedMessages)
 }
 
 function appendRunEvent(event: AgentRunEvent) {
@@ -2570,8 +2829,8 @@ defineExpose({
         </div>
       </div>
 
-      <template v-else>
-        <template v-for="(message, index) in messages" :key="message.id">
+      <TransitionGroup v-else name="branch-message" tag="div" class="message-list-transition">
+        <div v-for="(message, index) in messages" :key="message.id" class="message-list-item">
           <div v-if="shouldShowTimeDivider(message, index)" class="time-divider">
             {{ messageDividerTime(message.createdAt) }}
           </div>
@@ -2594,17 +2853,20 @@ defineExpose({
             :is-streaming="isMessageStreaming(message)"
             :live-stream="isMessageLiveStreaming(message)"
             :asset-ref-map="sessionAssetRefMap"
+            :branch-state="branchStateForMessage(message)"
             @copy="copyMessage"
             @start-edit="startEditMessage"
             @cancel-edit="cancelEditMessage"
             @submit-edit="submitEditedMessage"
+            @branch-prev="(message) => switchMessageBranch(message.id, -1)"
+            @branch-next="(message) => switchMessageBranch(message.id, 1)"
             @regenerate="regenerateAssistantMessage"
             @preview="(asset, message) => openAssetPreview(asset, message)"
             @reference="addReferenceAttachment"
             @open-memory-from-trace="openMemoryFromTrace"
             @delete-memory-from-trace="deleteMemoryFromTrace"
           />
-        </template>
+        </div>
 
         <article v-if="showGenerationLoading" class="agent-message assistant generating-message">
           <div class="generating-main">
@@ -2702,7 +2964,7 @@ defineExpose({
           :style="{ height: `${composerScrollInset}px` }"
           aria-hidden="true"
         />
-      </template>
+      </TransitionGroup>
     </div>
 
     <div v-if="!paneLoading" class="chat-floating-actions">
@@ -2972,6 +3234,29 @@ defineExpose({
   flex-shrink: 0;
   width: 100%;
   pointer-events: none;
+}
+
+.message-list-transition {
+  width: 100%;
+}
+
+.message-list-item {
+  width: 100%;
+}
+
+.branch-message-enter-active,
+.branch-message-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.branch-message-enter-from,
+.branch-message-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.branch-message-move {
+  transition: transform 0.2s ease;
 }
 
 .chat-floating-actions {

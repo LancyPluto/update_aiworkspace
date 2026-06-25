@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.agent.service;
 
 import com.aiminilab.aitoolmarket.agent.dto.AgentMessageResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentSessionResponse;
+import com.aiminilab.aitoolmarket.agent.dto.ActivateAgentBranchRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentSessionRequest;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 
@@ -13,6 +14,8 @@ public interface AgentSessionService {
     AgentSessionResponse detail(Long userId, Long sessionId);
 
     PageResponse<AgentMessageResponse> messages(Long userId, Long sessionId, Integer pageNo, Integer pageSize);
+
+    PageResponse<AgentMessageResponse> activateBranch(Long userId, Long sessionId, ActivateAgentBranchRequest request);
 
     void delete(Long userId, Long sessionId);
 }

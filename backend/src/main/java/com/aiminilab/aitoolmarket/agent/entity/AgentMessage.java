@@ -15,6 +15,7 @@ public class AgentMessage {
     private String contentText;
     private String contentJson;
     private Long runId;
+    private Long parentMessageId;
     /**
      * ACTIVE: visible in chat and context; SUPERSEDED: replaced by edit/regenerate branch.
      */
@@ -37,6 +38,8 @@ public class AgentMessage {
     public void setContentJson(String contentJson) { this.contentJson = contentJson; }
     public Long getRunId() { return runId; }
     public void setRunId(Long runId) { this.runId = runId; }
+    public Long getParentMessageId() { return parentMessageId; }
+    public void setParentMessageId(Long parentMessageId) { this.parentMessageId = parentMessageId; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public LocalDateTime getSupersededAt() { return supersededAt; }

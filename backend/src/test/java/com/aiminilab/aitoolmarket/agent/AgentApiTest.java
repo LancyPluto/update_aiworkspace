@@ -1459,6 +1459,71 @@ class AgentApiTest {
     }
 
     @Test
+    void runContextScopesRecentToolCallsToCurrentMessageBranch() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_branch_tool_memory_user");
+        String token = login("agent_branch_tool_memory_user");
+        Long sessionId = createSession(token, "Branch Tool Memory");
+        ensureOnlineTool("ofox_gpt_image2");
+
+        SendMessageResult nanami = sendMessage(token, sessionId, "图中人物服饰改为七海千秋");
+        completeImageToolCall(nanami.runId(), "nanami prompt", 9911L, "https://cdn.example.com/nanami.png");
+        completeRun(nanami.runId(), """
+                {
+                  "finalAnswer": "七海千秋图片已生成。",
+                  "intent": "tool_use",
+                  "modelProviderCode": "mock",
+                  "modelName": "mock-chat",
+                  "consumedCredits": 0
+                }
+                """).andExpect(status().isOk());
+
+        String editResp = mockMvc.perform(post(
+                        "/api/v1/agent/sessions/{sessionId}/messages/{messageId}/edit-regenerate",
+                        sessionId, nanami.messageId())
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "content": "图中人物服饰改为时崎狂三",
+                                  "clientRequestId": null
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        Long kurumiRunId = objectMapper.readTree(editResp).path("data").path("runId").asLong();
+
+        String kurumiInitialCtx = mockMvc.perform(signed(get("/api/internal/v1/agent/runs/{runId}/context", kurumiRunId), "GET",
+                        "/api/internal/v1/agent/runs/%d/context".formatted(kurumiRunId), ""))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(kurumiInitialCtx).doesNotContain("nanami prompt");
+        assertThat(objectMapper.readTree(kurumiInitialCtx).path("data").path("recentToolCalls").size()).isEqualTo(0);
+
+        completeImageToolCall(kurumiRunId, "kurumi prompt", 9912L, "https://cdn.example.com/kurumi.png");
+        completeRun(kurumiRunId, """
+                {
+                  "finalAnswer": "时崎狂三图片已生成。",
+                  "intent": "tool_use",
+                  "modelProviderCode": "mock",
+                  "modelName": "mock-chat",
+                  "consumedCredits": 0
+                }
+                """).andExpect(status().isOk());
+
+        SendMessageResult followup = sendMessage(token, sessionId, "继续优化当前分支的光影");
+        String followupCtx = mockMvc.perform(signed(get("/api/internal/v1/agent/runs/{runId}/context", followup.runId()), "GET",
+                        "/api/internal/v1/agent/runs/%d/context".formatted(followup.runId()), ""))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        JsonNode recentToolCalls = objectMapper.readTree(followupCtx).path("data").path("recentToolCalls");
+        assertThat(recentToolCalls.size()).isEqualTo(1);
+        assertThat(recentToolCalls.get(0).path("argumentsJson").path("prompt").asText()).isEqualTo("kurumi prompt");
+        assertThat(followupCtx).contains("kurumi prompt");
+        assertThat(followupCtx).doesNotContain("nanami prompt");
+    }
+
+    @Test
     void editRegenerateTruncatesLaterTurns() throws Exception {
         mockExternalAuthDependencies();
         register("agent_edit_truncate_user");
@@ -1676,6 +1741,50 @@ class AgentApiTest {
                         "/api/internal/v1/agent/runs/%d/complete".formatted(runId), completeBody)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(completeBody));
+    }
+
+    private long completeImageToolCall(Long runId, String prompt, long taskId, String imageUrl) throws Exception {
+        String createToolBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "toolCode", "ofox_gpt_image2",
+                "argumentsJson", java.util.Map.of("prompt", prompt)
+        ));
+        String startedResponse = mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/tool-calls", runId), "POST",
+                        "/api/internal/v1/agent/runs/%d/tool-calls".formatted(runId), createToolBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createToolBody))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        long toolCallId = objectMapper.readTree(startedResponse).path("data").path("id").asLong();
+        String bindTaskBody = objectMapper.writeValueAsString(java.util.Map.of("taskId", taskId));
+        mockMvc.perform(signed(post("/api/internal/v1/agent/tool-calls/{toolCallId}/task", toolCallId), "POST",
+                        "/api/internal/v1/agent/tool-calls/%d/task".formatted(toolCallId), bindTaskBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bindTaskBody))
+                .andExpect(status().isOk());
+        String imageContent = objectMapper.writeValueAsString(java.util.Map.of(
+                "images", java.util.List.of(java.util.Map.of("url", imageUrl))
+        ));
+        String completeToolBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "resultJson", java.util.Map.of(
+                        "toolCode", "ofox_gpt_image2",
+                        "toolCallId", toolCallId,
+                        "taskId", taskId,
+                        "status", "SUCCESS",
+                        "data", java.util.Map.of(
+                                "resourceType", "IMAGE",
+                                "contentText", imageContent
+                        ),
+                        "summary", imageContent
+                )
+        ));
+        mockMvc.perform(signed(post("/api/internal/v1/agent/tool-calls/{toolCallId}/complete", toolCallId), "POST",
+                        "/api/internal/v1/agent/tool-calls/%d/complete".formatted(toolCallId), completeToolBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(completeToolBody))
+                .andExpect(status().isOk());
+        return toolCallId;
     }
 
     private JsonNode parseEventJson(String raw) throws Exception {

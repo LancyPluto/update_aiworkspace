@@ -90,6 +90,7 @@ import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Arrays;
@@ -223,11 +224,13 @@ public class AgentRunServiceImpl implements AgentRunService {
 
         LocalDateTime now = LocalDateTime.now();
         String trimmed = request.content().trim();
+        Long parentMessageId = resolveParentMessageId(userId, session, request.parentMessageId());
         AgentMessage message = new AgentMessage();
         message.setSessionId(sessionId);
         message.setUserId(userId);
         message.setRole("USER");
         message.setContentText(trimmed);
+        message.setParentMessageId(parentMessageId);
         message.setStatus("ACTIVE");
         message.setCreatedAt(now);
         String contentJson = messageContentJson(
@@ -295,8 +298,6 @@ public class AgentRunServiceImpl implements AgentRunService {
                 creditService, userId, creditBudget, ErrorCode.AGENT_CREDIT_NOT_ENOUGH, null);
 
         LocalDateTime now = LocalDateTime.now();
-        agentMessageMapper.supersedeMessagesAfter(sourceRun.getSessionId(), userMessage.getId(), now);
-
         return executeStartRun(userId, session, userMessage, runId, clientKey, null, now, null, body.modelConfigId(), null);
     }
 
@@ -338,12 +339,19 @@ public class AgentRunServiceImpl implements AgentRunService {
                 creditService, userId, creditBudget, ErrorCode.AGENT_CREDIT_NOT_ENOUGH, null);
 
         LocalDateTime now = LocalDateTime.now();
-        userMessage.setContentText(trimmed);
-        userMessage.setEditedAt(now);
-        agentMessageMapper.updateById(userMessage);
-        agentMessageMapper.supersedeMessagesAfter(sessionId, messageId, now);
+        AgentMessage editedMessage = new AgentMessage();
+        editedMessage.setSessionId(sessionId);
+        editedMessage.setUserId(userId);
+        editedMessage.setRole("USER");
+        editedMessage.setContentText(trimmed);
+        editedMessage.setContentJson(userMessage.getContentJson());
+        editedMessage.setParentMessageId(userMessage.getParentMessageId());
+        editedMessage.setStatus("ACTIVE");
+        editedMessage.setEditedAt(now);
+        editedMessage.setCreatedAt(now);
+        agentMessageMapper.insertMessage(editedMessage);
 
-        return executeStartRun(userId, session, userMessage, null, clientKey, trimmed, now, null, request.modelConfigId(), null);
+        return executeStartRun(userId, session, editedMessage, userMessage.getRunId(), clientKey, trimmed, now, null, request.modelConfigId(), null);
     }
 
     @Override
@@ -457,19 +465,19 @@ public class AgentRunServiceImpl implements AgentRunService {
         if (anchorId == null && userMessage != null) {
             anchorId = userMessage.getId();
         }
+        List<Long> branchRunIds = branchRunIdsForRun(run, userMessage, anchorId);
         List<InternalAgentMessageResponse> history;
         if (anchorId == null) {
             history = List.of();
         } else {
-            history = new java.util.ArrayList<>(agentMessageMapper.findActiveHistoryBefore(run.getSessionId(), anchorId, contextHistoryLimit())
+            history = new java.util.ArrayList<>(activePathBeforeUserMessage(run.getSessionId(), anchorId, contextHistoryLimit())
                     .stream()
-                    .sorted(Comparator.comparingLong(AgentMessage::getId))
                     .map(message -> new InternalAgentMessageResponse(
                             message.getRole(),
                             safeContextMessageText(message.getContentText(), MAX_HISTORY_MESSAGE_CONTEXT_LENGTH)
                     ))
                     .toList());
-            recentToolResultContext(run).ifPresent(summary ->
+            recentToolResultContext(run, branchRunIds).ifPresent(summary ->
                     history.add(new InternalAgentMessageResponse("system", summary))
             );
         }
@@ -616,7 +624,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                 memorySettings,
                 routerSettings,
                 runtimeSettings,
-                recentToolCallContext(run),
+                recentToolCallContext(run, branchRunIds),
                 pendingToolContextResponse,
                 run.getPreferredToolCode(),
                 referenceMentions,
@@ -1111,6 +1119,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             assistant.setRole("ASSISTANT");
             assistant.setContentText(contentText);
             assistant.setRunId(runId);
+            assistant.setParentMessageId(run.getSourceUserMessageId());
             assistant.setStatus("ACTIVE");
             assistant.setSupersededAt(null);
             assistant.setCreatedAt(now);
@@ -1118,7 +1127,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         } else {
             agentMessageMapper.updateContentText(assistant.getId(), contentText, null);
         }
-        agentSessionMapper.touch(run.getSessionId(), now);
+        agentSessionMapper.updateActiveLeaf(run.getSessionId(), assistant.getId(), now);
         appendEventInternal(
                 runId,
                 run.getUserId(),
@@ -1167,6 +1176,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             assistant.setRole("ASSISTANT");
             assistant.setContentText(request.finalAnswer());
             assistant.setRunId(runId);
+            assistant.setParentMessageId(run.getSourceUserMessageId());
             assistant.setStatus("ACTIVE");
             assistant.setSupersededAt(null);
             assistant.setCreatedAt(now);
@@ -1181,7 +1191,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                 request.promptTokens(), request.completionTokens(), null, consumedCredits,
                 completedQuote.vendorCost(), completedQuote.markupRatio());
         appendEventInternal(runId, run.getUserId(), "run.completed", "Agent 运行已完成", null, now);
-        agentSessionMapper.touch(run.getSessionId(), now);
+        agentSessionMapper.updateActiveLeaf(run.getSessionId(), assistant.getId(), now);
         agentRateLimitService.decrementActiveRun(run.getUserId(), runId);
         agentPendingToolContextMapper.expireByRunId(runId);
         agentMetrics.recordRunOutcome("SUCCESS", request.intent(), firstNonNull(run.getStartedAt(), run.getCreatedAt()), now);
@@ -1320,6 +1330,7 @@ public class AgentRunServiceImpl implements AgentRunService {
 
         userMessage.setRunId(run.getId());
         agentMessageMapper.updateById(userMessage);
+        agentSessionMapper.updateActiveLeaf(sessionId, userMessage.getId(), now);
 
         if (parentRunId != null) {
             agentFileMapper.reattachFilesFromRun(userId, sessionId, parentRunId, run.getId(), now);
@@ -1670,10 +1681,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                                                        LocalDateTime now) {
         Long anchorId = run.getSourceUserMessageId() == null ? userMessage.getId() : run.getSourceUserMessageId();
         int maxHistoryMessages = contextHistoryLimit();
-        List<AgentMessage> history = agentMessageMapper.findActiveHistoryBefore(run.getSessionId(), anchorId, maxHistoryMessages)
-                .stream()
-                .sorted(Comparator.comparingLong(AgentMessage::getId))
-                .toList();
+        List<AgentMessage> contextHistory = activePathBeforeUserMessage(run.getSessionId(), anchorId, maxHistoryMessages);
         List<AgentFile> readyFiles = agentFileMapper.findReadyByRun(
                 run.getUserId(),
                 run.getSessionId(),
@@ -1688,7 +1696,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                 filenames
         );
         int estimatedTokens = estimateTokens(userMessage == null ? "" : userMessage.getContentText());
-        for (AgentMessage message : history) {
+        for (AgentMessage message : contextHistory) {
             estimatedTokens += estimateTokens(message.getContentText());
         }
         for (InternalAgentFileChunkContextResponse chunk : fileChunks) {
@@ -1698,8 +1706,10 @@ public class AgentRunServiceImpl implements AgentRunService {
         var snapshotPayload = new java.util.LinkedHashMap<String, Object>();
         snapshotPayload.put("version", 1);
         snapshotPayload.put("strategy", "recent_history_plus_run_files");
+        snapshotPayload.put("historySource", "message_tree");
         snapshotPayload.put("runId", run.getId());
         snapshotPayload.put("sessionId", run.getSessionId());
+        snapshotPayload.put("leafMessageId", anchorId);
         snapshotPayload.put("workspaceId", session.getWorkspaceId());
         snapshotPayload.put("sourceUserMessageId", run.getSourceUserMessageId());
         snapshotPayload.put("modelConfig", Map.of(
@@ -1713,8 +1723,12 @@ public class AgentRunServiceImpl implements AgentRunService {
                 "fileContextLimit", FILE_CONTEXT_LIMIT,
                 "fileChunkContextLimit", FILE_CHUNK_CONTEXT_LIMIT
         ));
-        snapshotPayload.put("includedHistory", history.stream()
+        snapshotPayload.put("ancestorMessageIds", contextHistory.stream()
+                .map(AgentMessage::getId)
+                .toList());
+        snapshotPayload.put("includedHistory", contextHistory.stream()
                 .map(message -> Map.of(
+                        "id", message.getId(),
                         "role", message.getRole(),
                         "chars", message.getContentText() == null ? 0 : message.getContentText().length(),
                         "preview", preview(message.getContentText(), 120)
@@ -1747,7 +1761,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         snapshot.setModelName(modelConfig.modelName());
         snapshot.setStrategy("recent_history_plus_run_files");
         snapshot.setMaxHistoryMessages(maxHistoryMessages);
-        snapshot.setHistoryMessageCount(history.size());
+        snapshot.setHistoryMessageCount(contextHistory.size());
         snapshot.setFileCount(readyFiles.size());
         snapshot.setFileChunkCount(fileChunks.size());
         snapshot.setMemoryItemCount(0);
@@ -1767,6 +1781,41 @@ public class AgentRunServiceImpl implements AgentRunService {
         );
     }
 
+    private Long resolveParentMessageId(Long userId, AgentSession session, Long requestedParentMessageId) {
+        Long parentMessageId = requestedParentMessageId == null ? session.getActiveLeafMessageId() : requestedParentMessageId;
+        if (parentMessageId == null) {
+            AgentMessage latest = agentMessageMapper.findLatestActiveBySession(session.getId());
+            parentMessageId = latest == null ? null : latest.getId();
+        }
+        if (parentMessageId == null) {
+            return null;
+        }
+        AgentMessage parent = agentMessageMapper.findByIdSessionAndUser(parentMessageId, session.getId(), userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.AGENT_MESSAGE_NOT_FOUND, "父级消息不存在"));
+        if (!"ACTIVE".equals(parent.getStatus())) {
+            throw new BusinessException(ErrorCode.AGENT_MESSAGE_NOT_FOUND, "父级消息不存在或已失效");
+        }
+        return parent.getId();
+    }
+
+    private List<AgentMessage> activePathBeforeUserMessage(Long sessionId, Long userMessageId, int limit) {
+        if (userMessageId == null) {
+            return List.of();
+        }
+        AgentMessage userMessage = agentMessageMapper.selectById(userMessageId);
+        if (userMessage == null || userMessage.getParentMessageId() == null) {
+            return List.of();
+        }
+        List<AgentMessage> path = agentMessageMapper.findActivePathByLeaf(sessionId, userMessage.getParentMessageId());
+        if (path.isEmpty()) {
+            return List.of();
+        }
+        int boundedLimit = Math.max(0, limit);
+        return path.stream()
+                .skip(Math.max(0, path.size() - boundedLimit))
+                .toList();
+    }
+
     private InternalAgentModelConfigResponse resolveModelConfigForRun(AgentRun run) {
         AgentModelConfig config = resolveModelConfigEntityForRun(run);
         if (config != null) {
@@ -1775,13 +1824,8 @@ public class AgentRunServiceImpl implements AgentRunService {
         return agentModelConfigService.internalGet();
     }
 
-    private Optional<String> recentToolResultContext(AgentRun run) {
-        List<AgentToolCall> calls = agentToolCallMapper.findRecentSuccessfulBeforeRun(
-                run.getUserId(),
-                run.getSessionId(),
-                run.getId(),
-                RECENT_TOOL_RESULT_CONTEXT_LIMIT
-        );
+    private Optional<String> recentToolResultContext(AgentRun run, List<Long> branchRunIds) {
+        List<AgentToolCall> calls = recentSuccessfulToolCallsForBranch(run, branchRunIds, RECENT_TOOL_RESULT_CONTEXT_LIMIT);
         if (calls.isEmpty()) {
             return Optional.empty();
         }
@@ -1795,13 +1839,8 @@ public class AgentRunServiceImpl implements AgentRunService {
         );
     }
 
-    private List<InternalRecentToolCallContextResponse> recentToolCallContext(AgentRun run) {
-        return agentToolCallMapper.findRecentSuccessfulBeforeRun(
-                        run.getUserId(),
-                        run.getSessionId(),
-                        run.getId(),
-                        RECENT_TOOL_RESULT_CONTEXT_LIMIT
-                )
+    private List<InternalRecentToolCallContextResponse> recentToolCallContext(AgentRun run, List<Long> branchRunIds) {
+        return recentSuccessfulToolCallsForBranch(run, branchRunIds, RECENT_TOOL_RESULT_CONTEXT_LIMIT)
                 .stream()
                 .map(call -> {
                     JsonNode result = parseJsonNode(call.getResultJson());
@@ -1829,6 +1868,34 @@ public class AgentRunServiceImpl implements AgentRunService {
                     );
                 })
                 .toList();
+    }
+
+    private List<AgentToolCall> recentSuccessfulToolCallsForBranch(AgentRun run, List<Long> branchRunIds, int limit) {
+        if (branchRunIds == null || branchRunIds.isEmpty() || limit <= 0) {
+            return List.of();
+        }
+        return agentToolCallMapper.findRecentSuccessfulByRunIds(
+                run.getUserId(),
+                run.getSessionId(),
+                branchRunIds,
+                limit
+        );
+    }
+
+    private List<Long> branchRunIdsForRun(AgentRun run, AgentMessage userMessage, Long anchorId) {
+        LinkedHashSet<Long> runIds = new LinkedHashSet<>();
+        if (anchorId != null) {
+            activePathBeforeUserMessage(run.getSessionId(), anchorId, Integer.MAX_VALUE)
+                    .stream()
+                    .map(AgentMessage::getRunId)
+                    .filter(Objects::nonNull)
+                    .forEach(runIds::add);
+        }
+        if (userMessage != null && userMessage.getRunId() != null) {
+            runIds.add(userMessage.getRunId());
+        }
+        runIds.add(run.getId());
+        return new java.util.ArrayList<>(runIds);
     }
 
     private String formatToolResultMemoryLine(AgentToolCall call) {

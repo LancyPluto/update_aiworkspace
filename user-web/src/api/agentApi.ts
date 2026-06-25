@@ -71,6 +71,7 @@ export function sendAgentMessage(
     modelConfigId?: number | null
     preferredToolCode?: string | null
     intelligenceLevel?: "standard" | "high"
+    parentMessageId?: number | null
     fileIds?: number[]
     urlAttachments?: AgentUrlAttachment[]
     globalFileIds?: Array<string | number>
@@ -102,6 +103,17 @@ export function sendAgentMessage(
   options?: { token?: string | null },
 ) {
   return apiRequest<CreateAgentMessageResponse>("POST", `/api/v1/agent/sessions/${sessionId}/messages`, {
+    token: options?.token,
+    body,
+  })
+}
+
+export function activateAgentBranch(
+  sessionId: number,
+  body: { anchorMessageId: number; variantMessageId: number },
+  options?: { token?: string | null },
+) {
+  return apiRequest<PageResult<AgentMessage>>("POST", `/api/v1/agent/sessions/${sessionId}/branches/active`, {
     token: options?.token,
     body,
   })
