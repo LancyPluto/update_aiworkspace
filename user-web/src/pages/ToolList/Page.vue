@@ -426,13 +426,28 @@ watch(
         >
           <div class="marketplace-tool-media" @mousemove="usesComparisonMedia(tool) && updateComparisonPosition($event, tool)">
             <template v-if="usesComparisonMedia(tool)">
+              <video
+                v-if="isVideoPreviewUrl(tool.comparisonOriginalUrl)"
+                :src="normalizeMediaUrl(tool.comparisonOriginalUrl)"
+                class="marketplace-tool-image"
+                muted loop autoplay playsinline preload="metadata"
+              />
               <img
+                v-else
                 :src="normalizeMediaUrl(tool.comparisonOriginalUrl)"
                 :alt="`${tool.name} 原图`"
                 class="marketplace-tool-image"
                 draggable="false"
               />
+              <video
+                v-if="isVideoPreviewUrl(tool.comparisonEffectUrl)"
+                :src="normalizeMediaUrl(tool.comparisonEffectUrl)"
+                class="marketplace-tool-image marketplace-tool-image--effect"
+                :style="{ clipPath: `inset(0 0 0 ${comparisonPosition(tool)}%)` }"
+                muted loop autoplay playsinline preload="metadata"
+              />
               <img
+                v-else
                 :src="normalizeMediaUrl(tool.comparisonEffectUrl)"
                 :alt="`${tool.name} 效果图`"
                 class="marketplace-tool-image marketplace-tool-image--effect"
