@@ -233,12 +233,16 @@ public interface BillingUsageLogMapper extends BaseMapper<BillingUsageLog> {
                    l.output_token_price_per_1k, l.input_token_price_per_1m, l.output_token_price_per_1m,
                    l.billing_unit, l.billable_units, l.unit_price, l.cost_amount, l.charged_credits, l.created_at
             FROM billing_usage_logs l
+            INNER JOIN (
+                SELECT id FROM billing_usage_logs
+                WHERE 1 = 1
+                """ + FILTER + """
+                ORDER BY id DESC
+                LIMIT #{limit} OFFSET #{offset}
+            ) page ON l.id = page.id
             LEFT JOIN ai_tasks task ON l.source_type = 'TASK' AND l.source_id = task.id
             LEFT JOIN ai_tools tool ON task.tool_id = tool.id
-            WHERE 1 = 1
-            """ + ALIASED_FILTER + """
             ORDER BY l.id DESC
-            LIMIT #{limit} OFFSET #{offset}
             </script>
             """)
     @ConstructorArgs({

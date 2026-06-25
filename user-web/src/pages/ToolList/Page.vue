@@ -29,7 +29,6 @@ const tasks = ref<TaskDetail[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const selectedOutputModality = ref<string | undefined>(undefined)
-const comparisonPositions = ref<Record<string, number>>({})
 const offlineNotice = computed(() => route.query.notice === "offline")
 
 const modalityLabels: Record<string, string> = {
@@ -76,16 +75,6 @@ function usesComparisonMedia(tool: AITool): boolean {
   return tool.mediaDisplayMode === "comparison" && Boolean(tool.comparisonOriginalUrl) && Boolean(tool.comparisonEffectUrl)
 }
 
-function comparisonPosition(tool: AITool): number {
-  return comparisonPositions.value[tool.id] ?? 50
-}
-
-function updateComparisonPosition(event: MouseEvent, tool: AITool) {
-  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  if (rect.width <= 0) return
-  const next = Math.min(92, Math.max(8, ((event.clientX - rect.left) / rect.width) * 100))
-  comparisonPositions.value = { ...comparisonPositions.value, [tool.id]: next }
-}
 
 function modelBrand(tool: AITool) {
   return resolveModelBrand(tool)
@@ -424,7 +413,7 @@ watch(
           :to="toolEntryRoute(tool.id)"
           class="marketplace-tool-card"
         >
-          <div class="marketplace-tool-media" @mousemove="usesComparisonMedia(tool) && updateComparisonPosition($event, tool)">
+          <div class="marketplace-tool-media">
             <template v-if="usesComparisonMedia(tool)">
               <video
                 v-if="isVideoPreviewUrl(tool.comparisonOriginalUrl)"
@@ -443,7 +432,6 @@ watch(
                 v-if="isVideoPreviewUrl(tool.comparisonEffectUrl)"
                 :src="normalizeMediaUrl(tool.comparisonEffectUrl)"
                 class="marketplace-tool-image marketplace-tool-image--effect"
-                :style="{ clipPath: `inset(0 0 0 ${comparisonPosition(tool)}%)` }"
                 muted loop autoplay playsinline preload="metadata"
               />
               <img
@@ -451,18 +439,15 @@ watch(
                 :src="normalizeMediaUrl(tool.comparisonEffectUrl)"
                 :alt="`${tool.name} 效果图`"
                 class="marketplace-tool-image marketplace-tool-image--effect"
-                :style="{ clipPath: `inset(0 0 0 ${comparisonPosition(tool)}%)` }"
                 draggable="false"
               />
-              <div
-                class="marketplace-comparison-line"
-                :style="{ left: `${comparisonPosition(tool)}%` }"
-              />
-              <div
-                class="marketplace-comparison-handle"
-                :style="{ left: `${comparisonPosition(tool)}%` }"
-              >
-                ↔
+              <div class="marketplace-comparison-line" />
+              <div class="marketplace-comparison-handle">
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                  <circle cx="14" cy="14" r="13" fill="white" stroke="rgba(0,0,0,0.3)" stroke-width="1.5" />
+                  <path d="M10 10L6 14L10 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                  <path d="M18 10L22 14L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
               </div>
             </template>
             <template v-else>

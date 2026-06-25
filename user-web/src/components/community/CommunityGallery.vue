@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import {
   ChevronDown,
@@ -528,12 +528,30 @@ function handleCommunityPostUnpublished(event: Event) {
   }
 }
 
+let lastLoadAt = 0
+const STALE_MS = 60_000
+
 onMounted(() => {
   void loadTopics()
+  lastLoadAt = Date.now()
   const sessionToken = resolveAuthToken()
   if (sessionToken) void preloadDefaultCommunityCollection(sessionToken).catch(() => undefined)
   window.addEventListener(COMMUNITY_POST_UNPUBLISHED_EVENT, handleCommunityPostUnpublished)
   document.addEventListener("click", handleDocumentClick)
+})
+
+onActivated(() => {
+  window.addEventListener(COMMUNITY_POST_UNPUBLISHED_EVENT, handleCommunityPostUnpublished)
+  document.addEventListener("click", handleDocumentClick)
+  if (Date.now() - lastLoadAt > STALE_MS) {
+    void load(true)
+    lastLoadAt = Date.now()
+  }
+})
+
+onDeactivated(() => {
+  window.removeEventListener(COMMUNITY_POST_UNPUBLISHED_EVENT, handleCommunityPostUnpublished)
+  document.removeEventListener("click", handleDocumentClick)
 })
 
 onUnmounted(() => {
