@@ -210,6 +210,25 @@ function toolCover(tool: ToolSummary) {
   )
 }
 
+function usesComparison(tool: ToolSummary): boolean {
+  return tool.frontendStyle?.mediaDisplayMode === "comparison"
+    && Boolean(tool.frontendStyle?.comparisonOriginalUrl)
+    && Boolean(tool.frontendStyle?.comparisonEffectUrl)
+}
+
+const homeComparisonPositions = ref<Record<number, number>>({})
+
+function homeComparisonPos(tool: ToolSummary): number {
+  return homeComparisonPositions.value[tool.id] ?? 50
+}
+
+function updateHomeComparisonPos(event: MouseEvent, tool: ToolSummary) {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  if (rect.width <= 0) return
+  const next = Math.min(92, Math.max(8, ((event.clientX - rect.left) / rect.width) * 100))
+  homeComparisonPositions.value = { ...homeComparisonPositions.value, [tool.id]: next }
+}
+
 function toolDescription(tool: ToolSummary) {
   return tool.description?.trim() || tool.frontendStyle?.heroSubtitle?.trim() || "进入工具，使用真实配置开始创作。"
 }
@@ -479,20 +498,54 @@ watch(
 
         <div v-else class="tool-grid">
           <article v-for="tool in featuredTools" :key="tool.toolCode" class="tool-card" @click="quickLaunch(tool)">
-            <div class="tool-cover">
-              <video
-                v-if="isVideoPreviewUrl(toolCover(tool))"
-                :src="toolCover(tool)"
-                muted
-                loop
-                autoplay
-                playsinline
-                preload="metadata"
-              />
-              <img v-else-if="toolCover(tool)" :src="toolCover(tool)" :alt="tool.toolName" loading="lazy" />
-              <div v-else class="tool-cover-empty">
-                <WandSparkles class="h-10 w-10 text-white/48" />
-              </div>
+            <div class="tool-cover" @mousemove="usesComparison(tool) && updateHomeComparisonPos($event, tool)">
+              <template v-if="usesComparison(tool)">
+                <video
+                  v-if="isVideoPreviewUrl(tool.frontendStyle?.comparisonOriginalUrl)"
+                  :src="normalizeMediaUrl(tool.frontendStyle?.comparisonOriginalUrl)"
+                  class="tool-cover-comparison-media"
+                  muted loop autoplay playsinline preload="metadata"
+                />
+                <img
+                  v-else
+                  :src="normalizeMediaUrl(tool.frontendStyle?.comparisonOriginalUrl)"
+                  :alt="tool.toolName"
+                  class="tool-cover-comparison-media"
+                  draggable="false"
+                />
+                <video
+                  v-if="isVideoPreviewUrl(tool.frontendStyle?.comparisonEffectUrl)"
+                  :src="normalizeMediaUrl(tool.frontendStyle?.comparisonEffectUrl)"
+                  class="tool-cover-comparison-media tool-cover-comparison-effect"
+                  :style="{ clipPath: `inset(0 0 0 ${homeComparisonPos(tool)}%)` }"
+                  muted loop autoplay playsinline preload="metadata"
+                />
+                <img
+                  v-else
+                  :src="normalizeMediaUrl(tool.frontendStyle?.comparisonEffectUrl)"
+                  :alt="tool.toolName"
+                  class="tool-cover-comparison-media tool-cover-comparison-effect"
+                  :style="{ clipPath: `inset(0 0 0 ${homeComparisonPos(tool)}%)` }"
+                  draggable="false"
+                />
+                <div class="tool-cover-comparison-line" :style="{ left: `${homeComparisonPos(tool)}%` }" />
+                <div class="tool-cover-comparison-handle" :style="{ left: `${homeComparisonPos(tool)}%` }">↔</div>
+              </template>
+              <template v-else>
+                <video
+                  v-if="isVideoPreviewUrl(toolCover(tool))"
+                  :src="toolCover(tool)"
+                  muted
+                  loop
+                  autoplay
+                  playsinline
+                  preload="metadata"
+                />
+                <img v-else-if="toolCover(tool)" :src="toolCover(tool)" :alt="tool.toolName" loading="lazy" />
+                <div v-else class="tool-cover-empty">
+                  <WandSparkles class="h-10 w-10 text-white/48" />
+                </div>
+              </template>
               <span class="modality-badge">{{ modalityLabel(tool.outputModality) }}</span>
               <button
                 type="button"
@@ -1071,6 +1124,50 @@ watch(
     radial-gradient(circle at 25% 35%, rgb(255 63 121 / 0.34), transparent 26%),
     radial-gradient(circle at 70% 52%, rgb(124 92 255 / 0.34), transparent 30%),
     radial-gradient(circle at 48% 82%, rgb(24 198 174 / 0.18), transparent 32%);
+}
+
+.tool-cover-comparison-media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.tool-cover-comparison-effect {
+  z-index: 1;
+}
+
+.tool-cover-comparison-line {
+  position: absolute;
+  inset-block: 0;
+  z-index: 5;
+  width: 3px;
+  background: white;
+  box-shadow: 0 0 8px rgb(0 0 0 / 0.5), 0 0 20px rgb(255 255 255 / 0.3);
+  pointer-events: none;
+}
+
+.tool-cover-comparison-handle {
+  position: absolute;
+  top: 50%;
+  z-index: 5;
+  display: flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 0.65);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.45);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  box-shadow: 0 16px 32px rgb(0 0 0 / 0.3);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  backdrop-filter: blur(12px);
 }
 
 .modality-badge,
