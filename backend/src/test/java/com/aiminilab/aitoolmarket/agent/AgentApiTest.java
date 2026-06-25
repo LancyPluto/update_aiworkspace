@@ -1524,6 +1524,83 @@ class AgentApiTest {
     }
 
     @Test
+    void editRegenerateRewritesStructuredPromptPayload() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_edit_structured_payload_user");
+        String token = login("agent_edit_structured_payload_user");
+        Long sessionId = createSession(token, "Edit Structured Payload");
+        String oldText = "@image1 edit outfit to amiya prompt";
+        String newText = "@image1 edit outfit to miku prompt";
+        String sendBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "content", oldText,
+                "clientRequestId", java.util.UUID.randomUUID().toString(),
+                "referenceMentions", java.util.List.of(java.util.Map.of(
+                        "token", "@image1",
+                        "refLabel", "@image1",
+                        "url", "https://cdn.example.com/input.png",
+                        "kind", "image"
+                )),
+                "contentParts", java.util.List.of(
+                        java.util.Map.of(
+                                "type", "image",
+                                "url", "https://cdn.example.com/input.png",
+                                "name", "@image1"
+                        ),
+                        java.util.Map.of(
+                                "type", "text",
+                                "text", oldText
+                        )
+                ),
+                "positionalPrompt", oldText
+        ));
+        String sendResp = mockMvc.perform(post("/api/v1/agent/sessions/{sessionId}/messages", sessionId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(sendBody))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        JsonNode sentData = objectMapper.readTree(sendResp).path("data");
+        Long messageId = sentData.path("messageId").asLong();
+        Long originalRunId = sentData.path("runId").asLong();
+        completeRun(originalRunId, """
+                {
+                  "finalAnswer": "原始图片已生成。",
+                  "intent": "tool_use",
+                  "modelProviderCode": "mock",
+                  "modelName": "mock-chat",
+                  "consumedCredits": 0
+                }
+                """).andExpect(status().isOk());
+
+        String editResp = mockMvc.perform(post(
+                        "/api/v1/agent/sessions/{sessionId}/messages/{messageId}/edit-regenerate",
+                        sessionId, messageId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(java.util.Map.of(
+                                "content", newText,
+                                "clientRequestId", java.util.UUID.randomUUID().toString()
+                        ))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        Long editedRunId = objectMapper.readTree(editResp).path("data").path("runId").asLong();
+
+        String contextJson = mockMvc.perform(signed(get("/api/internal/v1/agent/runs/{runId}/context", editedRunId), "GET",
+                        "/api/internal/v1/agent/runs/%d/context".formatted(editedRunId), ""))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        JsonNode context = objectMapper.readTree(contextJson).path("data");
+        assertThat(context.path("message").asText()).isEqualTo(newText);
+        assertThat(context.path("positionalPrompt").asText()).isEqualTo(newText);
+        assertThat(context.path("contentParts").toString()).contains("miku prompt");
+        assertThat(contextJson).doesNotContain("amiya prompt");
+    }
+
+    @Test
     void editRegenerateTruncatesLaterTurns() throws Exception {
         mockExternalAuthDependencies();
         register("agent_edit_truncate_user");

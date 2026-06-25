@@ -344,7 +344,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         editedMessage.setUserId(userId);
         editedMessage.setRole("USER");
         editedMessage.setContentText(trimmed);
-        editedMessage.setContentJson(userMessage.getContentJson());
+        editedMessage.setContentJson(editedMessageContentJson(userMessage.getContentJson(), trimmed));
         editedMessage.setParentMessageId(userMessage.getParentMessageId());
         editedMessage.setStatus("ACTIVE");
         editedMessage.setEditedAt(now);
@@ -1472,6 +1472,76 @@ public class AgentRunServiceImpl implements AgentRunService {
             payload.put("agentOptions", Map.of("intelligenceLevel", normalizedLevel));
         }
         return toJson(payload);
+    }
+
+    private String editedMessageContentJson(String existingJson, String editedText) {
+        JsonNode existing = parseJsonNode(existingJson);
+        if (!existing.isObject()) {
+            return null;
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        copyJsonField(existing, payload, "attachments", List.class);
+        copyJsonField(existing, payload, "referenceMentions", List.class);
+        copyJsonField(existing, payload, "globalFileIds", List.class);
+        copyJsonField(existing, payload, "agentOptions", Map.class);
+        List<Map<String, Object>> rewrittenParts = rewrittenContentPartsForEdit(existing.path("contentParts"), editedText);
+        if (!rewrittenParts.isEmpty()) {
+            payload.put("contentParts", rewrittenParts);
+        }
+        if (!editedText.isBlank() && (
+                existing.path("positionalPrompt").isTextual()
+                        || existing.path("contentParts").isArray()
+                        || existing.path("referenceMentions").isArray()
+                        || existing.path("attachments").isArray()
+        )) {
+            payload.put("positionalPrompt", editedText);
+        }
+        return payload.isEmpty() ? null : toJson(payload);
+    }
+
+    private void copyJsonField(JsonNode existing, Map<String, Object> payload, String fieldName, Class<?> targetType) {
+        JsonNode value = existing.path(fieldName);
+        if (value.isMissingNode() || value.isNull()) {
+            return;
+        }
+        if (targetType == List.class && !value.isArray()) {
+            return;
+        }
+        if (targetType == Map.class && !value.isObject()) {
+            return;
+        }
+        payload.put(fieldName, objectMapper.convertValue(value, targetType));
+    }
+
+    private List<Map<String, Object>> rewrittenContentPartsForEdit(JsonNode contentParts, String editedText) {
+        if (!contentParts.isArray()) {
+            return List.of();
+        }
+        List<Map<String, Object>> rewritten = new java.util.ArrayList<>();
+        boolean textInserted = false;
+        for (JsonNode item : contentParts) {
+            if (!item.isObject() || !item.path("type").isTextual()) {
+                continue;
+            }
+            Map<String, Object> part = objectMapper.convertValue(item, Map.class);
+            String type = item.path("type").asText("").trim().toLowerCase();
+            if ("text".equals(type)) {
+                if (!textInserted && !editedText.isBlank()) {
+                    part.put("text", editedText);
+                    rewritten.add(part);
+                    textInserted = true;
+                }
+                continue;
+            }
+            rewritten.add(part);
+        }
+        if (!textInserted && !editedText.isBlank()) {
+            Map<String, Object> textPart = new LinkedHashMap<>();
+            textPart.put("type", "text");
+            textPart.put("text", editedText);
+            rewritten.add(textPart);
+        }
+        return rewritten;
     }
 
     private String normalizeIntelligenceLevel(String value) {
