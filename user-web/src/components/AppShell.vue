@@ -99,7 +99,7 @@ const credit = ref<CreditAccount | null>(null)
 const sidebarOpen = ref(true)
 const customerServiceOpen = ref(false)
 /** Vite publicDir=asset，kf.jpg 对外路径为 /kf.jpg */
-const DEFAULT_CUSTOMER_SERVICE_QR = "/kf.jpg"
+const DEFAULT_CUSTOMER_SERVICE_QR = "https://cdn.wlcloudai.com/static/kf.jpg"
 
 const customerService = ref<CustomerServiceSettings>({
   enabled: true,
@@ -351,7 +351,7 @@ watch(
       <div class="app-shell-brand-row flex h-[92px] shrink-0 items-center justify-between px-6 pb-4 pt-6">
         <div class="app-shell-brand-ambient" aria-hidden="true" />
         <RouterLink to="/agent" class="app-shell-agent-logo-link min-w-0 flex-1">
-          <img src="/logo.png" class="app-shell-agent-logo" alt="科创点AI" />
+          <img src="https://cdn.wlcloudai.com/static/logo.png" class="app-shell-agent-logo" alt="科创点AI" />
         </RouterLink>
         <button
           type="button"

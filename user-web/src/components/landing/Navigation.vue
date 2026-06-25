@@ -46,7 +46,7 @@ const toggleMobileMenu = () => {
     <!-- Logo -->
     <a href="#" class="flex items-center gap-2">
       <!-- 这里已经换成你的 logo.svg -->
-      <img src="/logo.svg" class="w-8 h-8 rounded-lg object-contain" alt="logo">
+      <img src="https://cdn.wlcloudai.com/static/logo.svg" class="w-8 h-8 rounded-lg object-contain" alt="logo">
       <span class="font-semibold text-lg">科创点AI</span>
     </a>
         

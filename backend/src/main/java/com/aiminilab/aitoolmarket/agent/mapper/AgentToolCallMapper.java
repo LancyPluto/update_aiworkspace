@@ -138,4 +138,14 @@ public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
                                         @Param("query") String query,
                                         @Param("toolCode") String toolCode,
                                         @Param("limit") int limit);
+
+    @Select("""
+            <script>
+            SELECT *
+            FROM agent_tool_calls
+            WHERE task_id IN
+            <foreach item="id" collection="taskIds" open="(" separator="," close=")">#{id}</foreach>
+            </script>
+            """)
+    List<AgentToolCall> batchFindByTaskIds(@Param("taskIds") List<Long> taskIds);
 }

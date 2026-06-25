@@ -61,7 +61,7 @@ export function isKlingTool(tool: Pick<AITool, "id" | "name">): boolean {
 
 /** Vite publicDir=asset，视频封面默认走站点根路径 */
 export function defaultVideoCoverPath(tool: Pick<AITool, "id" | "name">): string {
-  return isKlingTool(tool) ? "/3D动画生成.mp4" : "/猴子视频.mp4"
+  return isKlingTool(tool) ? "https://cdn.wlcloudai.com/static/3D动画生成.mp4" : "https://cdn.wlcloudai.com/static/猴子视频.mp4"
 }
 
 export function resolveToolCoverUrl(tool: AITool): string {

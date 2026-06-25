@@ -325,7 +325,7 @@ watch(
           </div>
           <div class="marketplace-entry-card__visual" aria-hidden="true">
             <div class="marketplace-entry-card__glow" />
-            <img src="/agent.png" alt="" class="marketplace-entry-card__icon" />
+            <img src="https://cdn.wlcloudai.com/static/agent.png" alt="" class="marketplace-entry-card__icon" />
           </div>
         </RouterLink>
         <div class="rounded-3xl border border-white/8 bg-white/[0.04] p-5">
