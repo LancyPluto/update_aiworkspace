@@ -120,19 +120,24 @@ public interface TaskMapper extends BaseMapper<AiTask> {
                    COALESCE(model_config.display_name, model_config.model_name) AS model_config_name,
                    model_config.model_name AS model_name
             FROM ai_tasks t
+            INNER JOIN (
+                SELECT t2.id FROM ai_tasks t2
+                JOIN ai_tools tool2 ON tool2.id = t2.tool_id
+                WHERE t2.user_id = #{userId}
+                  AND (t2.user_deleted IS NULL OR t2.user_deleted = 0)
+                <if test="status != null and status.trim() != ''">
+                  AND t2.status = #{status}
+                </if>
+                <if test="toolCode != null and toolCode.trim() != ''">
+                  AND tool2.tool_code = #{toolCode}
+                </if>
+                ORDER BY t2.id DESC
+                LIMIT #{limit} OFFSET #{offset}
+            ) page ON t.id = page.id
             JOIN ai_tools tool ON tool.id = t.tool_id
             LEFT JOIN agent_model_configs model_config ON model_config.id = t.model_config_id
-              AND COALESCE(model_config.is_deleted, 0) = 0
-            WHERE t.user_id = #{userId}
-              AND COALESCE(t.user_deleted, 0) = 0
-            <if test="status != null and status.trim() != ''">
-              AND t.status = #{status}
-            </if>
-            <if test="toolCode != null and toolCode.trim() != ''">
-              AND tool.tool_code = #{toolCode}
-            </if>
+              AND (model_config.is_deleted IS NULL OR model_config.is_deleted = 0)
             ORDER BY t.id DESC
-            LIMIT #{limit} OFFSET #{offset}
             </script>
             """)
     List<AiTask> findByUserId(@Param("userId") Long userId,
@@ -147,7 +152,7 @@ public interface TaskMapper extends BaseMapper<AiTask> {
             FROM ai_tasks t
             JOIN ai_tools tool ON tool.id = t.tool_id
             WHERE t.user_id = #{userId}
-              AND COALESCE(t.user_deleted, 0) = 0
+              AND (t.user_deleted IS NULL OR t.user_deleted = 0)
             <if test="status != null and status.trim() != ''">
               AND t.status = #{status}
             </if>

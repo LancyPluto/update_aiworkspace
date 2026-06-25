@@ -55,7 +55,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             LEFT JOIN users u ON u.id = p.user_id AND u.is_deleted = 0
             WHERE p.user_id = #{userId}
               AND p.status = 'PUBLISHED'
-              AND COALESCE(p.audit_status, 'APPROVED') = 'APPROVED'
+              AND (p.audit_status IS NULL OR p.audit_status = 'APPROVED')
             <if test="modality != null and modality.trim() != ''">
               AND p.modality = #{modality}
             </if>
@@ -74,7 +74,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             FROM community_posts
             WHERE user_id = #{userId}
               AND status = 'PUBLISHED'
-              AND COALESCE(audit_status, 'APPROVED') = 'APPROVED'
+              AND (audit_status IS NULL OR audit_status = 'APPROVED')
             <if test="modality != null and modality.trim() != ''">
               AND modality = #{modality}
             </if>
@@ -98,7 +98,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             INNER JOIN community_post_tags t ON t.post_id = p.id AND t.tag = #{tag}
             </if>
             WHERE p.status = 'PUBLISHED'
-              AND COALESCE(p.audit_status, 'APPROVED') = 'APPROVED'
+              AND (p.audit_status IS NULL OR p.audit_status = 'APPROVED')
             <if test="modality != null and modality.trim() != ''">
               AND p.modality = #{modality}
             </if>
@@ -144,7 +144,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             INNER JOIN community_post_tags t ON t.post_id = p.id AND t.tag = #{tag}
             </if>
             WHERE p.status = 'PUBLISHED'
-              AND COALESCE(p.audit_status, 'APPROVED') = 'APPROVED'
+              AND (p.audit_status IS NULL OR p.audit_status = 'APPROVED')
             <if test="keyword != null and keyword.trim() != ''">
               AND (p.title LIKE CONCAT('%', #{keyword}, '%')
                 OR p.description LIKE CONCAT('%', #{keyword}, '%')
@@ -205,7 +205,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             INNER JOIN community_post_tags t ON t.post_id = p.id AND t.tag = #{tag}
             </if>
             WHERE p.status = 'PUBLISHED'
-              AND COALESCE(p.audit_status, 'APPROVED') = 'APPROVED'
+              AND (p.audit_status IS NULL OR p.audit_status = 'APPROVED')
             <if test="keyword != null and keyword.trim() != ''">
               AND (p.title LIKE CONCAT('%', #{keyword}, '%')
                 OR p.description LIKE CONCAT('%', #{keyword}, '%')
@@ -238,7 +238,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             SELECT topic AS name, COUNT(*) AS postCount
             FROM community_posts
             WHERE status = 'PUBLISHED'
-              AND COALESCE(audit_status, 'APPROVED') = 'APPROVED'
+              AND (audit_status IS NULL OR audit_status = 'APPROVED')
               AND topic IS NOT NULL
               AND topic != ''
             GROUP BY topic
@@ -253,7 +253,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             FROM community_posts
             WHERE user_id = #{userId}
               AND status = 'PUBLISHED'
-              AND COALESCE(audit_status, 'APPROVED') = 'APPROVED'
+              AND (audit_status IS NULL OR audit_status = 'APPROVED')
             <if test="modality != null and modality.trim() != ''">
               AND modality = #{modality}
             </if>
@@ -266,7 +266,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             FROM community_posts
             WHERE user_id = #{userId}
               AND status = 'PUBLISHED'
-              AND COALESCE(audit_status, 'APPROVED') = 'APPROVED'
+              AND (audit_status IS NULL OR audit_status = 'APPROVED')
             """)
     long sumLikesByUserId(@Param("userId") Long userId);
 
@@ -275,7 +275,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             FROM community_posts
             WHERE user_id = #{userId}
               AND status = 'PUBLISHED'
-              AND COALESCE(audit_status, 'APPROVED') = 'APPROVED'
+              AND (audit_status IS NULL OR audit_status = 'APPROVED')
             """)
     long sumFavoritesByUserId(@Param("userId") Long userId);
 
@@ -284,7 +284,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             FROM community_posts
             WHERE user_id = #{userId}
               AND status = 'PUBLISHED'
-              AND COALESCE(audit_status, 'APPROVED') = 'APPROVED'
+              AND (audit_status IS NULL OR audit_status = 'APPROVED')
             """)
     long sumSameStyleByUserId(@Param("userId") Long userId);
 
@@ -294,7 +294,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             WHERE user_id = #{userId}
               AND status = 'PUBLISHED'
               AND featured = 1
-              AND COALESCE(audit_status, 'APPROVED') = 'APPROVED'
+              AND (audit_status IS NULL OR audit_status = 'APPROVED')
             """)
     long countFeaturedByUserId(@Param("userId") Long userId);
 
@@ -304,7 +304,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             WHERE user_id = #{userId}
               AND status = 'PUBLISHED'
               AND featured = 1
-              AND COALESCE(audit_status, 'APPROVED') = 'APPROVED'
+              AND (audit_status IS NULL OR audit_status = 'APPROVED')
             ORDER BY pinned DESC, last_featured_at DESC, id DESC
             LIMIT #{limit}
             """)

@@ -105,7 +105,7 @@ public interface CommunityCollectionMapper extends BaseMapper<CommunityCollectio
             WHERE i.collection_id = #{collectionId}
               AND i.user_id = #{userId}
               AND p.status = 'PUBLISHED'
-              AND COALESCE(p.audit_status, 'APPROVED') = 'APPROVED'
+              AND (p.audit_status IS NULL OR p.audit_status = 'APPROVED')
             ORDER BY i.id DESC
             LIMIT #{limit} OFFSET #{offset}
             """)

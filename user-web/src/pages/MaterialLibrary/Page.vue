@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue"
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from "vue"
+
+defineOptions({ name: "MaterialLibraryPage" })
 import { RouterLink, useRoute } from "vue-router"
 import {
   ChevronDown,
@@ -382,9 +384,27 @@ async function removeMaterial(item: MaterialItem) {
   }
 }
 
+let lastLoadAt = 0
+const STALE_MS = 60_000
+
 onMounted(() => {
-  if (assetTab.value === "works") loadMaterials()
+  if (assetTab.value === "works") {
+    loadMaterials()
+    lastLoadAt = Date.now()
+  }
   document.addEventListener("click", handleDocumentClick)
+})
+
+onActivated(() => {
+  document.addEventListener("click", handleDocumentClick)
+  if (assetTab.value === "works" && Date.now() - lastLoadAt > STALE_MS) {
+    loadMaterials()
+    lastLoadAt = Date.now()
+  }
+})
+
+onDeactivated(() => {
+  document.removeEventListener("click", handleDocumentClick)
 })
 
 onUnmounted(() => {

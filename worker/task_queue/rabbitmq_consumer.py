@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -18,10 +19,14 @@ class RabbitMqConsumer:
         self.queue_name = settings.rabbitmq_task_queue
         self.dead_queue_name = settings.rabbitmq_dead_queue
         self.retry_queue_prefix = settings.rabbitmq_retry_queue_prefix
-        retry_queue_count = len([value for value in settings.rabbitmq_retry_delays_ms.split(",") if value.strip()])
-        self.max_retries = min(settings.rabbitmq_max_retries, retry_queue_count)
+        self.retry_delays_ms = [
+            int(v.strip()) for v in settings.rabbitmq_retry_delays_ms.split(",") if v.strip()
+        ]
+        self.max_retries = min(settings.rabbitmq_max_retries, len(self.retry_delays_ms))
         self.concurrency = max(1, settings.worker_concurrency)
         self.prefetch_count = max(1, settings.rabbitmq_prefetch_count)
+        self.task_exchange = os.getenv("RABBITMQ_TASK_EXCHANGE", "ai.task.exchange")
+        self.task_routing_key = os.getenv("RABBITMQ_TASK_ROUTING_KEY", "tool.normal")
         self.handler = handler or TaskHandlerRouter()
 
     def start(self) -> None:
@@ -44,9 +49,38 @@ class RabbitMqConsumer:
                 time.sleep(backoff_seconds)
                 backoff_seconds = min(backoff_seconds * 2, 30)
 
+    def _declare_topology(self, channel) -> None:
+        dlx_name = self.task_exchange + ".dlx"
+        channel.exchange_declare(exchange=self.task_exchange, exchange_type="direct", durable=True)
+        channel.exchange_declare(exchange=dlx_name, exchange_type="direct", durable=True)
+        channel.queue_declare(
+            queue=self.queue_name,
+            durable=True,
+            arguments={
+                "x-dead-letter-exchange": dlx_name,
+                "x-dead-letter-routing-key": "dead",
+            },
+        )
+        channel.queue_bind(queue=self.queue_name, exchange=self.task_exchange, routing_key=self.task_routing_key)
+        channel.queue_declare(queue=self.dead_queue_name, durable=True)
+        channel.queue_bind(queue=self.dead_queue_name, exchange=dlx_name, routing_key="dead")
+        for index, delay_ms in enumerate(self.retry_delays_ms):
+            retry_queue = f"{self.retry_queue_prefix}.{index + 1}"
+            channel.queue_declare(
+                queue=retry_queue,
+                durable=True,
+                arguments={
+                    "x-message-ttl": delay_ms,
+                    "x-dead-letter-exchange": self.task_exchange,
+                    "x-dead-letter-routing-key": self.task_routing_key,
+                },
+            )
+        LOGGER.info("rabbitmq topology declared: exchange=%s queue=%s", self.task_exchange, self.queue_name)
+
     def _consume(self, connection: pika.BlockingConnection) -> None:
         channel = connection.channel()
         channel.confirm_delivery()
+        self._declare_topology(channel)
         channel.basic_qos(prefetch_count=self.prefetch_count)
         executor = ThreadPoolExecutor(max_workers=self.concurrency, thread_name_prefix="task-worker")
         LOGGER.info(

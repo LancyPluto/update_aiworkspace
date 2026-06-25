@@ -4,6 +4,8 @@ import { RouterView, useRoute, useRouter } from "vue-router"
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog/ConfirmDeleteDialog.vue"
 import { useAuthStore } from "@/store/authStore"
 
+const keepAliveIncludes = ["MaterialLibraryPage", "CommunityDiscoverPage"]
+
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
@@ -24,6 +26,10 @@ watch(
 </script>
 
 <template>
-  <RouterView />
+  <RouterView v-slot="{ Component, route: viewRoute }">
+    <KeepAlive :include="keepAliveIncludes">
+      <component :is="Component" />
+    </KeepAlive>
+  </RouterView>
   <ConfirmDeleteDialog />
 </template>
