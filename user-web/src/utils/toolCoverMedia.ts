@@ -59,7 +59,6 @@ export function isKlingTool(tool: Pick<AITool, "id" | "name">): boolean {
   return text.includes("kling") || text.includes("可灵")
 }
 
-/** Vite publicDir=asset，视频封面默认走站点根路径 */
 export function defaultVideoCoverPath(tool: Pick<AITool, "id" | "name">): string {
   return isKlingTool(tool) ? "https://cdn.wlcloudai.com/static/3D动画生成.mp4" : "https://cdn.wlcloudai.com/static/猴子视频.mp4"
 }
