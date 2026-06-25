@@ -46,7 +46,7 @@ const toggleMobileMenu = () => {
     <!-- Logo -->
     <a href="#" class="flex items-center">
       <img
-        src="/logo.png"
+        src="/logo.svg"
         class="h-10 w-auto max-w-[150px] object-contain [filter:drop-shadow(0_0_8px_rgb(34_211_238_/_0.35))]"
         alt="科创点AI"
       >
