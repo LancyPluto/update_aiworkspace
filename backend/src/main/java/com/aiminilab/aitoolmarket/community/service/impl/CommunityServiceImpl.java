@@ -38,12 +38,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -290,14 +293,8 @@ public class CommunityServiceImpl implements CommunityService {
     @Override
     public CommunityCreatorResponse creator(Long userId, Long viewerId) {
         PublicUserProfileResponse profile = publicUser(userId);
-        List<CommunityPostResponse> featured = postMapper.findFeaturedByUserId(userId, 6)
-                .stream()
-                .map(post -> response(post, viewerId))
-                .toList();
-        List<CommunityPostResponse> recent = postMapper.findPublicByUserId(userId, null, 12, 0)
-                .stream()
-                .map(post -> response(post, viewerId))
-                .toList();
+        List<CommunityPostResponse> featured = responseBatch(postMapper.findFeaturedByUserId(userId, 6), viewerId);
+        List<CommunityPostResponse> recent = responseBatch(postMapper.findPublicByUserId(userId, null, 12, 0), viewerId);
         return new CommunityCreatorResponse(
                 profile,
                 postMapper.sumSameStyleByUserId(userId),
@@ -481,9 +478,7 @@ public class CommunityServiceImpl implements CommunityService {
         String normalizedTopic = normalizeTopic(topic);
         List<CommunityPost> posts = postMapper.findForAdmin(userId, normalizeStatus(status), normalizeModality(modality),
                         normalizedKeyword, normalizedTopic, featured, normalizeAuditStatus(auditStatus), normalizedPageSize, offset);
-        List<CommunityPostResponse> list = posts.stream()
-                .map(this::adminResponse)
-                .toList();
+        List<CommunityPostResponse> list = adminResponseBatch(posts);
         long total = postMapper.countForAdmin(userId, normalizeStatus(status), normalizeModality(modality),
                 normalizedKeyword, normalizedTopic, featured, normalizeAuditStatus(auditStatus));
         return PageResponse.of(list, total, pageNo, pageSize);
@@ -853,10 +848,8 @@ public class CommunityServiceImpl implements CommunityService {
     }
 
     private CommunityCollectionResponse collectionResponse(CommunityCollection collection, Long userId, int itemLimit) {
-        List<CommunityPostResponse> items = collection == null ? List.of() : collectionMapper.findItems(collection.getId(), userId, itemLimit, 0)
-                .stream()
-                .map(post -> response(post, userId))
-                .toList();
+        List<CommunityPostResponse> items = collection == null ? List.of()
+                : responseBatch(collectionMapper.findItems(collection.getId(), userId, itemLimit, 0), userId);
         return new CommunityCollectionResponse(
                 collection.getId(),
                 collection.getName(),
@@ -872,14 +865,45 @@ public class CommunityServiceImpl implements CommunityService {
         if (posts == null || posts.isEmpty()) {
             return List.of();
         }
+
+        List<Long> postIds = posts.stream().map(CommunityPost::getId).toList();
+
+        Set<Long> likedIds = viewerId != null && !postIds.isEmpty()
+                ? new HashSet<>(postMapper.batchFindLikedPostIds(postIds, viewerId))
+                : Collections.emptySet();
+        Set<Long> favoritedIds = viewerId != null && !postIds.isEmpty()
+                ? new HashSet<>(postMapper.batchFindFavoritedPostIds(postIds, viewerId))
+                : Collections.emptySet();
+
+        Map<Long, List<String>> tagsByPost = batchLoadTags(postIds);
+
+        List<Long> taskIds = posts.stream()
+                .map(CommunityPost::getTaskId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, String> firstResultByTaskId = batchLoadFirstResults(taskIds);
+        Map<Long, AiTask> tasksByIdForPrompt = batchLoadTasksForPrompt(posts, taskIds);
+
         if (posts.get(0) instanceof CommunityPostDiscoverRow) {
+            List<Long> missingUserIds = posts.stream()
+                    .filter(p -> p instanceof CommunityPostDiscoverRow row
+                            && (row.getAuthorNickname() == null || row.getAuthorNickname().isBlank())
+                            && p.getUserId() != null)
+                    .map(CommunityPost::getUserId)
+                    .distinct()
+                    .toList();
+            Map<Long, User> fallbackUsers = missingUserIds.isEmpty()
+                    ? Map.of()
+                    : userMapper.findByIds(missingUserIds).stream()
+                    .collect(Collectors.toMap(User::getId, Function.identity(), (l, r) -> l));
             return posts.stream()
                     .map(post -> {
                         CommunityPostDiscoverRow row = (CommunityPostDiscoverRow) post;
                         String authorNickname = row.getAuthorNickname();
                         String authorAvatarUrl = row.getAuthorAvatarUrl();
                         if (authorNickname == null || authorNickname.isBlank()) {
-                            User user = row.getUserId() == null ? null : userMapper.selectById(row.getUserId());
+                            User user = fallbackUsers.get(row.getUserId());
                             authorNickname = resolveAuthorNickname(user, row.getUserId());
                             if (authorAvatarUrl == null && user != null) {
                                 authorAvatarUrl = user.getAvatarUrl();
@@ -887,10 +911,12 @@ public class CommunityServiceImpl implements CommunityService {
                         } else {
                             authorNickname = normalizeAuthorNickname(authorNickname, row.getUserId());
                         }
-                        return buildResponse(row, viewerId, authorNickname, authorAvatarUrl);
+                        return buildResponseBatch(row, likedIds, favoritedIds, tagsByPost,
+                                firstResultByTaskId, tasksByIdForPrompt, authorNickname, authorAvatarUrl);
                     })
                     .toList();
         }
+
         List<Long> userIds = posts.stream()
                 .map(CommunityPost::getUserId)
                 .filter(Objects::nonNull)
@@ -899,9 +925,15 @@ public class CommunityServiceImpl implements CommunityService {
         Map<Long, User> usersById = userIds.isEmpty()
                 ? Map.of()
                 : userMapper.findByIds(userIds).stream()
-                .collect(Collectors.toMap(User::getId, Function.identity(), (left, right) -> left));
+                .collect(Collectors.toMap(User::getId, Function.identity(), (l, r) -> l));
         return posts.stream()
-                .map(post -> buildResponse(post, viewerId, usersById.get(post.getUserId())))
+                .map(post -> {
+                    User author = usersById.get(post.getUserId());
+                    return buildResponseBatch(post, likedIds, favoritedIds, tagsByPost,
+                            firstResultByTaskId, tasksByIdForPrompt,
+                            resolveAuthorNickname(author, post.getUserId()),
+                            author == null ? null : author.getAvatarUrl());
+                })
                 .toList();
     }
 
@@ -934,12 +966,78 @@ public class CommunityServiceImpl implements CommunityService {
         return rewriteResponseUrls(resp, false);
     }
 
+    private CommunityPostResponse buildResponseBatch(CommunityPost post,
+                                                     Set<Long> likedIds,
+                                                     Set<Long> favoritedIds,
+                                                     Map<Long, List<String>> tagsByPost,
+                                                     Map<Long, String> firstResultByTaskId,
+                                                     Map<Long, AiTask> tasksByIdForPrompt,
+                                                     String authorNickname,
+                                                     String authorAvatarUrl) {
+        boolean liked = likedIds.contains(post.getId());
+        boolean favorited = favoritedIds.contains(post.getId());
+        List<String> tags = tagsByPost.getOrDefault(post.getId(), List.of());
+        String promptSnapshot = resolvePromptSnapshotBatch(post, tasksByIdForPrompt);
+        List<String> mediaUrls = resolvePostMediaUrlsBatch(post, firstResultByTaskId);
+        CommunityPostResponse resp = CommunityPostResponse.from(
+                post, liked, favorited, tags, authorNickname, authorAvatarUrl, promptSnapshot, mediaUrls
+        );
+        return rewriteResponseUrls(resp, false);
+    }
+
+    private Map<Long, List<String>> batchLoadTags(List<Long> postIds) {
+        if (postIds.isEmpty()) return Map.of();
+        return postMapper.batchFindTagRows(postIds).stream()
+                .collect(Collectors.groupingBy(
+                        row -> ((Number) row.get("post_id")).longValue(),
+                        Collectors.mapping(row -> (String) row.get("tag"), Collectors.toList())
+                ));
+    }
+
+    private Map<Long, String> batchLoadFirstResults(List<Long> taskIds) {
+        if (taskIds.isEmpty()) return Map.of();
+        return taskMapper.batchSelectFirstResults(taskIds).stream()
+                .collect(Collectors.toMap(
+                        row -> ((Number) row.get("task_id")).longValue(),
+                        row -> row.get("content_text") != null ? (String) row.get("content_text") : "",
+                        (l, r) -> l
+                ));
+    }
+
+    private Map<Long, AiTask> batchLoadTasksForPrompt(List<? extends CommunityPost> posts, List<Long> taskIds) {
+        List<Long> needPromptTaskIds = posts.stream()
+                .filter(p -> (p.getPromptSnapshot() == null || p.getPromptSnapshot().isBlank()) && p.getTaskId() != null)
+                .map(CommunityPost::getTaskId)
+                .distinct()
+                .toList();
+        if (needPromptTaskIds.isEmpty()) return Map.of();
+        return taskMapper.selectBatchIds(needPromptTaskIds).stream()
+                .collect(Collectors.toMap(AiTask::getId, Function.identity(), (l, r) -> l));
+    }
+
     private List<String> resolvePostMediaUrls(CommunityPost post) {
         LinkedHashSet<String> urls = new LinkedHashSet<>();
         if (post.getTaskId() != null && "IMAGE".equalsIgnoreCase(post.getModality())) {
             taskMapper.findFirstResult(post.getTaskId())
                     .map(result -> extractImageUrls(result.contentText()))
                     .ifPresent(urls::addAll);
+        }
+        if (post.getMediaUrl() != null && !post.getMediaUrl().isBlank()) {
+            urls.add(post.getMediaUrl());
+        }
+        if (post.getCoverUrl() != null && !post.getCoverUrl().isBlank()) {
+            urls.add(post.getCoverUrl());
+        }
+        return new ArrayList<>(urls);
+    }
+
+    private List<String> resolvePostMediaUrlsBatch(CommunityPost post, Map<Long, String> firstResultByTaskId) {
+        LinkedHashSet<String> urls = new LinkedHashSet<>();
+        if (post.getTaskId() != null && "IMAGE".equalsIgnoreCase(post.getModality())) {
+            String contentText = firstResultByTaskId.get(post.getTaskId());
+            if (contentText != null && !contentText.isBlank()) {
+                urls.addAll(extractImageUrls(contentText));
+            }
         }
         if (post.getMediaUrl() != null && !post.getMediaUrl().isBlank()) {
             urls.add(post.getMediaUrl());
@@ -963,6 +1061,17 @@ public class CommunityServiceImpl implements CommunityService {
                 .orElse(null);
     }
 
+    private String resolvePromptSnapshotBatch(CommunityPost post, Map<Long, AiTask> tasksByIdForPrompt) {
+        if (post.getPromptSnapshot() != null && !post.getPromptSnapshot().isBlank()) {
+            return post.getPromptSnapshot();
+        }
+        if (post.getTaskId() == null) return null;
+        AiTask task = tasksByIdForPrompt.get(post.getTaskId());
+        if (task == null) return null;
+        String prompt = extractPrompt(task.getParamsJson());
+        return (prompt != null && !prompt.isBlank()) ? prompt : null;
+    }
+
     private CommunityPostResponse response(CommunityPost post, Long viewerId) {
         User user = post.getUserId() == null ? null : userMapper.findById(post.getUserId()).orElse(null);
         return buildResponse(post, viewerId, user);
@@ -982,6 +1091,42 @@ public class CommunityServiceImpl implements CommunityService {
                 resolvePromptSnapshot(post)
         );
         return rewriteResponseUrls(resp, true);
+    }
+
+    private List<CommunityPostResponse> adminResponseBatch(List<CommunityPost> posts) {
+        if (posts == null || posts.isEmpty()) return List.of();
+
+        List<Long> postIds = posts.stream().map(CommunityPost::getId).toList();
+        Map<Long, List<String>> tagsByPost = batchLoadTags(postIds);
+
+        List<Long> userIds = posts.stream()
+                .map(CommunityPost::getUserId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, User> usersById = userIds.isEmpty()
+                ? Map.of()
+                : userMapper.findByIds(userIds).stream()
+                .collect(Collectors.toMap(User::getId, Function.identity(), (l, r) -> l));
+
+        List<Long> taskIds = posts.stream()
+                .map(CommunityPost::getTaskId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, AiTask> tasksByIdForPrompt = batchLoadTasksForPrompt(posts, taskIds);
+
+        return posts.stream().map(post -> {
+            User user = usersById.get(post.getUserId());
+            CommunityPostResponse resp = CommunityPostResponse.adminFrom(
+                    post,
+                    tagsByPost.getOrDefault(post.getId(), List.of()),
+                    resolveAuthorNickname(user, post.getUserId()),
+                    user == null ? null : user.getAvatarUrl(),
+                    resolvePromptSnapshotBatch(post, tasksByIdForPrompt)
+            );
+            return rewriteResponseUrls(resp, true);
+        }).toList();
     }
 
     private CommunityPostResponse rewriteResponseUrls(CommunityPostResponse resp, boolean forAdmin) {

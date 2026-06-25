@@ -31,7 +31,7 @@ const router = useRouter()
 const auth = useAuthStore()
 
 const SIDEBAR_OPEN_KEY = "ai_tool_market_sidebar_open"
-const DEFAULT_CUSTOMER_SERVICE_QR = "/kf.jpg"
+const DEFAULT_CUSTOMER_SERVICE_QR = "https://cdn.wlcloudai.com/static/kf.jpg"
 
 const credit = ref<CreditAccount | null>(null)
 const customerServiceOpen = ref(false)

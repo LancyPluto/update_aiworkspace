@@ -410,4 +410,31 @@ public interface TaskMapper extends BaseMapper<AiTask> {
             WHERE source_type = 'TASK' AND source_id = #{taskId}
             """)
     int sumConsumedCreditsByTaskId(@Param("taskId") Long taskId);
+
+    @Select("""
+            <script>
+            SELECT task_id, resource_type, content_text
+            FROM (
+                SELECT task_id, resource_type, content_text,
+                       ROW_NUMBER() OVER (PARTITION BY task_id ORDER BY sort_order ASC, id ASC) AS rn
+                FROM ai_result_resources
+                WHERE task_id IN
+                <foreach item="id" collection="taskIds" open="(" separator="," close=")">#{id}</foreach>
+            ) ranked
+            WHERE rn = 1
+            </script>
+            """)
+    List<java.util.Map<String, Object>> batchSelectFirstResults(@Param("taskIds") List<Long> taskIds);
+
+    @Select("""
+            <script>
+            SELECT source_id AS task_id, COALESCE(SUM(charged_credits), 0) AS total_credits
+            FROM billing_usage_logs
+            WHERE source_type = 'TASK'
+              AND source_id IN
+            <foreach item="id" collection="taskIds" open="(" separator="," close=")">#{id}</foreach>
+            GROUP BY source_id
+            </script>
+            """)
+    List<java.util.Map<String, Object>> batchSumConsumedCredits(@Param("taskIds") List<Long> taskIds);
 }

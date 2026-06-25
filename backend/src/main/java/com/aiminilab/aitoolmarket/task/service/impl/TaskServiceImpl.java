@@ -6,6 +6,7 @@ import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.community.mapper.CommunityEventMapper;
+import com.aiminilab.aitoolmarket.community.entity.CommunityPost;
 import com.aiminilab.aitoolmarket.community.mapper.CommunityPostMapper;
 import com.aiminilab.aitoolmarket.credit.dto.PricingBreakdownItem;
 import com.aiminilab.aitoolmarket.credit.dto.PricingQuote;
@@ -51,9 +52,13 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class TaskServiceImpl implements TaskService {
@@ -192,11 +197,8 @@ public class TaskServiceImpl implements TaskService {
     public PageResponse<TaskDetailResponse> list(Long userId, String status, String toolCode, Integer pageNo, Integer pageSize) {
         int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
         int offset = PageResponse.offset(pageNo, pageSize);
-        List<TaskDetailResponse> tasks = taskMapper
-                .findByUserId(userId, status, toolCode, normalizedPageSize, offset)
-                .stream()
-                .map(t -> toDetail(t, false))
-                .toList();
+        List<AiTask> rawTasks = taskMapper.findByUserId(userId, status, toolCode, normalizedPageSize, offset);
+        List<TaskDetailResponse> tasks = toDetailBatch(rawTasks, false);
         long total = taskMapper.countByUserId(userId, status, toolCode);
         return PageResponse.of(tasks, total, pageNo, pageSize);
     }
@@ -242,9 +244,8 @@ public class TaskServiceImpl implements TaskService {
                                                       Integer pageNo, Integer pageSize) {
         int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
         int offset = PageResponse.offset(pageNo, pageSize);
-        List<TaskDetailResponse> tasks = taskMapper.findForAdmin(status, toolCode, userId, taskId, normalizedPageSize, offset).stream()
-                .map(t -> toDetail(t, true))
-                .toList();
+        List<AiTask> rawTasks = taskMapper.findForAdmin(status, toolCode, userId, taskId, normalizedPageSize, offset);
+        List<TaskDetailResponse> tasks = toDetailBatch(rawTasks, true);
         long total = taskMapper.countForAdmin(status, toolCode, userId, taskId);
         return PageResponse.of(tasks, total, pageNo, pageSize);
     }
@@ -350,6 +351,77 @@ public class TaskServiceImpl implements TaskService {
                 .map(post -> post.getId())
                 .orElse(null);
         return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result, agentSource, communityPostId, consumedCredits);
+    }
+
+    private List<TaskDetailResponse> toDetailBatch(List<AiTask> tasks, boolean forAdmin) {
+        if (tasks == null || tasks.isEmpty()) return List.of();
+
+        List<Long> taskIds = tasks.stream().map(AiTask::getId).toList();
+
+        List<Map<String, Object>> firstResultRows = taskMapper.batchSelectFirstResults(taskIds);
+        Map<Long, String> firstResults = firstResultRows.stream()
+                .collect(Collectors.toMap(
+                        row -> ((Number) row.get("task_id")).longValue(),
+                        row -> {
+                            Object ct = row.get("content_text");
+                            return ct != null ? (String) ct : "";
+                        },
+                        (l, r) -> l
+                ));
+        Map<Long, String> resourceTypes = firstResultRows.stream()
+                .collect(Collectors.toMap(
+                        row -> ((Number) row.get("task_id")).longValue(),
+                        row -> {
+                            Object rt = row.get("resource_type");
+                            return rt != null ? (String) rt : "";
+                        },
+                        (l, r) -> l
+                ));
+
+        Map<Long, Integer> creditsByTask = taskMapper.batchSumConsumedCredits(taskIds).stream()
+                .collect(Collectors.toMap(
+                        row -> ((Number) row.get("task_id")).longValue(),
+                        row -> ((Number) row.get("total_credits")).intValue(),
+                        (l, r) -> l
+                ));
+
+        Map<Long, AgentToolCall> agentCallsByTask = agentToolCallMapper.batchFindByTaskIds(taskIds).stream()
+                .collect(Collectors.toMap(
+                        AgentToolCall::getTaskId,
+                        Function.identity(),
+                        (l, r) -> l
+                ));
+
+        Map<Long, CommunityPost> postsByTask = communityPostMapper.batchFindByTaskIds(taskIds).stream()
+                .collect(Collectors.toMap(
+                        CommunityPost::getTaskId,
+                        Function.identity(),
+                        (l, r) -> l
+                ));
+
+        return tasks.stream().map(task -> {
+            String contentText = firstResults.getOrDefault(task.getId(), null);
+            String resourceType = resourceTypes.getOrDefault(task.getId(), null);
+            TaskResultResponse result = (contentText != null)
+                    ? new TaskResultResponse(resourceType, contentText)
+                    : null;
+            result = rewriteResultUrls(result, forAdmin);
+
+            int consumedCredits = creditsByTask.getOrDefault(task.getId(), 0);
+
+            AgentToolCall agentCall = agentCallsByTask.get(task.getId());
+            AgentTaskSourceResponse agentSource = agentCall != null ? toAgentTaskSource(agentCall) : null;
+
+            CommunityPost post = postsByTask.get(task.getId());
+            Long communityPostId = null;
+            if (post != null
+                    && "PUBLISHED".equalsIgnoreCase(post.getStatus())
+                    && (post.getAuditStatus() == null || "APPROVED".equalsIgnoreCase(post.getAuditStatus()))) {
+                communityPostId = post.getId();
+            }
+
+            return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result, agentSource, communityPostId, consumedCredits);
+        }).toList();
     }
 
     private TaskResultResponse rewriteResultUrls(TaskResultResponse result, boolean forAdmin) {

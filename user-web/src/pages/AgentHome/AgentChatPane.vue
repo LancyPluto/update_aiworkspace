@@ -2625,7 +2625,7 @@ defineExpose({
 
         <article v-if="showInlineRunTimeline" class="agent-message assistant run-progress">
           <div class="avatar">
-            <img src="/logo.svg" alt="AI" />
+            <img src="https://cdn.wlcloudai.com/static/logo.svg" alt="AI" />
           </div>
           <div class="bubble">
             <RunTimeline

@@ -641,4 +641,47 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
     int updateMedia(@Param("postId") Long postId,
                     @Param("coverUrl") String coverUrl,
                     @Param("mediaUrl") String mediaUrl);
+
+    @Select("""
+            <script>
+            SELECT post_id
+            FROM community_post_likes
+            WHERE user_id = #{userId}
+              AND post_id IN
+            <foreach item="id" collection="postIds" open="(" separator="," close=")">#{id}</foreach>
+            </script>
+            """)
+    List<Long> batchFindLikedPostIds(@Param("postIds") List<Long> postIds, @Param("userId") Long userId);
+
+    @Select("""
+            <script>
+            SELECT post_id
+            FROM community_post_favorites
+            WHERE user_id = #{userId}
+              AND post_id IN
+            <foreach item="id" collection="postIds" open="(" separator="," close=")">#{id}</foreach>
+            </script>
+            """)
+    List<Long> batchFindFavoritedPostIds(@Param("postIds") List<Long> postIds, @Param("userId") Long userId);
+
+    @Select("""
+            <script>
+            SELECT post_id, tag
+            FROM community_post_tags
+            WHERE post_id IN
+            <foreach item="id" collection="postIds" open="(" separator="," close=")">#{id}</foreach>
+            ORDER BY id ASC
+            </script>
+            """)
+    List<java.util.Map<String, Object>> batchFindTagRows(@Param("postIds") List<Long> postIds);
+
+    @Select("""
+            <script>
+            SELECT *
+            FROM community_posts
+            WHERE task_id IN
+            <foreach item="id" collection="taskIds" open="(" separator="," close=")">#{id}</foreach>
+            </script>
+            """)
+    List<CommunityPost> batchFindByTaskIds(@Param("taskIds") List<Long> taskIds);
 }

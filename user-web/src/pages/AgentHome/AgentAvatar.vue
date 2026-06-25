@@ -17,7 +17,7 @@ defineProps<{
     ]"
     aria-hidden="true"
   >
-    <img src="/logo.svg" alt="" class="agent-avatar__logo" />
+    <img src="https://cdn.wlcloudai.com/static/logo.svg" alt="" class="agent-avatar__logo" />
   </div>
 </template>
 

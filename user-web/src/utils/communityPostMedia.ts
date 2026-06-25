@@ -35,16 +35,23 @@ export function resolveCommunityDerivativeUrl(value?: string | null, kind?: Comm
   if (!value || !kind) return ""
   if (kind === "image-thumb") return communityMediaDerivativeUrl(value, "thumb-640", "webp")
   if (kind === "image-lqip") return communityMediaDerivativeUrl(value, "lqip-32", "webp")
-  if (kind === "video-poster") return resolveOssVideoPosterUrl(value)
+  if (kind === "video-poster") {
+    const ossPoster = resolveOssVideoPosterUrl(value)
+    return ossPoster || communityMediaDerivativeUrl(value, "poster-640", "webp")
+  }
   return communityMediaDerivativeUrl(value, "preview-480p", "mp4")
 }
 
 const OSS_SNAPSHOT_SUFFIX = "?x-oss-process=video/snapshot,t_1000,f_jpg,w_640,h_0,m_fast"
 
+function isOssMediaUrl(url: string): boolean {
+  return url.includes(".oss-") || url.includes("/cdn/") || url.includes("cdn.wlcloudai.com")
+}
+
 export function resolveOssVideoPosterUrl(value?: string | null): string {
   const source = normalizeCommunityMediaUrl(value)
   if (!source) return ""
-  if (source.includes(".oss-") || source.includes("/cdn/")) {
+  if (isOssMediaUrl(source)) {
     const clean = source.split("?")[0].split("#")[0]
     return clean + OSS_SNAPSHOT_SUFFIX
   }
