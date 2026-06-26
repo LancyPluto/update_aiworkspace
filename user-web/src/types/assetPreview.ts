@@ -10,6 +10,7 @@ export interface AssetPreviewItem {
   subtitle?: string
   url?: string
   urls?: string[]
+  downloadUrl?: string
   prompt?: string
   rawText?: string
   taskId?: number

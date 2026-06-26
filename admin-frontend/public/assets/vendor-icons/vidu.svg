@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="Vidu">
+  <rect width="64" height="64" rx="14" fill="#ffffff"/>
+  <g transform="translate(32,32)">
+    <path fill="#0066FF" d="M-20,-12 L-12,12 L-6,12 L2,-12 L8,-12 L0,18 L-8,18 L-14,-6 L-14,-6 Z"/>
+    <circle fill="#0066FF" cx="14" cy="-4" r="6"/>
+    <path fill="#00CC88" d="M10,8 L18,8 L18,18 L10,18 Z"/>
+  </g>
+</svg>

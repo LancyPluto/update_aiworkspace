@@ -259,6 +259,7 @@ const vendorCatalog: Record<string, VendorMeta> = {
   openrouter: { label: "OpenRouter", shortName: "OpenRouter", mark: "OR", iconAsset: "openrouter" },
   doubao: { label: "Doubao", shortName: "Doubao", mark: "DB", iconAsset: "doubao" },
   baidu: { label: "Baidu", shortName: "ERNIE", mark: "BD", iconAsset: "baidu" },
+  vidu: { label: "Vidu (生数科技)", shortName: "Vidu", mark: "V", iconAsset: "vidu" },
 }
 
 const emptyForm: ModelForm = {
@@ -396,6 +397,7 @@ function resolveVendorMeta(parts: {
   if (modelText.includes("qwen") || modelText.includes("tongyi") || modelText.includes("dashscope")) return vendorCatalog.qwen
   if (modelText.includes("alibaba") || baseText.includes("aliyuncs.com")) return vendorCatalog.alibabacloud
   if (modelText.includes("ernie") || modelText.includes("wenxin") || modelText.includes("baidu")) return vendorCatalog.baidu
+  if (modelText.includes("vidu") || baseText.includes("vidu.com") || baseText.includes("api.vidu.com")) return vendorCatalog.vidu
   if (modelText.includes("gemini") || modelText.includes("google")) return vendorCatalog.google
   if (modelText.includes("claude")) return vendorCatalog.claude
   if (baseText.includes("siliconflow")) return vendorCatalog.siliconflow
