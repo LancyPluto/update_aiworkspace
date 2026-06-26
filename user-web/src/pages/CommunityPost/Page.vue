@@ -38,6 +38,30 @@ const auth = useAuthStore()
 function resolveAuthToken() {
   return auth.token ?? getSessionBearerJwt()
 }
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
+async function forceDownload(url: string, filename: string) {
+  if (!url) return
+  try {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error("Download failed")
+    const blob = await res.blob()
+    downloadBlob(blob, filename)
+  } catch {
+    window.open(url, "_blank")
+  }
+}
+
 const post = ref<CommunityPost | null>(null)
 const loading = ref(false)
 const acting = ref(false)
@@ -620,14 +644,14 @@ onUnmounted(() => {
             <Send class="h-4 w-4" />
             分享
           </button>
-          <a
+          <button
             v-if="downloadUrl"
-            :href="downloadUrl"
-            download
+            type="button"
             aria-label="下载作品"
+            @click="forceDownload(downloadUrl, `community-post-${post.id}.png`)"
           >
             <Download class="h-4 w-4" />
-          </a>
+          </button>
         </div>
 
         <div class="metadata">
