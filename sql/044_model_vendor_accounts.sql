@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS model_vendor_accounts (
   extra_auth_json TEXT NULL,
   console_url VARCHAR(512) NULL,
   balance_url VARCHAR(512) NULL,
+  console_cookie TEXT NULL,
+  console_cookie_status VARCHAR(20) NULL DEFAULT 'UNKNOWN',
   balance_query_mode VARCHAR(32) NOT NULL DEFAULT 'MANUAL',
   balance_amount DECIMAL(18,4) NULL,
   balance_currency VARCHAR(8) NULL DEFAULT 'CNY',

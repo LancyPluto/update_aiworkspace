@@ -30,6 +30,7 @@ const capabilityLabels: Record<string, string> = {
   TEXT_TO_SPEECH: "文字转语音",
   SPEECH_TO_TEXT: "语音转文字",
   DIGITAL_HUMAN: "数字人",
+  VISION_INPUT: "图片视觉",
   EMBEDDING: "Embedding",
   RERANK: "Rerank",
 }

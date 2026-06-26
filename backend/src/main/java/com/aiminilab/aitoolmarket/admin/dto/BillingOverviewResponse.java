@@ -5,6 +5,8 @@ import java.time.LocalDate;
 import java.util.List;
 
 public record BillingOverviewResponse(
+        LocalDate rangeStartDate,
+        LocalDate rangeEndDate,
         long todayPromptTokens,
         long todayCompletionTokens,
         long todayTotalTokens,

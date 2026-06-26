@@ -6,8 +6,13 @@ import com.aiminilab.aitoolmarket.admin.entity.BillingUsageLog;
 import com.aiminilab.aitoolmarket.admin.mapper.BillingUsageLogMapper;
 import com.aiminilab.aitoolmarket.admin.service.BillingService;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
+import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.VendorBalanceAdjustmentMapper;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -21,9 +26,18 @@ public class BillingServiceImpl implements BillingService {
     private static final BigDecimal CREDIT_PRICE_CNY = new BigDecimal("0.01");
 
     private final BillingUsageLogMapper billingUsageLogMapper;
+    private final AgentModelConfigMapper modelConfigMapper;
+    private final ModelVendorAccountMapper vendorAccountMapper;
+    private final VendorBalanceAdjustmentMapper vendorBalanceAdjustmentMapper;
 
-    public BillingServiceImpl(BillingUsageLogMapper billingUsageLogMapper) {
+    public BillingServiceImpl(BillingUsageLogMapper billingUsageLogMapper,
+                              AgentModelConfigMapper modelConfigMapper,
+                              ModelVendorAccountMapper vendorAccountMapper,
+                              VendorBalanceAdjustmentMapper vendorBalanceAdjustmentMapper) {
         this.billingUsageLogMapper = billingUsageLogMapper;
+        this.modelConfigMapper = modelConfigMapper;
+        this.vendorAccountMapper = vendorAccountMapper;
+        this.vendorBalanceAdjustmentMapper = vendorBalanceAdjustmentMapper;
     }
 
     @Override
@@ -37,6 +51,8 @@ public class BillingServiceImpl implements BillingService {
         LocalDateTime startAt = normalizedStart.atStartOfDay();
         LocalDateTime endAt = normalizedEnd.plusDays(1).atStartOfDay();
         return new BillingOverviewResponse(
+                normalizedStart,
+                normalizedEnd,
                 billingUsageLogMapper.sumPromptTokens(startAt, endAt, userId, modelConfigId, clean(provider), clean(modelName), clean(sourceType), sourceId),
                 billingUsageLogMapper.sumCompletionTokens(startAt, endAt, userId, modelConfigId, clean(provider), clean(modelName), clean(sourceType), sourceId),
                 billingUsageLogMapper.sumTotalTokens(startAt, endAt, userId, modelConfigId, clean(provider), clean(modelName), clean(sourceType), sourceId),
@@ -69,6 +85,7 @@ public class BillingServiceImpl implements BillingService {
     }
 
     @Override
+    @Transactional
     public void recordUsage(String sourceType, Long sourceId, Long userId, AgentModelConfig modelConfig,
                             Integer promptTokens, Integer completionTokens, Integer billableUnits, Integer chargedCredits,
                             BigDecimal vendorCostAmount, BigDecimal markupRatio) {
@@ -122,6 +139,70 @@ public class BillingServiceImpl implements BillingService {
         log.setMarkupRatio(markupRatio == null ? BigDecimal.ZERO : markupRatio);
         log.setCreatedAt(LocalDateTime.now());
         billingUsageLogMapper.insert(log);
+        deductManualVendorBalance(log, modelConfig, vendorCost);
+    }
+
+    private void deductManualVendorBalance(BillingUsageLog log, AgentModelConfig modelConfig, BigDecimal vendorCost) {
+        if (log == null || log.getId() == null) {
+            return;
+        }
+        Long vendorAccountId = resolveVendorAccountId(modelConfig);
+        if (vendorAccountId == null) {
+            return;
+        }
+        BigDecimal deductedAmount = vendorCost == null ? BigDecimal.ZERO : vendorCost.max(BigDecimal.ZERO).setScale(6, RoundingMode.HALF_UP);
+        if (deductedAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+        ModelVendorAccount account = vendorAccountMapper.findActiveByIdForUpdate(vendorAccountId);
+        if (account == null || !"MANUAL".equalsIgnoreCase(defaultString(account.getBalanceQueryMode()))) {
+            return;
+        }
+        BigDecimal before = account.getBalanceAmount();
+        if (before == null) {
+            return;
+        }
+        BigDecimal after = before.subtract(deductedAmount).setScale(6, RoundingMode.HALF_UP);
+        account.setBalanceAmount(after);
+        account.setBalanceUpdatedAt(LocalDateTime.now());
+        account.setBalanceErrorMessage(null);
+        account.setBalanceStatus(resolveBalanceStatus(after, account.getBalanceLowThreshold()));
+        account.setUpdatedAt(LocalDateTime.now());
+        vendorAccountMapper.updateAccount(account);
+        vendorBalanceAdjustmentMapper.insertAdjustment(
+                log.getId(),
+                account.getId(),
+                before,
+                after,
+                deductedAmount,
+                account.getBalanceCurrency() == null || account.getBalanceCurrency().isBlank()
+                        ? "CNY"
+                        : account.getBalanceCurrency()
+        );
+    }
+
+    private Long resolveVendorAccountId(AgentModelConfig modelConfig) {
+        if (modelConfig == null) {
+            return null;
+        }
+        if (modelConfig.getVendorAccountId() != null) {
+            return modelConfig.getVendorAccountId();
+        }
+        if (modelConfig.getId() == null) {
+            return null;
+        }
+        AgentModelConfig current = modelConfigMapper.findActiveById(modelConfig.getId());
+        return current == null ? null : current.getVendorAccountId();
+    }
+
+    private String resolveBalanceStatus(BigDecimal amount, BigDecimal lowThreshold) {
+        if (amount == null) {
+            return "UNKNOWN";
+        }
+        if (lowThreshold != null && amount.compareTo(lowThreshold) < 0) {
+            return "LOW";
+        }
+        return "OK";
     }
 
     private BigDecimal costPerMillion(int tokens, BigDecimal pricePer1m) {
@@ -157,5 +238,9 @@ public class BillingServiceImpl implements BillingService {
 
     private String clean(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private String defaultString(String value) {
+        return value == null ? "" : value.trim();
     }
 }

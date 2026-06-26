@@ -39,9 +39,11 @@ class FakeLangChainModel:
 class FakeAsyncResponse:
     status_code = 200
 
-    def __init__(self, payload):
+    def __init__(self, payload, *, content=b"", headers=None):
         self.payload = payload
         self.text = str(payload)
+        self.content = content
+        self.headers = headers or {}
 
     def raise_for_status(self):
         return None
@@ -65,6 +67,10 @@ class FakeAsyncHttpClient:
     async def post(self, url, headers=None, json=None):
         FakeAsyncHttpClient.requests.append({"url": url, "headers": headers, "json": json, "timeout": self.timeout})
         return FakeAsyncResponse({"choices": [{"message": {"content": "modelscope ready"}}]})
+
+    async def get(self, url, headers=None):
+        FakeAsyncHttpClient.requests.append({"method": "GET", "url": url, "headers": headers, "timeout": self.timeout})
+        return FakeAsyncResponse({}, content=b"image-bytes", headers={"content-type": "image/png"})
 
 
 @pytest.mark.asyncio
@@ -223,6 +229,79 @@ async def test_model_client_calls_modelscope_directly(monkeypatch):
     assert FakeAsyncHttpClient.requests[0]["url"] == "https://api-inference.modelscope.cn/v1/chat/completions"
     assert FakeAsyncHttpClient.requests[0]["json"]["model"] == "deepseek-ai/DeepSeek-V4-Pro"
     assert FakeAsyncHttpClient.requests[0]["json"]["messages"] == [{"role": "user", "content": "ping"}]
+
+
+@pytest.mark.asyncio
+async def test_model_client_preserves_multimodal_content_for_openai_direct(monkeypatch):
+    FakeAsyncHttpClient.requests = []
+    monkeypatch.setattr("app.clients.model_client.httpx.AsyncClient", FakeAsyncHttpClient)
+    client = ModelClient(
+        Settings(
+            model_provider="openai_compatible",
+            model_api_base_url="https://api-inference.modelscope.cn/v1",
+            model_api_key="key",
+            model_name="qwen-vl-max",
+            model_timeout_seconds=60,
+        ),
+        chat_model=FakeLangChainModel(RuntimeError("langchain should not be used")),
+    )
+    content = [
+        {"type": "text", "text": "描述图2并用于提示词"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+    ]
+
+    await client.chat([ChatMessage(role="user", content=content)])
+
+    assert FakeAsyncHttpClient.requests[0]["json"]["messages"] == [{"role": "user", "content": content}]
+
+
+@pytest.mark.asyncio
+async def test_model_client_calls_qwen_directly(monkeypatch):
+    FakeAsyncHttpClient.requests = []
+    monkeypatch.setattr("app.clients.model_client.httpx.AsyncClient", FakeAsyncHttpClient)
+    client = ModelClient(
+        Settings(
+            model_provider="qwen",
+            model_api_base_url="https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            model_api_key="key",
+            model_name="qwen3.6-plus",
+            model_timeout_seconds=60,
+        ),
+        chat_model=FakeLangChainModel(RuntimeError("langchain should not be used")),
+    )
+
+    answer = await client.chat([ChatMessage(role="user", content="ping")])
+
+    assert answer == "modelscope ready"
+    assert FakeAsyncHttpClient.requests[0]["url"] == "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions"
+    assert FakeAsyncHttpClient.requests[0]["json"]["model"] == "qwen3.6-plus"
+    assert FakeAsyncHttpClient.requests[0]["json"]["messages"] == [{"role": "user", "content": "ping"}]
+
+
+@pytest.mark.asyncio
+async def test_model_client_inlines_private_qwen_image_urls(monkeypatch):
+    FakeAsyncHttpClient.requests = []
+    monkeypatch.setattr("app.clients.model_client.httpx.AsyncClient", FakeAsyncHttpClient)
+    client = ModelClient(
+        Settings(
+            model_provider="qwen",
+            model_api_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            model_api_key="key",
+            model_name="qwen3.6-plus",
+            backend_internal_base_url="http://backend:8080",
+        ),
+        chat_model=FakeLangChainModel(RuntimeError("langchain should not be used")),
+    )
+    content = [
+        {"type": "text", "text": "看图"},
+        {"type": "image_url", "image_url": {"url": "http://backend:8080/generated/uploads/a.png"}},
+    ]
+
+    await client.chat([ChatMessage(role="user", content=content)])
+
+    post_request = [request for request in FakeAsyncHttpClient.requests if "json" in request][0]
+    sent_url = post_request["json"]["messages"][0]["content"][1]["image_url"]["url"]
+    assert sent_url == "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 
 
 @pytest.mark.asyncio

@@ -27,6 +27,12 @@ class ModelProviderRegistryTest {
         assertThat(localMediaMock.get().capabilities()).containsExactly("IMAGE_GENERATION", "VIDEO_GENERATION");
         assertThat(localMediaMock.get().testStrategy()).isEqualTo("accept_only");
         assertThat(registry.listByCapability("TEXT_GENERATION")).isNotEmpty();
+        Optional<ModelProviderDefinition> qwen = registry.findByCode("qwen");
+        assertThat(qwen).isPresent();
+        assertThat(qwen.get().defaultModel()).isEqualTo("qwen3.6-plus");
+        assertThat(qwen.get().defaultBaseUrl()).isEqualTo("https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1");
+        assertThat(qwen.get().providerProtocol()).isEqualTo("openai_chat");
+        assertThat(qwen.get().capabilities()).containsExactly("TEXT_GENERATION", "VISION_INPUT");
     }
 
     @Test

@@ -863,6 +863,24 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("billing_usage_logs", "billing_unit", "ALTER TABLE billing_usage_logs ADD COLUMN billing_unit VARCHAR(32) NOT NULL DEFAULT 'TOKEN_PER_M'");
         ensureColumn("billing_usage_logs", "billable_units", "ALTER TABLE billing_usage_logs ADD COLUMN billable_units INT NOT NULL DEFAULT 0");
         ensureColumn("billing_usage_logs", "unit_price", "ALTER TABLE billing_usage_logs ADD COLUMN unit_price DECIMAL(18,8) NOT NULL DEFAULT 0");
+        ensureColumn("billing_usage_logs", "vendor_cost_amount", "ALTER TABLE billing_usage_logs ADD COLUMN vendor_cost_amount DECIMAL(18,6) NOT NULL DEFAULT 0 AFTER cost_amount");
+        ensureColumn("billing_usage_logs", "customer_charge_credits", "ALTER TABLE billing_usage_logs ADD COLUMN customer_charge_credits INT NOT NULL DEFAULT 0 AFTER charged_credits");
+        ensureColumn("billing_usage_logs", "margin_credits", "ALTER TABLE billing_usage_logs ADD COLUMN margin_credits INT NOT NULL DEFAULT 0 AFTER customer_charge_credits");
+        ensureColumn("billing_usage_logs", "markup_ratio", "ALTER TABLE billing_usage_logs ADD COLUMN markup_ratio DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER margin_credits");
+        ensureTable("vendor_balance_adjustments", """
+                CREATE TABLE vendor_balance_adjustments (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  billing_usage_log_id BIGINT NOT NULL,
+                  vendor_account_id BIGINT NOT NULL,
+                  balance_before DECIMAL(18,6) NOT NULL,
+                  balance_after DECIMAL(18,6) NOT NULL,
+                  deducted_amount DECIMAL(18,6) NOT NULL,
+                  balance_currency VARCHAR(8) NOT NULL DEFAULT 'CNY',
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_vendor_balance_adjustment_log (billing_usage_log_id),
+                  KEY idx_vendor_balance_adjustment_account (vendor_account_id, created_at)
+                )
+                """);
         ensureColumn("agent_files", "attached_run_id", "ALTER TABLE agent_files ADD COLUMN attached_run_id BIGINT NULL");
         ensureIndex("agent_files", "idx_agent_files_attached_run", "CREATE INDEX idx_agent_files_attached_run ON agent_files(session_id, attached_run_id, id)");
         ensureColumn("agent_messages", "status", "ALTER TABLE agent_messages ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE'");
@@ -871,6 +889,7 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("agent_messages", "parent_message_id", "ALTER TABLE agent_messages ADD COLUMN parent_message_id BIGINT NULL");
         ensureIndex("agent_messages", "idx_agent_messages_session_active", "CREATE INDEX idx_agent_messages_session_active ON agent_messages(session_id, status, id)");
         ensureIndex("agent_messages", "idx_agent_messages_parent_branch", "CREATE INDEX idx_agent_messages_parent_branch ON agent_messages(session_id, parent_message_id, role, id)");
+        ensureColumn("agent_sessions", "conversation_summary", "ALTER TABLE agent_sessions ADD COLUMN conversation_summary TEXT NULL COMMENT 'rolling conversation summary for compacted agent history' AFTER title");
         ensureColumn("agent_sessions", "active_leaf_message_id", "ALTER TABLE agent_sessions ADD COLUMN active_leaf_message_id BIGINT NULL");
         ensureIndex("agent_sessions", "idx_agent_sessions_active_leaf", "CREATE INDEX idx_agent_sessions_active_leaf ON agent_sessions(active_leaf_message_id)");
         ensureColumn("agent_runs", "model_config_id", "ALTER TABLE agent_runs ADD COLUMN model_config_id BIGINT NULL");

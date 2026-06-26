@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from app.config import settings
+from app.core.attachment_catalog import build_user_message_content
 from app.core.preferred_tool_bias import apply_preferred_tool_override, resolve_preferred_tool, sort_tools_with_preferred
 from app.core.schemas import ChatMessage, RunContext
 from app.routing.semantic_tool_recall import recall_tool_codes
@@ -162,5 +163,5 @@ class ToolResolver:
                 context.conversationSummary,
             )
         )
-        messages.append(ChatMessage(role="user", content=context.message))
+        messages.append(ChatMessage(role="user", content=build_user_message_content(context)))
         return messages

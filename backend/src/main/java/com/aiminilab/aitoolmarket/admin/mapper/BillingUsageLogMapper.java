@@ -210,7 +210,6 @@ public interface BillingUsageLogMapper extends BaseMapper<BillingUsageLog> {
             """ + FILTER + """
             GROUP BY CAST(created_at AS DATE)
             ORDER BY usage_date DESC
-            LIMIT 14
             </script>
             """)
     @ConstructorArgs({

@@ -44,6 +44,23 @@ providers:
     workerReady: true
     description: DeepSeek chat completions API using the OpenAI-compatible protocol.
 
+  - code: qwen
+    label: Alibaba Cloud Bailian Qwen
+    capabilities:
+      - TEXT_GENERATION
+      - VISION_INPUT
+    defaultBaseUrl: https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+    defaultModel: qwen3.6-plus
+    billingDefault: TOKEN_PER_M
+    providerProtocol: openai_chat
+    vendorKind: direct
+    upstreamVendor: aliyun_bailian
+    testStrategy: agent_service
+    workerReady: true
+    authSchemaJson: '{"fields":[{"key":"apiKey","label":"DASHSCOPE_API_KEY","type":"password","required":true},{"key":"baseUrl","label":"Base URL","type":"url","required":true,"placeholder":"https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"}]}'
+    modelParamSchemaJson: '{"models":["qwen3.6-plus"],"fields":[{"key":"modelName","label":"模型名称","type":"text","required":true},{"key":"capabilities","label":"能力","type":"multi_select","options":["TEXT_GENERATION","VISION_INPUT"],"required":true}]}'
+    description: Alibaba Cloud Model Studio Bailian Qwen OpenAI-compatible Chat Completions endpoint. Use qwen3.6-plus with VISION_INPUT for Agent image understanding.
+
   - code: anthropic_compatible
     label: Anthropic compatible
     capabilities:

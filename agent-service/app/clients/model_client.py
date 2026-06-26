@@ -1,9 +1,12 @@
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 import asyncio
+import base64
+import ipaddress
 import json
 import os
 from typing import Any, Awaitable, Callable, TypeVar
+from urllib.parse import urlparse
 
 import httpx
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -175,7 +178,7 @@ class ModelClient:
     def _should_use_direct_openai_stream(self) -> bool:
         provider = self.settings.model_provider.strip().lower()
         base_url = self.settings.model_api_base_url.strip().lower()
-        if provider in {"deepseek", "deepseek_compatible"}:
+        if provider in {"deepseek", "deepseek_compatible", "qwen", "qwen_compatible", "dashscope", "bailian"}:
             return True
         if provider == "openai_compatible":
             return bool(base_url) and not any(
@@ -196,9 +199,13 @@ class ModelClient:
         tools: list[dict[str, Any]] | None = None,
     ) -> str:
         base_url = normalize_volcengine_openai_base_url(self.settings.model_api_base_url.rstrip("/"))
+        if not base_url and self.settings.model_provider.strip().lower() in {"deepseek", "deepseek_compatible"}:
+            base_url = "https://api.deepseek.com"
+        if not base_url and self.settings.model_provider.strip().lower() in {"qwen", "qwen_compatible", "dashscope", "bailian"}:
+            base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
         payload: dict[str, Any] = {
             "model": _resolved_model_name(self.settings, base_url),
-            "messages": [_to_openai_message(message) for message in messages],
+            "messages": await _to_openai_messages_for_provider(messages, self.settings),
             "stream": False,
         }
         if tools:
@@ -222,9 +229,13 @@ class ModelClient:
         tool_choice: str | dict[str, Any] | None = None,
     ) -> ChatTurnResult:
         base_url = normalize_volcengine_openai_base_url(self.settings.model_api_base_url.rstrip("/"))
+        if not base_url and self.settings.model_provider.strip().lower() in {"deepseek", "deepseek_compatible"}:
+            base_url = "https://api.deepseek.com"
+        if not base_url and self.settings.model_provider.strip().lower() in {"qwen", "qwen_compatible", "dashscope", "bailian"}:
+            base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
         payload: dict[str, Any] = {
             "model": _resolved_model_name(self.settings, base_url),
-            "messages": [_to_openai_message(message) for message in messages],
+            "messages": await _to_openai_messages_for_provider(messages, self.settings),
             "stream": False,
         }
         if tools:
@@ -262,9 +273,11 @@ class ModelClient:
         base_url = normalize_volcengine_openai_base_url(self.settings.model_api_base_url.rstrip("/"))
         if not base_url and self.settings.model_provider.strip().lower() in {"deepseek", "deepseek_compatible"}:
             base_url = "https://api.deepseek.com"
+        if not base_url and self.settings.model_provider.strip().lower() in {"qwen", "qwen_compatible", "dashscope", "bailian"}:
+            base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
         payload: dict[str, Any] = {
             "model": _resolved_model_name(self.settings, base_url),
-            "messages": [_to_openai_message(message) for message in messages],
+            "messages": await _to_openai_messages_for_provider(messages, self.settings),
             "stream": True,
         }
         safe_tools = _prepare_tools_for_provider(tools, self.settings.model_provider)
@@ -335,14 +348,14 @@ class ModelClient:
 def _to_langchain_message(message: ChatMessage):
     role = message.role.lower()
     if role == "system":
-        return SystemMessage(content=message.content)
+        return SystemMessage(content=_langchain_content(message.content))
     if role == "tool":
-        return ToolMessage(content=message.content, tool_call_id=message.toolCallId or "")
+        return ToolMessage(content=_content_text(message.content), tool_call_id=message.toolCallId or "")
     if role == "assistant" or role == "ai":
         if message.toolCalls:
-            return AIMessage(content=message.content or "", tool_calls=[_to_langchain_tool_call(call) for call in message.toolCalls])
-        return AIMessage(content=message.content)
-    return HumanMessage(content=message.content)
+            return AIMessage(content=_content_text(message.content), tool_calls=[_to_langchain_tool_call(call) for call in message.toolCalls])
+        return AIMessage(content=_langchain_content(message.content))
+    return HumanMessage(content=_langchain_content(message.content))
 
 
 def _to_langchain_messages(messages: list[ChatMessage]):
@@ -406,7 +419,7 @@ def _to_openai_message(message: ChatMessage) -> dict[str, Any]:
         role = "assistant"
     if role not in {"system", "assistant", "user", "tool"}:
         role = "user"
-    payload: dict[str, Any] = {"role": role, "content": message.content or ""}
+    payload: dict[str, Any] = {"role": role, "content": _openai_content(message.content)}
     if role == "tool" and message.toolCallId:
         payload["tool_call_id"] = message.toolCallId
     if role == "assistant" and message.toolCalls:
@@ -414,6 +427,136 @@ def _to_openai_message(message: ChatMessage) -> dict[str, Any]:
     if message.name:
         payload["name"] = message.name
     return payload
+
+
+async def _to_openai_messages_for_provider(messages: list[ChatMessage], settings: Settings) -> list[dict[str, Any]]:
+    payload = [_to_openai_message(message) for message in messages]
+    if not _should_inline_private_image_urls(settings):
+        return payload
+    return await _inline_private_image_urls(payload, settings)
+
+
+def _should_inline_private_image_urls(settings: Settings) -> bool:
+    provider = settings.model_provider.strip().lower()
+    base_url = settings.model_api_base_url.strip().lower()
+    return provider in {"qwen", "qwen_compatible", "dashscope", "bailian"} or (
+        "dashscope.aliyuncs.com" in base_url or "maas.aliyuncs.com" in base_url
+    )
+
+
+async def _inline_private_image_urls(messages: list[dict[str, Any]], settings: Settings) -> list[dict[str, Any]]:
+    backend_host = _url_host(settings.backend_internal_base_url)
+    converted: list[dict[str, Any]] = []
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            converted.append(message)
+            continue
+        parts: list[dict[str, Any]] = []
+        changed = False
+        for part in content:
+            if not isinstance(part, dict) or part.get("type") != "image_url":
+                parts.append(part)
+                continue
+            image_url = part.get("image_url")
+            if not isinstance(image_url, dict):
+                parts.append(part)
+                continue
+            url = image_url.get("url")
+            if not isinstance(url, str) or not _should_inline_image_url(url, backend_host):
+                parts.append(part)
+                continue
+            data_url = await _download_image_as_data_url(url, settings.model_timeout_seconds)
+            next_part = dict(part)
+            next_image_url = dict(image_url)
+            next_image_url["url"] = data_url
+            next_part["image_url"] = next_image_url
+            parts.append(next_part)
+            changed = True
+        converted.append({**message, "content": parts} if changed else message)
+    return converted
+
+
+def _should_inline_image_url(url: str, backend_host: str) -> bool:
+    value = (url or "").strip()
+    if not value or value.startswith("data:"):
+        return False
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        return False
+    if backend_host and host == backend_host:
+        return True
+    if host in {"localhost", "backend", "host.docker.internal"}:
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_private or ip.is_loopback or ip.is_link_local
+    except ValueError:
+        return False
+
+
+async def _download_image_as_data_url(url: str, timeout_seconds: int | float) -> str:
+    timeout = min(float(timeout_seconds or 30), 30.0)
+    async with _outbound_http_client(timeout) as client:
+        response = await client.get(url, headers={"Accept": "image/*"})
+        response.raise_for_status()
+        content_type = _image_content_type(response.headers.get("content-type"), url)
+        encoded = base64.b64encode(response.content).decode("ascii")
+        return f"data:{content_type};base64,{encoded}"
+
+
+def _image_content_type(header: str | None, url: str) -> str:
+    content_type = (header or "").split(";", 1)[0].strip().lower()
+    if content_type.startswith("image/"):
+        return content_type
+    path = urlparse(url).path.lower()
+    if path.endswith(".png"):
+        return "image/png"
+    if path.endswith((".jpg", ".jpeg")):
+        return "image/jpeg"
+    if path.endswith(".webp"):
+        return "image/webp"
+    if path.endswith(".gif"):
+        return "image/gif"
+    if path.endswith(".bmp"):
+        return "image/bmp"
+    if path.endswith((".heic", ".heif")):
+        return "image/heic"
+    return "image/jpeg"
+
+
+def _url_host(url: str | None) -> str:
+    try:
+        return (urlparse(url or "").hostname or "").strip().lower()
+    except Exception:
+        return ""
+
+
+def _openai_content(content: str | list[dict[str, Any]] | None) -> str | list[dict[str, Any]]:
+    if isinstance(content, list):
+        return content
+    return content or ""
+
+
+def _langchain_content(content: str | list[dict[str, Any]] | None) -> str | list[dict[str, Any]]:
+    if isinstance(content, list):
+        return content
+    return content or ""
+
+
+def _content_text(content: str | list[dict[str, Any]] | None) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    texts: list[str] = []
+    for part in content:
+        if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
+            texts.append(part["text"])
+    return "\n".join(texts)
 
 
 def _to_langchain_tool_call(call: dict[str, Any]) -> dict[str, Any]:

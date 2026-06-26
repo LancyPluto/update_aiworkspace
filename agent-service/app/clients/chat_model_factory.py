@@ -7,12 +7,17 @@ from app.config import Settings
 MINIMAX_OPENAI_COMPATIBLE_BASE_URL = "https://api.minimax.io/v1"
 MINIMAX_ANTHROPIC_COMPATIBLE_BASE_URL = "https://api.minimaxi.com/anthropic"
 DEEPSEEK_OPENAI_COMPATIBLE_BASE_URL = "https://api.deepseek.com"
+QWEN_OPENAI_COMPATIBLE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 OPENAI_CHAT_COMPATIBLE_PROVIDERS = {
     "openai",
     "openai_chat",
     "openai_compatible",
     "deepseek",
     "deepseek_compatible",
+    "qwen",
+    "qwen_compatible",
+    "dashscope",
+    "bailian",
     "agnes",
     "agnes_chat",
 }
@@ -72,6 +77,8 @@ class ChatModelFactory:
         base_url = self.settings.model_api_base_url.strip()
         if not base_url and self.settings.model_provider.strip().lower() in {"deepseek", "deepseek_compatible"}:
             base_url = DEEPSEEK_OPENAI_COMPATIBLE_BASE_URL
+        if not base_url and self.settings.model_provider.strip().lower() in {"qwen", "qwen_compatible", "dashscope", "bailian"}:
+            base_url = QWEN_OPENAI_COMPATIBLE_BASE_URL
         if not base_url and self.settings.model_provider.strip().lower() in {"agnes", "agnes_chat"}:
             base_url = "https://apihub.agnes-ai.com/v1"
         if not base_url and self.settings.model_provider.strip().lower() in {"openai", "openai_chat", "openai_compatible"}:

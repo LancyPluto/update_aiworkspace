@@ -126,6 +126,19 @@ def test_estimate_messages_tokens():
     assert estimate_messages_tokens(messages) >= 1
 
 
+def test_estimate_messages_tokens_ignores_image_parts():
+    messages = [
+        ChatMessage(
+            role="user",
+            content=[
+                {"type": "text", "text": "hello"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64," + "a" * 1000}},
+            ],
+        )
+    ]
+    assert estimate_messages_tokens(messages) == estimate_messages_tokens([ChatMessage(role="user", content="hello")])
+
+
 def test_prune_trims_only_tool_messages_over_budget():
     long_tool = "y" * 2000
     history = [

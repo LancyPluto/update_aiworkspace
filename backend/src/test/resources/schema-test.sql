@@ -765,6 +765,18 @@ CREATE TABLE billing_usage_logs (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE vendor_balance_adjustments (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  billing_usage_log_id BIGINT NOT NULL,
+  vendor_account_id BIGINT NOT NULL,
+  balance_before DECIMAL(18,6) NOT NULL,
+  balance_after DECIMAL(18,6) NOT NULL,
+  deducted_amount DECIMAL(18,6) NOT NULL,
+  balance_currency VARCHAR(8) NOT NULL DEFAULT 'CNY',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (billing_usage_log_id)
+);
+
 CREATE TABLE pricing_margins (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   scope_type VARCHAR(16) NOT NULL DEFAULT 'GLOBAL',

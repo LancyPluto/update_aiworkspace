@@ -85,7 +85,7 @@ from app.runtime.tool_call_loop import (
 from app.runtime.tool_decision_validator import ToolDecisionValidator
 from app.runtime.tool_orchestrator import ToolOrchestrator, missing_execution_arguments
 from app.runtime.workspace_files import WorkspaceFileContext
-from app.core.attachment_catalog import reference_readiness_hint, user_message_for_llm
+from app.core.attachment_catalog import build_user_message_content, reference_readiness_hint, user_message_for_llm
 from app.security.prompt_guard import PromptGuard
 from app.core.user_attachment_priority import apply_user_selected_attachment_priority
 from app.runtime.prompt_policy import PromptMode, resolve_prompt_mode, should_skip_tool_memory_injection
@@ -1341,7 +1341,7 @@ class DeepAgentsRuntimeEngine:
         chat_history = _history_for_chat(context, memory_management=memory_management_turn)
         await self._emit_context_compaction(context)
         messages.extend(chat_history)
-        messages.append(ChatMessage(role="user", content=user_message_for_llm(context)))
+        messages.append(ChatMessage(role="user", content=build_user_message_content(context)))
         budget = BudgetState(credit_budget=context.creditBudget)
         return await self._stream_model_answer(
             context.runId,
@@ -1944,7 +1944,7 @@ def _task_description_from_inputs(inputs: dict[str, Any] | None, input_str: str)
     return input_str
 
 
-def _messages(context: RunContext, workspace_memory_context: str = "", workspace_file_context: str = "") -> list[dict[str, str]]:
+def _messages(context: RunContext, workspace_memory_context: str = "", workspace_file_context: str = "") -> list[dict[str, Any]]:
     context_manager = _context_manager(context)
     messages_list: list[dict[str, str]] = []
     if workspace_memory_context:
@@ -1956,11 +1956,11 @@ def _messages(context: RunContext, workspace_memory_context: str = "", workspace
     session_state_context = format_session_state_context(context)
     if session_state_context:
         messages_list.append({"role": "system", "content": session_state_context})
-    messages_list.append({"role": "user", "content": user_message_for_llm(context)})
+    messages_list.append({"role": "user", "content": build_user_message_content(context)})
     return messages_list
 
 
-def _message(message: ChatMessage) -> dict[str, str]:
+def _message(message: ChatMessage) -> dict[str, Any]:
     role = message.role.lower()
     if role in {"assistant", "ai"}:
         role = "assistant"

@@ -192,8 +192,20 @@ def estimate_tokens(text: str) -> int:
 def estimate_messages_tokens(messages: list[ChatMessage]) -> int:
     total = 0
     for message in messages:
-        total += estimate_tokens(message.content or "")
+        total += estimate_tokens(message_text_content(message.content))
     return total
+
+
+def message_text_content(content: str | list[dict] | None) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    texts: list[str] = []
+    for part in content:
+        if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
+            texts.append(part["text"])
+    return "\n".join(texts)
 
 
 def _align_window_start(messages: list[ChatMessage], start: int) -> int:
@@ -343,7 +355,7 @@ class ContextManager:
         pruned: list[ChatMessage] = []
         for message in messages:
             role = (message.role or "").lower()
-            content = message.content or ""
+            content = message_text_content(message.content)
             if role == "tool" and len(content) > self.pruning_tool_char_limit:
                 pruned.append(
                     message.model_copy(
@@ -369,7 +381,7 @@ class ContextManager:
                 break
             if (message.role or "").lower() != "tool":
                 continue
-            content = message.content or ""
+            content = message_text_content(message.content)
             if not content:
                 continue
             shorter_limit = max(20, self.tool_output_token_soft_limit // 2)
@@ -389,7 +401,7 @@ class ContextManager:
         """Token-aware middle truncation for each message; tool outputs keep URLs."""
         compacted: list[ChatMessage] = []
         for message in messages:
-            content = message.content or ""
+            content = message_text_content(message.content)
             role = (message.role or "").lower()
             if role == "tool":
                 new_content = trim_tool_output_by_tokens(

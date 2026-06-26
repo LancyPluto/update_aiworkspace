@@ -31,6 +31,7 @@ from app.core.intent_router import Intent, IntentRouter
 from app.routing import semantic_tool_recall
 from app.routing.v2.unified_router import UnifiedSemanticRouter
 from app.core.preferred_tool_bias import resolve_preferred_tool
+from app.core.attachment_catalog import build_user_message_content
 from app.core.schemas import (
     AgentRouteDebugResponse,
     AgentRouteDebugTool,
@@ -752,7 +753,7 @@ class AgentGraphEngine:
             messages.append(ChatMessage(role="system", content=session_state_context))
         await self._emit_context_compaction(context)
         messages.extend(context_manager.build_working_memory(context.history))
-        messages.append(ChatMessage(role="user", content=context.message))
+        messages.append(ChatMessage(role="user", content=build_user_message_content(context)))
         return messages
 
     async def _emit_context_compaction(self, context: RunContext) -> None:

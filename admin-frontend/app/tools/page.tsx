@@ -325,6 +325,7 @@ function resolvedModelCapabilities(
 
 function capabilityLabel(capability: string): string {
   const value = capability.toUpperCase()
+  if (value === "VISION_INPUT") return "图片视觉"
   return toolTypeOptions.find((item) => item.value === value)?.label || value
 }
 

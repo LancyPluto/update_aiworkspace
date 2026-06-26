@@ -127,6 +127,29 @@ function toggleValue(values: string[], nextValue: string) {
 
 const LOG_PAGE_SIZE = 20
 
+function localDateInput(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function todayDateInput() {
+  return localDateInput(new Date())
+}
+
+function rangeStart(days: number) {
+  const date = new Date()
+  date.setDate(date.getDate() - Math.max(0, days - 1))
+  return localDateInput(date)
+}
+
+function monthStartDateInput() {
+  const date = new Date()
+  date.setDate(1)
+  return localDateInput(date)
+}
+
 function buildUsageLogQuery(pageNo: number, filters: {
   userIds: string[]
   modelSelections: string[]
@@ -144,6 +167,13 @@ function buildUsageLogQuery(pageNo: number, filters: {
   if (modelSelection) {
     query.modelName = modelSelection.slice("model:".length)
   }
+  return query
+}
+
+function buildOverviewQuery(filters: { startDate: string; endDate: string }): Omit<BillingQuery, "pageNo" | "pageSize"> {
+  const query: Omit<BillingQuery, "pageNo" | "pageSize"> = {}
+  if (filters.startDate) query.startDate = filters.startDate
+  if (filters.endDate) query.endDate = filters.endDate
   return query
 }
 
@@ -592,18 +622,18 @@ export default function BillingPage() {
     taskQuery: "",
     userIds: [] as string[],
     modelSelections: [] as string[],
-    startDate: "",
-    endDate: "",
+    startDate: todayDateInput(),
+    endDate: todayDateInput(),
   })
   const [loading, setLoading] = useState(true)
   const [logsLoading, setLogsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  async function loadOverview() {
+  async function loadOverview(filters = logFilters) {
     setLoading(true)
     setError(null)
     try {
-      const overviewData = await fetchBillingOverview({})
+      const overviewData = await fetchBillingOverview(buildOverviewQuery(filters))
       setOverview(overviewData)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "加载计费数据失败")
@@ -635,9 +665,13 @@ export default function BillingPage() {
     if (resetPage) setLogPageNo(1)
   }
 
+  function applyDateRange(startDate: string, endDate: string) {
+    patchLogFilters({ startDate, endDate })
+  }
+
   useEffect(() => {
     loadOverview()
-  }, [])
+  }, [logFilters.startDate, logFilters.endDate])
 
   useEffect(() => {
     loadUsageLogs(logPageNo)
@@ -645,10 +679,10 @@ export default function BillingPage() {
 
   const stats = useMemo(
     () => [
-      { label: "今日 Token", value: number(overview?.todayTotalTokens), icon: Sigma },
-      { label: "用户消耗算力", value: number(overview?.todayChargedCredits), icon: Coins },
-      { label: "平台模型成本", value: money(overview?.todayCostAmount), icon: DollarSign },
-      { label: "计费记录", value: number(overview?.todayUsageCount), icon: Gauge },
+      { label: "范围 Token", value: number(overview?.todayTotalTokens), icon: Sigma },
+      { label: "范围消耗算力", value: number(overview?.todayChargedCredits), icon: Coins },
+      { label: "范围模型成本", value: money(overview?.todayCostAmount), icon: DollarSign },
+      { label: "范围计费记录", value: number(overview?.todayUsageCount), icon: Gauge },
     ],
     [overview],
   )
@@ -710,6 +744,37 @@ export default function BillingPage() {
       />
 
       <div className="space-y-6 p-6">
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-3 p-4">
+            <Button type="button" variant="outline" size="sm" onClick={() => applyDateRange(todayDateInput(), todayDateInput())}>
+              今日
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => applyDateRange(rangeStart(7), todayDateInput())}>
+              近 7 天
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => applyDateRange(monthStartDateInput(), todayDateInput())}>
+              本月
+            </Button>
+            <div className="ml-auto flex items-center gap-2">
+              <input
+                aria-label="成本监控开始日期"
+                type="date"
+                value={logFilters.startDate}
+                onChange={(event) => patchLogFilters({ startDate: event.target.value })}
+                className="h-9 w-32 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+              />
+              <span className="text-sm text-muted-foreground">至</span>
+              <input
+                aria-label="成本监控结束日期"
+                type="date"
+                value={logFilters.endDate}
+                onChange={(event) => patchLogFilters({ endDate: event.target.value })}
+                className="h-9 w-32 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+              />
+            </div>
+          </CardContent>
+        </Card>
+
         <div className="grid gap-4 md:grid-cols-4">
           {stats.map((stat) => (
             <Card key={stat.label}>
@@ -730,7 +795,7 @@ export default function BillingPage() {
           <CardHeader>
             <div>
               <CardTitle>模型成本分布</CardTitle>
-              <CardDescription>按今天已写入的 token 计费日志聚合</CardDescription>
+              <CardDescription>按选定时间范围内已写入的计费日志聚合</CardDescription>
             </div>
           </CardHeader>
           <CardContent>
@@ -773,7 +838,7 @@ export default function BillingPage() {
                 {!loading && sortedModelCosts.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
-                      暂无今日 token 计费记录
+                      当前范围暂无计费记录
                     </TableCell>
                   </TableRow>
                 ) : null}

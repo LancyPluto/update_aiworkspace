@@ -73,6 +73,9 @@ public class ModelCapabilityService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "capabilities cannot be empty");
         }
         for (String capability : capabilities) {
+            if ("VISION_INPUT".equalsIgnoreCase(capability)) {
+                continue;
+            }
             boolean supported = providerMetadataService.get(provider).capabilities().stream()
                     .anyMatch(item -> item.equalsIgnoreCase(capability));
             if (!supported) {

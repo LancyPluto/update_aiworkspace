@@ -366,7 +366,7 @@ class AgentExecutor:
         self._aliases = aliases
 
     async def _build_initial_messages(self, context: RunContext) -> list[ChatMessage]:
-        from app.core.attachment_catalog import user_message_for_llm
+        from app.core.attachment_catalog import build_user_message_content
         from app.runtime.deep_agents_engine import DEFAULT_AGENT_SYSTEM_PROMPT, _compose_system_prompt, _format_file_context
 
         configured = _compose_system_prompt(
@@ -415,7 +415,7 @@ class AgentExecutor:
             messages.append(ChatMessage(role="system", content=skill_catalog))
         await self._emit_context_compaction(context)
         messages.extend(context_manager.build_working_memory(context.history))
-        messages.append(ChatMessage(role="user", content=user_message_for_llm(context)))
+        messages.append(ChatMessage(role="user", content=build_user_message_content(context)))
         return messages
 
     @dataclass(slots=True)

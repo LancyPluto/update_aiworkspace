@@ -805,6 +805,15 @@ public class AgentRunServiceImpl implements AgentRunService {
                 .toList();
     }
 
+    private boolean hasCapability(List<String> capabilities, String capability) {
+        if (capabilities == null || capabilities.isEmpty() || capability == null || capability.isBlank()) {
+            return false;
+        }
+        return capabilities.stream()
+                .filter(item -> item != null && !item.isBlank())
+                .anyMatch(item -> item.trim().equalsIgnoreCase(capability));
+    }
+
     private List<InternalAgentFileChunkContextResponse> retrieveRelevantFileChunks(
             AgentRun run,
             String query,
@@ -1772,6 +1781,16 @@ public class AgentRunServiceImpl implements AgentRunService {
         for (InternalAgentFileChunkContextResponse chunk : fileChunks) {
             estimatedTokens += estimateTokens(chunk.contentText());
         }
+        List<InternalReferenceMentionResponse> referenceMentions = referenceMentionContexts(userMessage);
+        List<Map<String, Object>> contentParts = contentPartsFromMessage(userMessage);
+        String positionalPrompt = positionalPromptFromMessage(userMessage);
+        boolean visionInputEnabled = hasCapability(modelConfig.capabilities(), "VISION_INPUT");
+        List<String> visionInputUrlSummary = referenceMentions.stream()
+                .map(InternalReferenceMentionResponse::url)
+                .filter(url -> url != null && !url.isBlank())
+                .distinct()
+                .limit(10)
+                .toList();
 
         var snapshotPayload = new java.util.LinkedHashMap<String, Object>();
         snapshotPayload.put("version", 1);
@@ -1786,8 +1805,15 @@ public class AgentRunServiceImpl implements AgentRunService {
                 "id", modelConfig.id() == null ? 0 : modelConfig.id(),
                 "provider", modelConfig.provider(),
                 "modelName", modelConfig.modelName(),
-                "enabled", modelConfig.enabled()
+                "enabled", modelConfig.enabled(),
+                "capabilities", modelConfig.capabilities() == null ? List.of() : modelConfig.capabilities()
         ));
+        snapshotPayload.put("referenceMentions", referenceMentions);
+        snapshotPayload.put("contentParts", contentParts);
+        snapshotPayload.put("positionalPrompt", positionalPrompt == null ? "" : positionalPrompt);
+        snapshotPayload.put("visionInputEnabled", visionInputEnabled);
+        snapshotPayload.put("visionInputImageCount", visionInputUrlSummary.size());
+        snapshotPayload.put("visionInputUrlSummary", visionInputUrlSummary);
         snapshotPayload.put("limits", Map.of(
                 "maxHistoryMessages", maxHistoryMessages,
                 "fileContextLimit", FILE_CONTEXT_LIMIT,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from app.config import settings
 from app.core.schemas import AgentFileContext, ReferenceMention, RunContext
@@ -127,6 +128,42 @@ def user_message_for_llm(context: RunContext) -> str:
     for display, llm_token in replacements:
         resolved = resolved.replace(display, llm_token)
     return resolved
+
+
+def build_user_message_content(context: RunContext) -> str | list[dict[str, Any]]:
+    """Build the final user content sent to the Agent model.
+
+    Text-only models keep the current string payload. Vision-enabled Agent models
+    receive OpenAI-compatible multimodal content with current-turn referenced images.
+    """
+    text = user_message_for_llm(context)
+    if not model_supports_vision_input(context):
+        return text
+    image_urls = referenced_image_urls_for_vision(context)
+    if not image_urls:
+        return text
+    parts: list[dict[str, Any]] = [{"type": "text", "text": text}]
+    parts.extend({"type": "image_url", "image_url": {"url": url}} for url in image_urls)
+    return parts
+
+
+def model_supports_vision_input(context: RunContext) -> bool:
+    config = context.modelConfig
+    if config is None:
+        return False
+    return any((capability or "").strip().upper() == "VISION_INPUT" for capability in config.capabilities or [])
+
+
+def referenced_image_urls_for_vision(context: RunContext) -> list[str]:
+    plan = build_reference_plan(context)
+    urls: list[str] = []
+    for mention in plan.mentions:
+        if not _is_visual_mention(mention):
+            continue
+        normalized = _normalize_media_url(mention.url)
+        if normalized and normalized not in urls:
+            urls.append(normalized)
+    return urls
 
 
 def resolve_media_argument_pointers(context: RunContext, arguments: dict) -> dict:
@@ -459,6 +496,18 @@ def _is_ready_image_file(file: AgentFileContext) -> bool:
     return content_type.startswith("image/") or filename.endswith(
         (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".heif", ".avif")
     ) or filename.startswith("@图片")
+
+
+def _is_visual_mention(mention: ReferenceMention) -> bool:
+    kind = (mention.kind or "").strip().lower()
+    content_type = (mention.contentType or "").strip().lower()
+    url = (mention.url or "").strip().lower()
+    name = (mention.name or "").strip().lower()
+    if kind == "image" or content_type.startswith("image/") or url.startswith("data:image/"):
+        return True
+    return url.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".heif", ".avif")) or name.endswith(
+        (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".heif", ".avif")
+    )
 
 
 def _normalize_media_url(raw: str | None) -> str:

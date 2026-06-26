@@ -29,7 +29,6 @@ import { ApiError } from "@/lib/api/http"
 import {
   createModelVendorAccount,
   deleteModelVendorAccount,
-  refreshAllModelVendorAccountBalances,
   refreshModelVendorAccountBalance,
   testModelVendorAccount,
   updateModelVendorAccount,
@@ -68,6 +67,7 @@ import {
 import { toast } from "sonner"
 
 const adminBasePath = (process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || "").replace(/\/$/, "")
+const VISION_INPUT_CAPABILITY = "VISION_INPUT"
 
 function VendorIcon({ iconAsset, label }: { iconAsset: string; label: string }) {
   const [failed, setFailed] = useState(false)
@@ -124,6 +124,15 @@ function formatBalance(account: ModelVendorAccount) {
     return "余额（手填）"
   }
   return "余额 --"
+}
+
+function normalizeBalanceMode(account: { balanceQueryMode?: string | null }) {
+  return (account.balanceQueryMode || "MANUAL").trim().toUpperCase()
+}
+
+function canRefreshBalance(account: { balanceQueryMode?: string | null }) {
+  const mode = normalizeBalanceMode(account)
+  return mode === "REST_API" || mode === "INFERRED"
 }
 
 function diagnoseProviderIssue(
@@ -228,8 +237,6 @@ function defaultBalanceModeForVendor(vendorCode: string) {
   switch (vendorCode) {
     case "deepseek":
     case "siliconflow":
-    case "openai":
-    case "openai_gateway":
       return "REST_API"
     case "volcengine":
     case "kling":
@@ -249,6 +256,7 @@ function capabilityLabel(cap: string) {
     SPEECH_TO_TEXT: "语音转文字",
     MUSIC_GENERATION: "文生音乐",
     DIGITAL_HUMAN: "数字人",
+    VISION_INPUT: "图片视觉",
     MULTIMODAL: "多模态输入",
   }
   return map[cap] || cap
@@ -269,6 +277,7 @@ function modelCapabilitiesForProvider(
   capabilities: string[] | null | undefined,
   provider?: ModelProviderDescriptor,
 ) {
+  const agentOnlyCaps = (capabilities || []).filter((capability) => capability.toUpperCase() === VISION_INPUT_CAPABILITY)
   const defaults = provider?.capabilities && provider.capabilities.length > 0 ? provider.capabilities : ["TEXT_GENERATION"]
   if (!capabilities || capabilities.length === 0) {
     return [...defaults]
@@ -278,13 +287,16 @@ function modelCapabilitiesForProvider(
   }
   const allowed = new Set(provider.capabilities.map((capability) => capability.toUpperCase()))
   const compatible = capabilities.filter((capability) => allowed.has(capability.toUpperCase()))
-  return compatible.length > 0 ? compatible : [...defaults]
+  const executable = compatible.length > 0 ? compatible : [...defaults]
+  return [...executable, ...agentOnlyCaps.filter((capability) => !executable.some((item) => item.toUpperCase() === capability.toUpperCase()))]
 }
 
 function routeTasksForModel(provider: string | undefined, capabilities: string[] | null | undefined) {
   const tasks = executionTaskOptions[(provider || "").trim()]
   if (!tasks) return []
-  const caps = new Set((capabilities || []).map((capability) => capability.toUpperCase()))
+  const caps = new Set((capabilities || [])
+    .map((capability) => capability.toUpperCase())
+    .filter((capability) => capability !== VISION_INPUT_CAPABILITY))
   if (caps.size === 0) return tasks
   return tasks.filter((task) => task.capabilities.some((capability) => caps.has(capability)))
 }
@@ -371,7 +383,9 @@ const emptyAccountForm = (): AccountFormState => ({
   enabled: true,
 })
 
-const emptyModelForm = (): AgentModelConfigPayload & { id?: number } => ({
+type ModelFormState = AgentModelConfigPayload & { id?: number; endpointPath?: string | null }
+
+const emptyModelForm = (): ModelFormState => ({
   vendorAccountId: undefined,
   displayName: "",
   configCode: "",
@@ -542,7 +556,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
   const [providers, setProviders] = useState<ModelProviderDescriptor[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [refreshingBalance, setRefreshingBalance] = useState(false)
+  const [refreshingBalanceAccountId, setRefreshingBalanceAccountId] = useState<number | null>(null)
 
   const [accountDialogOpen, setAccountDialogOpen] = useState(false)
   const [accountForm, setAccountForm] = useState(emptyAccountForm())
@@ -754,8 +768,17 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
 
   const runRefreshBalance = useCallback(
     async (account: ModelVendorAccount, vendorLabel: string) => {
+      if (!canRefreshBalance(account)) {
+        toast.info(`${vendorLabel}：该账户不需要自动刷新`, {
+          description: normalizeBalanceMode(account) === "MANUAL"
+            ? "手填余额会在用量入账后自动扣减，可在账户设置中修改金额。"
+            : "该账户使用控制台外链查看余额，不会调用余额探测接口。",
+        })
+        return
+      }
       setError(null)
-      const toastId = toast.loading(`${vendorLabel}：正在刷新余额…`)
+      setRefreshingBalanceAccountId(account.id)
+      const toastId = toast.loading(`${vendorLabel}：正在刷新 ${account.accountName || `账户 ${account.id}`} 余额…`)
       try {
         const updated = await refreshModelVendorAccountBalance(account.id)
         patchVendorAccount(updated)
@@ -784,6 +807,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         const message = err instanceof ApiError ? err.message : "刷新失败"
         toast.error(`${vendorLabel}：刷新失败`, { id: toastId, description: diagnoseProviderIssue(message, "balance", account) })
         setError(message)
+      } finally {
+        setRefreshingBalanceAccountId((current) => (current === account.id ? null : current))
       }
     },
     [patchVendorAccount],
@@ -1039,19 +1064,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     }
   }, [overview])
 
-  async function handleRefreshAllBalances() {
-    setRefreshingBalance(true)
-    setError(null)
-    try {
-      await refreshAllModelVendorAccountBalances()
-      await load()
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "刷新余额失败")
-    } finally {
-      setRefreshingBalance(false)
-    }
-  }
-
   function openCreateAccount(vendorCode: string, label: string) {
     const meta = providerForVendor(providers, vendorCode)
     const existingCount = overview?.vendors.find((vendor) => vendor.vendorCode === vendorCode)?.accounts.length ?? 0
@@ -1096,6 +1108,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     setError(null)
     try {
       const extraAuthJson = buildExtraAuthJsonWithTopUp(accountForm.extraAuthJson, accountForm.topUpEditBatch)
+      const balanceQueryMode = normalizeBalanceMode(accountForm)
       const payload: ModelVendorAccountPayload = {
         vendorCode: accountForm.vendorCode,
         accountName: accountForm.accountName,
@@ -1108,8 +1121,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         balanceUrl: accountForm.balanceUrl,
         consoleCookie: accountForm.consoleCookie,
         clearConsoleCookie: accountForm.clearConsoleCookie,
-        balanceQueryMode: accountForm.balanceQueryMode,
-        balanceAmount: accountForm.balanceAmount,
+        balanceQueryMode,
+        balanceAmount: balanceQueryMode === "MANUAL" ? accountForm.balanceAmount : undefined,
         balanceCurrency: accountForm.balanceCurrency,
         balanceLowThreshold: accountForm.balanceLowThreshold,
         proxyMode: accountForm.proxyMode,
@@ -1161,6 +1174,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       provider: model.provider,
       modelName: model.modelName,
       baseUrl: model.baseUrl || "",
+      endpointPath: model.endpointPath || "",
       docsUrl: model.docsUrl || "",
       executionTask: model.executionTask || "",
       executionOptionsJson: "",
@@ -1183,7 +1197,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         ? new Set(currentModelProviderMeta.capabilities.map((item) => item.toUpperCase()))
         : null
       const base = allowed
-        ? (current.capabilities || []).filter((item) => allowed.has(item.toUpperCase()))
+        ? (current.capabilities || []).filter((item) => allowed.has(item.toUpperCase()) || item.toUpperCase() === VISION_INPUT_CAPABILITY)
         : current.capabilities || []
       const exists = base.some((item) => item.toUpperCase() === capability.toUpperCase())
       const next = exists
@@ -1194,6 +1208,17 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         ? current.executionTask
         : compatibleTasks[0]?.value || ""
       return { ...current, capabilities: next, executionTask }
+    })
+  }
+
+  function setModelVisionInput(enabled: boolean) {
+    setModelForm((current) => {
+      const currentCaps = current.capabilities || []
+      const withoutVision = currentCaps.filter((item) => item.toUpperCase() !== VISION_INPUT_CAPABILITY)
+      return {
+        ...current,
+        capabilities: enabled ? [...withoutVision, VISION_INPUT_CAPABILITY] : withoutVision,
+      }
     })
   }
 
@@ -1208,7 +1233,10 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     }
     if (currentModelProviderMeta) {
       const allowed = new Set(currentModelProviderMeta.capabilities.map((capability) => capability.toUpperCase()))
-      const invalid = modelForm.capabilities.find((capability) => !allowed.has(capability.toUpperCase()))
+      const invalid = modelForm.capabilities.find((capability) => {
+        const normalized = capability.toUpperCase()
+        return normalized !== VISION_INPUT_CAPABILITY && !allowed.has(normalized)
+      })
       if (invalid) {
         setError(`能力 ${capabilityLabel(invalid)} 不适用于当前供应商 ${currentModelProviderMeta.label}`)
         return
@@ -1218,8 +1246,10 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     setError(null)
     try {
       const scrollY = typeof window === "undefined" ? 0 : window.scrollY
+      const modelPayload = { ...modelForm }
+      delete modelPayload.endpointPath
       const payload: AgentModelConfigPayload = {
-        ...modelForm,
+        ...modelPayload,
         apiKey: "",
         inputTokenPricePer1m: numberOrZero(modelForm.inputTokenPricePer1m),
         outputTokenPricePer1m: numberOrZero(modelForm.outputTokenPricePer1m),
@@ -1294,6 +1324,19 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
             <Wallet className={`h-4 w-4 ${account.consoleCookieStatus === "EXPIRED" ? "text-red-500" : ""}`} />
           </Button>
         ) : null}
+        {canRefreshBalance(account) ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            title="刷新自动余额"
+            disabled={refreshingBalanceAccountId === account.id}
+            onClick={() => runRefreshBalance(account, vendorLabel)}
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshingBalanceAccountId === account.id ? "animate-spin" : ""}`} />
+          </Button>
+        ) : null}
       </div>
     )
   }
@@ -1349,9 +1392,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                   label={`启用账户 ${primaryAccount.accountName}`}
                   onCheckedChange={(enabled) => toggleAccountEnabled(primaryAccount, enabled)}
                 />
-                <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="刷新该厂商余额" onClick={() => runRefreshBalance(primaryAccount, vendor.label)}>
-                  <RefreshCw className="h-4 w-4" />
-                </Button>
                 <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="添加账户" onClick={() => openCreateAccount(vendor.vendorCode, vendor.label)}>
                   <Plus className="h-4 w-4" />
                 </Button>
@@ -1388,6 +1428,9 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                         />
                       </div>
                       <p className="truncate text-xs text-muted-foreground">{account.baseUrl || "未配置 Base URL"}</p>
+                      {account.endpointPath ? (
+                        <p className="truncate text-xs text-muted-foreground">Endpoint：{account.endpointPath}</p>
+                      ) : null}
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
                       <Button
@@ -1683,10 +1726,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               <Plus className="mr-1 h-4 w-4" />
               添加厂商
             </Button>
-            <Button type="button" variant="outline" size="sm" disabled={refreshingBalance || loading} onClick={handleRefreshAllBalances}>
-              <RefreshCw className={`mr-1 h-4 w-4 ${refreshingBalance ? "animate-spin" : ""}`} />
-              刷新余额
-            </Button>
             <Button type="button" variant="outline" size="sm" disabled={loading} onClick={load}>
               重新加载
             </Button>
@@ -1932,10 +1971,18 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                   onChange={(e) =>
                     setAccountForm((f) => ({
                       ...f,
+                      balanceQueryMode: "MANUAL",
                       balanceAmount: e.target.value === "" ? undefined : Number(e.target.value),
                     }))
                   }
                 />
+                {normalizeBalanceMode(accountForm) !== "MANUAL" ? (
+                  <p className="text-xs text-muted-foreground">
+                    API 自动查询账户以上游余额为准；输入手填金额后会自动切换为手填余额，并由成本日志扣减。
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">手填余额会在计费日志写入后按厂商成本自动扣减。</p>
+                )}
               </div>
             </div>
             <div className="space-y-2">
@@ -2085,6 +2132,11 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                       <p className="mt-2 text-xs text-muted-foreground">
                         生效地址：{inherited ? (accountBaseUrl || "未配置") : modelOverrideBaseUrl}
                       </p>
+                      {modelForm.id && modelForm.endpointPath ? (
+                        <p className="mt-1 text-xs text-muted-foreground">Endpoint：{modelForm.endpointPath}</p>
+                      ) : account?.endpointPath && inherited ? (
+                        <p className="mt-1 text-xs text-muted-foreground">继承 Endpoint：{account.endpointPath}</p>
+                      ) : null}
                       {!inherited ? (
                         <p className="mt-1 text-xs text-amber-700">
                           当前模型保存了独立 baseUrl；切换账号后它不会自动跟随账号地址变化。
@@ -2143,6 +2195,22 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               <p className="text-xs text-muted-foreground">
                 能力决定工具页可绑定范围和 Worker 执行路由；音乐模型请选择“文生音乐”。
               </p>
+            </div>
+            <div className="rounded-md border bg-muted/30 p-3">
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <Label>Agent 图片视觉</Label>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    写入 <code>{VISION_INPUT_CAPABILITY}</code>。开启后，Agent 在思考和生成提示词前会把本轮 @ 引用图片作为 image_url 发给支持视觉的聊天模型。
+                  </p>
+                </div>
+                <EmbeddedOnOffSwitch
+                  checked={(modelForm.capabilities || []).some((item) => item.toUpperCase() === VISION_INPUT_CAPABILITY)}
+                  disabled={modelForm.agentEnabled === false}
+                  label="Agent 图片视觉"
+                  onCheckedChange={setModelVisionInput}
+                />
+              </div>
             </div>
             <div className="space-y-3 rounded-md border p-3">
               <div className="flex items-center justify-between gap-3">
