@@ -50,9 +50,13 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 @Service
 public class CommunityServiceImpl implements CommunityService {
 
+    private static final Logger log = LoggerFactory.getLogger(CommunityServiceImpl.class);
     private static final int MAX_TITLE_LENGTH = 160;
     private static final int MAX_DESCRIPTION_LENGTH = 500;
     private static final int MAX_PROMPT_LENGTH = 4000;
