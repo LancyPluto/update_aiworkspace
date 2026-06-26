@@ -390,7 +390,7 @@ public class AssetStorageService {
         try {
             ossClient.copyObject(new CopyObjectRequest(source.bucket(), source.objectKey(), targetBucket, targetKey));
             ossClient.deleteObject(source.bucket(), source.objectKey());
-        } catch (com.aliyun.oss.model.OSSException ossEx) {
+        } catch (com.aliyun.oss.OSSException ossEx) {
             // OSS文件不存在（NoSuchKey）时，只更新数据库状态，不阻塞撤回/删除操作
             if ("NoSuchKey".equals(ossEx.getErrorCode())) {
                 log.warn("OSS asset not found during move, proceeding with status update only: source=oss://{}/{} target=oss://{}/{}",
