@@ -48,6 +48,29 @@ function onAssetDragStart(event: DragEvent, url: string) {
   writeAssetDragData(event, asset)
 }
 
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
+async function forceDownload(url: string, filename: string) {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error("Download failed")
+    const blob = await res.blob()
+    downloadBlob(blob, filename)
+  } catch {
+    // 如果fetch失败（跨域），打开新窗口让用户手动保存
+    window.open(url, "_blank")
+  }
+}
+
 onBeforeUnmount(() => {
   cleanupLongPressBindings()
 })
@@ -352,17 +375,6 @@ function concatUint8Arrays(chunks: Uint8Array[]): Uint8Array {
   return result
 }
 
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement("a")
-  anchor.href = url
-  anchor.download = filename
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
-
 function sanitizeDownloadName(value: string) {
   return value.trim().replace(/[\\/:*?"<>|]+/g, "-").slice(0, 80) || "audio"
 }
@@ -422,21 +434,24 @@ function escapeXml(value: string): string {
             </div>
             <figcaption v-if="props.mode !== 'compact'" :class="captionClass()">
               <span>{{ image.label ?? "图片" }}</span>
-              <a :href="image.downloadUrl || image.url" download :class="downloadLinkClass()" @click.stop>
+              <button
+                type="button"
+                :class="downloadLinkClass()"
+                @click.stop="forceDownload(image.downloadUrl || image.url, `image-${imageIndex + 1}.png`)"
+              >
                 <Download class="h-3.5 w-3.5" />
                 下载
-              </a>
+              </button>
             </figcaption>
-            <a
+            <button
               v-if="props.mode === 'compact'"
-              :href="image.downloadUrl || image.url"
-              download
+              type="button"
               :class="floatingDownloadClass()"
-              @click.stop
+              @click.stop="forceDownload(image.downloadUrl || image.url, `image-${imageIndex + 1}.png`)"
             >
               <Download class="h-3.5 w-3.5" />
               下载
-            </a>
+            </button>
           </figure>
         </div>
       </template>
@@ -493,15 +508,14 @@ function escapeXml(value: string): string {
                   <p class="text-xs text-muted-foreground">{{ b.title }}</p>
                 </div>
                 <div class="flex shrink-0 flex-wrap justify-end gap-2">
-                  <a
-                    :href="track.downloadUrl || track.url"
-                    :download="track.downloadName ?? `audio-${trackIndex + 1}`"
+                  <button
+                    type="button"
                     class="inline-flex h-8 items-center gap-1 rounded-md border border-border px-2.5 text-xs hover:bg-secondary"
-                    @click.stop
+                    @click.stop="forceDownload(track.downloadUrl || track.url, track.downloadName ?? `audio-${trackIndex + 1}`)"
                   >
                     <Download class="h-3.5 w-3.5" />
                     下载
-                  </a>
+                  </button>
                   <button
                     type="button"
                     class="inline-flex h-8 items-center gap-1 rounded-md border border-border px-2.5 text-xs hover:bg-secondary"
@@ -536,15 +550,14 @@ function escapeXml(value: string): string {
             <p class="text-xs text-muted-foreground">视频结果</p>
             <h2 class="text-base font-semibold text-foreground">{{ b.title }}</h2>
           </div>
-          <a
-            :href="b.downloadUrl || b.url"
-            :download="b.downloadName ?? 'digital-human-video.mp4'"
+          <button
+            type="button"
             class="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-secondary"
-            @click.stop
+            @click.stop="forceDownload(b.downloadUrl || b.url, b.downloadName ?? 'digital-human-video.mp4')"
           >
             <Download class="h-4 w-4" />
             下载视频
-          </a>
+          </button>
         </div>
         <div
           :ref="(el) => setDraggableAssetRef(el as Element | null, b.url)"
@@ -565,15 +578,14 @@ function escapeXml(value: string): string {
           </video>
         </div>
         <div v-if="props.mode === 'compact'" class="flex justify-end px-2 pb-2 pt-2">
-          <a
-            :href="b.url"
-            :download="b.downloadName ?? 'digital-human-video.mp4'"
+          <button
+            type="button"
             :class="mediaActionClass()"
-            @click.stop
+            @click.stop="forceDownload(b.downloadUrl || b.url, b.downloadName ?? 'digital-human-video.mp4')"
           >
             <Download class="h-4 w-4" />
             下载
-          </a>
+          </button>
         </div>
       </template>
       <template v-else-if="b.type === 'report'">

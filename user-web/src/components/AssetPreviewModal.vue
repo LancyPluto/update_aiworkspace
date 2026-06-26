@@ -239,6 +239,22 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
+
+
+async function fetchDownload() {
+  if (!downloadUrl.value) return
+  try {
+    const res = await fetch(downloadUrl.value)
+    if (!res.ok) throw new Error("Download failed")
+    const blob = await res.blob()
+    const ext = downloadUrl.value.split(".").pop()?.split("?")[0] || "bin"
+    const name = sanitizeDownloadName(activeAsset.value?.title || "download") + "." + ext
+    downloadBlob(blob, name)
+  } catch {
+    window.open(downloadUrl.value, "_blank")
+  }
+}
+
 function sanitizeDownloadName(value: string) {
   return value.trim().replace(/[\\/:*?"<>|]+/g, "-").slice(0, 80) || "audio"
 }
@@ -394,15 +410,15 @@ function sanitizeDownloadName(value: string) {
                   <CalendarDays class="h-4 w-4 text-white/35" />
                   {{ formatTime(asset.createdAt) || "未知" }}
                 </p>
-                <a
+                <button
                   v-if="canDownload"
-                  :href="downloadUrl"
-                  download
+                  type="button"
+                  @click="fetchDownload"
                   class="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgb(255_255_255_/_0.08),rgb(176_92_255_/_0.12))] px-4 py-2.5 text-sm font-semibold text-white/82 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.08)] transition hover:border-primary/40 hover:text-white"
                 >
                   <Download class="h-4 w-4" />
                   下载作品
-                </a>
+                </button>
                 <button
                   v-if="canExportEffectAsset"
                   type="button"

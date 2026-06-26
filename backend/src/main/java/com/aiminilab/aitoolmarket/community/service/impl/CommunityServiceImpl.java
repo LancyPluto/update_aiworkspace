@@ -213,7 +213,11 @@ public class CommunityServiceImpl implements CommunityService {
     @Transactional
     public void unpublish(Long userId, Long postId) {
         CommunityPost post = requireOwnedPost(postId, userId);
-        migratePostAssets(post, false);
+        try {
+            migratePostAssets(post, false);
+        } catch (Exception e) {
+            log.warn("Failed to migrate post assets during unpublish (postId={}): {}", postId, e.getMessage());
+        }
         if (postMapper.updateOwnerStatus(postId, userId, "UNPUBLISHED") == 0) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "Post not found");
         }

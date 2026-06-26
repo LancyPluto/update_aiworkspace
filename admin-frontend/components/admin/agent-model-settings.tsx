@@ -463,6 +463,8 @@ function capabilityModalityLabel(capabilities: string[]) {
   return labels.join(" / ")
 }
 
+const VENDOR_ICON_BASE_URL = "https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com/vendor-icons"
+
 function VendorIcon({ vendor, size = "md" }: { vendor: VendorMeta; size?: "md" | "sm" }) {
   const box = size === "sm" ? "h-11 w-11" : "h-14 w-14"
   const img = size === "sm" ? "h-8 w-8" : "h-10 w-10"
@@ -472,7 +474,7 @@ function VendorIcon({ vendor, size = "md" }: { vendor: VendorMeta; size?: "md" |
       title={vendor.label}
     >
       <img
-        src={`/assets/vendor-icons/${vendor.iconAsset}.svg`}
+        src={`${VENDOR_ICON_BASE_URL}/${vendor.iconAsset}.svg`}
         width={size === "sm" ? 32 : 40}
         height={size === "sm" ? 32 : 40}
         className={`${img} object-contain`}

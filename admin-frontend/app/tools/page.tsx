@@ -439,6 +439,7 @@ function vendorIconAssetForKey(key: string, config?: AgentModelConfig | null) {
     openai: "openai",
     qwen: "qwen",
     siliconflow: "siliconflow",
+    vidu: "vidu",
     volcengine: "doubao",
     zhipu: "zhipu",
   }
@@ -542,6 +543,7 @@ function modelVendorKey(config?: AgentModelConfig | null) {
   if (text.includes("minimax")) return "minimax"
   if (text.includes("openai")) return "openai"
   if (text.includes("suno")) return "suno"
+  if (text.includes("vidu")) return "vidu"
   return config.provider || "other"
 }
 
@@ -555,6 +557,7 @@ function modelVendorLabel(key: string, config?: AgentModelConfig | null) {
     kling: "可灵",
     minimax: "MiniMax",
     suno: "Suno",
+    vidu: "Vidu (\u751F\u6570\u79D1\u6280)",
     openai: "OpenAI",
     google: "Google Gemini",
     qwen: "阿里云百炼",
