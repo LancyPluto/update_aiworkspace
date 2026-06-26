@@ -50,6 +50,7 @@ import {
   streamTaskStatus,
 } from "@/api/taskApi"
 import { unpublishCommunityPost } from "@/api/communityApi"
+import { emitCommunityPostUnpublished } from "@/utils/communitySync"
 import { publishAssetToCommunity, type CommunityPublishPayload } from "@/utils/publishCommunityAsset"
 import { fetchAIToolById, fetchTools } from "@/api/toolApi"
 import type { AITool } from "@/api/aiToolTypes"
@@ -1562,6 +1563,7 @@ async function unpublishPreviewAsset(asset: AssetPreviewItem) {
   if (!auth.token || !asset.communityPostId) return
   try {
     await unpublishCommunityPost(asset.communityPostId, { token: auth.token })
+    emitCommunityPostUnpublished({ postId: asset.communityPostId, taskId: asset.taskId })
     previewAsset.value = { ...asset, communityPostId: undefined }
   } catch (err) {
     const message = err instanceof Error ? err.message : "撤回失败"
