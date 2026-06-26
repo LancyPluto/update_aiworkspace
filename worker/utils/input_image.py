@@ -175,6 +175,10 @@ def get_image_dimensions(data: bytes) -> tuple[int, int] | None:
             w = (bits & 0x3FFF) + 1
             h = ((bits >> 14) & 0x3FFF) + 1
             return int(w), int(h)
+        if data[12:16] == b"VP8X" and len(data) >= 30:
+            w = int.from_bytes(data[24:27], "little") + 1
+            h = int.from_bytes(data[27:30], "little") + 1
+            return int(w), int(h)
     return None
 
 

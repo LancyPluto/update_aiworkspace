@@ -62,6 +62,32 @@ def test_get_image_dimensions_jpeg() -> None:
     assert get_image_dimensions(_make_jpeg(1920, 1080)) == (1920, 1080)
 
 
+def _make_webp_vp8x(width: int, height: int) -> bytes:
+    w_bytes = (width - 1).to_bytes(3, "little")
+    h_bytes = (height - 1).to_bytes(3, "little")
+    flags = b"\x10"  # alpha flag set
+    reserved = b"\x00" * 3
+    vp8x_payload = flags + reserved + w_bytes + h_bytes
+    chunk_size = struct.pack("<I", len(vp8x_payload))
+    file_body = b"WEBP" + b"VP8X" + chunk_size + vp8x_payload
+    riff_size = struct.pack("<I", len(file_body))
+    return b"RIFF" + riff_size + file_body
+
+
+def test_get_image_dimensions_webp_vp8x() -> None:
+    assert get_image_dimensions(_make_webp_vp8x(224, 400)) == (224, 400)
+
+
+def test_get_image_dimensions_webp_vp8x_large() -> None:
+    assert get_image_dimensions(_make_webp_vp8x(1920, 1080)) == (1920, 1080)
+
+
+def test_validate_min_resolution_rejects_vp8x_too_small() -> None:
+    data_url = _to_data_url(_make_webp_vp8x(224, 400), "image/webp")
+    with pytest.raises(InputImageError, match="224x400"):
+        validate_min_resolution(data_url, 300, 300)
+
+
 def test_get_image_dimensions_unknown_returns_none() -> None:
     assert get_image_dimensions(b"not an image") is None
 
