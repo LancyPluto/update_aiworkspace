@@ -49,13 +49,13 @@ DELIMITER ;
 CALL add_column_if_missing(
   'agent_messages',
   'parent_message_id',
-  '`parent_message_id` BIGINT NULL AFTER `run_id` COMMENT ''parent message id for tree conversation branches'''
+  '`parent_message_id` BIGINT NULL COMMENT ''parent message id for tree conversation branches'' AFTER `run_id`'
 );
 
 CALL add_column_if_missing(
   'agent_sessions',
   'active_leaf_message_id',
-  '`active_leaf_message_id` BIGINT NULL AFTER `workspace_id` COMMENT ''active branch leaf message id'''
+  '`active_leaf_message_id` BIGINT NULL COMMENT ''active branch leaf message id'' AFTER `workspace_id`'
 );
 
 CALL add_index_if_missing(
