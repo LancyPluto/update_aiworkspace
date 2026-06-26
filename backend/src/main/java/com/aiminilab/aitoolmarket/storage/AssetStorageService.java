@@ -390,6 +390,16 @@ public class AssetStorageService {
         try {
             ossClient.copyObject(new CopyObjectRequest(source.bucket(), source.objectKey(), targetBucket, targetKey));
             ossClient.deleteObject(source.bucket(), source.objectKey());
+        } catch (com.aliyun.oss.OSSException ossEx) {
+            // OSS文件不存在（NoSuchKey）时，只更新数据库状态，不阻塞撤回/删除操作
+            if ("NoSuchKey".equals(ossEx.getErrorCode())) {
+                log.warn("OSS asset not found during move, proceeding with status update only: source=oss://{}/{} target=oss://{}/{}",
+                        source.bucket(), source.objectKey(), targetBucket, targetKey);
+                return urlForKey(source.relativeKey(), targetVisibility);
+            }
+            log.warn("OSS asset move failed: source=oss://{}/{} target=oss://{}/{}",
+                    source.bucket(), source.objectKey(), targetBucket, targetKey, ossEx);
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "cloud file move failed");
         } catch (RuntimeException exception) {
             log.warn("OSS asset move failed: source=oss://{}/{} target=oss://{}/{}",
                     source.bucket(), source.objectKey(), targetBucket, targetKey, exception);
