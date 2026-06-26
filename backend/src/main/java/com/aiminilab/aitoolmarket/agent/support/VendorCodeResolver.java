@@ -36,6 +36,7 @@ public class VendorCodeResolver {
             Map.entry("agnes_chat", "agnes"),
             Map.entry("agnes_images", "agnes"),
             Map.entry("agnes_video", "agnes"),
+            Map.entry("vidu_async", "vidu"),
             Map.entry("worker_video", "siliconflow"),
             Map.entry("mineru", "mineru"),
             Map.entry("mock", "mock")
@@ -58,6 +59,7 @@ public class VendorCodeResolver {
         VENDOR_LABELS.put("siliconflow", "SiliconFlow");
         VENDOR_LABELS.put("volcengine", "火山引擎 / 豆包");
         VENDOR_LABELS.put("kling", "可灵");
+        VENDOR_LABELS.put("vidu", "Vidu (生数科技)");
         VENDOR_LABELS.put("mineru", "MinerU");
         VENDOR_LABELS.put("mock", "Mock");
     }
