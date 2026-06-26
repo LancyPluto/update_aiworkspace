@@ -28,7 +28,7 @@ DELIMITER ;
 CALL add_column_if_missing(
   'agent_sessions',
   'conversation_summary',
-  '`conversation_summary` TEXT NULL AFTER `title` COMMENT ''rolling conversation summary for compacted agent history'''
+  '`conversation_summary` TEXT NULL COMMENT ''rolling conversation summary for compacted agent history'' AFTER `title`'
 );
 
 DROP PROCEDURE IF EXISTS add_column_if_missing;
