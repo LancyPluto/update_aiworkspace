@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import { Check, Copy, FileText, Image, Loader2, Pencil, RefreshCw, X } from "lucide-vue-next"
+import { Check, ChevronLeft, ChevronRight, Copy, FileText, Image, Loader2, Pencil, RefreshCw, X } from "lucide-vue-next"
 import ChatMessage from "./ChatMessage.vue"
 import MentionMessageBody from "./MentionMessageBody.vue"
 import AgentAvatar from "./AgentAvatar.vue"
@@ -32,6 +32,7 @@ const props = defineProps<{
   isStreaming?: boolean
   liveStream?: boolean
   assetRefMap?: Map<string, ChatAssetRef>
+  branchState?: { activeIndex: number; total: number } | null
 }>()
 
 const emit = defineEmits<{
@@ -39,6 +40,8 @@ const emit = defineEmits<{
   "start-edit": [message: AgentMessage]
   "cancel-edit": []
   "submit-edit": [message: AgentMessage]
+  "branch-prev": [message: AgentMessage]
+  "branch-next": [message: AgentMessage]
   regenerate: [message: AgentMessage]
   preview: [asset: AssetPreviewItem, message?: AgentMessage]
   reference: [payload: import("@/utils/agentChatAssetRefs").ChatAssetDragPayload]
@@ -294,6 +297,29 @@ function openAttachmentPreview(file: MessageAttachment) {
       </div>
       <div v-if="message.role === 'USER' && message.editedAt" class="message-meta message-meta--user">
         已编辑
+      </div>
+      <div v-if="branchState && branchState.total > 1" class="message-branch-switcher">
+        <button
+          type="button"
+          class="branch-switcher-btn"
+          title="上一个分支"
+          aria-label="上一个分支"
+          :disabled="branchState.activeIndex <= 0 || editingRegenerating"
+          @click="emit('branch-prev', message)"
+        >
+          <ChevronLeft class="h-3.5 w-3.5" />
+        </button>
+        <span>{{ branchState.activeIndex + 1 }}/{{ branchState.total }}</span>
+        <button
+          type="button"
+          class="branch-switcher-btn"
+          title="下一个分支"
+          aria-label="下一个分支"
+          :disabled="branchState.activeIndex >= branchState.total - 1 || editingRegenerating"
+          @click="emit('branch-next', message)"
+        >
+          <ChevronRight class="h-3.5 w-3.5" />
+        </button>
       </div>
     </div>
   </article>
@@ -577,6 +603,42 @@ function openAttachmentPreview(file: MessageAttachment) {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.message-branch-switcher {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1;
+  color: rgb(255 255 255 / 0.4);
+}
+
+.branch-switcher-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: rgb(255 255 255 / 0.42);
+  cursor: pointer;
+  transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+}
+
+.branch-switcher-btn:hover:not(:disabled) {
+  border-color: rgb(255 255 255 / 0.10);
+  background: rgb(255 255 255 / 0.06);
+  color: rgb(255 255 255 / 0.78);
+}
+
+.branch-switcher-btn:disabled {
+  opacity: 0.32;
+  cursor: not-allowed;
 }
 
 @keyframes message-rise {

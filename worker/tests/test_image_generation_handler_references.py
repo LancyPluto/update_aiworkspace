@@ -1,4 +1,5 @@
-from handlers.image_generation_handler import _build_prompt, _resolve_reference_image_sources
+from client.openai_images_client import OpenAIImagesClient
+from handlers.image_generation_handler import ImageGenerationHandler, _build_prompt, _resolve_reference_image_sources
 
 
 def test_openai_image_reference_sources_put_base_before_references():
@@ -15,6 +16,27 @@ def test_openai_image_reference_sources_put_base_before_references():
         "https://example.com/face.png",
         "https://example.com/style.png",
     ]
+
+
+def test_openai_image_client_receives_execution_proxy_policy():
+    client = ImageGenerationHandler()._image_client(
+        "openai_images_gateway",
+        {
+            "baseUrl": "https://api.ofox.ai/v1",
+            "apiKey": "test-key",
+            "modelName": "openai/gpt-image-2",
+            "proxyPolicy": {
+                "enabled": True,
+                "proxyUrl": "http://127.0.0.1:7890",
+                "noProxyHosts": ["backend"],
+            },
+        },
+        {},
+    )
+
+    assert isinstance(client, OpenAIImagesClient)
+    assert client.session.proxies["http"] == "http://127.0.0.1:7890"
+    assert client.session.policy.no_proxy_hosts == frozenset({"backend"})
 
 
 def test_openai_image_reference_sources_keep_legacy_image_compatibility():

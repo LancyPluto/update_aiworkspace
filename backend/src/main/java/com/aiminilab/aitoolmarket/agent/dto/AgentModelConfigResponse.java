@@ -49,6 +49,8 @@ public record AgentModelConfigResponse(
         String providerMetadataVersion,
         String pricingPreview,
         String effectiveCredentialsStatus,
+        String proxyMode,
+        String proxyUrl,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -143,6 +145,8 @@ public record AgentModelConfigResponse(
                 providerMetadataVersion == null || providerMetadataVersion.isBlank() ? "manifest" : providerMetadataVersion,
                 pricingPreview(config),
                 credentialsStatus(config),
+                extraAuthText(config.getExtraAuthJson(), "proxyMode"),
+                extraAuthText(config.getExtraAuthJson(), "proxyUrl"),
                 config.getCreatedAt(),
                 config.getUpdatedAt()
         );
@@ -220,5 +224,18 @@ public record AgentModelConfigResponse(
             return null;
         }
         return null;
+    }
+
+    private static String extraAuthText(String value, String key) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        try {
+            JsonNode node = new ObjectMapper().readTree(value);
+            JsonNode field = node.get(key);
+            return field == null || field.isNull() ? "" : field.asText("");
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 }

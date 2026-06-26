@@ -11,7 +11,9 @@ public class AgentSession {
     private Long id;
     private Long userId;
     private Long workspaceId;
+    private Long activeLeafMessageId;
     private String title;
+    private String conversationSummary;
     private String status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -22,8 +24,12 @@ public class AgentSession {
     public void setUserId(Long userId) { this.userId = userId; }
     public Long getWorkspaceId() { return workspaceId; }
     public void setWorkspaceId(Long workspaceId) { this.workspaceId = workspaceId; }
+    public Long getActiveLeafMessageId() { return activeLeafMessageId; }
+    public void setActiveLeafMessageId(Long activeLeafMessageId) { this.activeLeafMessageId = activeLeafMessageId; }
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
+    public String getConversationSummary() { return conversationSummary; }
+    public void setConversationSummary(String conversationSummary) { this.conversationSummary = conversationSummary; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public LocalDateTime getCreatedAt() { return createdAt; }

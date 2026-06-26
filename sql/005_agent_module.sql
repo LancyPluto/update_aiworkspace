@@ -4,12 +4,15 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   user_id BIGINT NOT NULL,
   workspace_id BIGINT NULL,
+  active_leaf_message_id BIGINT NULL,
   title VARCHAR(120) NOT NULL,
+  conversation_summary TEXT NULL,
   status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_agent_sessions_user_updated (user_id, updated_at),
   KEY idx_agent_sessions_workspace (workspace_id),
+  KEY idx_agent_sessions_active_leaf (active_leaf_message_id),
   KEY idx_agent_sessions_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -21,6 +24,7 @@ CREATE TABLE IF NOT EXISTS agent_messages (
   content_text MEDIUMTEXT NOT NULL,
   content_json JSON NULL,
   run_id BIGINT NULL,
+  parent_message_id BIGINT NULL,
   status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE|SUPERSEDED',
   superseded_at DATETIME NULL,
   edited_at DATETIME NULL,
@@ -28,6 +32,7 @@ CREATE TABLE IF NOT EXISTS agent_messages (
   KEY idx_agent_messages_session_id (session_id, id),
   KEY idx_agent_messages_user_id (user_id, id),
   KEY idx_agent_messages_run_id (run_id),
+  KEY idx_agent_messages_parent_branch (session_id, parent_message_id, role, id),
   KEY idx_agent_messages_session_active (session_id, status, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

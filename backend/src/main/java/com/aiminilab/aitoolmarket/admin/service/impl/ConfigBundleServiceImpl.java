@@ -599,7 +599,9 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                             item.balanceAmount(),
                             item.balanceCurrency(),
                             item.balanceLowThreshold(),
-                            item.enabled()
+                            item.enabled(),
+                            null,
+                            null
                     );
                     ModelVendorAccount existing = resolveExistingVendorAccount(
                             vendorCode, accountName, item.baseUrl(), request.apiKey(), request.extraAuthJson(), ref, warnings);
@@ -727,7 +729,9 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 forceDisabled ? false : config.enabled(),
                 forceDisabled ? Boolean.FALSE : config.agentEnabled(),
                 config.isDefault(),
-                config.capabilities()
+                config.capabilities(),
+                null,
+                null
         );
     }
 

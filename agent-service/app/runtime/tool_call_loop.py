@@ -16,7 +16,7 @@ from app.core.event_types import (
 )
 from app.config import settings
 from app.core.schemas import ChatMessage, RunEventCreate
-from app.runtime.context_manager import trim_tool_output
+from app.runtime.context_manager import trim_tool_output_by_tokens
 from app.tools.memory_tool import MemoryTool, _format_memory_tool_definitions
 
 
@@ -120,9 +120,9 @@ class AgentToolCallLoopExecutor:
                 working.append(
                     ChatMessage(
                         role="tool",
-                        content=trim_tool_output(
+                        content=trim_tool_output_by_tokens(
                             json.dumps(result, ensure_ascii=False),
-                            max(1, settings.agent_tool_output_char_limit),
+                            max(1, settings.agent_tool_output_token_soft_limit),
                         ),
                         toolCallId=call.id,
                         name=call.name,

@@ -25,6 +25,8 @@ import {
   X,
   Menu,
   Loader2,
+  Palette,
+  Check,
 } from "lucide-vue-next"
 import { ref, onMounted, onUnmounted, computed, watch } from "vue"
 import { useGlobalSearch, type GlobalSearchResultItem, type GlobalSearchScope } from "@/composables/useGlobalSearch"
@@ -36,7 +38,14 @@ import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import MemberBadge from "@/components/MemberBadge/MemberBadge.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
-import { applyAppTheme } from "@/utils/theme"
+import {
+  applyAppTheme,
+  applyBrandAccent,
+  BRAND_ACCENT_OPTIONS,
+  getStoredBrandAccent,
+  storeBrandAccent,
+  type BrandAccent,
+} from "@/utils/theme"
 import AgentThemePicker from "@/pages/AgentHome/AgentThemePicker.vue"
 
 withDefaults(
@@ -65,7 +74,10 @@ const router = useRouter()
 const auth = useAuthStore()
 
 const searchRootRef = ref<HTMLElement | null>(null)
+const brandAccentRootRef = ref<HTMLElement | null>(null)
 const scopeMenuOpen = ref(false)
+const brandAccentMenuOpen = ref(false)
+const brandAccent = ref<BrandAccent>("cyan")
 const {
   keyword: searchKeyword,
   scope: searchScope,
@@ -159,6 +171,13 @@ const accountNav: NavLink[] = [
 
 function toggleSidebar() {
   sidebarOpen.value = !sidebarOpen.value
+}
+
+function selectBrandAccent(next: BrandAccent) {
+  brandAccent.value = next
+  applyBrandAccent(next)
+  storeBrandAccent(next)
+  brandAccentMenuOpen.value = false
 }
 
 watch(sidebarOpen, (open) => {
@@ -273,9 +292,15 @@ async function navigateSearchResult(item: GlobalSearchResultItem) {
 
 function onDocumentPointerDown(event: MouseEvent) {
   const root = searchRootRef.value
-  if (!root || root.contains(event.target as Node)) return
-  closeSearchPanel()
-  scopeMenuOpen.value = false
+  const target = event.target as Node
+  if (!root || !root.contains(target)) {
+    closeSearchPanel()
+    scopeMenuOpen.value = false
+  }
+  const accentRoot = brandAccentRootRef.value
+  if (!accentRoot || !accentRoot.contains(target)) {
+    brandAccentMenuOpen.value = false
+  }
 }
 
 watch(customerServiceQrSrc, () => {
@@ -313,6 +338,8 @@ watch(
 
 onMounted(async () => {
   applyAppTheme("dark")
+  brandAccent.value = getStoredBrandAccent()
+  applyBrandAccent(brandAccent.value)
 
   const saved = localStorage.getItem(SIDEBAR_OPEN_KEY)
   if (saved === "0") sidebarOpen.value = false
@@ -354,7 +381,7 @@ watch(
         </RouterLink>
         <button
           type="button"
-          class="z-20 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/[0.06] bg-white/[0.035] text-white/58 transition hover:border-[rgb(255_63_121_/_0.36)] hover:bg-[#32101c] hover:text-[#ff3f79]"
+          class="z-20 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/[0.06] bg-white/[0.035] text-white/58 transition hover:border-[var(--brand-border)] hover:bg-[var(--brand-softer)] hover:text-[var(--brand-active-text)]"
           :aria-label="sidebarOpen ? '隐藏侧栏' : '显示侧栏'"
           :aria-expanded="sidebarOpen"
           @click="toggleSidebar"
@@ -424,18 +451,18 @@ watch(
 
         <button
           type="button"
-          class="group relative mb-3 flex h-11 w-full items-center gap-2.5 overflow-hidden rounded-lg border border-white/[0.055] bg-white/[0.025] px-3 text-left text-sm font-medium text-white/76 transition hover:border-[rgb(255_63_121_/_0.2)] hover:bg-white/[0.045] hover:text-white"
+          class="group relative mb-3 flex h-11 w-full items-center gap-2.5 overflow-hidden rounded-lg border border-white/[0.055] bg-white/[0.025] px-3 text-left text-sm font-medium text-white/76 transition hover:border-[var(--brand-border)] hover:bg-white/[0.045] hover:text-white"
         >
-          <Gift class="h-[17px] w-[17px] shrink-0 text-white/58 transition group-hover:text-[#ff7da4]" aria-hidden="true" />
+          <Gift class="h-[17px] w-[17px] shrink-0 text-white/58 transition group-hover:text-[var(--brand-active-text)]" aria-hidden="true" />
           <span class="min-w-0 flex-1">
             <span class="block truncate">推荐有礼</span>
           </span>
-          <span class="rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[10px] font-medium text-[#ff7da4] ring-1 ring-white/[0.05]">最新</span>
+          <span class="rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[10px] font-medium text-[var(--brand-active-text)] ring-1 ring-white/[0.05]">最新</span>
         </button>
 
         <RouterLink
           to="/billing"
-          class="mb-2 block rounded-lg border border-white/[0.055] bg-white/[0.025] p-3 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.02)] transition hover:border-[rgb(255_63_121_/_0.18)] hover:bg-white/[0.04]"
+          class="mb-2 block rounded-lg border border-white/[0.055] bg-white/[0.025] p-3 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.02)] transition hover:border-[var(--brand-border)] hover:bg-white/[0.04]"
         >
           <p class="text-xs font-medium text-white/40">可用算力</p>
           <p class="mt-2 font-mono text-[12px] font-semibold tabular-nums text-white/88">
@@ -446,7 +473,7 @@ watch(
           </p>
           <div class="mt-3 h-1 overflow-hidden rounded-full bg-white/[0.08]">
             <div
-              class="h-full rounded-full bg-gradient-to-r from-[#ff3f79] via-[#ff72ad] to-[#7ad7ff]"
+              class="app-shell-credit-progress h-full rounded-full"
               :style="{ width: Math.min(creditPercent, 100) + '%' }"
             />
           </div>
@@ -469,7 +496,7 @@ watch(
         <div class="mt-3 px-2">
           <RouterLink
             :to="'/billing'"
-            class="text-xs font-semibold text-[#ff5d8c] transition hover:text-[#ff8aaa]"
+            class="text-xs font-semibold text-[var(--brand-active-text)] transition hover:text-white"
           >
             充值 / 升级套餐
           </RouterLink>
@@ -594,12 +621,43 @@ watch(
         <RouterLink
           v-if="!isAgentRoute"
           :to="userRoutes.toolList"
-          class="hidden h-11 items-center gap-2 rounded-full bg-gradient-to-br from-primary/90 via-fuchsia-400/85 to-primary/80 px-5 text-sm font-semibold text-white shadow-[0_14px_34px_rgb(176_92_255_/_0.24),inset_0_1px_0_rgb(255_255_255_/_0.22)] transition hover:brightness-110 md:inline-flex"
+          class="app-shell-create-button hidden h-11 items-center gap-2 rounded-full px-5 text-sm font-semibold text-white transition hover:brightness-110 md:inline-flex"
         >
           <Plus class="h-4 w-4" />
           创建
         </RouterLink>
         <AgentThemePicker v-if="isAgentRoute" target-selector=".agent-page" />
+        <div ref="brandAccentRootRef" class="relative hidden md:block">
+          <button
+            type="button"
+            class="app-shell-accent-trigger"
+            aria-label="切换品牌配色"
+            :aria-expanded="brandAccentMenuOpen"
+            @click="brandAccentMenuOpen = !brandAccentMenuOpen"
+          >
+            <Palette class="h-[18px] w-[18px]" aria-hidden="true" />
+          </button>
+          <Transition name="app-shell-accent-pop">
+            <div v-if="brandAccentMenuOpen" class="app-shell-accent-menu">
+              <p class="app-shell-accent-title">全局品牌色</p>
+              <button
+                v-for="option in BRAND_ACCENT_OPTIONS"
+                :key="option.id"
+                type="button"
+                class="app-shell-accent-option"
+                :class="{ 'app-shell-accent-option--active': brandAccent === option.id }"
+                @click="selectBrandAccent(option.id)"
+              >
+                <span class="app-shell-accent-swatch" :style="{ background: option.swatch }" />
+                <span class="min-w-0 flex-1">
+                  <span class="block text-sm font-semibold text-white">{{ option.label }}</span>
+                  <span class="mt-0.5 block truncate text-[11px] text-white/42">{{ option.description }}</span>
+                </span>
+                <Check v-if="brandAccent === option.id" class="h-4 w-4 text-[var(--brand-active-text)]" aria-hidden="true" />
+              </button>
+            </div>
+          </Transition>
+        </div>
         <button
           type="button"
           class="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full text-white/55 hover:bg-white/8 hover:text-white md:inline-flex"
@@ -742,13 +800,13 @@ watch(
 }
 
 .sidebar-nav-link--active {
-  background: #2d161d;
-  color: #e94560;
+  background: var(--brand-active-bg);
+  color: var(--brand-active-text);
   font-weight: 520;
 }
 
 .sidebar-nav-link--active :deep(svg) {
-  color: #e94560;
+  color: var(--brand-active-text);
 }
 
 .sidebar-section-label {
@@ -772,8 +830,8 @@ watch(
   inset: 0 0 -34px;
   z-index: 0;
   background:
-    radial-gradient(ellipse 178px 112px at 42px 34px, rgb(34 211 238 / 0.46) 0%, rgb(52 211 153 / 0.28) 38%, transparent 74%),
-    radial-gradient(ellipse 164px 108px at 134px 52px, rgb(59 130 246 / 0.24) 0%, rgb(99 102 241 / 0.12) 44%, transparent 78%);
+    radial-gradient(ellipse 178px 112px at 42px 34px, rgb(var(--brand-primary-rgb) / 0.46) 0%, rgb(var(--brand-tertiary-rgb) / 0.28) 38%, transparent 74%),
+    radial-gradient(ellipse 164px 108px at 134px 52px, rgb(var(--brand-secondary-rgb) / 0.24) 0%, rgb(var(--brand-secondary-rgb) / 0.12) 44%, transparent 78%);
   filter: blur(18px);
   opacity: 0.95;
 }
@@ -797,7 +855,101 @@ watch(
   object-fit: contain;
   object-position: left center;
   filter:
-    drop-shadow(0 0 8px rgb(34 211 238 / 0.45))
-    drop-shadow(0 0 16px rgb(52 211 153 / 0.24));
+    drop-shadow(0 0 8px rgb(var(--brand-primary-rgb) / 0.45))
+    drop-shadow(0 0 16px rgb(var(--brand-tertiary-rgb) / 0.24));
+}
+
+.app-shell-create-button {
+  background: var(--brand-gradient);
+  box-shadow: var(--brand-button-shadow);
+}
+
+.app-shell-credit-progress {
+  background: var(--brand-progress-gradient);
+}
+
+.app-shell-accent-trigger {
+  display: inline-flex;
+  height: 40px;
+  width: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.04);
+  color: rgb(255 255 255 / 0.58);
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+.app-shell-accent-trigger:hover,
+.app-shell-accent-trigger[aria-expanded="true"] {
+  border-color: var(--brand-border);
+  background: var(--brand-softer);
+  color: var(--brand-active-text);
+  box-shadow: 0 12px 28px var(--brand-glow);
+}
+
+.app-shell-accent-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 60;
+  width: 232px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 24% 0%, var(--brand-softer), transparent 46%),
+    rgb(23 23 28 / 0.98);
+  padding: 10px;
+  box-shadow: 0 22px 60px rgb(0 0 0 / 0.48), 0 0 40px var(--brand-glow);
+  backdrop-filter: blur(18px);
+}
+
+.app-shell-accent-title {
+  margin: 2px 4px 8px;
+  color: rgb(255 255 255 / 0.46);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+
+.app-shell-accent-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  padding: 9px;
+  text-align: left;
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.app-shell-accent-option:hover {
+  background: rgb(255 255 255 / 0.06);
+}
+
+.app-shell-accent-option--active {
+  border-color: var(--brand-border);
+  background: var(--brand-softer);
+}
+
+.app-shell-accent-swatch {
+  height: 30px;
+  width: 30px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.28), 0 8px 20px var(--brand-glow);
+}
+
+.app-shell-accent-pop-enter-active,
+.app-shell-accent-pop-leave-active {
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.app-shell-accent-pop-enter-from,
+.app-shell-accent-pop-leave-to {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
 }
 </style>

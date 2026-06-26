@@ -383,6 +383,10 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
         }
         try {
             JsonNode node = objectMapper.readTree(value);
+            JsonNode proxyMode = node.get("proxyMode");
+            if (proxyMode != null && "enabled".equalsIgnoreCase(proxyMode.asText(""))) {
+                return true;
+            }
             JsonNode proxyUrl = node.get("proxyUrl");
             return proxyUrl != null && !proxyUrl.asText("").isBlank();
         } catch (Exception ignored) {

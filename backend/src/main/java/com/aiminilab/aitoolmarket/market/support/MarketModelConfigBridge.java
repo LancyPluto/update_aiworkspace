@@ -49,7 +49,9 @@ public class MarketModelConfigBridge {
                 resolved.getEnabled(),
                 resolved.getAgentEnabled(),
                 resolved.getDefault(),
-                capabilitiesCodec.parse(resolved.getCapabilities())
+                capabilitiesCodec.parse(resolved.getCapabilities()),
+                null,
+                null
         );
     }
 }

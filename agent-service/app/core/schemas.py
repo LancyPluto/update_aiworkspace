@@ -177,6 +177,10 @@ class RuntimeSettings(BaseModel):
     maxModelCalls: int | None = None
     maxToolCalls: int | None = None
     maxHistoryMessages: int | None = None
+    workingMemoryTokenBudget: int | None = None
+    messageTokenSoftLimit: int | None = None
+    toolOutputTokenSoftLimit: int | None = None
+    summaryTokenLimit: int | None = None
     toolExecutionTimeoutSeconds: int | None = None
     imageToolExecutionTimeoutSeconds: int | None = None
     videoToolExecutionTimeoutSeconds: int | None = None
@@ -294,6 +298,10 @@ class RunContext(BaseModel):
     workspaceId: int | None = Field(default=None, validation_alias=AliasChoices("workspaceId", "workspace_id"))
     message: str = Field(default="", validation_alias=AliasChoices("message", "userMessage"))
     history: list[ChatMessage] = Field(default_factory=list)
+    conversationSummary: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("conversationSummary", "conversation_summary"),
+    )
     agentFiles: list[AgentFileContext] = Field(default_factory=list)
     agentFileChunks: list[AgentFileChunkContext] = Field(default_factory=list)
     availableTools: list[ToolDescriptor] = Field(default_factory=list, validation_alias=AliasChoices("availableTools", "tools"))

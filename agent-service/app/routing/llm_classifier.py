@@ -26,6 +26,7 @@ from app.runtime.router_context import (
     router_recent_tool_call_limit,
     slice_history_by_turns,
 )
+from app.runtime.context_manager import ContextManager, token_middle_truncate
 from app.tools.registry import ToolRegistry, infer_output_modality, requested_output_modality
 
 LOGGER = logging.getLogger(__name__)
@@ -80,7 +81,9 @@ class LLMClassifier:
             return None
 
         candidates = self._candidate_payload(context)
-        history_slice = slice_history_by_turns(context.history, router_history_turns(context))
+        history_slice = ContextManager.from_settings(settings, context.runtimeSettings).build_working_memory(
+            slice_history_by_turns(context.history, router_history_turns(context))
+        )
         prompt = self._build_prompt(
             context,
             guard_intent,
@@ -225,6 +228,8 @@ class LLMClassifier:
         tool_limit = router_recent_tool_call_limit(context)
         preferred = resolve_preferred_tool(context)
         guidance_text, guidance_tool = _active_tool_clarification(context)
+        context_manager = ContextManager.from_settings(settings, context.runtimeSettings)
+        summary_message = context_manager.format_conversation_summary(context.conversationSummary)
         payload = {
             "userMessage": context.message,
             "requestedOutputModality": requested_output_modality(context.message),
@@ -233,9 +238,10 @@ class LLMClassifier:
             "attachments": _attachment_payload(context),
             **routing_context_payload(routing_ctx),
             "recentHistory": [
-                {"role": message.role, "content": _clip(message.content, settings.agent_router_history_clip)}
+                {"role": message.role, "content": _clip(message.content, settings.agent_router_message_token_limit)}
                 for message in history_slice
             ],
+            "conversationSummary": summary_message.content if summary_message else "",
             "activeToolClarification": {
                 "assistantExcerpt": _clip(guidance_text, 800),
                 "toolHint": guidance_tool or None,
@@ -570,7 +576,7 @@ def _classify_router_failure(reason: str, error: str | None, validation_failure:
 def _clip(value: str | None, limit: int) -> str:
     if not value:
         return ""
-    return value if len(value) <= limit else value[:limit] + "..."
+    return token_middle_truncate(value, max(1, limit))
 
 
 def _attachment_payload(context: RunContext) -> list[dict[str, Any]]:

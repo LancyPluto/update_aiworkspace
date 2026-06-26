@@ -491,9 +491,12 @@ function chipDisplayLabel(kind: string, index: number, name?: string | null) {
   return displayLabelForMention({ kind }, index + 1)
 }
 
-function mentionFromUrlAttachment(file: AgentUrlAttachment): { mention: AgentReferenceMention; displayLabel: string } {
+function mentionFromUrlAttachment(
+  file: AgentUrlAttachment,
+  fallbackIndex = stagedAssets.value.length,
+): { mention: AgentReferenceMention; displayLabel: string } {
   const existingIndex = stagedAssets.value.findIndex((item) => item.url === file.url)
-  const index = existingIndex >= 0 ? existingIndex : stagedAssets.value.length
+  const index = existingIndex >= 0 ? existingIndex : fallbackIndex
   const kind = attachmentKind(file.contentType, file.name)
   const canonical = findReferenceMentionByAsset(referenceMentionCatalog.value, {
     assetKey: String(file.id ?? file.url),
@@ -914,10 +917,12 @@ function confirmPickerMaterials() {
   for (const item of selectedMaterialAttachments.value) {
     if (!selectedUrls.has(item.url)) emit("remove-url-attachment", item)
   }
+  let nextInsertIndex = stagedAssets.value.filter((asset) => asset.url && selectedUrls.has(asset.url)).length
   for (const item of pickerMaterials.value) {
     if (!selectedUrls.has(item.url)) continue
     if (!previousUrls.has(item.url)) {
-      chipsToInsert.push(mentionFromUrlAttachment(item))
+      chipsToInsert.push(mentionFromUrlAttachment(item, nextInsertIndex))
+      nextInsertIndex += 1
     }
     if (resolveAgentUploadedFileId(item) != null) continue
     if (!selectedMaterialAttachments.value.some((current) => current.url === item.url)) {

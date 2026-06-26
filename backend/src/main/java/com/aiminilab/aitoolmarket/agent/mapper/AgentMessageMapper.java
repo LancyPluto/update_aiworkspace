@@ -15,9 +15,9 @@ import java.util.Optional;
 public interface AgentMessageMapper extends BaseMapper<AgentMessage> {
 
     @Insert("""
-            INSERT INTO agent_messages(session_id, user_id, role, content_text, content_json, run_id, status, superseded_at, created_at)
+            INSERT INTO agent_messages(session_id, user_id, role, content_text, content_json, run_id, parent_message_id, status, superseded_at, created_at)
             VALUES(#{message.sessionId}, #{message.userId}, #{message.role}, #{message.contentText},
-                   #{message.contentJson}, #{message.runId}, #{message.status}, #{message.supersededAt}, #{message.createdAt})
+                   #{message.contentJson}, #{message.runId}, #{message.parentMessageId}, #{message.status}, #{message.supersededAt}, #{message.createdAt})
             """)
     @Options(useGeneratedKeys = true, keyProperty = "message.id")
     void insertMessage(@Param("message") AgentMessage message);
@@ -41,6 +41,40 @@ public interface AgentMessageMapper extends BaseMapper<AgentMessage> {
                                      @Param("offset") int offset);
 
     @Select("""
+            WITH RECURSIVE active_path(id, session_id, user_id, role, content_text, content_json, run_id, parent_message_id, status, superseded_at, edited_at, created_at, depth) AS (
+                SELECT m.id, m.session_id, m.user_id, m.role, m.content_text, m.content_json, m.run_id,
+                       m.parent_message_id, m.status, m.superseded_at, m.edited_at, m.created_at, 0
+                FROM agent_messages m
+                WHERE m.session_id = #{sessionId}
+                  AND m.id = #{leafMessageId}
+                  AND m.status = 'ACTIVE'
+                UNION ALL
+                SELECT parent.id, parent.session_id, parent.user_id, parent.role, parent.content_text, parent.content_json,
+                       parent.run_id, parent.parent_message_id, parent.status, parent.superseded_at, parent.edited_at,
+                       parent.created_at, active_path.depth + 1
+                FROM agent_messages parent
+                JOIN active_path ON active_path.parent_message_id = parent.id
+                WHERE parent.session_id = #{sessionId}
+                  AND parent.status = 'ACTIVE'
+            )
+            SELECT id, session_id, user_id, role, content_text, content_json, run_id, parent_message_id, status, superseded_at, edited_at, created_at
+            FROM active_path
+            ORDER BY depth DESC
+            """)
+    List<AgentMessage> findActivePathByLeaf(@Param("sessionId") Long sessionId,
+                                            @Param("leafMessageId") Long leafMessageId);
+
+    @Select("""
+            SELECT *
+            FROM agent_messages
+            WHERE session_id = #{sessionId}
+              AND status = 'ACTIVE'
+            ORDER BY id DESC
+            LIMIT 1
+            """)
+    AgentMessage findLatestActiveBySession(@Param("sessionId") Long sessionId);
+
+    @Select("""
             SELECT COUNT(*)
             FROM agent_messages m
             JOIN agent_sessions s ON s.id = m.session_id
@@ -61,6 +95,54 @@ public interface AgentMessageMapper extends BaseMapper<AgentMessage> {
     List<AgentMessage> findActiveHistoryBefore(@Param("sessionId") Long sessionId,
                                                @Param("beforeMessageId") Long beforeMessageId,
                                                @Param("limit") int limit);
+
+    @Select("""
+            SELECT *
+            FROM agent_messages
+            WHERE session_id = #{sessionId}
+              AND status = 'ACTIVE'
+              AND role = #{role}
+              AND (
+                    (#{parentMessageId} IS NULL AND parent_message_id IS NULL)
+                    OR parent_message_id = #{parentMessageId}
+                  )
+            ORDER BY id ASC
+            """)
+    List<AgentMessage> findActiveSiblings(@Param("sessionId") Long sessionId,
+                                          @Param("parentMessageId") Long parentMessageId,
+                                          @Param("role") String role);
+
+    @Select("""
+            WITH RECURSIVE subtree(id, session_id, user_id, role, content_text, content_json, run_id, parent_message_id, status, superseded_at, edited_at, created_at, depth) AS (
+                SELECT m.id, m.session_id, m.user_id, m.role, m.content_text, m.content_json, m.run_id,
+                       m.parent_message_id, m.status, m.superseded_at, m.edited_at, m.created_at, 0
+                FROM agent_messages m
+                WHERE m.session_id = #{sessionId}
+                  AND m.id = #{rootMessageId}
+                  AND m.status = 'ACTIVE'
+                UNION ALL
+                SELECT child.id, child.session_id, child.user_id, child.role, child.content_text, child.content_json,
+                       child.run_id, child.parent_message_id, child.status, child.superseded_at, child.edited_at,
+                       child.created_at, subtree.depth + 1
+                FROM agent_messages child
+                JOIN subtree ON child.parent_message_id = subtree.id
+                WHERE child.session_id = #{sessionId}
+                  AND child.status = 'ACTIVE'
+            )
+            SELECT id, session_id, user_id, role, content_text, content_json, run_id, parent_message_id, status, superseded_at, edited_at, created_at
+            FROM subtree
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM agent_messages child
+                WHERE child.session_id = #{sessionId}
+                  AND child.parent_message_id = subtree.id
+                  AND child.status = 'ACTIVE'
+            )
+            ORDER BY depth DESC, id DESC
+            LIMIT 1
+            """)
+    AgentMessage findLatestActiveLeafInSubtree(@Param("sessionId") Long sessionId,
+                                               @Param("rootMessageId") Long rootMessageId);
 
     @Select("""
             SELECT *

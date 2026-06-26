@@ -716,6 +716,10 @@ export interface AgentMessage {
   contentText: string
   contentJson?: string | null
   runId?: number | null
+  parentMessageId?: number | null
+  branchIndex?: number | null
+  branchTotal?: number | null
+  branchVariantMessageIds?: number[] | null
   status?: "ACTIVE" | "SUPERSEDED" | string
   editedAt?: string | null
   createdAt: string

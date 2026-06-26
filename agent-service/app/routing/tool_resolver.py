@@ -156,6 +156,11 @@ class ToolResolver:
                     content=f"User selected preferred tool {preferred.toolCode} ({preferred.toolName}).",
                 )
             )
-        messages.extend(ContextManager.from_settings(settings).build_history(context.history))
+        messages.extend(
+            ContextManager.from_settings(settings, context.runtimeSettings).build_context_messages(
+                context.history,
+                context.conversationSummary,
+            )
+        )
         messages.append(ChatMessage(role="user", content=context.message))
         return messages

@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.agent.controller;
 
 import com.aiminilab.aitoolmarket.agent.dto.AgentMessageResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentSessionResponse;
+import com.aiminilab.aitoolmarket.agent.dto.ActivateAgentBranchRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentMessageRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentMessageResponse;
 import com.aiminilab.aitoolmarket.agent.dto.EditRegenerateAgentMessageRequest;
@@ -54,6 +55,12 @@ public class AgentSessionController {
                                                                     @RequestParam(required = false) Integer pageNo,
                                                                     @RequestParam(required = false) Integer pageSize) {
         return ApiResponse.success(agentSessionService.messages(AuthContext.get().userId(), sessionId, pageNo, pageSize));
+    }
+
+    @PostMapping("/{sessionId}/branches/active")
+    public ApiResponse<PageResponse<AgentMessageResponse>> activateBranch(@PathVariable Long sessionId,
+                                                                          @Valid @RequestBody ActivateAgentBranchRequest request) {
+        return ApiResponse.success(agentSessionService.activateBranch(AuthContext.get().userId(), sessionId, request));
     }
 
     @DeleteMapping("/{sessionId}")

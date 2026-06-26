@@ -382,6 +382,8 @@ export interface AgentModelConfig {
   providerMetadataVersion?: string | null
   pricingPreview?: string | null
   effectiveCredentialsStatus?: string | null
+  proxyMode?: string | null
+  proxyUrl?: string | null
   createdAt?: string | null
   updatedAt?: string | null
 }
@@ -482,6 +484,8 @@ export interface ModelVendorAccount {
   healthStatus: string
   enabled: boolean
   modelCount: number
+  proxyMode?: string | null
+  proxyUrl?: string | null
   createdAt?: string | null
   updatedAt?: string | null
 }
@@ -530,6 +534,8 @@ export interface ModelVendorAccountPayload {
   balanceCurrency?: string
   balanceLowThreshold?: number
   enabled?: boolean
+  proxyMode?: string
+  proxyUrl?: string
 }
 
 export interface ModelVendorPayload {
@@ -637,6 +643,8 @@ export interface AgentModelConfigPayload {
   agentEnabled?: boolean
   isDefault?: boolean
   capabilities?: string[]
+  proxyMode?: string
+  proxyUrl?: string
 }
 
 export interface ModelRoutePreview {

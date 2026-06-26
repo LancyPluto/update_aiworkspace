@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.agent.service;
 
 import com.aiminilab.aitoolmarket.agent.dto.ModelExecutionSnapshot;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
+import com.aiminilab.aitoolmarket.agent.support.OutboundProxyPolicyResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
@@ -13,15 +14,18 @@ public class ModelExecutionSnapshotService {
     private final AgentModelConfigService agentModelConfigService;
     private final ModelCapabilityService modelCapabilityService;
     private final ModelProviderMetadataService modelProviderMetadataService;
+    private final OutboundProxyPolicyResolver outboundProxyPolicyResolver;
     private final ObjectMapper objectMapper;
 
     public ModelExecutionSnapshotService(AgentModelConfigService agentModelConfigService,
                                          ModelCapabilityService modelCapabilityService,
                                          ModelProviderMetadataService modelProviderMetadataService,
+                                         OutboundProxyPolicyResolver outboundProxyPolicyResolver,
                                          ObjectMapper objectMapper) {
         this.agentModelConfigService = agentModelConfigService;
         this.modelCapabilityService = modelCapabilityService;
         this.modelProviderMetadataService = modelProviderMetadataService;
+        this.outboundProxyPolicyResolver = outboundProxyPolicyResolver;
         this.objectMapper = objectMapper;
     }
 
@@ -32,7 +36,7 @@ public class ModelExecutionSnapshotService {
         AgentModelConfig executable = agentModelConfigService.resolveForExecution(modelConfig);
         List<String> capabilities = modelCapabilityService.resolveCapabilities(modelConfig);
         String metadataVersion = modelProviderMetadataService.metadataVersion(executable.getProvider());
-        return ModelExecutionSnapshot.from(executable, capabilities, metadataVersion);
+        return ModelExecutionSnapshot.from(executable, capabilities, metadataVersion, outboundProxyPolicyResolver.resolve(executable));
     }
 
     public String serialize(ModelExecutionSnapshot snapshot) {

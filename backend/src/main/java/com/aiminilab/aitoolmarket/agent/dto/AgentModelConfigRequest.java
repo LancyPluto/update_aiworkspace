@@ -35,6 +35,8 @@ public record AgentModelConfigRequest(
         Boolean enabled,
         Boolean agentEnabled,
         Boolean isDefault,
-        List<String> capabilities
+        List<String> capabilities,
+        String proxyMode,
+        String proxyUrl
 ) {
 }

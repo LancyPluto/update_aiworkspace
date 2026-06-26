@@ -17,6 +17,7 @@ import com.aiminilab.aitoolmarket.agent.service.ModelProviderMetadataService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.ModelConfigCredentialResolver;
 import com.aiminilab.aitoolmarket.agent.support.ModelRoutePreviewResolver;
+import com.aiminilab.aitoolmarket.agent.support.OutboundProxyPolicyResolver;
 import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
 import com.aiminilab.aitoolmarket.agent.support.VolcengineEndpointSupport;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
@@ -51,6 +52,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     private final ModelCapabilitiesCodec capabilitiesCodec;
     private final ModelConfigCredentialResolver credentialResolver;
     private final ModelRoutePreviewResolver routePreviewResolver;
+    private final OutboundProxyPolicyResolver outboundProxyPolicyResolver;
     private final VendorCodeResolver vendorCodeResolver;
     private final ObjectMapper objectMapper;
 
@@ -63,6 +65,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                                        ModelCapabilitiesCodec capabilitiesCodec,
                                        ModelConfigCredentialResolver credentialResolver,
                                        ModelRoutePreviewResolver routePreviewResolver,
+                                       OutboundProxyPolicyResolver outboundProxyPolicyResolver,
                                        VendorCodeResolver vendorCodeResolver,
                                        ObjectMapper objectMapper) {
         this.agentModelConfigMapper = agentModelConfigMapper;
@@ -74,6 +77,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         this.capabilitiesCodec = capabilitiesCodec;
         this.credentialResolver = credentialResolver;
         this.routePreviewResolver = routePreviewResolver;
+        this.outboundProxyPolicyResolver = outboundProxyPolicyResolver;
         this.vendorCodeResolver = vendorCodeResolver;
         this.objectMapper = objectMapper;
     }
@@ -238,7 +242,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     @Override
     public InternalAgentModelConfigResponse internalGet() {
         AgentModelConfig config = findExecutableAgentDefault();
-        return InternalAgentModelConfigResponse.from(credentialResolver.resolveForExecution(config));
+        AgentModelConfig executable = credentialResolver.resolveForExecution(config);
+        return InternalAgentModelConfigResponse.from(executable, outboundProxyPolicyResolver.resolve(executable));
     }
 
     @Override
@@ -254,7 +259,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (!isExecutableForAgent(executable)) {
             return internalGet();
         }
-        return InternalAgentModelConfigResponse.from(executable);
+        return InternalAgentModelConfigResponse.from(executable, outboundProxyPolicyResolver.resolve(executable));
     }
 
     @Override
@@ -486,7 +491,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 config.getEnabled(),
                 config.getAgentEnabled(),
                 config.getDefault(),
-                capabilities.isEmpty() ? null : capabilities
+                capabilities.isEmpty() ? null : capabilities,
+                null,
+                null
         ));
     }
 
@@ -873,7 +880,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.enabled(),
                 request.agentEnabled(),
                 request.isDefault(),
-                request.capabilities()
+                request.capabilities(),
+                request.proxyMode(),
+                request.proxyUrl()
         );
         return mergeFromVendorAccount(merged, existing);
     }
@@ -925,7 +934,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.enabled(),
                 request.agentEnabled(),
                 request.isDefault(),
-                request.capabilities()
+                request.capabilities(),
+                request.proxyMode(),
+                request.proxyUrl()
         ));
     }
 
@@ -973,7 +984,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.enabled(),
                 request.agentEnabled(),
                 request.isDefault(),
-                request.capabilities()
+                request.capabilities(),
+                request.proxyMode(),
+                request.proxyUrl()
         ));
     }
 
@@ -1010,7 +1023,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.enabled(),
                 request.agentEnabled(),
                 request.isDefault(),
-                request.capabilities()
+                request.capabilities(),
+                request.proxyMode(),
+                request.proxyUrl()
         );
     }
 
@@ -1053,7 +1068,24 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (request.readTimeoutSeconds() != null) {
             node.put("readTimeoutSeconds", request.readTimeoutSeconds());
         }
+        if (request.proxyMode() != null) {
+            node.put("proxyMode", normalizeProxyMode(request.proxyMode()));
+        }
+        if (request.proxyUrl() != null) {
+            node.put("proxyUrl", request.proxyUrl().trim());
+        }
         return node.isEmpty() ? null : node.toString();
+    }
+
+    private String normalizeProxyMode(String value) {
+        if (value == null || value.isBlank()) {
+            return "inherit";
+        }
+        String normalized = value.trim().toLowerCase(java.util.Locale.ROOT);
+        if (Set.of("inherit", "enabled", "disabled").contains(normalized)) {
+            return normalized;
+        }
+        throw new BusinessException(ErrorCode.PARAM_ERROR, "proxyMode must be inherit, enabled or disabled");
     }
 
     private String resolveExecutionTask(AgentModelConfigRequest request, AgentModelConfig existing) {

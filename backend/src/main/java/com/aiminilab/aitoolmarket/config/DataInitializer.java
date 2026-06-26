@@ -5,6 +5,7 @@ import com.aiminilab.aitoolmarket.admin.mapper.SystemSettingVersionMapper;
 import com.aiminilab.aitoolmarket.agent.config.AgentPromptSettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentRouterSettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentMemorySettings;
+import com.aiminilab.aitoolmarket.agent.config.AgentOutboundProxySettings;
 import com.aiminilab.aitoolmarket.agent.config.AgentRuntimeSettings;
 import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountMigrationService;
@@ -83,6 +84,7 @@ public class DataInitializer implements CommandLineRunner {
         seedSettingDefaults(AgentRouterSettings.defaults(), "agent", "Agent router setting");
         seedSettingDefaults(AgentMemorySettings.defaults(), "agent", "Agent memory setting");
         seedSettingDefaults(AgentRuntimeSettings.defaults(), "agent", "Agent runtime setting");
+        seedSettingDefaults(AgentOutboundProxySettings.defaults(), "agent", "Outbound proxy setting");
     }
 
     private void seedSettingDefaults(java.util.Map<String, String> defaults, String group, String description) {
@@ -724,6 +726,8 @@ public class DataInitializer implements CommandLineRunner {
                   extra_auth_json TEXT NULL,
                   console_url VARCHAR(512) NULL,
                   balance_url VARCHAR(512) NULL,
+                  console_cookie TEXT NULL,
+                  console_cookie_status VARCHAR(20) NULL DEFAULT 'UNKNOWN',
                   balance_query_mode VARCHAR(32) NOT NULL DEFAULT 'MANUAL',
                   balance_amount DECIMAL(18,4) NULL,
                   balance_currency VARCHAR(8) NULL DEFAULT 'CNY',
@@ -738,6 +742,8 @@ public class DataInitializer implements CommandLineRunner {
                   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """);
+        ensureColumn("model_vendor_accounts", "console_cookie", "ALTER TABLE model_vendor_accounts ADD COLUMN console_cookie TEXT NULL AFTER balance_url");
+        ensureColumn("model_vendor_accounts", "console_cookie_status", "ALTER TABLE model_vendor_accounts ADD COLUMN console_cookie_status VARCHAR(20) NULL DEFAULT 'UNKNOWN' AFTER console_cookie");
         executeSql("""
                 UPDATE model_vendor_accounts
                 SET enabled = 0,
@@ -862,7 +868,11 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("agent_messages", "status", "ALTER TABLE agent_messages ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE'");
         ensureColumn("agent_messages", "superseded_at", "ALTER TABLE agent_messages ADD COLUMN superseded_at DATETIME NULL");
         ensureColumn("agent_messages", "edited_at", "ALTER TABLE agent_messages ADD COLUMN edited_at DATETIME NULL");
+        ensureColumn("agent_messages", "parent_message_id", "ALTER TABLE agent_messages ADD COLUMN parent_message_id BIGINT NULL");
         ensureIndex("agent_messages", "idx_agent_messages_session_active", "CREATE INDEX idx_agent_messages_session_active ON agent_messages(session_id, status, id)");
+        ensureIndex("agent_messages", "idx_agent_messages_parent_branch", "CREATE INDEX idx_agent_messages_parent_branch ON agent_messages(session_id, parent_message_id, role, id)");
+        ensureColumn("agent_sessions", "active_leaf_message_id", "ALTER TABLE agent_sessions ADD COLUMN active_leaf_message_id BIGINT NULL");
+        ensureIndex("agent_sessions", "idx_agent_sessions_active_leaf", "CREATE INDEX idx_agent_sessions_active_leaf ON agent_sessions(active_leaf_message_id)");
         ensureColumn("agent_runs", "model_config_id", "ALTER TABLE agent_runs ADD COLUMN model_config_id BIGINT NULL");
         ensureColumn("agent_runs", "parent_run_id", "ALTER TABLE agent_runs ADD COLUMN parent_run_id BIGINT NULL");
         ensureColumn("agent_runs", "source_user_message_id", "ALTER TABLE agent_runs ADD COLUMN source_user_message_id BIGINT NULL");

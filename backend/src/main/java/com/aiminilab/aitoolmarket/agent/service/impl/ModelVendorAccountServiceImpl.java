@@ -629,7 +629,9 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                             : java.util.Arrays.stream(linked.getCapabilities().split(","))
                             .map(String::trim)
                             .filter(value -> !value.isBlank())
-                            .toList()
+                            .toList(),
+                    null,
+                    null
             ));
         }
         return normalizeProviderBaseUrl(new AgentModelConfigRequest(
@@ -660,7 +662,9 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 true,
                 false,
                 false,
-                provider.capabilities()
+                provider.capabilities(),
+                null,
+                null
         ));
     }
 
@@ -697,7 +701,9 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 request.enabled(),
                 request.agentEnabled(),
                 request.isDefault(),
-                request.capabilities()
+                request.capabilities(),
+                request.proxyMode(),
+                request.proxyUrl()
         );
     }
 
@@ -890,12 +896,13 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         } else if (existing != null) {
             account.setApiKey(existing.getApiKey());
         }
-        if (request.extraAuthJson() != null && !request.extraAuthJson().isBlank()) {
-            account.setExtraAuthJson(request.extraAuthJson().trim());
+        String mergedExtraAuthJson = mergeProxyFields(request.extraAuthJson(), request.proxyMode(), request.proxyUrl());
+        if (mergedExtraAuthJson != null && !mergedExtraAuthJson.isBlank()) {
+            account.setExtraAuthJson(mergedExtraAuthJson);
         } else if (Boolean.TRUE.equals(request.clearExtraAuthJson())) {
             account.setExtraAuthJson("");
         } else if (existing != null) {
-            account.setExtraAuthJson(existing.getExtraAuthJson());
+            account.setExtraAuthJson(mergeProxyFields(existing.getExtraAuthJson(), request.proxyMode(), request.proxyUrl()));
         }
         account.setConsoleUrl(blankToNull(request.consoleUrl()));
         account.setBalanceUrl(blankToNull(request.balanceUrl()));
@@ -964,6 +971,9 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
             } catch (JsonProcessingException exception) {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "extraAuthJson must be valid JSON");
             }
+        }
+        if (request.proxyMode() != null) {
+            normalizeProxyMode(request.proxyMode());
         }
         boolean hasKey = request.apiKey() != null && !request.apiKey().isBlank();
         boolean hasExtra = request.extraAuthJson() != null && !request.extraAuthJson().isBlank();
@@ -1062,5 +1072,43 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
             case "mock" -> "mock";
             default -> "openai_compatible";
         };
+    }
+
+    private String mergeProxyFields(String extraAuthJson, String proxyMode, String proxyUrl) {
+        boolean hasProxyMode = proxyMode != null;
+        boolean hasProxyUrl = proxyUrl != null;
+        if (!hasProxyMode && !hasProxyUrl) {
+            return extraAuthJson == null || extraAuthJson.isBlank() ? null : extraAuthJson.trim();
+        }
+        try {
+            com.fasterxml.jackson.databind.node.ObjectNode node = objectMapper.createObjectNode();
+            if (extraAuthJson != null && !extraAuthJson.isBlank()) {
+                JsonNode parsed = objectMapper.readTree(extraAuthJson);
+                if (!parsed.isObject()) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR, "extraAuthJson must be valid JSON object");
+                }
+                node.setAll((com.fasterxml.jackson.databind.node.ObjectNode) parsed);
+            }
+            if (hasProxyMode) {
+                node.put("proxyMode", normalizeProxyMode(proxyMode));
+            }
+            if (hasProxyUrl) {
+                node.put("proxyUrl", proxyUrl.trim());
+            }
+            return node.isEmpty() ? null : objectMapper.writeValueAsString(node);
+        } catch (JsonProcessingException exception) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "extraAuthJson must be valid JSON");
+        }
+    }
+
+    private String normalizeProxyMode(String value) {
+        if (value == null || value.isBlank()) {
+            return "inherit";
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        if (Set.of("inherit", "enabled", "disabled").contains(normalized)) {
+            return normalized;
+        }
+        throw new BusinessException(ErrorCode.PARAM_ERROR, "proxyMode must be inherit, enabled or disabled");
     }
 }

@@ -17,6 +17,7 @@ export {
 } from "./aiToolApi"
 export {
   cancelAgentRun,
+  activateAgentBranch,
   confirmAgentTool,
   createAgentSession,
   deleteAgentSession,

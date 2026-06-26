@@ -26,6 +26,8 @@ public record CreateAgentMessageRequest(
         /** 按输入框 DOM 顺序序列化的 OpenAI-style 多模态片段。 */
         List<Map<String, Object>> contentParts,
         /** 将 inline chip 替换成 {asset_key} 变量后的站位提示词。 */
-        String positionalPrompt
+        String positionalPrompt,
+        /** 当前分支叶子消息 ID；新消息会挂载到该节点下。为空时使用会话 active leaf。 */
+        Long parentMessageId
 ) {
 }

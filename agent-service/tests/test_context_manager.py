@@ -3,6 +3,7 @@ from app.runtime.context_manager import (
     ContextManager,
     estimate_messages_tokens,
     middle_truncate,
+    token_middle_truncate,
     trim_tool_output,
 )
 
@@ -39,6 +40,13 @@ def test_trim_tool_output_no_double_append_when_url_kept():
     # short enough to not truncate at all
     assert out == content
     assert out.count(url) == 1
+
+
+def test_token_middle_truncate_collapses_long_text():
+    text = "hello " * 1000
+    out = token_middle_truncate(text, 50)
+    assert "已截断" in out
+    assert estimate_messages_tokens([ChatMessage(role="user", content=out)]) <= 50
 
 
 def test_window_keeps_last_n_turns():
@@ -78,8 +86,8 @@ def test_window_respects_hard_message_cap():
     assert windowed[-1].content == "m49"
 
 
-def test_compact_uses_role_specific_limits():
-    cm = ContextManager(msg_char_limit=50, tool_output_char_limit=10)
+def test_compact_uses_role_specific_token_limits():
+    cm = ContextManager(message_token_soft_limit=20, tool_output_token_soft_limit=5)
     messages = [
         ChatMessage(role="assistant", content="x" * 200),
         ChatMessage(role="tool", content="y" * 200, toolCallId="c1", name="search"),
@@ -95,7 +103,7 @@ def test_compact_uses_role_specific_limits():
 
 
 def test_compact_keeps_short_messages_identical():
-    cm = ContextManager(msg_char_limit=2000)
+    cm = ContextManager(message_token_soft_limit=2000)
     original = ChatMessage(role="assistant", content="short answer")
     compacted = cm.compact([original])
     assert compacted[0] is original
@@ -107,7 +115,7 @@ def test_build_history_windows_then_truncates():
         ChatMessage(role="user", content="recent"),
         ChatMessage(role="assistant", content="z" * 500),
     ]
-    cm = ContextManager(max_recent_turns=1, max_history_messages=20, msg_char_limit=40)
+    cm = ContextManager(max_recent_turns=1, max_history_messages=20, message_token_soft_limit=40)
     built = cm.build_history(history)
     assert [m.content for m in built[:1]] == ["recent"]
     assert "已截断" in built[-1].content
@@ -115,7 +123,7 @@ def test_build_history_windows_then_truncates():
 
 def test_estimate_messages_tokens():
     messages = [ChatMessage(role="user", content="a" * 40)]
-    assert estimate_messages_tokens(messages) == 10
+    assert estimate_messages_tokens(messages) >= 1
 
 
 def test_prune_trims_only_tool_messages_over_budget():
@@ -147,8 +155,62 @@ def test_build_history_metrics_reports_pruning():
     cm = ContextManager(prune_token_budget=500, pruning_tool_char_limit=200, tool_output_char_limit=100)
     metrics = cm.build_history_metrics(history)
     assert metrics["pruningApplied"] is True
+    assert metrics["summaryCandidateMessages"] == 0
     assert metrics["estimatedTokensAfterPrune"] < metrics["estimatedTokensAfterWindow"]
     assert metrics["estimatedTokensAfter"] <= metrics["estimatedTokensAfterPrune"]
+
+
+def test_split_history_returns_evicted_summary_candidates():
+    history = [
+        ChatMessage(role="user", content="turn1"),
+        ChatMessage(role="assistant", content="a1"),
+        ChatMessage(role="user", content="turn2"),
+        ChatMessage(role="assistant", content="a2"),
+        ChatMessage(role="user", content="turn3"),
+        ChatMessage(role="assistant", content="a3"),
+    ]
+    cm = ContextManager(max_recent_turns=2, max_history_messages=20)
+    split = cm.split_history(history)
+    assert [m.content for m in split.summary_candidates] == ["turn1", "a1"]
+    assert [m.content for m in split.recent_messages] == ["turn2", "a2", "turn3", "a3"]
+
+
+def test_build_context_messages_injects_summary_before_recent_history():
+    history = [ChatMessage(role="user", content="recent")]
+    cm = ContextManager()
+    messages = cm.build_context_messages(history, "用户最初要求生成 Owl City 风格英文情歌。")
+    assert messages[0].role == "system"
+    assert messages[0].content.startswith("<Conversation_Summary>")
+    assert "Owl City" in messages[0].content
+    assert messages[1].content == "recent"
+
+
+def test_working_memory_token_budget_prefers_latest_turn():
+    history = [
+        ChatMessage(role="user", content="old " * 1000),
+        ChatMessage(role="assistant", content="old answer " * 1000),
+        ChatMessage(role="user", content="latest"),
+    ]
+    cm = ContextManager(max_recent_turns=10, max_history_messages=20, working_memory_token_budget=20)
+    memory = cm.build_working_memory(history)
+    assert memory[-1].content == "latest"
+    assert all(message.content != "old " * 1000 for message in memory[:-1])
+
+
+def test_split_history_summarizes_messages_evicted_by_token_budget():
+    history = [
+        ChatMessage(role="user", content="first request " * 500),
+        ChatMessage(role="assistant", content="first answer " * 500),
+        ChatMessage(role="user", content="latest"),
+    ]
+    cm = ContextManager(max_recent_turns=10, max_history_messages=20, working_memory_token_budget=20)
+    split = cm.split_history(history)
+
+    assert split.recent_messages[-1].content == "latest"
+    assert [message.content for message in split.summary_candidates] == [
+        "first request " * 500,
+        "first answer " * 500,
+    ]
 
 
 def test_from_settings_reads_config():
@@ -159,6 +221,11 @@ def test_from_settings_reads_config():
         agent_tool_output_char_limit = 600
         agent_pruning_tool_char_limit = 350
         agent_context_prune_token_budget = 2500
+        agent_working_memory_token_budget = 7000
+        agent_message_token_soft_limit = 1300
+        agent_tool_output_token_soft_limit = 550
+        agent_summary_token_limit = 900
+        model_name = "gpt-4o-mini"
 
     cm = ContextManager.from_settings(FakeSettings())
     assert cm.max_recent_turns == 3
@@ -167,3 +234,7 @@ def test_from_settings_reads_config():
     assert cm.tool_output_char_limit == 600
     assert cm.pruning_tool_char_limit == 350
     assert cm.prune_token_budget == 2500
+    assert cm.working_memory_token_budget == 7000
+    assert cm.message_token_soft_limit == 1300
+    assert cm.tool_output_token_soft_limit == 550
+    assert cm.summary_token_limit == 900

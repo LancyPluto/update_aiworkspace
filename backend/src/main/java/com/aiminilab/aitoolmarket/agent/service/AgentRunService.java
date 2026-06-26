@@ -54,6 +54,8 @@ public interface AgentRunService {
 
     AgentRunResponse upsertStreamingAnswer(Long runId, UpsertStreamingAgentAnswerRequest request);
 
+    AgentRunResponse updateConversationSummary(Long runId, String conversationSummary);
+
     AgentRunResponse failRun(Long runId, FailAgentRunRequest request);
 
     void saveGraphCheckpoint(Long runId, String checkpointJson);

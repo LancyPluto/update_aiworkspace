@@ -1,6 +1,8 @@
 package com.aiminilab.aitoolmarket.agent.dto;
 
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -29,6 +31,8 @@ public record ModelVendorAccountResponse(
         String healthStatus,
         Boolean enabled,
         int modelCount,
+        String proxyMode,
+        String proxyUrl,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -57,6 +61,8 @@ public record ModelVendorAccountResponse(
                 account.getHealthStatus(),
                 account.getEnabled(),
                 modelCount,
+                extraAuthText(account.getExtraAuthJson(), "proxyMode"),
+                extraAuthText(account.getExtraAuthJson(), "proxyUrl"),
                 account.getCreatedAt(),
                 account.getUpdatedAt()
         );
@@ -87,5 +93,18 @@ public record ModelVendorAccountResponse(
             return "";
         }
         return "********";
+    }
+
+    private static String extraAuthText(String value, String key) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        try {
+            JsonNode node = new ObjectMapper().readTree(value);
+            JsonNode field = node.get(key);
+            return field == null || field.isNull() ? "" : field.asText("");
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 }

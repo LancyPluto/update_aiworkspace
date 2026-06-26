@@ -20,6 +20,8 @@ public record ModelVendorAccountRequest(
         BigDecimal balanceAmount,
         String balanceCurrency,
         BigDecimal balanceLowThreshold,
-        Boolean enabled
+        Boolean enabled,
+        String proxyMode,
+        String proxyUrl
 ) {
 }

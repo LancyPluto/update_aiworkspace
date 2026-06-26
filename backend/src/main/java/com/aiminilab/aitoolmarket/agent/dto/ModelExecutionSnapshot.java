@@ -26,9 +26,14 @@ public record ModelExecutionSnapshot(
         String billingUnit,
         BigDecimal unitPrice,
         List<String> capabilities,
-        String providerMetadataVersion
+        String providerMetadataVersion,
+        ProxyPolicy proxyPolicy
 ) {
     public static ModelExecutionSnapshot from(AgentModelConfig config, List<String> capabilities, String providerMetadataVersion) {
+        return from(config, capabilities, providerMetadataVersion, null);
+    }
+
+    public static ModelExecutionSnapshot from(AgentModelConfig config, List<String> capabilities, String providerMetadataVersion, ProxyPolicy proxyPolicy) {
         if (config == null) {
             return null;
         }
@@ -53,7 +58,8 @@ public record ModelExecutionSnapshot(
                 config.getBillingUnit(),
                 config.getUnitPrice(),
                 capabilities == null ? List.of() : capabilities,
-                providerMetadataVersion == null || providerMetadataVersion.isBlank() ? "manifest" : providerMetadataVersion
+                providerMetadataVersion == null || providerMetadataVersion.isBlank() ? "manifest" : providerMetadataVersion,
+                proxyPolicy
         );
     }
 

@@ -65,6 +65,26 @@ public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
                                                       @Param("limit") int limit);
 
     @Select("""
+            <script>
+            SELECT c.*
+            FROM agent_tool_calls c
+            JOIN agent_runs r ON r.id = c.run_id
+            WHERE c.user_id = #{userId}
+              AND r.session_id = #{sessionId}
+              AND c.status = 'SUCCESS'
+              AND c.result_json IS NOT NULL
+              AND c.run_id IN
+              <foreach item="runId" collection="runIds" open="(" separator="," close=")">#{runId}</foreach>
+            ORDER BY c.id DESC
+            LIMIT #{limit}
+            </script>
+            """)
+    List<AgentToolCall> findRecentSuccessfulByRunIds(@Param("userId") Long userId,
+                                                     @Param("sessionId") Long sessionId,
+                                                     @Param("runIds") List<Long> runIds,
+                                                     @Param("limit") int limit);
+
+    @Select("""
             SELECT *
             FROM agent_tool_calls
             WHERE task_id = #{taskId}
