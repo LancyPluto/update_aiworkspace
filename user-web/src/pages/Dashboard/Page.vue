@@ -1422,6 +1422,8 @@ function assetFromTask(item: { task: TaskDetail; blocks: ResultBlock[]; modality
     toolName: item.task.toolName,
     toolCode: item.task.toolCode,
     createdAt: item.task.createdAt,
+    communityPostId: item.task.communityPostId ?? undefined,
+    promptVisible: item.task.communityPromptVisible ?? undefined,
   }
   if (block.type === "image") {
     const urls = block.images.map((image) => image.url).filter(Boolean)

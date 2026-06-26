@@ -422,14 +422,14 @@ function escapeXml(value: string): string {
             </div>
             <figcaption v-if="props.mode !== 'compact'" :class="captionClass()">
               <span>{{ image.label ?? "图片" }}</span>
-              <a :href="image.url" download :class="downloadLinkClass()" @click.stop>
+              <a :href="image.downloadUrl || image.url" download :class="downloadLinkClass()" @click.stop>
                 <Download class="h-3.5 w-3.5" />
                 下载
               </a>
             </figcaption>
             <a
               v-if="props.mode === 'compact'"
-              :href="image.url"
+              :href="image.downloadUrl || image.url"
               download
               :class="floatingDownloadClass()"
               @click.stop
@@ -494,7 +494,7 @@ function escapeXml(value: string): string {
                 </div>
                 <div class="flex shrink-0 flex-wrap justify-end gap-2">
                   <a
-                    :href="track.url"
+                    :href="track.downloadUrl || track.url"
                     :download="track.downloadName ?? `audio-${trackIndex + 1}`"
                     class="inline-flex h-8 items-center gap-1 rounded-md border border-border px-2.5 text-xs hover:bg-secondary"
                     @click.stop
@@ -537,7 +537,7 @@ function escapeXml(value: string): string {
             <h2 class="text-base font-semibold text-foreground">{{ b.title }}</h2>
           </div>
           <a
-            :href="b.url"
+            :href="b.downloadUrl || b.url"
             :download="b.downloadName ?? 'digital-human-video.mp4'"
             class="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-secondary"
             @click.stop

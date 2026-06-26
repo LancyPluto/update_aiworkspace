@@ -66,7 +66,11 @@ const mediaUrls = computed(() => {
 const mediaUrl = computed(() => selectedUrl.value || normalizeMediaUrl(props.asset?.url) || mediaUrls.value[0] || "")
 const activeAsset = computed<AssetPreviewItem | null>(() => (props.asset ? { ...props.asset, url: mediaUrl.value } : null))
 
-const downloadUrl = computed(() => mediaUrl.value)
+const downloadUrl = computed(() => {
+  // 优先使用后端返回的downloadUrl（OSS签名URL或CDN签名URL）
+  if (props.asset?.downloadUrl) return props.asset.downloadUrl
+  return mediaUrl.value
+})
 
 const canDownload = computed(() => Boolean(downloadUrl.value))
 
