@@ -1,5 +1,6 @@
 import base64
 import mimetypes
+import struct
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -152,3 +153,68 @@ def _validate_base64(value: str) -> None:
         base64.b64decode(compact, validate=True)
     except Exception as exc:
         raise InputImageError("reference image is not valid base64") from exc
+
+
+def get_image_dimensions(data: bytes) -> tuple[int, int] | None:
+    """Parse width×height from raw image bytes (PNG/JPEG/GIF/WebP). Returns None if unrecognised."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 24:
+        w, h = struct.unpack(">II", data[16:24])
+        return int(w), int(h)
+    if data.startswith(b"\xff\xd8\xff"):
+        return _jpeg_dimensions(data)
+    if data[:6] in {b"GIF87a", b"GIF89a"} and len(data) >= 10:
+        w, h = struct.unpack("<HH", data[6:10])
+        return int(w), int(h)
+    if data.startswith(b"RIFF") and len(data) >= 30 and data[8:12] == b"WEBP":
+        if data[12:16] == b"VP8 " and len(data) >= 30:
+            w = (struct.unpack("<H", data[26:28])[0]) & 0x3FFF
+            h = (struct.unpack("<H", data[28:30])[0]) & 0x3FFF
+            return int(w), int(h)
+        if data[12:16] == b"VP8L" and len(data) >= 25:
+            bits = struct.unpack("<I", data[21:25])[0]
+            w = (bits & 0x3FFF) + 1
+            h = ((bits >> 14) & 0x3FFF) + 1
+            return int(w), int(h)
+    return None
+
+
+def _jpeg_dimensions(data: bytes) -> tuple[int, int] | None:
+    i = 2
+    while i < len(data) - 1:
+        if data[i] != 0xFF:
+            return None
+        marker = data[i + 1]
+        if marker in (0xC0, 0xC1, 0xC2):
+            if i + 9 >= len(data):
+                return None
+            h, w = struct.unpack(">HH", data[i + 5 : i + 9])
+            return int(w), int(h)
+        if marker == 0xD9 or marker == 0xDA:
+            return None
+        if i + 3 >= len(data):
+            return None
+        seg_len = struct.unpack(">H", data[i + 2 : i + 4])[0]
+        i += 2 + seg_len
+    return None
+
+
+def validate_min_resolution(data_url: str, min_width: int, min_height: int) -> None:
+    """Decode a data-URL, check dimensions, raise InputImageError if too small."""
+    raw = data_url.strip()
+    if not raw.startswith("data:"):
+        return
+    _, _, encoded = raw.partition(",")
+    if not encoded:
+        return
+    try:
+        img_bytes = base64.b64decode("".join(encoded.split()), validate=True)
+    except Exception:
+        return
+    dims = get_image_dimensions(img_bytes)
+    if dims is None:
+        return
+    w, h = dims
+    if w < min_width or h < min_height:
+        raise InputImageError(
+            f"图片分辨率 {w}x{h} 不满足最低要求 {min_width}x{min_height}，请使用更高分辨率的图片"
+        )

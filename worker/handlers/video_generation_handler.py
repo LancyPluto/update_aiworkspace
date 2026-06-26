@@ -11,7 +11,7 @@ from config import resolve_kling_api_key, resolve_kling_credentials, resolve_kli
 from handlers.error_classifier import classify_model_error
 from handlers.generated_video_persister import GeneratedVideoPersistError, GeneratedVideoPersister
 from providers import registry as provider_registry
-from utils.input_image import InputImageError, resolve_reference_image_data_url
+from utils.input_image import InputImageError, resolve_reference_image_data_url, validate_min_resolution
 from utils.kling_config import resolve_kling_api_task, resolve_kling_model_name, resolve_kling_video_paths
 from utils.volcengine_config import resolve_volcengine_task_model
 
@@ -518,11 +518,16 @@ def _resolve_bool_param(value: Any, default: bool = False) -> bool:
     return default
 
 
+_DASHSCOPE_MIN_RESOLUTION = 300
+
+
 def _resolve_happyhorse_image_data_url(value: str, field_name: str) -> str:
     try:
-        return resolve_reference_image_data_url(value)
+        data_url = resolve_reference_image_data_url(value)
+        validate_min_resolution(data_url, _DASHSCOPE_MIN_RESOLUTION, _DASHSCOPE_MIN_RESOLUTION)
+        return data_url
     except InputImageError as exc:
-        raise DashScopeVideoError(f"{field_name} must be a valid image or base64 data: {exc}") from exc
+        raise DashScopeVideoError(f"{field_name}: {exc}") from exc
 
 
 def _resolve_billable_seconds(usage: Any, params: dict[str, Any]) -> int:
