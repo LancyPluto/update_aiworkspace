@@ -131,6 +131,45 @@ class ModelVendorAccountDiscoveryApiTest {
     }
 
     @Test
+    void adminCanDiscoverQwen36PlusAsVisionAgentModel() throws Exception {
+        HttpServer server = modelsServer("""
+                {
+                  "object": "list",
+                  "data": [
+                    {"id": "qwen3.6-plus", "object": "model"},
+                    {"id": "qwen-plus", "object": "model"}
+                  ]
+                }
+                """);
+        try {
+            String adminToken = loginAdmin();
+            Long accountId = createVendorAccount(
+                    adminToken,
+                    "qwen",
+                    "Bailian Qwen",
+                    "http://127.0.0.1:%d/compatible-mode/v1".formatted(server.getAddress().getPort())
+            );
+
+            mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/discover-models", accountId)
+                            .header("Authorization", "Bearer " + adminToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.imported").value(2))
+                    .andExpect(jsonPath("$.data.models[?(@.modelName=='qwen3.6-plus')].provider").value("qwen"))
+                    .andExpect(jsonPath("$.data.models[?(@.modelName=='qwen3.6-plus')].capabilities[0]").value("TEXT_GENERATION"))
+                    .andExpect(jsonPath("$.data.models[?(@.modelName=='qwen3.6-plus')].capabilities[1]").value("VISION_INPUT"))
+                    .andExpect(jsonPath("$.data.models[?(@.modelName=='qwen-plus')].provider").value("qwen"))
+                    .andExpect(jsonPath("$.data.models[?(@.modelName=='qwen-plus')].capabilities[0]").value("TEXT_GENERATION"));
+
+            AgentModelConfig vision = agentModelConfigMapper.findActiveByVendorAccountAndModelName(accountId, "qwen3.6-plus");
+            assertThat(vision.getProvider()).isEqualTo("qwen");
+            assertThat(vision.getCapabilities()).contains("TEXT_GENERATION", "VISION_INPUT");
+            assertThat(vision.getDocsUrl()).contains("compatibility-of-openai-with-dashscope");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void adminCanDiscoverVolcengineSeedreamWithJsonImageInputDefaults() throws Exception {
         HttpServer server = modelsServer("""
                 {
@@ -304,15 +343,21 @@ class ModelVendorAccountDiscoveryApiTest {
 
     private HttpServer modelsServer(String body) throws Exception {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/v1/models", exchange -> {
+        java.util.function.Consumer<com.sun.net.httpserver.HttpExchange> handler = exchange -> {
             assertThat(exchange.getRequestHeaders().getFirst("Authorization")).isEqualTo("Bearer discovery-secret");
             byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, bytes.length);
-            try (OutputStream output = exchange.getResponseBody()) {
-                output.write(bytes);
+            try {
+                exchange.sendResponseHeaders(200, bytes.length);
+                try (OutputStream output = exchange.getResponseBody()) {
+                    output.write(bytes);
+                }
+            } catch (Exception exception) {
+                throw new RuntimeException(exception);
             }
-        });
+        };
+        server.createContext("/v1/models", handler::accept);
+        server.createContext("/compatible-mode/v1/models", handler::accept);
         server.start();
         return server;
     }

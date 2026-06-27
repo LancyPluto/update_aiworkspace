@@ -8,7 +8,7 @@ from app.config import settings
 from app.core.preferred_tool_bias import resolve_preferred_tool
 from app.core.schemas import ChatMessage, RunContext
 from app.routing.attachment_signals import attachment_signal_payload, build_attachment_signal
-from app.core.attachment_catalog import build_reference_plan, reference_mentions_payload, user_message_for_llm
+from app.core.attachment_catalog import build_reference_plan, build_user_message_content, reference_mentions_payload
 from app.routing.context_builder import capability_flags_payload, default_capability_flags
 from app.routing.v2.thread_state import RoutingThreadState, format_thread_state_block
 from app.runtime.context_manager import ContextManager, token_middle_truncate
@@ -118,5 +118,5 @@ def build_routing_messages(
         if content:
             messages.append(ChatMessage(role=role, content=content))
 
-    messages.append(ChatMessage(role="user", content=user_message_for_llm(context)))
+    messages.append(ChatMessage(role="user", content=build_user_message_content(context)))
     return messages

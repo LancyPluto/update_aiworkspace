@@ -1,5 +1,6 @@
 from app.core.attachment_catalog import (
     build_reference_plan,
+    build_user_message_content,
     extract_at_tokens,
     llm_token_for_mention,
     reference_mentions_payload,
@@ -7,7 +8,7 @@ from app.core.attachment_catalog import (
     resolve_media_argument_pointers,
     user_message_for_llm,
 )
-from app.core.schemas import AgentFileContext, RecentToolCallContext, ReferenceMention, RunContext
+from app.core.schemas import AgentFileContext, AgentModelConfig, RecentToolCallContext, ReferenceMention, RunContext
 
 
 def test_extract_at_tokens_dedupes_and_preserves_order():
@@ -57,6 +58,45 @@ def test_build_reference_plan_prefers_structured_reference_mentions():
     assert len(reference_mentions_payload(plan)) == 2
     assert reference_mentions_payload(plan)[0]["alias"] == "[当前参考图_1]"
     assert reference_mentions_payload(plan)[0]["originalLabel"] == "@图片1-角色"
+
+
+def test_build_user_message_content_adds_images_for_vision_model():
+    ctx = RunContext(
+        runId=840,
+        sessionId=1,
+        userId=1,
+        message="生成 @图片2 女性 cos @图片1",
+        modelConfig=AgentModelConfig(provider="openai_compatible", modelName="qwen-vl-max", capabilities=["TEXT_GENERATION", "VISION_INPUT"]),
+        referenceMentions=[
+            ReferenceMention(token="@图片1", refLabel="@图片1-角色", url="/generated/uploads/role.png", kind="image"),
+            ReferenceMention(token="@图片2", refLabel="@图片2-风格", url="/generated/uploads/style.png", kind="image"),
+        ],
+    )
+
+    content = build_user_message_content(ctx)
+
+    assert isinstance(content, list)
+    assert content[0]["type"] == "text"
+    assert content[1]["image_url"]["url"].endswith("/generated/uploads/role.png")
+    assert content[2]["image_url"]["url"].endswith("/generated/uploads/style.png")
+
+
+def test_build_user_message_content_keeps_text_for_non_vision_model():
+    ctx = RunContext(
+        runId=840,
+        sessionId=1,
+        userId=1,
+        message="生成 @图片2 女性 cos @图片1",
+        modelConfig=AgentModelConfig(provider="deepseek", modelName="deepseek-chat", capabilities=["TEXT_GENERATION"]),
+        referenceMentions=[
+            ReferenceMention(token="@图片1", refLabel="@图片1-角色", url="/generated/uploads/role.png", kind="image"),
+        ],
+    )
+
+    content = build_user_message_content(ctx)
+
+    assert isinstance(content, str)
+    assert "@图片1-角色" in content
 
 
 def test_build_reference_plan_falls_back_to_message_tokens_and_agent_files():

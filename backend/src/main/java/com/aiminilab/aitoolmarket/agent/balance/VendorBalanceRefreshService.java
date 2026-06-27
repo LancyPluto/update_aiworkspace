@@ -85,9 +85,6 @@ public class VendorBalanceRefreshService {
                     status,
                     result.errorMessage()
             );
-            if ("UNKNOWN".equals(status)) {
-                account.setBalanceAmount(null);
-            }
             return;
         }
         account.setBalanceAmount(result.balanceAmount());

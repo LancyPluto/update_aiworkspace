@@ -17,6 +17,8 @@ import com.aiminilab.aitoolmarket.agent.service.ModelProviderMetadataService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.ModelConfigCredentialResolver;
 import com.aiminilab.aitoolmarket.agent.support.ModelRoutePreviewResolver;
+import com.aiminilab.aitoolmarket.agent.support.OpenAiCompatibleEndpointSupport;
+import com.aiminilab.aitoolmarket.agent.support.OpenAiCompatibleEndpointSupport.NormalizedEndpoint;
 import com.aiminilab.aitoolmarket.agent.support.OutboundProxyPolicyResolver;
 import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
 import com.aiminilab.aitoolmarket.agent.support.VolcengineEndpointSupport;
@@ -188,8 +190,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         String providerTrimmed = request.provider().trim();
         config.setProvider(providerTrimmed);
         config.setModelName(request.modelName().trim());
-        config.setBaseUrl(blankToNull(request.baseUrl()));
-        config.setExtraAuthJson(mergeExtraAuthJson(request, existing));
+        NormalizedEndpoint normalizedEndpoint = OpenAiCompatibleEndpointSupport.normalize(request.baseUrl());
+        config.setBaseUrl(blankToNull(normalizedEndpoint.baseUrl()));
+        config.setExtraAuthJson(mergeEndpointPath(mergeExtraAuthJson(request, existing), normalizedEndpoint.endpointPath()));
         config.setExecutionTask(resolveExecutionTask(request, existing));
         config.setExecutionOptionsJson(resolveExecutionOptionsJson(request, existing));
         if (request.vendorAccountId() != null) {
@@ -991,8 +994,11 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     }
 
     private AgentModelConfigRequest normalizeProviderBaseUrl(AgentModelConfigRequest request) {
-        String normalizedBaseUrl = VolcengineEndpointSupport.normalizeProviderBaseUrl(request.provider(), request.baseUrl());
-        if (sameText(normalizedBaseUrl, request.baseUrl())) {
+        NormalizedEndpoint normalizedEndpoint = OpenAiCompatibleEndpointSupport.normalize(request.baseUrl());
+        String normalizedBaseUrl = VolcengineEndpointSupport.normalizeProviderBaseUrl(request.provider(), normalizedEndpoint.baseUrl());
+        String normalizedExtraAuthJson = mergeEndpointPath(request.extraAuthJson(), normalizedEndpoint.endpointPath());
+        if (sameText(normalizedBaseUrl, request.baseUrl())
+                && sameText(normalizedExtraAuthJson, request.extraAuthJson())) {
             return request;
         }
         return new AgentModelConfigRequest(
@@ -1004,7 +1010,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 normalizedBaseUrl,
                 request.apiKey(),
                 request.clearApiKey(),
-                request.extraAuthJson(),
+                normalizedExtraAuthJson,
                 request.executionTask(),
                 request.executionOptionsJson(),
                 request.minimaxGroupId(),
@@ -1056,7 +1062,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     private String mergeExtraAuthJson(AgentModelConfigRequest request, AgentModelConfig existing) {
         ObjectNode node = objectMapper.createObjectNode();
         boolean boundVendorAccount = request.vendorAccountId() != null;
-        if (!boundVendorAccount && existing != null && existing.getExtraAuthJson() != null && !existing.getExtraAuthJson().isBlank()) {
+        if (existing != null && existing.getExtraAuthJson() != null && !existing.getExtraAuthJson().isBlank()) {
             mergeObject(node, existing.getExtraAuthJson());
         }
         if (!boundVendorAccount && request.extraAuthJson() != null && !request.extraAuthJson().isBlank()) {
@@ -1075,6 +1081,18 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             node.put("proxyUrl", request.proxyUrl().trim());
         }
         return node.isEmpty() ? null : node.toString();
+    }
+
+    private String mergeEndpointPath(String extraAuthJson, String endpointPath) {
+        if (endpointPath == null || endpointPath.isBlank()) {
+            return extraAuthJson;
+        }
+        ObjectNode node = objectMapper.createObjectNode();
+        if (extraAuthJson != null && !extraAuthJson.isBlank()) {
+            mergeObject(node, extraAuthJson);
+        }
+        node.put("endpointPath", endpointPath.trim());
+        return node.toString();
     }
 
     private String normalizeProxyMode(String value) {

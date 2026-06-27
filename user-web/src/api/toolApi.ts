@@ -1,6 +1,7 @@
 import { apiRequest } from "./client"
 import type { AITool, Capability } from "./aiToolTypes"
 import type { PageResult, ToolCategory, ToolDetail, ToolSummary, UserUploadAsset } from "./types"
+import { compressImage } from "@/utils/imageCompressor"
 import {
   isMarketplaceMockToolId,
   isMockMode,
@@ -159,8 +160,9 @@ export async function uploadToolFile(
   file: File,
   options?: { token?: string | null },
 ): Promise<{ assetId?: number; fileId: string; url: string; name?: string; contentType?: string; size?: number }> {
+  const uploadFile = await compressImage(file, 512, 0.8)
   const formData = new FormData()
-  formData.append("file", file)
+  formData.append("file", uploadFile)
   return apiRequest<{ assetId?: number; fileId: string; url: string; name?: string; contentType?: string; size?: number }>("POST", "/api/v1/tool-upload", {
     token: options?.token,
     body: formData,

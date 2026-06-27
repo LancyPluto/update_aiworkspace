@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.agent.service;
 
 import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
+import com.aiminilab.aitoolmarket.agent.dto.ModelProviderResponse;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
@@ -31,6 +32,9 @@ class ModelCapabilityServiceTest {
     @Mock
     private ModelConfigCredentialResolver credentialResolver;
 
+    @Mock
+    private ModelProviderMetadataService providerMetadataService;
+
     private ModelCapabilityService modelCapabilityService;
 
     @BeforeEach
@@ -38,12 +42,14 @@ class ModelCapabilityServiceTest {
         ModelCapabilitiesCodec codec = new ModelCapabilitiesCodec(new ObjectMapper());
         modelCapabilityService = new ModelCapabilityService(
                 new ModelProviderRegistry(),
+                providerMetadataService,
                 codec,
                 agentModelConfigMapper,
                 credentialResolver
         );
         lenient().when(credentialResolver.resolveForExecution(org.mockito.ArgumentMatchers.any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(providerMetadataService.get("agnes_chat")).thenReturn(textProvider("agnes_chat"));
     }
 
     @Test
@@ -109,6 +115,16 @@ class ModelCapabilityServiceTest {
         assertThat(resolved).isEqualTo(bound);
     }
 
+    @Test
+    void normalizeCapabilities_allowsVisionInputAsAgentOnlyCapability() {
+        List<String> capabilities = modelCapabilityService.normalizeCapabilities(
+                "agnes_chat",
+                List.of("TEXT_GENERATION", "VISION_INPUT")
+        );
+
+        assertThat(capabilities).containsExactly("TEXT_GENERATION", "VISION_INPUT");
+    }
+
     private static AgentModelConfig config(Long id, String code, String capabilitiesJson, boolean isDefault) {
         AgentModelConfig config = new AgentModelConfig();
         config.setId(id);
@@ -118,5 +134,27 @@ class ModelCapabilityServiceTest {
         config.setDefault(isDefault);
         config.setEnabled(true);
         return config;
+    }
+
+    private static ModelProviderResponse textProvider(String code) {
+        return new ModelProviderResponse(
+                code,
+                code,
+                List.of("TEXT_GENERATION"),
+                "",
+                "",
+                "TOKEN_PER_M",
+                "openai_compatible",
+                "chat",
+                "",
+                "accept_only",
+                true,
+                true,
+                "",
+                "test",
+                null,
+                null,
+                ""
+        );
     }
 }

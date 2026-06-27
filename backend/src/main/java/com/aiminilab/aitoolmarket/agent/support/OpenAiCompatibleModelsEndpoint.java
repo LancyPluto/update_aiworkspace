@@ -16,7 +16,7 @@ public final class OpenAiCompatibleModelsEndpoint {
     }
 
     public static String resolve(String baseUrl) {
-        String normalized = baseUrl == null ? "" : baseUrl.trim();
+        String normalized = OpenAiCompatibleEndpointSupport.normalizedBaseUrl(baseUrl);
         while (normalized.endsWith("/")) {
             normalized = normalized.substring(0, normalized.length() - 1);
         }

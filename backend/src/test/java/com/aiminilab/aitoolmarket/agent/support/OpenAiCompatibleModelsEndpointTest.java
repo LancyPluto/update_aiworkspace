@@ -25,6 +25,30 @@ class OpenAiCompatibleModelsEndpointTest {
     }
 
     @Test
+    void resolvesApiPorterBareOrigin() {
+        assertThat(OpenAiCompatibleModelsEndpoint.resolve("https://www.apiporter.com"))
+                .isEqualTo("https://www.apiporter.com/v1/models");
+    }
+
+    @Test
+    void resolvesApiPorterVersionedBaseUrl() {
+        assertThat(OpenAiCompatibleModelsEndpoint.resolve("https://www.apiporter.com/v1"))
+                .isEqualTo("https://www.apiporter.com/v1/models");
+    }
+
+    @Test
+    void resolvesApiPorterChatEndpointToModelsEndpoint() {
+        assertThat(OpenAiCompatibleModelsEndpoint.resolve("https://www.apiporter.com/v1/chat/completions"))
+                .isEqualTo("https://www.apiporter.com/v1/models");
+    }
+
+    @Test
+    void resolvesApiPorterImagesEndpointToModelsEndpoint() {
+        assertThat(OpenAiCompatibleModelsEndpoint.resolve("https://www.apiporter.com/v1/images/generations"))
+                .isEqualTo("https://www.apiporter.com/v1/models");
+    }
+
+    @Test
     void appendsV1ModelsForBareOrigin() {
         assertThat(OpenAiCompatibleModelsEndpoint.resolve("https://api.openai.com"))
                 .isEqualTo("https://api.openai.com/v1/models");

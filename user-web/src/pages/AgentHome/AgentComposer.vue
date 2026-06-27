@@ -560,8 +560,19 @@ function modelVendorMeta(model: AgentModelConfig) {
   return resolveAgentModelVendor(model)
 }
 
+function agentCapabilityLabel(capability: string) {
+  const normalized = capability.trim().toUpperCase()
+  const labels: Record<string, string> = {
+    TEXT_GENERATION: "文本生成",
+    IMAGE_GENERATION: "文生图",
+    VIDEO_GENERATION: "视频生成",
+    VISION_INPUT: "图片视觉",
+  }
+  return labels[normalized] || capability
+}
+
 function modelMeta(model: AgentModelConfig) {
-  const capabilities = model.capabilities?.filter(Boolean).slice(0, 2).join(" · ")
+  const capabilities = model.capabilities?.filter(Boolean).slice(0, 2).map(agentCapabilityLabel).join(" · ")
   const vendorLabel = modelVendorMeta(model).label
   return capabilities || model.modelName || vendorLabel || model.configCode || model.provider
 }

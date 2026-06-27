@@ -9,6 +9,7 @@ import type {
   FileUploadResult,
 } from "./aiToolTypes"
 import type { PageResult, ToolDetail, ToolFrontendStyle, ToolSummary } from "./types"
+import { compressImage } from "@/utils/imageCompressor"
 import {
   isMarketplaceMockToolId,
   isMockMode,
@@ -268,16 +269,17 @@ export async function uploadChatFile(
   file: File,
   options?: { token?: string | null; toolId?: string | null },
 ): Promise<FileUploadResult> {
+  const uploadFile = await compressImage(file, 512, 0.8)
   return withToolMockFallback(
     options?.toolId || undefined,
     () => {
       const formData = new FormData()
-      formData.append("file", file)
+      formData.append("file", uploadFile)
       return apiRequest<FileUploadResult>("POST", "/api/v1/upload", {
         token: options?.token,
         body: formData,
       })
     },
-    () => mockUploadChatFile(file),
+    () => mockUploadChatFile(uploadFile),
   )
 }

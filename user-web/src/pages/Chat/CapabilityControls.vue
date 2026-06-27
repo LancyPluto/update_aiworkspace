@@ -710,6 +710,50 @@ function rememberUploadHistoryItem(field: ToolField, item: UploadHistoryItem) {
   uploadHistoryList.rememberItem({ ...item, kind: materialKindForField(field) })
 }
 
+function extensionFromContentType(contentType: string): string {
+  if (contentType.includes("webp")) return "webp"
+  if (contentType.includes("png")) return "png"
+  if (contentType.includes("jpeg") || contentType.includes("jpg")) return "jpg"
+  if (contentType.includes("gif")) return "gif"
+  return "jpg"
+}
+
+function materialFileName(asset: MaterialAsset, contentType: string): string {
+  const fromUrl = asset.url.split(/[?#]/)[0]?.split("/").pop()
+  const baseName = (fromUrl || asset.title || asset.id || "material").replace(/[\\/:*?"<>|]+/g, "_")
+  if (/\.[a-z0-9]+$/i.test(baseName)) return baseName
+  return `${baseName}.${extensionFromContentType(contentType)}`
+}
+
+async function materialAssetToFile(asset: MaterialAsset): Promise<File> {
+  const response = await fetch(normalizeMediaUrl(asset.url))
+  if (!response.ok) throw new Error("素材下载失败")
+  const blob = await response.blob()
+  const contentType = blob.type || "image/jpeg"
+  if (!contentType.startsWith("image/")) throw new Error("素材不是图片")
+  return new File([blob], materialFileName(asset, contentType), {
+    type: contentType,
+    lastModified: Date.now(),
+  })
+}
+
+async function uploadMaterialAssetImage(field: ToolField, asset: MaterialAsset, startedAt: string) {
+  const file = await materialAssetToFile(asset)
+  const result = await uploadToolFile(file, { token: auth.token })
+  rememberUploadHistoryItem(field, {
+    id: result.fileId || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    assetId: result.assetId,
+    kind: "image",
+    url: result.url,
+    name: result.name || file.name,
+    size: result.size ?? file.size,
+    type: result.contentType || file.type,
+    uploadedAt: startedAt,
+    toolId: props.toolId,
+  })
+  return result.url
+}
+
 function openUploadHistoryPicker(field: ToolField) {
   uploadHistoryField.value = field
   pickerSelectedUrls.value = isMultiImageField(field) ? multiImageValues(field) : []
@@ -856,14 +900,27 @@ function closeMaterialPicker() {
   pickerSelectedUrls.value = []
 }
 
-function selectMaterialAsset(asset: MaterialAsset) {
+async function selectMaterialAsset(asset: MaterialAsset) {
   const field = materialPickerField.value
   if (!field) return
   if (isMultiImageField(field)) {
     togglePickerUrl(asset.url)
     return
   }
-  setField(field.fieldKey, asset.url)
+  const startedAt = new Date().toISOString()
+  fieldUploads.value = {
+    ...fieldUploads.value,
+    [field.fieldKey]: { uploading: true, fileName: asset.title },
+  }
+  let selectedUrl = asset.url
+  if (asset.kind === "image") {
+    try {
+      selectedUrl = await uploadMaterialAssetImage(field, asset, startedAt)
+    } catch {
+      selectedUrl = asset.url
+    }
+  }
+  setField(field.fieldKey, selectedUrl)
   fieldUploads.value = {
     ...fieldUploads.value,
     [field.fieldKey]: { uploading: false, fileName: asset.title },
@@ -872,13 +929,46 @@ function selectMaterialAsset(asset: MaterialAsset) {
   else closeMaterialPicker()
 }
 
-function confirmPickerSelection() {
+function materialAssetByUrl(url: string): MaterialAsset | undefined {
+  return materialAssets.value.find((asset) => asset.url === url)
+}
+
+function isMaterialSelectionContext(): boolean {
+  return materialPickerOpen.value || (referencePickerOpen.value && referencePickerTab.value === "material")
+}
+
+async function resolveMaterialSelectionUrls(field: ToolField, urls: string[]): Promise<string[]> {
+  if (!isMaterialSelectionContext()) return urls
+  const startedAt = new Date().toISOString()
+  const resolved: string[] = []
+  for (const url of urls) {
+    const asset = materialAssetByUrl(url)
+    if (!asset || asset.kind !== "image") {
+      resolved.push(url)
+      continue
+    }
+    try {
+      resolved.push(await uploadMaterialAssetImage(field, asset, startedAt))
+    } catch {
+      resolved.push(url)
+    }
+  }
+  return resolved
+}
+
+async function confirmPickerSelection() {
   const field = referencePickerOpen.value ? (materialPickerField.value || uploadHistoryField.value) : uploadHistoryOpen.value ? uploadHistoryField.value : materialPickerField.value
   if (!field || !isMultiImageField(field)) return
-  setMultiImageValues(field, pickerSelectedUrls.value)
+  const selectedCount = pickerSelectedUrls.value.length
   fieldUploads.value = {
     ...fieldUploads.value,
-    [field.fieldKey]: { uploading: false, fileName: `${pickerSelectedUrls.value.length} 张参考图` },
+    [field.fieldKey]: { uploading: true, fileName: `${selectedCount} 张参考图` },
+  }
+  const selectedUrls = await resolveMaterialSelectionUrls(field, pickerSelectedUrls.value)
+  setMultiImageValues(field, selectedUrls)
+  fieldUploads.value = {
+    ...fieldUploads.value,
+    [field.fieldKey]: { uploading: false, fileName: `${selectedUrls.length} 张参考图` },
   }
   if (uploadHistoryOpen.value) closeUploadHistoryPicker()
   if (materialPickerOpen.value) closeMaterialPicker()

@@ -31,6 +31,15 @@ public interface ModelVendorAccountMapper extends BaseMapper<ModelVendorAccount>
     @Select("""
             SELECT *
             FROM model_vendor_accounts
+            WHERE id = #{id}
+              AND COALESCE(is_deleted, 0) = 0
+            FOR UPDATE
+            """)
+    ModelVendorAccount findActiveByIdForUpdate(@Param("id") Long id);
+
+    @Select("""
+            SELECT *
+            FROM model_vendor_accounts
             WHERE vendor_code = #{vendorCode}
               AND COALESCE(is_deleted, 0) = 0
             ORDER BY id ASC

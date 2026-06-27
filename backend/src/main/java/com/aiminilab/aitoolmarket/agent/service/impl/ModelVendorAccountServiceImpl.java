@@ -17,6 +17,8 @@ import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
+import com.aiminilab.aitoolmarket.agent.support.OpenAiCompatibleEndpointSupport;
+import com.aiminilab.aitoolmarket.agent.support.OpenAiCompatibleEndpointSupport.NormalizedEndpoint;
 import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
 import com.aiminilab.aitoolmarket.agent.support.VolcengineEndpointSupport;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
@@ -55,6 +57,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
             "siliconflow", List.of("siliconflow_images", "siliconflow_speech", "openai_compatible"),
             "volcengine", List.of("volcengine_images", "seedance", "openai_compatible"),
             "kling", List.of("kling_video", "openai_compatible"),
+            "qwen", List.of("qwen", "openai_compatible"),
             "dashscope", List.of("bailian_happyhorse", "openai_compatible")
     );
 
@@ -274,14 +277,15 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         int skipped = 0;
         List<DiscoveredModelConfigResponse> models = new ArrayList<>();
         for (String modelName : modelNames) {
-            String capability = inferCapability(modelName);
-            String provider = providerForCapability(account, modelName, capability);
+            List<String> capabilities = inferCapabilities(account, modelName);
+            String primaryCapability = capabilities.get(0);
+            String provider = providerForCapability(account, modelName, primaryCapability);
             if (provider == null) {
                 skipped++;
                 continue;
             }
             AgentModelConfig existing = agentModelConfigMapper.findActiveByVendorAccountAndModelName(account.getId(), modelName);
-            AgentModelConfig saved = upsertDiscoveredModel(account, existing, modelName, provider, capability);
+            AgentModelConfig saved = upsertDiscoveredModel(account, existing, modelName, provider, capabilities);
             if (existing == null) {
                 imported++;
             } else {
@@ -367,7 +371,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                                                    AgentModelConfig existing,
                                                    String modelName,
                                                    String provider,
-                                                   String capability) {
+                                                   List<String> capabilities) {
         LocalDateTime now = LocalDateTime.now();
         AgentModelConfig config = existing == null ? new AgentModelConfig() : existing;
         config.setVendorAccountId(account.getId());
@@ -401,7 +405,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         config.setOutputTokenPricePer1k(config.getOutputTokenPricePer1m().divide(BigDecimal.valueOf(1000)));
         config.setBillingUnit(providerRegistry.defaultBillingUnit(provider));
         config.setUnitPrice(config.getUnitPrice() == null ? BigDecimal.ZERO : config.getUnitPrice());
-        config.setCapabilities(capabilitiesCodec.serialize(List.of(capability)));
+        config.setCapabilities(capabilitiesCodec.serialize(capabilities));
         config.setEnabled(config.getEnabled() == null || config.getEnabled());
         config.setAgentEnabled(config.getAgentEnabled() == null || config.getAgentEnabled());
         config.setDefault(Boolean.TRUE.equals(config.getDefault()));
@@ -444,6 +448,17 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         return "TEXT_GENERATION";
     }
 
+    private List<String> inferCapabilities(ModelVendorAccount account, String modelName) {
+        String primaryCapability = inferCapability(modelName);
+        if (!"TEXT_GENERATION".equals(primaryCapability)) {
+            return List.of(primaryCapability);
+        }
+        if (isQwenVisionModelOrAccount(account, modelName)) {
+            return List.of("TEXT_GENERATION", "VISION_INPUT");
+        }
+        return List.of(primaryCapability);
+    }
+
     private String providerForCapability(ModelVendorAccount account, String modelName, String capability) {
         if (isAgnesModelOrAccount(account, modelName)) {
             return switch (capability) {
@@ -458,6 +473,9 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 case "VIDEO_GENERATION" -> "seedance";
                 default -> "openai_compatible";
             };
+        }
+        if ("TEXT_GENERATION".equals(capability) && isQwenModelOrAccount(account, modelName)) {
+            return "qwen";
         }
         return switch (capability) {
             case "IMAGE_GENERATION" -> "openai_images_gateway";
@@ -496,6 +514,35 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 || model.contains("seedance");
     }
 
+    private boolean isQwenModelOrAccount(ModelVendorAccount account, String modelName) {
+        String vendorCode = account == null || account.getVendorCode() == null
+                ? ""
+                : account.getVendorCode().trim().toLowerCase(Locale.ROOT);
+        String baseUrl = account == null || account.getBaseUrl() == null
+                ? ""
+                : account.getBaseUrl().trim().toLowerCase(Locale.ROOT);
+        String model = modelName == null ? "" : modelName.trim().toLowerCase(Locale.ROOT);
+        return "qwen".equals(vendorCode)
+                || "dashscope".equals(vendorCode)
+                || baseUrl.contains("dashscope.aliyuncs.com")
+                || baseUrl.contains("maas.aliyuncs.com")
+                || model.startsWith("qwen")
+                || model.startsWith("qwq")
+                || model.startsWith("qvq");
+    }
+
+    private boolean isQwenVisionModelOrAccount(ModelVendorAccount account, String modelName) {
+        String model = modelName == null ? "" : modelName.trim().toLowerCase(Locale.ROOT);
+        return isQwenModelOrAccount(account, modelName)
+                && (model.contains("qwen3.6-plus")
+                || model.contains("qwen-vl")
+                || model.contains("qwen2-vl")
+                || model.contains("qwen2.5-vl")
+                || model.contains("qwen3-vl")
+                || model.contains("qvq")
+                || model.contains("omni"));
+    }
+
     private String defaultExtraAuthJson(String provider, String modelName) {
         if ("volcengine_images".equals(provider)) {
             return """
@@ -532,6 +579,9 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 return "https://agnes-ai.com/doc/agnes-15-flash";
             }
             return "https://agnes-ai.com/doc/agnes-20-flash";
+        }
+        if ("qwen".equals(provider)) {
+            return "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope";
         }
         return null;
     }
@@ -669,8 +719,11 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     }
 
     private AgentModelConfigRequest normalizeProviderBaseUrl(AgentModelConfigRequest request) {
-        String normalizedBaseUrl = VolcengineEndpointSupport.normalizeProviderBaseUrl(request.provider(), request.baseUrl());
-        if (sameText(normalizedBaseUrl, request.baseUrl())) {
+        NormalizedEndpoint normalizedEndpoint = OpenAiCompatibleEndpointSupport.normalize(request.baseUrl());
+        String normalizedBaseUrl = VolcengineEndpointSupport.normalizeProviderBaseUrl(request.provider(), normalizedEndpoint.baseUrl());
+        String normalizedExtraAuthJson = mergeEndpointPath(request.extraAuthJson(), normalizedEndpoint.endpointPath());
+        if (sameText(normalizedBaseUrl, request.baseUrl())
+                && sameText(normalizedExtraAuthJson, request.extraAuthJson())) {
             return request;
         }
         return new AgentModelConfigRequest(
@@ -682,7 +735,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 normalizedBaseUrl,
                 request.apiKey(),
                 request.clearApiKey(),
-                request.extraAuthJson(),
+                normalizedExtraAuthJson,
                 request.executionTask(),
                 request.executionOptionsJson(),
                 request.minimaxGroupId(),
@@ -746,7 +799,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
             baseUrl = provider.defaultBaseUrl();
         }
         baseUrl = VolcengineEndpointSupport.normalizeProviderBaseUrl(providerCode, baseUrl);
-        MediaGatewayProbeResult probe = probeMediaGateway(baseUrl, account.getApiKey());
+        MediaGatewayProbeResult probe = probeMediaGateway(baseUrl, apiKey);
         long latencyMs = Math.max(0L, System.currentTimeMillis() - startedAt);
         boolean success = probe.success();
         String message = probe.message();
@@ -888,7 +941,8 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                                             LocalDateTime now) {
         account.setVendorCode(request.vendorCode().trim().toLowerCase(Locale.ROOT));
         account.setAccountName(request.accountName().trim());
-        account.setBaseUrl(blankToNull(request.baseUrl()));
+        NormalizedEndpoint normalizedEndpoint = OpenAiCompatibleEndpointSupport.normalize(request.baseUrl());
+        account.setBaseUrl(blankToNull(normalizedEndpoint.baseUrl()));
         if (request.apiKey() != null && !request.apiKey().isBlank()) {
             account.setApiKey(request.apiKey().trim());
         } else if (Boolean.TRUE.equals(request.clearApiKey())) {
@@ -896,7 +950,14 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         } else if (existing != null) {
             account.setApiKey(existing.getApiKey());
         }
-        String mergedExtraAuthJson = mergeProxyFields(request.extraAuthJson(), request.proxyMode(), request.proxyUrl());
+        String baseExtraAuthJson = request.extraAuthJson();
+        if ((baseExtraAuthJson == null || baseExtraAuthJson.isBlank())
+                && existing != null
+                && !Boolean.TRUE.equals(request.clearExtraAuthJson())) {
+            baseExtraAuthJson = existing.getExtraAuthJson();
+        }
+        String requestExtraAuthJson = mergeEndpointPath(baseExtraAuthJson, normalizedEndpoint.endpointPath());
+        String mergedExtraAuthJson = mergeProxyFields(requestExtraAuthJson, request.proxyMode(), request.proxyUrl());
         if (mergedExtraAuthJson != null && !mergedExtraAuthJson.isBlank()) {
             account.setExtraAuthJson(mergedExtraAuthJson);
         } else if (Boolean.TRUE.equals(request.clearExtraAuthJson())) {
@@ -941,6 +1002,9 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     }
 
     private String resolveBalanceQueryMode(ModelVendorAccountRequest request, ModelVendorAccount existing) {
+        if (request.balanceAmount() != null && isOpenAiLikeVendor(request.vendorCode())) {
+            return "MANUAL";
+        }
         if (request.balanceQueryMode() != null && !request.balanceQueryMode().isBlank()) {
             return normalizeMode(request.balanceQueryMode());
         }
@@ -952,6 +1016,14 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
             return "REST_API";
         }
         return "MANUAL";
+    }
+
+    private boolean isOpenAiLikeVendor(String vendorCode) {
+        if (vendorCode == null) {
+            return false;
+        }
+        String vendor = vendorCode.trim().toLowerCase(Locale.ROOT);
+        return "openai".equals(vendor) || "openai_gateway".equals(vendor);
     }
 
     private void validate(ModelVendorAccountRequest request, ModelVendorAccount existing) {
@@ -1096,6 +1168,26 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 node.put("proxyUrl", proxyUrl.trim());
             }
             return node.isEmpty() ? null : objectMapper.writeValueAsString(node);
+        } catch (JsonProcessingException exception) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "extraAuthJson must be valid JSON");
+        }
+    }
+
+    private String mergeEndpointPath(String extraAuthJson, String endpointPath) {
+        if (endpointPath == null || endpointPath.isBlank()) {
+            return extraAuthJson == null || extraAuthJson.isBlank() ? null : extraAuthJson.trim();
+        }
+        try {
+            com.fasterxml.jackson.databind.node.ObjectNode node = objectMapper.createObjectNode();
+            if (extraAuthJson != null && !extraAuthJson.isBlank()) {
+                JsonNode parsed = objectMapper.readTree(extraAuthJson);
+                if (!parsed.isObject()) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR, "extraAuthJson must be valid JSON object");
+                }
+                node.setAll((com.fasterxml.jackson.databind.node.ObjectNode) parsed);
+            }
+            node.put("endpointPath", endpointPath.trim());
+            return objectMapper.writeValueAsString(node);
         } catch (JsonProcessingException exception) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "extraAuthJson must be valid JSON");
         }

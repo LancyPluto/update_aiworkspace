@@ -12,7 +12,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
+
 import static com.aiminilab.aitoolmarket.testsupport.InternalApiTestSupport.signed;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.blankOrNullString;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -357,6 +360,8 @@ class WorkerInternalApiTest {
     void perCallModelUsageRecordsBillableUnitsAndCost() throws Exception {
         String adminToken = login("/api/admin/v1/auth/login", "admin");
         Long modelConfigId = createImageModelConfig(adminToken);
+        Long accountId = createManualVendorAccount("manual_image_account", "https://api.siliconflow.cn", "fake-key", new BigDecimal("10.0000"));
+        jdbcTemplate.update("UPDATE agent_model_configs SET vendor_account_id = ?, api_key = '' WHERE id = ?", accountId, modelConfigId);
         Long toolId = createTool(adminToken, "worker_per_call_image_tool", 5, "IMAGE_GENERATION", modelConfigId);
         publishTool(adminToken, toolId);
         String userToken = login("/api/v1/auth/login", "user1");
@@ -400,6 +405,19 @@ class WorkerInternalApiTest {
                 .andExpect(jsonPath("$.data.list[0].unitPrice").value(0.03))
                 .andExpect(jsonPath("$.data.list[0].costAmount").value(0.06))
                 .andExpect(jsonPath("$.data.list[0].chargedCredits").value(8));
+
+        BigDecimal balance = jdbcTemplate.queryForObject(
+                "SELECT balance_amount FROM model_vendor_accounts WHERE id = ?",
+                BigDecimal.class,
+                accountId
+        );
+        Integer adjustmentCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM vendor_balance_adjustments WHERE vendor_account_id = ?",
+                Integer.class,
+                accountId
+        );
+        assertThat(balance).isEqualByComparingTo("9.940000");
+        assertThat(adjustmentCount).isEqualTo(1);
     }
 
     @Test
@@ -627,6 +645,25 @@ class WorkerInternalApiTest {
                 .getResponse()
                 .getContentAsString();
         return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+
+    private Long createManualVendorAccount(String accountName, String baseUrl, String apiKey, BigDecimal balance) {
+        jdbcTemplate.update("""
+                        INSERT INTO model_vendor_accounts(vendor_code, account_name, base_url, api_key,
+                                                          balance_query_mode, balance_amount, balance_currency,
+                                                          balance_status, health_status, enabled, is_deleted,
+                                                          created_at, updated_at)
+                        VALUES('siliconflow', ?, ?, ?, 'MANUAL', ?, 'CNY', 'OK', 'OK', 1, 0, NOW(), NOW())
+                        """,
+                accountName,
+                baseUrl,
+                apiKey,
+                balance);
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM model_vendor_accounts WHERE account_name = ?",
+                Long.class,
+                accountName
+        );
     }
 
     private Long createMinimalImageTool(String adminToken, String toolCode, Long modelConfigId) throws Exception {

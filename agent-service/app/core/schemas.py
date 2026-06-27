@@ -1,13 +1,12 @@
-from typing import Any
-
 import json
+from typing import Any
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: str | list[dict[str, Any]]
     name: str | None = None
     toolCallId: str | None = Field(default=None, validation_alias=AliasChoices("toolCallId", "tool_call_id"))
     toolCalls: list[dict[str, Any]] | None = Field(default=None, validation_alias=AliasChoices("toolCalls", "tool_calls"))
@@ -131,6 +130,7 @@ class AgentModelConfig(BaseModel):
     enabled: bool = True
     # Backend may send null for agentEnabled; accept it for compatibility.
     agentEnabled: bool | None = True
+    capabilities: list[str] | None = None
 
 
 class ContextWindow(BaseModel):

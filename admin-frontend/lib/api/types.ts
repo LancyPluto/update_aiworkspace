@@ -353,6 +353,7 @@ export interface AgentModelConfig {
   provider: string
   modelName: string
   baseUrl?: string | null
+  endpointPath?: string | null
   apiKeyMasked?: string | null
   extraAuthJsonMasked?: string | null
   executionTask?: string | null
@@ -466,6 +467,7 @@ export interface ModelVendorAccount {
   vendorLabel: string
   accountName: string
   baseUrl?: string | null
+  endpointPath?: string | null
   apiKey?: string | null
   apiKeyMasked?: string | null
   extraAuthJson?: string | null
@@ -563,6 +565,7 @@ export interface UnifiedApiModelItem {
   provider: string
   modelName: string
   baseUrl?: string | null
+  endpointPath?: string | null
   minimaxGroupId?: string | null
   consoleUrl?: string | null
   balanceUrl?: string | null
@@ -845,6 +848,8 @@ export interface BillingDailyCostPoint {
 }
 
 export interface BillingOverview {
+  rangeStartDate?: string | null
+  rangeEndDate?: string | null
   todayPromptTokens: number
   todayCompletionTokens: number
   todayTotalTokens: number

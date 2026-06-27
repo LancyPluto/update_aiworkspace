@@ -71,8 +71,28 @@ public class ModelVendorAccountMigrationServiceImpl implements ModelVendorAccoun
             }
         }
         upgradeBalanceQueryModes();
+        downgradeOpenAiRestBalanceModes();
         downgradeUnsupportedRestBalanceModes();
         consolidateDuplicateAccounts();
+    }
+
+    private void downgradeOpenAiRestBalanceModes() {
+        for (ModelVendorAccount account : vendorAccountMapper.findAllActive()) {
+            String mode = account.getBalanceQueryMode() == null ? "" : account.getBalanceQueryMode().trim().toUpperCase(Locale.ROOT);
+            if (!"REST_API".equals(mode) && !"INFERRED".equals(mode)) {
+                continue;
+            }
+            String vendor = account.getVendorCode() == null ? "" : account.getVendorCode().trim().toLowerCase(Locale.ROOT);
+            if (!"openai".equals(vendor) && !"openai_gateway".equals(vendor)) {
+                continue;
+            }
+            account.setBalanceQueryMode("MANUAL");
+            account.setBalanceErrorMessage(null);
+            account.setBalanceStatus(balanceStatus(account));
+            account.setUpdatedAt(LocalDateTime.now());
+            vendorAccountMapper.updateAccount(account);
+            log.info("Adjusted OpenAI-compatible vendor account id={} balance_query_mode MANUAL", account.getId());
+        }
     }
 
     /**
@@ -281,10 +301,21 @@ public class ModelVendorAccountMigrationServiceImpl implements ModelVendorAccoun
 
     private static String defaultBalanceMode(String vendorCode) {
         return switch (vendorCode) {
-            case "deepseek", "siliconflow", "openai", "openai_gateway" -> "REST_API";
+            case "deepseek", "siliconflow" -> "REST_API";
             case "volcengine", "kling", "minimax" -> "NONE";
             default -> "MANUAL";
         };
+    }
+
+    private static String balanceStatus(ModelVendorAccount account) {
+        if (account.getBalanceAmount() == null) {
+            return "UNKNOWN";
+        }
+        if (account.getBalanceLowThreshold() != null
+                && account.getBalanceAmount().compareTo(account.getBalanceLowThreshold()) < 0) {
+            return "LOW";
+        }
+        return "OK";
     }
 
     private static ModelVendorAccount newAccountFromConfig(AgentModelConfig config, String vendorCode, LocalDateTime now) {
