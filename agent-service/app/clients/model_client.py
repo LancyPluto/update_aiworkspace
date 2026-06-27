@@ -171,6 +171,10 @@ class ModelClient:
         base_url = self.settings.model_api_base_url.strip().lower()
         if provider == "openai_compatible" and "api-inference.modelscope.cn" in base_url:
             return True
+        if provider in {"deepseek", "deepseek_compatible", "qwen", "qwen_compatible", "dashscope", "bailian"}:
+            return True
+        if provider == "minimax" and "chatcompletion_v2" not in base_url:
+            return True
         if self._uses_injected_chat_model:
             return False
         return self._should_use_direct_openai_stream()
