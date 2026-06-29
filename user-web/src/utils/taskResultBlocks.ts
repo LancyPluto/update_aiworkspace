@@ -57,12 +57,14 @@ export function buildTaskResultBlocks(content: string, detail?: TaskDetail): Res
   if (outputModality === "VIDEO" || finalVideoUrl) {
     const videoUrl = finalVideoUrl || collectUrls(parsed ?? content)[0]
     if (videoUrl) {
+      const dlUrl = extractDownloadUrlFor(parsed, videoUrl)
       return [
         {
           type: "video",
           title: "生成视频",
           url: normalizeMediaUrl(videoUrl),
           downloadName: `${detail?.taskNo ?? "video"}-final.mp4`,
+          ...(dlUrl ? { downloadUrl: dlUrl } : {}),
         },
       ]
     }
@@ -70,10 +72,12 @@ export function buildTaskResultBlocks(content: string, detail?: TaskDetail): Res
 
   if (outputModality === "IMAGE") {
     const requestedImageCount = resolveRequestedImageCount(detail?.params)
-    const imageUrls = limitUrls(collectImageUrls(parsed ?? content), requestedImageCount)
-    const images = imageUrls.map((url, index) => ({
+    const imageItems = limitUrls(collectImageUrls(parsed ?? content), requestedImageCount)
+    const downloadUrls = collectImageDownloadUrls(parsed)
+    const images = imageItems.map((url, index) => ({
       url: normalizeMediaUrl(url),
       label: `图片 ${index + 1}`,
+      ...(downloadUrls[index] ? { downloadUrl: downloadUrls[index] } : {}),
     }))
     if (images.length > 0) {
       return [{ type: "image", title: "生成图片", images }]
@@ -295,6 +299,35 @@ function extractUrlsFromText(value: string): string[] {
   }
   const matches = trimmed.match(/(?:https?:\/\/|\/)[^\s"'<>]+/g)
   return matches ?? []
+}
+
+function collectImageDownloadUrls(parsed: unknown): string[] {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return []
+  const root = parsed as Record<string, unknown>
+  const images = Array.isArray(root.images) ? root.images : []
+  return images.map((item) => {
+    if (item && typeof item === "object") {
+      const record = item as Record<string, unknown>
+      return typeof record.downloadUrl === "string" ? record.downloadUrl : ""
+    }
+    return ""
+  })
+}
+
+function extractDownloadUrlFor(parsed: unknown, _displayUrl: string): string | undefined {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined
+  const root = parsed as Record<string, unknown>
+  if (typeof root.downloadUrl === "string") return root.downloadUrl
+  const videos = Array.isArray(root.videos) ? root.videos : undefined
+  if (videos) {
+    for (const item of videos) {
+      if (item && typeof item === "object") {
+        const record = item as Record<string, unknown>
+        if (typeof record.downloadUrl === "string") return record.downloadUrl
+      }
+    }
+  }
+  return undefined
 }
 
 function extractFinalVideoUrl(content: string): string {

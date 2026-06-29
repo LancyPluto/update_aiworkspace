@@ -155,7 +155,11 @@ public class CommunityServiceImpl implements CommunityService {
             if (!post.getUserId().equals(userId)) {
                 throw new BusinessException(ErrorCode.FORBIDDEN, "Post owner mismatch");
             }
-            migratePostAssets(post, true);
+            try {
+                migratePostAssets(post, true);
+            } catch (Exception e) {
+                log.warn("Failed to migrate post assets during re-publish (postId={}): {}", post.getId(), e.getMessage());
+            }
             postMapper.updateOwnerStatus(post.getId(), userId, "PUBLISHED");
             postMapper.updateOwnerMetadata(
                     post.getId(),
@@ -179,7 +183,11 @@ public class CommunityServiceImpl implements CommunityService {
                 ? Boolean.TRUE.equals(request.promptVisible())
                 : Boolean.TRUE.equals(user.getPromptPublicByDefault());
         CommunityPost post = createPost(task, null, null, title, request.description(), promptVisible, "PUBLISHED");
-        migratePostAssets(post, true);
+        try {
+            migratePostAssets(post, true);
+        } catch (Exception e) {
+            log.warn("Failed to migrate post assets during publish (postId={}): {}", post.getId(), e.getMessage());
+        }
         post = requirePost(post.getId());
         if (request.topic() != null) {
             postMapper.updateTopic(post.getId(), normalizeTopic(request.topic()));

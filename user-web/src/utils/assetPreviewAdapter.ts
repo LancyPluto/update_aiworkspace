@@ -83,25 +83,29 @@ export function assetFromTask(
   if (block.type === "image") {
     const urls = block.images.map((image) => image.url).filter(Boolean)
     const url = urls[0] || extractPrimaryMediaUrl(task.result?.contentText || "") || ""
+    const downloadUrl = block.images[0]?.downloadUrl
     return {
       ...base,
       kind: "image",
       url,
       urls,
+      ...(downloadUrl ? { downloadUrl } : {}),
       title: block.title || base.title,
       subtitle: urls.length > 1 ? `${base.subtitle} · 共 ${urls.length} 张` : base.subtitle,
     } as AssetPreviewItem
   }
-  if (block.type === "video") return { ...base, kind: "video", url: block.url, title: block.title || base.title } as AssetPreviewItem
+  if (block.type === "video") return { ...base, kind: "video", url: block.url, ...(block.downloadUrl ? { downloadUrl: block.downloadUrl } : {}), title: block.title || base.title } as AssetPreviewItem
   if (block.type === "audio") {
     const tracks = resolveAudioTracks(block)
     const first = tracks[0]
+    const downloadUrl = first?.downloadUrl || block.downloadUrl
     return {
       ...base,
       kind: "audio",
       url: first?.url || block.url,
       urls: tracks.map((track) => track.url),
       coverUrl: tracks.find((track) => track.coverUrl)?.coverUrl,
+      ...(downloadUrl ? { downloadUrl } : {}),
       title: first?.title || block.title || base.title,
     } as AssetPreviewItem
   }
