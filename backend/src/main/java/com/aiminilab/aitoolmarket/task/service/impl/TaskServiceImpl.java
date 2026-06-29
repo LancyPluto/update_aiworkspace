@@ -227,6 +227,11 @@ public class TaskServiceImpl implements TaskService {
         if (updated == 0) {
             throw new BusinessException(ErrorCode.TASK_NOT_FOUND, "任务不存在");
         }
+        communityPostMapper.findByTaskId(taskId).ifPresent(post -> {
+            if ("PUBLISHED".equals(post.getStatus())) {
+                communityPostMapper.updateOwnerStatus(post.getId(), userId, "UNPUBLISHED");
+            }
+        });
     }
 
     @Override

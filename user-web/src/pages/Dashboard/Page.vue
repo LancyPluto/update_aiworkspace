@@ -73,6 +73,7 @@ import {
 } from "./dashboardAttribution"
 import { buildDashboardTaskParams, buildOptimisticDashboardTask } from "./dashboardTaskFactory"
 import { normalizeMediaUrl } from "@/utils/toolCoverMedia"
+import { forceDownload } from "@/utils/download"
 import { isWorkflowToolCode } from "@/adapters/toolPresentationAdapter"
 import { taskFailureHint, taskProgressMessage } from "@/utils/taskStatusLabels"
 import { buildTaskProgressView } from "@/utils/taskProgressView"
@@ -360,6 +361,8 @@ watch(activePanel, async (panel) => {
     scrollHistoryFeedToBottom("smooth")
     shouldScrollHistoryFeedToBottom.value = false
     updateHistoryScrollBottomVisibility()
+  } else {
+    dashboardMainRef.value?.scrollTo({ top: 0, behavior: "smooth" })
   }
 })
 
@@ -1111,10 +1114,17 @@ function videoUrlForBlocks(blocks: ResultBlock[]) {
 
 function firstDownloadUrl(blocks: ResultBlock[]): string {
   const block = primaryBlock(blocks)
-  if (block?.type === "image") return block.images[0]?.url || ""
-  if (block?.type === "video") return block.url
-  if (block?.type === "audio") return resolveAudioTracks(block)[0]?.url || ""
+  if (block?.type === "image") return block.images[0]?.downloadUrl || block.images[0]?.url || ""
+  if (block?.type === "video") return block.downloadUrl || block.url
+  if (block?.type === "audio") {
+    const track = resolveAudioTracks(block)[0]
+    return track?.downloadUrl || track?.url || ""
+  }
   return ""
+}
+
+function firstDownloadFilename(item: { task: { taskNo?: string | null } }): string {
+  return `${item.task.taskNo || 'asset'}-result`
 }
 
 function isPromptExpanded(taskId: number) {
@@ -1239,6 +1249,35 @@ function historyCardClass(task: TaskDetail, blocks: ResultBlock[]): string {
   const block = primaryBlock(blocks)
   if (block?.type !== "image") return "history-card-standard"
   return "history-card-image"
+}
+
+/**
+ * Resolve the best available cover URL for a tool card.
+ * Falls back through frontendStyle.comparisonEffectUrl → demoThumbnails → coverUrl
+ * to handle cases where the OSS cover URL is inaccessible (e.g. encoding issues).
+ */
+const brokenToolCoverIds = ref<Set<number>>(new Set())
+
+function toolCardCover(tool: ToolSummary): string {
+  if (brokenToolCoverIds.value.has(tool.id)) {
+    return normalizeMediaUrl(
+      tool.frontendStyle?.comparisonEffectUrl ||
+      tool.frontendStyle?.demoThumbnails?.[0] ||
+      "",
+    )
+  }
+  return normalizeMediaUrl(
+    tool.coverUrl ||
+      tool.frontendStyle?.comparisonEffectUrl ||
+      tool.frontendStyle?.demoThumbnails?.[0] ||
+      "",
+  )
+}
+
+function onToolCoverError(tool: ToolSummary) {
+  if (!brokenToolCoverIds.value.has(tool.id)) {
+    brokenToolCoverIds.value = new Set([...brokenToolCoverIds.value, tool.id])
+  }
 }
 
 function inferImageAspectRatio(task: TaskDetail): number {
@@ -1788,8 +1827,8 @@ onUnmounted(() => {
                 >
                   <div class="marketplace-tool-media">
                     <video
-                      v-if="isVideoPreviewUrl(tool.coverUrl)"
-                      :src="normalizeMediaUrl(tool.coverUrl)"
+                      v-if="isVideoPreviewUrl(toolCardCover(tool))"
+                      :src="normalizeMediaUrl(toolCardCover(tool))"
                       class="marketplace-tool-image"
                       muted
                       loop
@@ -1798,10 +1837,11 @@ onUnmounted(() => {
                       preload="metadata"
                     />
                     <img
-                      v-else-if="tool.coverUrl"
-                      :src="normalizeMediaUrl(tool.coverUrl)"
+                      v-else-if="toolCardCover(tool)"
+                      :src="normalizeMediaUrl(toolCardCover(tool))"
                       :alt="tool.toolName"
                       class="marketplace-tool-image"
+                      @error="onToolCoverError(tool)"
                     />
                     <div v-else class="marketplace-tool-empty">
                       <Sparkles class="h-10 w-10 text-white/48" />
@@ -2015,15 +2055,14 @@ onUnmounted(() => {
                           {{ activeAudioTrack?.id === track.id ? activeAudioTimeLabel(track) : `0:00 / ${formatAudioDuration(track.duration) || "--:--"}` }}
                         </span>
                         <span class="flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100">
-                          <a
-                            :href="normalizeMediaUrl(track.url)"
-                            :download="track.downloadName || `audio-${track.version}`"
+                          <button
+                            type="button"
                             class="inline-flex h-8 w-8 items-center justify-center rounded-full text-white/45 transition hover:bg-white/10 hover:text-white"
                             title="下载"
-                            @click.stop
+                            @click.stop="forceDownload(track.downloadUrl || normalizeMediaUrl(track.url), track.downloadName || `audio-${track.version}`)"
                           >
                             <Download class="h-4 w-4" />
-                          </a>
+                          </button>
                           <span
                             class="inline-flex h-8 w-8 items-center justify-center rounded-full text-white/45 transition hover:bg-white/10 hover:text-white"
                             title="更多"
@@ -2424,16 +2463,15 @@ onUnmounted(() => {
                         <ImageIcon class="h-3.5 w-3.5" />
                         局部重绘
                       </button>
-                      <a
+                      <button
                         v-if="firstDownloadUrl(item.blocks)"
-                        :href="firstDownloadUrl(item.blocks)"
-                        :download="`${item.task.taskNo || 'asset'}-result`"
+                        type="button"
                         class="dashboard-feed-action"
-                        @click.stop
+                        @click.stop="forceDownload(firstDownloadUrl(item.blocks), firstDownloadFilename(item))"
                       >
                         <Download class="h-3.5 w-3.5" />
                         下载
-                      </a>
+                      </button>
                       <button
                         v-if="canDeleteTask(item.task.status)"
                         type="button"
@@ -3307,6 +3345,11 @@ onUnmounted(() => {
 
 .dashboard-history-grid > .history-card-image {
   min-width: 0;
+  min-height: 300px;
+}
+
+.dashboard-history-grid > .history-card-standard {
+  min-height: 300px;
 }
 
 .dashboard-history-media-frame {
