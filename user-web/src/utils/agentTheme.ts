@@ -180,11 +180,20 @@ export function getAgentTheme(id?: AgentAmbientThemeId): AgentAmbientTheme {
 
 export function applyAgentThemeToElement(el: HTMLElement, id?: AgentAmbientThemeId) {
   const theme = getAgentTheme(id)
+  const root = document.documentElement
   el.dataset.agentTheme = theme.id
-  document.documentElement.style.setProperty("--theme-color", theme.accent)
-  document.documentElement.style.setProperty("--agent-accent", theme.accent)
+  root.style.setProperty("--agent-accent", theme.accent)
+  root.style.setProperty("--agent-accent-light", theme.accentLight)
+  root.style.setProperty("--agent-accent-dark", theme.accentDark)
+  root.style.setProperty("--agent-accent-soft", theme.accentSoft)
+  root.style.setProperty("--agent-accent-glow", theme.accentGlow)
+  root.style.setProperty("--agent-bg-mesh-1", theme.mesh1)
+  root.style.setProperty("--agent-bg-mesh-2", theme.mesh2)
+  root.style.setProperty("--agent-bg-mesh-3", theme.mesh3)
+  root.style.setProperty("--agent-composer-tint", theme.composerTint)
+  root.style.setProperty("--agent-bubble-user-tint", theme.bubbleUserTint)
+  root.style.setProperty("--agent-bubble-assistant-tint", theme.bubbleAssistantTint)
   el.style.setProperty("--agent-accent", theme.accent)
-  el.style.setProperty("--theme-color", theme.accent)
   el.style.setProperty("--agent-accent-light", theme.accentLight)
   el.style.setProperty("--agent-accent-dark", theme.accentDark)
   el.style.setProperty("--agent-accent-soft", theme.accentSoft)
@@ -195,14 +204,12 @@ export function applyAgentThemeToElement(el: HTMLElement, id?: AgentAmbientTheme
   el.style.setProperty("--agent-composer-tint", theme.composerTint)
   el.style.setProperty("--agent-bubble-user-tint", theme.bubbleUserTint)
   el.style.setProperty("--agent-bubble-assistant-tint", theme.bubbleAssistantTint)
-  el.style.setProperty(
-    "--agent-send-gradient",
-    `linear-gradient(135deg, ${theme.accentLight}, ${theme.accent} 48%, ${theme.accentDark})`,
-  )
-  el.style.setProperty(
-    "--agent-composer-bg",
-    `radial-gradient(circle at 14% 0%, ${theme.composerTint}, transparent 34%), radial-gradient(circle at 88% 100%, ${theme.mesh2}, transparent 28%), linear-gradient(180deg, rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.026)), rgb(28 28 33 / 0.68)`,
-  )
+  const sendGradient = `linear-gradient(135deg, ${theme.accentLight}, ${theme.accent} 48%, ${theme.accentDark})`
+  const composerBg = `radial-gradient(circle at 14% 0%, ${theme.composerTint}, transparent 34%), radial-gradient(circle at 88% 100%, ${theme.mesh2}, transparent 28%), linear-gradient(180deg, rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.026)), rgb(28 28 33 / 0.68)`
+  root.style.setProperty("--agent-send-gradient", sendGradient)
+  root.style.setProperty("--agent-composer-bg", composerBg)
+  el.style.setProperty("--agent-send-gradient", sendGradient)
+  el.style.setProperty("--agent-composer-bg", composerBg)
 }
 
 /** 将已存储的氛围主题应用到 Agent 页根节点 */
