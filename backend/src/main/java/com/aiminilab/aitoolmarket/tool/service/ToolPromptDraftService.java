@@ -166,14 +166,6 @@ public class ToolPromptDraftService {
             );
             String body = objectMapper.writeValueAsString(payload);
             URI uri = URI.create(normalizeChatBaseUrl(model.getBaseUrl()) + "/chat/completions");
-            
-            // SSRF protection: validate URL before sending
-            try {
-                com.aiminilab.aitoolmarket.security.SsrfGuard.validate(uri);
-            } catch (com.aiminilab.aitoolmarket.security.SsrfGuard.SsrfException e) {
-                throw new PromptDraftCallException("SSRF protection: " + e.getMessage());
-            }
-            
             HttpRequest request = HttpRequest.newBuilder(uri)
                     .timeout(resolveTimeout(model.getTimeoutSeconds()))
                     .header("Content-Type", "application/json")

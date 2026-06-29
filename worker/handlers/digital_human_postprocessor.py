@@ -12,7 +12,6 @@ import requests
 
 from config import settings
 from storage.asset_storage import asset_storage
-from utils.ssrf_guard import validate_outbound_url, SSRFGuardError
 
 
 class DigitalHumanPostprocessError(RuntimeError):
@@ -298,17 +297,6 @@ class DigitalHumanPostprocessor:
                     "relative media URL requires BACKEND_INTERNAL_BASE_URL"
                 )
             fetch_url = f"{backend}{url}"
-        
-        # SSRF protection: validate URL, but allow internal backend host
-        try:
-            validate_outbound_url(fetch_url)
-        except SSRFGuardError:
-            # Allow internal backend URLs
-            backend_host = urlparse(settings.backend_internal_base_url).hostname
-            fetch_host = urlparse(fetch_url).hostname
-            if not fetch_host or fetch_host != backend_host:
-                raise  # Re-raise if not internal backend
-        
         try:
             with requests.get(fetch_url, stream=True, timeout=self.timeout) as response:
                 response.raise_for_status()
