@@ -241,29 +241,14 @@ function downloadBlob(blob: Blob, filename: string) {
 
 
 
-async function fetchDownload() {
+function fetchDownload() {
   if (!downloadUrl.value) return
-  const url = downloadUrl.value
-  const headers: Record<string, string> = {}
-  if (url.startsWith("/") && auth.token) {
-    headers["Authorization"] = `Bearer ${auth.token}`
-  }
-  try {
-    const res = await fetch(url, { headers, credentials: url.startsWith("/") ? "same-origin" : "omit" })
-    if (!res.ok) throw new Error("Download failed")
-    const blob = await res.blob()
-    const ext = url.split("/").pop()?.split(".").pop()?.split("?")[0] || "bin"
-    const name = sanitizeDownloadName(activeAsset.value?.title || "download") + "." + ext
-    downloadBlob(blob, name)
-  } catch {
-    const a = document.createElement("a")
-    a.href = url
-    a.download = sanitizeDownloadName(activeAsset.value?.title || "download")
-    a.target = "_blank"
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-  }
+  const a = document.createElement("a")
+  a.href = downloadUrl.value
+  a.download = sanitizeDownloadName(activeAsset.value?.title || "download")
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
 }
 
 function sanitizeDownloadName(value: string) {

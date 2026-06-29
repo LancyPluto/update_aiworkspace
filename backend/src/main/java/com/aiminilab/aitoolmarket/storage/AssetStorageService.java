@@ -546,6 +546,27 @@ public class AssetStorageService {
                 || relativeKey.startsWith("customer-service/");
     }
 
+    public AssetVisibility resolveVisibility(String relativeKey) {
+        String normalized = normalizeRelativeKey(relativeKey);
+        AppProperties.AssetStorage storage = appProperties.getAssetStorage();
+        if (storage.getOssPublicBucket().isBlank()) {
+            return AssetVisibility.PRIVATE;
+        }
+        if (isLegacyPublicKey(normalized) || isGeneratedContentKey(normalized)) {
+            return AssetVisibility.PUBLIC;
+        }
+        return AssetVisibility.PRIVATE;
+    }
+
+    private static boolean isGeneratedContentKey(String relativeKey) {
+        return relativeKey.startsWith("video/")
+                || relativeKey.startsWith("videos/")
+                || relativeKey.startsWith("images/")
+                || relativeKey.startsWith("image/")
+                || relativeKey.startsWith("audio/")
+                || relativeKey.startsWith("digital-human/");
+    }
+
     private static String bucketFor(AssetVisibility visibility, AppProperties.AssetStorage storage) {
         return visibility == AssetVisibility.PUBLIC ? storage.getOssPublicBucket() : storage.getOssPrivateBucket();
     }
@@ -661,14 +682,28 @@ public class AssetStorageService {
         if (ref == null) {
             return url;
         }
+        return "/api/v1/assets/download/" + ref.relativeKey();
+    }
+
+    public String generateDownloadSignedUrl(String relativeKey, AssetVisibility visibility, int expirationSeconds,
+                                             String filename) {
+        if (!isOssMode() || ossClient == null) {
+            return urlForKey(relativeKey, visibility);
+        }
         AppProperties.AssetStorage storage = appProperties.getAssetStorage();
-        if (ref.bucket().equals(storage.getOssPublicBucket())) {
-            return rawUrlForKey(ref.relativeKey(), AssetVisibility.PUBLIC);
+        String bucket = bucketFor(visibility, storage);
+        String objectKey = storage.getOssKeyPrefix() + normalizeRelativeKey(relativeKey);
+        Date expiration = new Date(System.currentTimeMillis() + (long) expirationSeconds * 1000);
+        GeneratePresignedUrlRequest request = new GeneratePresignedUrlRequest(bucket, objectKey);
+        request.setExpiration(expiration);
+        String disposition = "attachment";
+        if (filename != null && !filename.isBlank()) {
+            disposition += "; filename=\"" + filename.replace("\"", "") + "\"";
         }
-        if (storage.isCdnAuthConfigured()) {
-            return generateCdnSignedUrl(ref.relativeKey(), false);
-        }
-        return rawUrlForKey(ref.relativeKey(), AssetVisibility.PRIVATE);
+        com.aliyun.oss.model.ResponseHeaderOverrides overrides = new com.aliyun.oss.model.ResponseHeaderOverrides();
+        overrides.setContentDisposition(disposition);
+        request.setResponseHeaders(overrides);
+        return ossClient.generatePresignedUrl(request).toString();
     }
 
     public String generateSignedUrl(String relativeKey, AssetVisibility visibility, int expirationSeconds) {

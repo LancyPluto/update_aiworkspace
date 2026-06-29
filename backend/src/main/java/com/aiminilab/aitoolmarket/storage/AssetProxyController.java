@@ -29,6 +29,31 @@ public class AssetProxyController {
         this.privateAssetAccessService = privateAssetAccessService;
     }
 
+    @GetMapping("/download/**")
+    public ResponseEntity<Void> downloadAsset(HttpServletRequest request) {
+        String fullPath = request.getRequestURI();
+        String prefix = "/api/v1/assets/download/";
+        int idx = fullPath.indexOf(prefix);
+        if (idx < 0 || fullPath.length() <= idx + prefix.length()) {
+            return ResponseEntity.notFound().build();
+        }
+        String relativeKey = fullPath.substring(idx + prefix.length());
+        if (relativeKey.isBlank() || relativeKey.contains("..")) {
+            return ResponseEntity.badRequest().build();
+        }
+        if (AuthContext.get() == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        Long userId = AuthContext.get().userId();
+        AssetVisibility visibility = assetStorageService.resolveVisibility(relativeKey);
+        if (visibility == AssetVisibility.PRIVATE && !privateAssetAccessService.canAccess(userId, relativeKey)) {
+            return ResponseEntity.notFound().build();
+        }
+        String filename = relativeKey.contains("/") ? relativeKey.substring(relativeKey.lastIndexOf('/') + 1) : relativeKey;
+        String signedUrl = assetStorageService.generateDownloadSignedUrl(relativeKey, visibility, 3600, filename);
+        return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(signedUrl)).build();
+    }
+
     @GetMapping("/private/**")
     public ResponseEntity<Void> privateAsset(HttpServletRequest request) {
         String fullPath = request.getRequestURI();
