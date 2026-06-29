@@ -305,7 +305,16 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
 
     private List<String> discoverRemoteModelNames(ModelVendorAccount account) {
         try {
-            HttpRequest request = HttpRequest.newBuilder(modelsEndpoint(account.getBaseUrl()))
+            URI endpoint = modelsEndpoint(account.getBaseUrl());
+            
+            // SSRF protection: validate URL before sending
+            try {
+                com.aiminilab.aitoolmarket.security.SsrfGuard.validate(endpoint);
+            } catch (com.aiminilab.aitoolmarket.security.SsrfGuard.SsrfException e) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "SSRF protection: " + e.getMessage());
+            }
+            
+            HttpRequest request = HttpRequest.newBuilder(endpoint)
                     .timeout(java.time.Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS))
                     .header("Accept", "application/json")
                     .header("Authorization", "Bearer " + resolveApiKey(account))

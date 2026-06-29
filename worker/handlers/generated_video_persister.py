@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import requests
 
 from storage.asset_storage import asset_storage
+from utils.ssrf_guard import validate_outbound_url
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,8 @@ class GeneratedVideoPersister:
         return None
 
     def _download(self, source_url: str) -> tuple[bytes, str | None]:
+        # SSRF protection: validate URL before downloading
+        validate_outbound_url(source_url)
         try:
             with requests.get(source_url, stream=True, timeout=self.timeout) as response:
                 response.raise_for_status()
