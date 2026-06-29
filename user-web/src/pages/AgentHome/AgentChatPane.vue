@@ -20,8 +20,10 @@ import {
   buildReferenceMentionsPayload,
   displayLabelForMention,
   findReferenceMentionByAsset,
+  mentionDedupeKey,
   type AgentReferenceMention,
 } from "@/utils/agentReferenceMentions"
+import type { ComposerContentPart } from "@/utils/agentComposerMentionEditor"
 import AgentComposer from "./AgentComposer.vue"
 import AgentMessageRow from "./AgentMessageRow.vue"
 import AgentAvatar from "./AgentAvatar.vue"
@@ -105,6 +107,7 @@ import { useGeneratedMaterialList, useUploadHistoryList } from "@/composables/us
 import {
   chatAssetRefByUrl,
   dragPayloadToUrlAttachment,
+  type ChatAssetRef,
   type ChatAssetDragPayload,
 } from "@/utils/agentChatAssetRefs"
 
@@ -493,6 +496,16 @@ const navLayoutTick = ref(0)
 const messagesKey = computed(() => `agent_messages_${props.sessionId}`)
 const branchStorageKey = computed(() => `agent_message_branches_${props.sessionId}`)
 const sessionAssetsForComposer = computed(() => collectSessionAssets(messages.value))
+const autoMountedReference = computed<AgentReferenceMention | null>(() => {
+  if (hasActiveRun.value || sending.value || editingRegenerating.value || regeneratingMessageId.value != null) return null
+  if (files.value.length > 0 || urlAttachments.value.length > 0 || draftReferenceMentions.value.length > 0) return null
+  if (hasTypedReferenceToken(input.value)) return null
+  const latest = latestImageSessionAsset(sessionAssetsForComposer.value)
+  if (!latest) return null
+  const mention = sessionAssetToReferenceMention(latest)
+  const key = mentionDedupeKey(mention)
+  return key && key === dismissedAutoMountedReferenceKey.value ? null : mention
+})
 let runStreamAbort: AbortController | null = null
 let runStatusWatchdog: number | null = null
 let streamingAnimationTimer: number | null = null
@@ -557,15 +570,9 @@ const input = computed({
 })
 
 const draftReferenceMentions = ref<AgentReferenceMention[]>([])
+const dismissedAutoMountedReferenceKey = ref<string | null>(null)
 
 const sessionAssetRefMap = computed(() => chatAssetRefByUrl(messages.value))
-
-const suggestions = [
-  "帮我写一篇小红书种草笔记",
-  "帮我优化一个电商商品标题",
-  "给朋友圈生成一段新品文案",
-  "我想做公众号长文，先推荐工具",
-]
 
 const confirmationEvents = computed(() =>
   events.value
@@ -683,6 +690,94 @@ function messageTime(value?: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   })
+}
+
+function hasTypedReferenceToken(value: string) {
+  return /@(?:图|图片|视频|音频|文件)\d+/i.test(value)
+}
+
+function latestImageSessionAsset(assets: ChatAssetRef[]) {
+  return [...assets].reverse().find((asset) => asset.kind === "image" && Boolean(asset.url)) ?? null
+}
+
+function sessionAssetToReferenceMention(asset: ChatAssetRef): AgentReferenceMention {
+  return {
+    token: baseImageLabel(asset.refLabel) || "@图1",
+    refLabel: asset.refLabel,
+    assetKey: asset.assetKey,
+    url: asset.url,
+    kind: "image",
+    name: asset.name,
+    contentType: asset.contentType || "image/*",
+    previewUrl: resolveAgentFileUrl(asset.url),
+    source: "session_asset_auto",
+  }
+}
+
+function dismissAutoMountedReference(mention: AgentReferenceMention) {
+  dismissedAutoMountedReferenceKey.value = mentionDedupeKey(mention)
+}
+
+function autoMountedReferenceToAttachment(mention: AgentReferenceMention): AgentUrlAttachment {
+  return {
+    id: mention.assetKey || mention.fileId || mention.url,
+    name: mention.refLabel || mention.name || "最新图片",
+    refLabel: mention.refLabel || mention.name || "最新图片",
+    contentType: mention.contentType || "image/*",
+    url: mention.url,
+    source: "chat_reference_auto",
+  }
+}
+
+function mergeAutoMountedAttachment(
+  attachments: AgentUrlAttachment[],
+  mention: AgentReferenceMention | null,
+) {
+  if (!mention?.url) return attachments
+  if (attachments.some((item) => item.url === mention.url)) return attachments
+  return [...attachments, autoMountedReferenceToAttachment(mention)]
+}
+
+function mergeAutoMountedMention(
+  mentions: AgentReferenceMention[],
+  mention: AgentReferenceMention | null,
+) {
+  if (!mention?.url) return mentions
+  const key = mentionDedupeKey(mention)
+  if (mentions.some((item) => mentionDedupeKey(item) === key)) return mentions
+  return [...mentions, mention]
+}
+
+function contentPartForAutoMountedReference(mention: AgentReferenceMention): ComposerContentPart {
+  const part: ComposerContentPart = {
+    type: "image",
+    asset_key: mention.assetKey || (mention.fileId == null ? mention.url : `file_${mention.fileId}`),
+    url: mention.url,
+    name: mention.refLabel || mention.name || "最新图片",
+    content_type: mention.contentType || "image/*",
+  }
+  if (mention.fileId != null) {
+    part.file_id = mention.fileId
+  }
+  return part
+}
+
+function mergeAutoMountedContentParts(
+  parts: ComposerContentPart[],
+  text: string,
+  mention: AgentReferenceMention | null,
+) {
+  if (!mention?.url) return parts
+  const next = parts.length > 0 ? [...parts] : (text ? [{ type: "text" as const, text }] : [])
+  const key = mention.assetKey || mention.url
+  const hasPart = next.some((part) => {
+    if (part.type === "text") return false
+    return part.url === mention.url || part.asset_key === key
+  })
+  if (!hasPart) {
+    next.push(contentPartForAutoMountedReference(mention))
+  }
+  return next
 }
 
 function messageContentJsonForFiles(
@@ -1657,6 +1752,7 @@ async function submitMessage(content = input.value) {
     agentError.value = "请先选择一个 Agent 模型。"
     return
   }
+  const autoReferenceForSubmission = autoMountedReference.value
   sending.value = true
   agentError.value = null
   confirmationError.value = null
@@ -1665,14 +1761,27 @@ async function submitMessage(content = input.value) {
   const submittedParentMessageId = messages.value.at(-1)?.id ?? null
   try {
     const submittedFiles = [...files.value]
-    const submittedUrlAttachments = [...urlAttachments.value]
+    const submittedUrlAttachments = mergeAutoMountedAttachment([...urlAttachments.value], autoReferenceForSubmission)
     const submittedReferenceCatalog = buildAttachmentLabelCatalog(
       submittedUrlAttachments,
       submittedFiles,
       collectSessionAssets(messages.value),
     )
     const submittedPreferredToolCode = selectedToolCode.value
-    const submittedMentions = [...(composerSnapshot?.mentions ?? draftReferenceMentions.value)]
+    const submittedMentions = mergeAutoMountedMention(
+      [...(composerSnapshot?.mentions ?? draftReferenceMentions.value)],
+      autoReferenceForSubmission,
+    )
+    const submittedContentParts = mergeAutoMountedContentParts(
+      composerSnapshot?.contentParts ?? [],
+      text,
+      autoReferenceForSubmission,
+    )
+    const submittedPositionalPrompt = autoReferenceForSubmission?.url
+      ? submittedContentParts
+        .map((part) => part.type === "text" ? part.text : `{${part.asset_key}}`)
+        .join("")
+      : composerSnapshot?.positionalPrompt
     const submittedGlobalFileIds = globalFileIdsFor(submittedFiles, submittedUrlAttachments)
     input.value = ""
     draftReferenceMentions.value = []
@@ -1682,8 +1791,8 @@ async function submitMessage(content = input.value) {
       text,
       submittedMentions,
       {
-        contentParts: composerSnapshot?.contentParts ?? [],
-        positionalPrompt: composerSnapshot?.positionalPrompt,
+        contentParts: submittedContentParts,
+        positionalPrompt: submittedPositionalPrompt,
         globalFileIds: submittedGlobalFileIds,
       },
     )
@@ -1724,8 +1833,8 @@ async function submitMessage(content = input.value) {
         })),
         referenceMentions: referenceMentionsForApi(submittedMentions),
         globalFileIds: submittedGlobalFileIds,
-        contentParts: composerSnapshot?.contentParts ?? [],
-        positionalPrompt: composerSnapshot?.positionalPrompt,
+        contentParts: submittedContentParts,
+        positionalPrompt: submittedPositionalPrompt,
       },
       { token: props.token },
     )
@@ -2742,6 +2851,7 @@ watch(
   () => props.sessionId,
   () => {
     loadPersistedRunEventCache()
+    dismissedAutoMountedReferenceKey.value = null
     stickToBottom.value = true
     scrollOffset.value = 0
     void loadRecentAttachments()
@@ -2821,12 +2931,7 @@ defineExpose({
       <div v-else-if="messages.length === 0" class="empty-state">
         <div class="empty-mark"><Sparkles class="h-6 w-6" /></div>
         <h2>想完成什么，直接告诉我</h2>
-        <p>Agent 会先分析需求，推荐合适工具，首次调用前让你确认。</p>
-        <div class="suggestions">
-          <button v-for="item in suggestions" :key="item" type="button" @click="submitMessage(item)">
-            {{ item }}
-          </button>
-        </div>
+        <p>我会先分析需求，推荐合适工具，关键操作前让你确认。</p>
       </div>
 
       <TransitionGroup v-else name="branch-message" tag="div" class="message-list-transition">
@@ -2973,16 +3078,26 @@ defineExpose({
         :phases="conversationPhases"
         @navigate="navigateToMessage"
       />
-      <button
-        type="button"
-        class="chat-float-btn memory-float-btn"
-        :class="{ 'memory-float-btn--active': memoryPanelOpen }"
-        aria-label="记忆记录"
-        title="长期记忆"
-        @click="memoryPanelOpen ? closeMemoryPanel() : openMemoryPanel()"
-      >
-        <Database class="h-4 w-4" />
-      </button>
+      <div class="assistant-rail" :class="{ 'assistant-rail--active': memoryPanelOpen }">
+        <button
+          type="button"
+          class="assistant-rail-main"
+          aria-label="打开助手记忆"
+          title="助手"
+          @click="memoryPanelOpen ? closeMemoryPanel() : openMemoryPanel()"
+        >
+          <Database class="h-4 w-4" />
+          <span>助手</span>
+        </button>
+        <button
+          type="button"
+          class="assistant-rail-collapse"
+          aria-label="切换助手面板"
+          @click="memoryPanelOpen ? closeMemoryPanel() : openMemoryPanel()"
+        >
+          «
+        </button>
+      </div>
       <button
         v-if="messages.length > 0 && !stickToBottom"
         type="button"
@@ -3027,6 +3142,7 @@ defineExpose({
         :intelligence-level="intelligenceLevel"
         :session-assets="sessionAssetsForComposer"
         :reference-mentions="draftReferenceMentions"
+        :auto-mounted-reference="autoMountedReference"
         @update:draft="emit('update:draft', $event)"
         @update:reference-mentions="draftReferenceMentions = $event"
         @update:selected-tool-code="selectedToolCode = $event"
@@ -3049,6 +3165,7 @@ defineExpose({
         @load-more-material-assets="loadMoreMaterialAssets"
         @refresh-agent-tools="loadAgentTools"
         @add-reference-attachment="addReferenceAttachment"
+        @dismiss-auto-mounted-reference="dismissAutoMountedReference"
         @open-memory="openMemoryPanel"
       />
     </div>
@@ -3197,8 +3314,22 @@ defineExpose({
   overflow: hidden !important;
   position: relative;
   background:
-    radial-gradient(circle at 50% 100%, rgb(176 92 255 / 0.045), transparent 34%),
-    #0a0a0d;
+    radial-gradient(circle at 50% 102%, var(--agent-accent-glow), transparent 34%),
+    transparent;
+}
+
+.agent-chat-pane::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 44%, transparent 0 30%, rgb(255 255 255 / 0.040) 30.08% 30.20%, transparent 30.40%),
+    radial-gradient(circle at 50% 44%, transparent 0 38%, rgb(255 255 255 / 0.034) 38.08% 38.20%, transparent 38.44%),
+    radial-gradient(circle at 50% 44%, transparent 0 46%, rgb(255 255 255 / 0.026) 46.08% 46.20%, transparent 46.48%);
+  opacity: 0.72;
+  -webkit-mask-image: radial-gradient(circle at 50% 44%, rgb(0 0 0 / 0.60) 0%, #000 34%, rgb(0 0 0 / 0.36) 58%, transparent 80%);
+  mask-image: radial-gradient(circle at 50% 44%, rgb(0 0 0 / 0.60) 0%, #000 34%, rgb(0 0 0 / 0.36) 58%, transparent 80%);
 }
 
 .chat-float-btn {
@@ -3224,12 +3355,6 @@ defineExpose({
   color: #fff;
 }
 
-.memory-float-btn--active {
-  border-color: rgb(176 92 255 / 0.42);
-  background: rgb(176 92 255 / 0.18);
-  color: #fff;
-}
-
 .chat-scroll-anchor {
   flex-shrink: 0;
   width: 100%;
@@ -3238,6 +3363,8 @@ defineExpose({
 
 .message-list-transition {
   width: 100%;
+  display: block;
+  padding-top: 26px;
 }
 
 .message-list-item {
@@ -3261,8 +3388,8 @@ defineExpose({
 
 .chat-floating-actions {
   position: absolute;
-  right: clamp(20px, 4vw, 56px);
-  bottom: calc(var(--chat-composer-inset, 210px) + 14px);
+  right: 0;
+  bottom: calc(var(--chat-composer-inset, 210px) + 178px);
   top: auto;
   left: auto;
   z-index: 5;
@@ -3284,6 +3411,56 @@ defineExpose({
   pointer-events: auto;
 }
 
+.assistant-rail {
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.10);
+  border-right: 0;
+  border-radius: 18px 0 0 18px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.075), rgb(255 255 255 / 0.035)),
+    rgb(24 27 34 / 0.78);
+  color: rgb(255 255 255 / 0.78);
+  box-shadow: 0 22px 60px rgb(0 0 0 / 0.28), inset 0 1px 0 rgb(255 255 255 / 0.06);
+  backdrop-filter: blur(18px) saturate(135%);
+}
+
+.assistant-rail--active {
+  border-color: color-mix(in srgb, var(--agent-accent) 45%, rgb(255 255 255 / 0.12));
+  color: #fff;
+  box-shadow: 0 22px 60px rgb(0 0 0 / 0.30), 0 0 34px var(--agent-accent-glow);
+}
+
+.assistant-rail-main,
+.assistant-rail-collapse {
+  width: 58px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.assistant-rail-main {
+  display: grid;
+  min-height: 66px;
+  place-items: center;
+  gap: 5px;
+  padding: 10px 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.assistant-rail-main:hover,
+.assistant-rail-collapse:hover {
+  background: rgb(255 255 255 / 0.055);
+}
+
+.assistant-rail-collapse {
+  height: 38px;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  font-size: 22px;
+  line-height: 1;
+}
+
 .message-container {
   flex: 1;
   overflow-y: auto;
@@ -3292,7 +3469,7 @@ defineExpose({
   z-index: 1;
   height: 100%;
   max-height: none;
-  padding: 64px clamp(40px, 7vw, 128px) 24px;
+  padding: 72px clamp(40px, 7vw, 128px) 24px;
   scroll-behavior: smooth;
   scrollbar-gutter: stable both-edges;
   scrollbar-width: thin;
@@ -3305,7 +3482,7 @@ defineExpose({
   right: 0;
   bottom: 0;
   z-index: 4;
-  padding: 18px 0 max(18px, env(safe-area-inset-bottom));
+  padding: 20px 0 max(36px, env(safe-area-inset-bottom));
   background: transparent;
   pointer-events: none;
 }
@@ -3315,7 +3492,7 @@ defineExpose({
   position: absolute;
   inset: -80px 0 0;
   z-index: -1;
-  background: linear-gradient(180deg, transparent, rgb(10 10 13 / 0.24) 54%, rgb(10 10 13 / 0.36));
+  background: linear-gradient(180deg, transparent, rgb(18 21 27 / 0.16) 54%, rgb(18 21 27 / 0.34));
   pointer-events: none;
 }
 
@@ -3337,12 +3514,13 @@ defineExpose({
 }
 
 .composer {
-  width: min(720px, calc(100% - 112px));
+  width: min(960px, calc(100% - 184px));
   margin: 0 auto;
+  min-height: 198px;
   border: 1px solid rgb(255 255 255 / 0.105);
-  border-radius: 28px;
+  border-radius: 24px;
   background: var(--agent-composer-bg);
-  padding: 10px 12px 11px;
+  padding: 16px 20px 14px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -3350,9 +3528,9 @@ defineExpose({
   position: relative;
   z-index: 2;
   box-shadow:
-    0 -18px 56px var(--agent-accent-glow, rgb(176 92 255 / 0.10)),
+    0 -24px 72px var(--agent-accent-glow, rgb(176 92 255 / 0.12)),
     0 24px 72px rgb(0 0 0 / 0.52),
-    0 0 0 1px color-mix(in srgb, var(--theme-color), transparent 86%),
+    0 0 0 1px color-mix(in srgb, var(--agent-accent), transparent 86%),
     inset 0 1px 0 rgb(255 255 255 / 0.08);
   backdrop-filter: blur(24px) saturate(145%);
 }
@@ -3585,56 +3763,42 @@ defineExpose({
 }
 
 .empty-state {
-  min-height: 60vh;
+  min-height: 54vh;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   text-align: center;
   color: rgb(255 255 255 / 0.48);
+  transform: translateY(-36px);
 }
 
 .empty-mark {
-  width: 62px;
-  height: 62px;
+  width: 76px;
+  height: 76px;
   display: grid;
   place-items: center;
   border-radius: 24px;
-  border: 1px solid var(--agent-accent-soft);
-  background: linear-gradient(145deg, var(--agent-accent-soft), rgb(255 255 255 / 0.05));
-  color: var(--agent-accent);
+  border: 1px solid color-mix(in srgb, var(--agent-accent) 32%, rgb(255 255 255 / 0.14));
+  background:
+    radial-gradient(circle at 34% 18%, rgb(255 255 255 / 0.22), transparent 30%),
+    linear-gradient(145deg, var(--agent-accent-soft), rgb(255 255 255 / 0.055));
+  color: var(--agent-accent-light);
+  box-shadow: 0 24px 60px var(--agent-accent-glow), inset 0 1px 0 rgb(255 255 255 / 0.10);
   animation: breathe-soft 2.8s ease-in-out infinite;
 }
 
 .empty-state h2 {
-  margin: 18px 0 8px;
-  font-size: 28px;
+  margin: 30px 0 10px;
+  font-size: 30px;
+  line-height: 1.2;
   color: #fff;
 }
 
-.suggestions {
-  margin-top: 22px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(180px, 1fr));
-  gap: 10px;
-  width: min(620px, 100%);
-}
-
-.suggestions button {
-  min-height: 44px;
-  border: 1px solid rgb(255 255 255 / 0.09);
-  border-radius: 18px;
-  background: linear-gradient(180deg, rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.035));
-  color: rgb(255 255 255 / 0.74);
-  cursor: pointer;
-  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, transform 0.18s ease;
-}
-
-.suggestions button:hover {
-  border-color: var(--agent-accent-soft);
-  background: var(--agent-accent-soft);
-  color: #fff;
-  transform: translateY(-1px);
+.empty-state p {
+  margin: 0;
+  color: rgb(255 255 255 / 0.48);
+  font-size: 15px;
 }
 
 .agent-message {
@@ -4348,13 +4512,11 @@ defineExpose({
   }
   .composer {
     width: calc(100% - 24px);
+    min-height: 176px;
     border-radius: 24px;
   }
   .composer-dock {
     padding: 14px 0 max(14px, env(safe-area-inset-bottom));
-  }
-  .suggestions {
-    grid-template-columns: 1fr;
   }
   .composer-model-row {
     align-items: center;

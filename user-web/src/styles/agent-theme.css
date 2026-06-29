@@ -1,7 +1,6 @@
 /* Agent page ambient design tokens — applied via applyAgentThemeToElement() */
 .agent-page {
   --agent-accent: rgb(176 92 255);
-  --theme-color: rgb(176 92 255);
   --agent-accent-light: rgb(205 132 255);
   --agent-accent-dark: rgb(115 72 255);
   --agent-accent-soft: rgb(176 92 255 / 0.14);

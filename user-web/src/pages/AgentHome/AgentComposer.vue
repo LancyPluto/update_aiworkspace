@@ -35,6 +35,7 @@ import ComposerMentionInput from "./ComposerMentionInput.vue"
 import type { ComposerEditorSnapshot } from "@/utils/agentComposerMentionEditor"
 import { useReducedMotion } from "@/composables/useReducedMotion"
 import ModelProviderIcon from "@/components/ModelProviderIcon.vue"
+import AgentThemePicker from "./AgentThemePicker.vue"
 import {
   buildAgentModelGroups,
   groupKeyForModel,
@@ -75,12 +76,14 @@ const props = withDefaults(defineProps<{
   selectedToolCode?: string | null
   sessionAssets?: ChatAssetRef[]
   referenceMentions?: AgentReferenceMention[]
+  autoMountedReference?: AgentReferenceMention | null
 }>(), {
   agentTools: () => [],
   agentToolsLoading: false,
   selectedToolCode: null,
   sessionAssets: () => [],
   referenceMentions: () => [],
+  autoMountedReference: null,
 })
 
 interface AgentMaterialAttachment extends AgentUrlAttachment {
@@ -113,6 +116,7 @@ const emit = defineEmits<{
   "update-tool-preference": [payload: { toolCode: string; autoCallEnabled?: boolean; disabled?: boolean }]
   "refresh-agent-tools": []
   "add-reference-attachment": [payload: import("@/utils/agentChatAssetRefs").ChatAssetDragPayload]
+  "dismiss-auto-mounted-reference": [mention: AgentReferenceMention]
   "file-selected": [event: Event]
   "files-dropped": [files: File[], options?: { autoSelect?: boolean }]
   "preview-attachment": [payload: { name: string; url: string; contentType?: string | null }]
@@ -300,6 +304,18 @@ const stagedAssets = computed<StagedAsset[]>(() => {
     })
   })
   return assets
+})
+
+const autoMountedReferencePreviewUrl = computed(() => {
+  const mention = props.autoMountedReference
+  if (!mention) return ""
+  return mention.previewUrl || resolveAgentFileUrl(mention.url)
+})
+
+const autoMountedReferenceName = computed(() => {
+  const mention = props.autoMountedReference
+  if (!mention) return ""
+  return shortAttachmentName(mention.name || mention.refLabel || "最新图片")
 })
 
 useInfiniteScroll({
@@ -1107,6 +1123,44 @@ defineExpose({
       </select>
     </div>
 
+    <div
+      v-if="autoMountedReference"
+      class="auto-reference-chip"
+      aria-live="polite"
+    >
+      <button
+        v-if="autoMountedReferencePreviewUrl"
+        type="button"
+        class="auto-reference-thumb-btn"
+        aria-label="预览自动关联图片"
+        @click="emit('preview-attachment', {
+          name: autoMountedReference.name || autoMountedReference.refLabel || '最新图片',
+          url: autoMountedReference.url,
+          contentType: autoMountedReference.contentType,
+        })"
+      >
+        <img
+          :src="autoMountedReferencePreviewUrl"
+          :alt="autoMountedReferenceName"
+          class="auto-reference-thumb"
+          loading="lazy"
+        />
+      </button>
+      <Image v-else class="h-4 w-4 shrink-0 auto-reference-icon" />
+      <span class="auto-reference-copy">
+        <strong>正在关联最新图片</strong>
+        <small>{{ autoMountedReferenceName }}</small>
+      </span>
+      <button
+        type="button"
+        class="auto-reference-close"
+        aria-label="取消自动关联图片"
+        @click="emit('dismiss-auto-mounted-reference', autoMountedReference)"
+      >
+        <X class="h-3.5 w-3.5" />
+      </button>
+    </div>
+
     <div v-if="stagedAssets.length > 0 || pendingUploadPreview || uploading" class="inner-file-list">
       <div v-if="pendingUploadPreview && !files.length" class="inner-file-item inner-file-item--image">
         <button
@@ -1327,6 +1381,7 @@ defineExpose({
           <Database class="h-4 w-4 tool-icon" />
           记忆
         </button>
+        <AgentThemePicker variant="toolbar" target-selector=".agent-page" />
         <div ref="intelligenceMenuRef" class="tool-menu-wrap">
           <button
             type="button"
@@ -1581,12 +1636,13 @@ defineExpose({
 
 <style scoped>
 .composer {
-  width: min(720px, calc(100% - 112px));
+  width: min(960px, calc(100% - 184px));
   margin: 0 auto;
-  border: 1px solid rgb(255 255 255 / 0.105);
-  border-radius: 28px;
+  min-height: 198px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 24px;
   background: var(--agent-composer-bg);
-  padding: 10px 12px 11px;
+  padding: 16px 20px 14px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1594,11 +1650,11 @@ defineExpose({
   position: relative;
   z-index: 2;
   box-shadow:
-    0 -18px 56px var(--agent-accent-glow, rgb(176 92 255 / 0.10)),
-    0 24px 72px rgb(0 0 0 / 0.52),
-    0 0 0 1px color-mix(in srgb, var(--theme-color), transparent 86%),
-    inset 0 1px 0 rgb(255 255 255 / 0.08);
-  backdrop-filter: blur(24px) saturate(145%);
+    0 -24px 72px var(--agent-accent-glow, rgb(176 92 255 / 0.12)),
+    0 26px 86px rgb(0 0 0 / 0.42),
+    0 0 0 1px color-mix(in srgb, var(--agent-accent), transparent 82%),
+    inset 0 1px 0 rgb(255 255 255 / 0.10);
+  backdrop-filter: blur(28px) saturate(150%);
 }
 
 .composer::before {
@@ -1608,7 +1664,7 @@ defineExpose({
   border-radius: inherit;
   pointer-events: none;
   background:
-    linear-gradient(90deg, transparent 8%, color-mix(in srgb, var(--theme-color), transparent 76%), transparent 44%),
+    linear-gradient(90deg, transparent 8%, color-mix(in srgb, var(--agent-accent), transparent 76%), transparent 44%),
     radial-gradient(circle at 92% 16%, var(--agent-bg-mesh-2), transparent 24%);
   opacity: 0.72;
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
@@ -1646,8 +1702,8 @@ defineExpose({
 .composer-model-pill:hover:not(:disabled),
 .composer-model-pill.open {
   background: rgb(255 255 255 / 0.085);
-  border-color: color-mix(in srgb, var(--theme-color), transparent 62%);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-color), transparent 86%);
+  border-color: color-mix(in srgb, var(--agent-accent), transparent 62%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-accent), transparent 86%);
 }
 
 .composer-model-pill:disabled {
@@ -1829,6 +1885,91 @@ defineExpose({
   max-height: none;
   overflow: visible;
   padding-right: 0;
+}
+
+.auto-reference-chip {
+  width: fit-content;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 6px 7px 6px 6px;
+  border: 1px solid rgb(96 165 250 / 0.32);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 18% 10%, rgb(96 165 250 / 0.20), transparent 36%),
+    rgb(255 255 255 / 0.055);
+  color: rgb(255 255 255 / 0.78);
+  box-shadow: 0 10px 28px rgb(59 130 246 / 0.12);
+}
+
+.auto-reference-thumb-btn {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgb(255 255 255 / 0.08);
+  cursor: zoom-in;
+}
+
+.auto-reference-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.auto-reference-icon {
+  margin-left: 6px;
+  color: rgb(147 197 253);
+}
+
+.auto-reference-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.auto-reference-copy strong,
+.auto-reference-copy small {
+  max-width: min(220px, 52vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auto-reference-copy strong {
+  color: rgb(255 255 255 / 0.84);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.auto-reference-copy small {
+  color: rgb(255 255 255 / 0.42);
+  font-size: 11px;
+}
+
+.auto-reference-close {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgb(255 255 255 / 0.45);
+  cursor: pointer;
+}
+
+.auto-reference-close:hover {
+  background: rgb(255 255 255 / 0.08);
+  color: #fff;
 }
 
 .inner-file-item {
@@ -2036,13 +2177,13 @@ defineExpose({
   border: none;
   outline: none;
   background: transparent;
-  font-size: 18px;
+  font-size: 21px;
   line-height: 1.6;
-  height: 52px;
-  min-height: 52px;
-  max-height: 52px;
+  height: 66px;
+  min-height: 66px;
+  max-height: 66px;
   resize: none;
-  padding: 8px 40px 6px 4px;
+  padding: 12px 48px 8px 4px;
   color: var(--agent-text-primary);
 }
 
@@ -2106,11 +2247,11 @@ defineExpose({
 }
 
 .composer--drop-active {
-  border-color: color-mix(in srgb, var(--theme-color) 55%, rgb(255 255 255 / 0.12));
+  border-color: color-mix(in srgb, var(--agent-accent) 55%, rgb(255 255 255 / 0.12));
   box-shadow:
     0 -18px 56px var(--agent-accent-glow, rgb(176 92 255 / 0.18)),
     0 24px 72px rgb(0 0 0 / 0.52),
-    0 0 0 1px color-mix(in srgb, var(--theme-color), transparent 70%),
+    0 0 0 1px color-mix(in srgb, var(--agent-accent), transparent 70%),
     inset 0 1px 0 rgb(255 255 255 / 0.08);
 }
 
@@ -2160,8 +2301,8 @@ defineExpose({
 }
 
 .tool-picker-tab--active {
-  border-color: color-mix(in srgb, var(--theme-color) 60%, transparent);
-  background: color-mix(in srgb, var(--theme-color) 16%, transparent);
+  border-color: color-mix(in srgb, var(--agent-accent) 60%, transparent);
+  background: color-mix(in srgb, var(--agent-accent) 16%, transparent);
   color: #fff;
 }
 
@@ -2255,8 +2396,8 @@ defineExpose({
 }
 
 .tool-toggle--on {
-  border-color: color-mix(in srgb, var(--theme-color) 52%, transparent);
-  background: color-mix(in srgb, var(--theme-color) 16%, transparent);
+  border-color: color-mix(in srgb, var(--agent-accent) 52%, transparent);
+  background: color-mix(in srgb, var(--agent-accent) 16%, transparent);
   color: #fff;
 }
 
@@ -2520,9 +2661,9 @@ defineExpose({
 }
 
 .material-dialog-tab.active {
-  background: color-mix(in srgb, var(--theme-color) 22%, rgb(255 255 255 / 0.10));
+  background: color-mix(in srgb, var(--agent-accent) 22%, rgb(255 255 255 / 0.10));
   color: #fff;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-color), transparent 58%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--agent-accent), transparent 58%);
 }
 
 .material-dialog-close {
@@ -2565,14 +2706,14 @@ defineExpose({
 }
 
 .material-upload-card:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--theme-color), transparent 45%);
-  background: color-mix(in srgb, var(--theme-color) 12%, rgb(255 255 255 / 0.05));
+  border-color: color-mix(in srgb, var(--agent-accent), transparent 45%);
+  background: color-mix(in srgb, var(--agent-accent) 12%, rgb(255 255 255 / 0.05));
 }
 
 .material-upload-card--drop {
-  border-color: color-mix(in srgb, var(--theme-color), transparent 18%);
-  background: color-mix(in srgb, var(--theme-color) 18%, rgb(255 255 255 / 0.06));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-color), transparent 82%);
+  border-color: color-mix(in srgb, var(--agent-accent), transparent 18%);
+  background: color-mix(in srgb, var(--agent-accent) 18%, rgb(255 255 255 / 0.06));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-accent), transparent 82%);
 }
 
 .material-section {
@@ -2619,8 +2760,8 @@ defineExpose({
 
 .material-tile:hover,
 .material-tile.selected {
-  border-color: color-mix(in srgb, var(--theme-color), transparent 42%);
-  background: color-mix(in srgb, var(--theme-color) 13%, rgb(255 255 255 / 0.05));
+  border-color: color-mix(in srgb, var(--agent-accent), transparent 42%);
+  background: color-mix(in srgb, var(--agent-accent) 13%, rgb(255 255 255 / 0.05));
 }
 
 .material-tile-thumb {
@@ -2659,7 +2800,7 @@ defineExpose({
   height: 24px;
   place-items: center;
   border-radius: 50%;
-  background: var(--theme-color);
+  background: var(--agent-accent);
   color: #fff;
   box-shadow: 0 8px 22px var(--agent-accent-glow);
 }
@@ -2709,7 +2850,7 @@ defineExpose({
 .material-confirm-btn {
   border: 0;
   border-radius: 999px;
-  background: var(--theme-color);
+  background: var(--agent-accent);
   color: #fff;
   padding: 8px 16px;
   font-size: 13px;
@@ -2741,7 +2882,7 @@ defineExpose({
 }
 
 .tool-btn--active {
-  color: var(--theme-color) !important;
+  color: var(--agent-accent) !important;
   text-shadow: 0 0 12px var(--agent-accent-glow);
 }
 
@@ -2817,7 +2958,16 @@ defineExpose({
 @media (max-width: 720px) {
   .composer {
     width: calc(100% - 24px);
+    min-height: 176px;
     border-radius: 24px;
+    padding: 14px 14px 12px;
+  }
+
+  .chat-input {
+    height: 60px;
+    min-height: 60px;
+    max-height: 60px;
+    font-size: 18px;
   }
 
   .tool-btn {
