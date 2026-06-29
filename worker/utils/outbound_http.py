@@ -9,6 +9,8 @@ from urllib.parse import urlparse
 import requests
 from requests import PreparedRequest, Request
 
+from utils.ssrf_guard import validate_outbound_url
+
 
 DEFAULT_NO_PROXY_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "backend", "host.docker.internal"}
 
@@ -43,6 +45,9 @@ class OutboundRequestsClient:
         return self.policy.proxy_url if self.policy.enabled else ""
 
     def request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
+        # SSRF protection: validate URL before sending
+        validate_outbound_url(url)
+        
         with requests.Session() as session:
             session.trust_env = self.policy.trust_env and not self._should_bypass_proxy(url)
             session.headers.update(self.headers)

@@ -411,6 +411,14 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     private MediaGatewayProbeResult probeMediaGateway(String baseUrl, String apiKey) {
         String probeUrl = com.aiminilab.aitoolmarket.agent.support.OpenAiCompatibleModelsEndpoint.resolve(baseUrl);
+        
+        // SSRF protection: validate URL before sending
+        try {
+            com.aiminilab.aitoolmarket.security.SsrfGuard.validate(probeUrl);
+        } catch (com.aiminilab.aitoolmarket.security.SsrfGuard.SsrfException e) {
+            return new MediaGatewayProbeResult(false, "SSRF protection: " + e.getMessage());
+        }
+        
         try {
             java.net.http.HttpClient client = com.aiminilab.aitoolmarket.agent.support.OutboundHttpClientFactory
                     .create(java.time.Duration.ofSeconds(8));
