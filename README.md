@@ -177,11 +177,13 @@ python -c "import yaml, pathlib; yaml.safe_load(pathlib.Path('docs/api/openapi.y
 
 | 文档 | 说明 |
 | --- | --- |
+| [docs/README.md](docs/README.md) | 文档状态总览：当前有效入口、历史记录和过期结论收口 |
 | [docs/项目整体架构说明.md](docs/项目整体架构说明.md) | 总分结构的架构、模块详情、调用链路与优化建议 |
 | [docs/agent/README.md](docs/agent/README.md) | Agent 文档入口：架构与维护指南、链路梳理、历史记录 |
 | [docs/api/openapi.yml](docs/api/openapi.yml) | API 契约 |
 | [docs/配置包导入导出-维护指南.md](docs/配置包导入导出-维护指南.md) | 配置包 JSON 格式、跨环境导入导出、密钥与 prune 运维说明 |
 | [docs/统一API管理-开发文档.md](docs/统一API管理-开发文档.md) | 统一 API 与模型供应商协议映射 |
+| [docs/商业上线P0发布门禁-2026-06-30.md](docs/商业上线P0发布门禁-2026-06-30.md) | 商业上线前安全、队列、任务结算、mock/legacy 和发布核对清单 |
 | [docs/比例Auto规则.md](docs/比例Auto规则.md) | 比例控件、`auto` 语义和新模型接入检查清单 |
 | [docs/图片编辑批量补全配置.md](docs/图片编辑批量补全配置.md) | 图片编辑批量补全 `topUpEditBatch` 的账号级配置规则 |
 | [docs/Agent优化与工作区整理-2026-06-04.md](docs/Agent优化与工作区整理-2026-06-04.md) | Agent 记忆、工具调用和工作区整理记录 |

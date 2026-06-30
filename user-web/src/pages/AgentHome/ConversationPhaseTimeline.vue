@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue"
-import { Layers, X } from "lucide-vue-next"
+import { computed, onMounted, onUnmounted, ref } from "vue"
+import { X } from "lucide-vue-next"
 import type { ConversationPhase } from "@/utils/conversationPhases"
 import { selectionTick } from "@/utils/haptic"
 
-defineProps<{
+const props = defineProps<{
   phases: ConversationPhase[]
 }>()
 
@@ -13,6 +13,8 @@ const emit = defineEmits<{
 }>()
 
 const open = ref(false)
+const compactPhases = computed(() => props.phases.slice(0, 7))
+const compactLabel = computed(() => props.phases[0]?.label ?? "对话目录")
 
 function toggle() {
   open.value = !open.value
@@ -71,7 +73,18 @@ function phaseIcon(type: ConversationPhase["type"]) {
       title="对话目录"
       @click="toggle"
     >
-      <Layers class="h-4 w-4" />
+      <span class="phase-timeline__rail" aria-hidden="true">
+        <span
+          v-for="phase in compactPhases"
+          :key="phase.id"
+          class="phase-timeline__rail-line"
+          :class="`phase-timeline__rail-line--${phase.type}`"
+        />
+      </span>
+      <span class="phase-timeline__peek" aria-hidden="true">
+        <strong>{{ compactLabel }}</strong>
+        <span>{{ phases.length }} 个节点</span>
+      </span>
     </button>
 
     <Transition name="phase-overlay">
@@ -113,27 +126,150 @@ function phaseIcon(type: ConversationPhase["type"]) {
 }
 
 .phase-timeline__toggle {
-  width: 36px;
-  height: 36px;
-  border-radius: 999px;
-  border: 1px solid rgb(255 255 255 / 0.12);
-  background: rgb(24 24 28 / 0.88);
-  color: rgb(255 255 255 / 0.55);
+  position: relative;
+  width: 44px;
+  height: 122px;
+  border-radius: 18px;
+  border: 1px solid rgb(255 255 255 / 0.11);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.075), rgb(255 255 255 / 0.035)),
+    rgb(17 19 25 / 0.78);
+  color: rgb(255 255 255 / 0.62);
   display: grid;
   place-items: center;
   cursor: pointer;
-  backdrop-filter: blur(12px);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
-  transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+  overflow: visible;
+  backdrop-filter: blur(18px) saturate(135%);
+  box-shadow:
+    0 18px 44px rgb(0 0 0 / 0.34),
+    inset 0 1px 0 rgb(255 255 255 / 0.06);
+  transition:
+    color 0.18s ease,
+    background 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .phase-timeline__toggle:hover,
 .phase-timeline__toggle--open {
-  transform: translateY(-2px);
+  transform: translateY(-2px) translateX(-2px);
   color: var(--agent-accent);
   border-color: var(--agent-accent-soft);
-  background: rgb(24 24 28 / 0.92);
-  box-shadow: 0 8px 28px var(--agent-accent-glow);
+  background:
+    radial-gradient(circle at 50% 18%, var(--agent-composer-tint), transparent 48%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.10), rgb(255 255 255 / 0.04)),
+    rgb(17 19 25 / 0.86);
+  box-shadow:
+    0 20px 52px rgb(0 0 0 / 0.38),
+    0 0 30px var(--agent-accent-glow);
+}
+
+.phase-timeline__rail {
+  position: relative;
+  width: 20px;
+  height: 78px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+}
+
+.phase-timeline__rail::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, transparent, rgb(255 255 255 / 0.62), transparent);
+  opacity: 0.5;
+}
+
+.phase-timeline__rail-line {
+  width: 12px;
+  height: 2px;
+  margin-left: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.42;
+  box-shadow: 0 0 10px transparent;
+}
+
+.phase-timeline__rail-line:nth-child(3n + 1) {
+  width: 7px;
+}
+
+.phase-timeline__rail-line:nth-child(3n + 2) {
+  width: 15px;
+}
+
+.phase-timeline__rail-line--user_prompt,
+.phase-timeline__rail-line--generation {
+  opacity: 0.82;
+  color: var(--agent-accent);
+  box-shadow: 0 0 10px var(--agent-accent-glow);
+}
+
+.phase-timeline__rail-line--session_start {
+  width: 6px;
+  height: 6px;
+  margin-left: 5px;
+  border: 1px solid var(--agent-accent);
+  background: transparent;
+  opacity: 0.9;
+}
+
+.phase-timeline__peek {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 12px);
+  width: 238px;
+  min-height: 76px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 7px;
+  padding: 14px 16px;
+  border: 1px solid rgb(255 255 255 / 0.10);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.08), rgb(255 255 255 / 0.04)),
+    rgb(20 22 28 / 0.92);
+  color: rgb(255 255 255 / 0.72);
+  text-align: left;
+  box-shadow: 0 18px 54px rgb(0 0 0 / 0.34);
+  backdrop-filter: blur(18px) saturate(130%);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(8px, -50%) scale(0.98);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.phase-timeline__peek strong,
+.phase-timeline__peek span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phase-timeline__peek strong {
+  color: rgb(255 255 255 / 0.88);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.phase-timeline__peek span {
+  color: rgb(255 255 255 / 0.48);
+  font-size: 12px;
+}
+
+.phase-timeline__toggle:hover .phase-timeline__peek,
+.phase-timeline__toggle:focus-visible .phase-timeline__peek {
+  opacity: 1;
+  transform: translate(0, -50%) scale(1);
 }
 
 .phase-timeline__backdrop {
@@ -279,8 +415,17 @@ function phaseIcon(type: ConversationPhase["type"]) {
 
 @media (max-width: 720px) {
   .phase-timeline__toggle {
-    width: 34px;
-    height: 34px;
+    width: 38px;
+    height: 96px;
+    border-radius: 16px;
+  }
+
+  .phase-timeline__rail {
+    height: 62px;
+  }
+
+  .phase-timeline__peek {
+    display: none;
   }
 }
 </style>

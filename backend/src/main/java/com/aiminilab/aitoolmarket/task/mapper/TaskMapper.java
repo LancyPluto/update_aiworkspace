@@ -199,6 +199,21 @@ public interface TaskMapper extends BaseMapper<AiTask> {
                               @Param("offset") int offset);
 
     @Select("""
+            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality,
+                   COALESCE(model_config.display_name, model_config.model_name) AS model_config_name,
+                   model_config.model_name AS model_name
+            FROM ai_tasks t
+            JOIN ai_tools tool ON tool.id = t.tool_id
+            LEFT JOIN agent_model_configs model_config ON model_config.id = t.model_config_id
+              AND COALESCE(model_config.is_deleted, 0) = 0
+            WHERE t.status IN ('QUEUED', 'PROCESSING')
+              AND COALESCE(t.updated_at, t.started_at, t.queued_at, t.created_at) < #{cutoff}
+            ORDER BY t.id ASC
+            LIMIT #{limit}
+            """)
+    List<AiTask> findStaleActiveTasks(@Param("cutoff") LocalDateTime cutoff, @Param("limit") int limit);
+
+    @Select("""
             <script>
             SELECT COUNT(*)
             FROM ai_tasks t

@@ -58,6 +58,8 @@ class PptAdminWorkflowServiceTest {
 
         assertTrue(merged.contains("运营说明"));
         assertTrue(merged.contains("\"OUTLINE\""));
+        assertTrue(merged.contains("tool-integration"));
+        assertTrue(!merged.contains("ppt-workflow"));
         assertTrue(new PptWorkflowService(null, new PptEngineProperties(), new ObjectMapper())
                 .parseWorkflow(merged)
                 .map(w -> w.getSteps().size())

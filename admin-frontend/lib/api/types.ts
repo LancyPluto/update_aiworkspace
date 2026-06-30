@@ -687,6 +687,7 @@ export interface ConfigBundle {
   version: number
   exportedAt?: string
   exportedBy?: string | null
+  exportScope?: "FULL" | "SELECTED_TOOLS" | string | null
   secretsRedacted?: boolean
   settings?: Record<string, string>
   vendorAccounts?: ConfigBundleVendorAccount[]

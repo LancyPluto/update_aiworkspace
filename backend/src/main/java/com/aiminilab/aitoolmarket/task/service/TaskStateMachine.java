@@ -10,7 +10,7 @@ import java.util.Set;
 public final class TaskStateMachine {
 
     private static final Map<String, Set<String>> ALLOWED_TRANSITIONS = Map.of(
-            TaskStatus.QUEUED.name(), Set.of(TaskStatus.PROCESSING.name(), TaskStatus.CANCELLED.name()),
+            TaskStatus.QUEUED.name(), Set.of(TaskStatus.PROCESSING.name(), TaskStatus.CANCELLED.name(), TaskStatus.TIMEOUT.name()),
             TaskStatus.PROCESSING.name(), Set.of(
                     TaskStatus.SUCCESS.name(),
                     TaskStatus.FAILED.name(),

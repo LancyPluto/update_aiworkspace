@@ -1,8 +1,25 @@
 import { http } from './http'
 import type { ConfigBundle, ConfigBundleImportResult } from './types'
 
-export function exportConfigBundle(includeSecrets = false) {
-  return http.get<ConfigBundle>(`/api/admin/v1/config-bundles/export?includeSecrets=${includeSecrets ? 'true' : 'false'}`)
+export interface ConfigBundleExportOptions {
+  includeSecrets?: boolean
+  toolCodes?: string[]
+  includeMediaAssets?: boolean
+}
+
+export function exportConfigBundle(options: boolean | ConfigBundleExportOptions = false) {
+  const normalized: ConfigBundleExportOptions = typeof options === 'boolean' ? { includeSecrets: options } : options
+  const params = new URLSearchParams()
+  params.set('includeSecrets', normalized.includeSecrets ? 'true' : 'false')
+  if (normalized.includeMediaAssets !== undefined) {
+    params.set('includeMediaAssets', normalized.includeMediaAssets ? 'true' : 'false')
+  }
+  for (const toolCode of normalized.toolCodes || []) {
+    if (toolCode.trim()) {
+      params.append('toolCodes', toolCode.trim())
+    }
+  }
+  return http.get<ConfigBundle>(`/api/admin/v1/config-bundles/export?${params.toString()}`)
 }
 
 export function importConfigBundle(bundle: ConfigBundle) {

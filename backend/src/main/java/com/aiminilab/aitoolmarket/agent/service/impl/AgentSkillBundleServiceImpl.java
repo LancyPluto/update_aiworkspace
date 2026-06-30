@@ -106,6 +106,9 @@ public class AgentSkillBundleServiceImpl implements AgentSkillBundleService {
                 }
             }
         }
+        if (visibleToolCodes.isEmpty()) {
+            return List.of();
+        }
         List<AgentSkillDescriptorResponse> result = new ArrayList<>();
         Set<String> emitted = new LinkedHashSet<>();
         for (AgentSkillBundle bundle : mapper.selectPublished()) {
@@ -113,7 +116,7 @@ public class AgentSkillBundleServiceImpl implements AgentSkillBundleService {
                 continue;
             }
             List<String> toolCodes = readStringList(bundle.getToolCodesJson());
-            boolean matched = visibleToolCodes.isEmpty() || visibleToolCodes.stream().anyMatch(code -> matchesAny(code, toolCodes));
+            boolean matched = visibleToolCodes.stream().anyMatch(code -> matchesAny(code, toolCodes));
             if (!matched) {
                 continue;
             }

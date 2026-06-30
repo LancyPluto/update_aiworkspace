@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/admin/v1/config-bundles")
 public class AdminConfigBundleController {
@@ -24,8 +26,11 @@ public class AdminConfigBundleController {
 
     @GetMapping("/export")
     public ApiResponse<ConfigBundleDto> exportBundle(
-            @RequestParam(name = "includeSecrets", defaultValue = "false") boolean includeSecrets) {
-        return ApiResponse.success(configBundleService.exportBundle(AuthContext.get().userId(), includeSecrets));
+            @RequestParam(name = "includeSecrets", defaultValue = "false") boolean includeSecrets,
+            @RequestParam(name = "toolCodes", required = false) List<String> toolCodes,
+            @RequestParam(name = "includeMediaAssets", defaultValue = "true") boolean includeMediaAssets) {
+        return ApiResponse.success(configBundleService.exportBundle(
+                AuthContext.get().userId(), includeSecrets, toolCodes, includeMediaAssets));
     }
 
     @PostMapping("/import")

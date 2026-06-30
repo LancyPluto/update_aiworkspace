@@ -18,6 +18,26 @@ def _bool(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _is_production_env(app_env: str) -> bool:
+    return _bool("APP_PRODUCTION_MODE", False) or app_env.strip().lower() == "production"
+
+
+def _is_missing_or_placeholder(value: str | None, *placeholders: str) -> bool:
+    normalized = (value or "").strip()
+    return not normalized or normalized in placeholders or normalized.startswith("replace-with-")
+
+
+def validate_startup_settings(settings: "Settings") -> None:
+    if not _is_production_env(settings.app_env):
+        return
+    if _is_missing_or_placeholder(settings.internal_api_token, "local-internal-token"):
+        raise RuntimeError("Production mode requires a non-default INTERNAL_API_TOKEN")
+    if settings.model_provider.strip().lower() == "mock":
+        raise RuntimeError("Production mode does not allow MODEL_PROVIDER=mock")
+    if _is_missing_or_placeholder(settings.model_api_key, "replace-with-model-key"):
+        raise RuntimeError("Production mode requires a real MODEL_API_KEY")
+
+
 @dataclass(slots=True)
 class Settings:
     app_env: str = os.getenv("APP_ENV", "local")
@@ -98,3 +118,4 @@ class Settings:
 
 
 settings = Settings()
+validate_startup_settings(settings)

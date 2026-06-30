@@ -178,6 +178,36 @@ def test_trim_tool_parameters_options_to_enum():
     assert "label" not in str(out)
 
 
+def test_trim_tool_parameters_keeps_custom_mode_even_with_default_strategy():
+    schema = {
+        "type": "object",
+        "required": ["prompt", "customMode"],
+        "properties": {
+            "prompt": {"type": "string", "title": "音乐描述 / 歌词", "x-agent-fill-strategy": "derive"},
+            "customMode": {
+                "type": "boolean",
+                "title": "创作模式",
+                "description": "常规：仅描述想法；高级：自定义歌词、风格与标题",
+                "enum": [False, True],
+                "default": False,
+                "x-agent-fill-strategy": "default",
+            },
+            "quality": {
+                "type": "string",
+                "enum": ["low", "high"],
+                "default": "low",
+                "x-agent-fill-strategy": "default",
+            },
+        },
+    }
+
+    out = trim_tool_parameters(schema, prune_fields=True)
+
+    assert out["properties"]["customMode"]["type"] == "boolean"
+    assert out["properties"]["customMode"]["enum"] == [False, True]
+    assert "quality" not in out["properties"]
+
+
 def test_trim_tool_parameters_empty_falls_back_to_generic():
     out = trim_tool_parameters({"type": "object", "properties": {}}, prune_fields=True)
     assert "userRequest" in out["properties"]

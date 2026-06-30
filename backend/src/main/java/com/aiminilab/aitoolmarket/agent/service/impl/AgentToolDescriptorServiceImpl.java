@@ -456,13 +456,18 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
             if (field.placeholder() != null && !field.placeholder().isBlank()) {
                 property.put("description", field.placeholder());
             }
-            if (supportsEnum(field.fieldType()) && field.options() != null && field.options().isArray()) {
+            JsonNode options = enumOptions(field.options());
+            boolean booleanEnum = isBooleanModeField(field) && allBooleanEnumOptions(options);
+            if (booleanEnum) {
+                property.put("type", "boolean");
+            }
+            if (supportsEnum(field.fieldType()) && options != null && options.isArray()) {
                 ArrayNode enumValues = objectMapper.createArrayNode();
-                field.options().forEach(option -> {
+                options.forEach(option -> {
                     if (option.isTextual()) {
-                        enumValues.add(option.asText());
+                        addEnumValue(enumValues, option.asText(), booleanEnum);
                     } else if (option.has("value")) {
-                        enumValues.add(option.get("value").asText());
+                        addEnumValue(enumValues, option.get("value").asText(), booleanEnum);
                     }
                 });
                 if (!enumValues.isEmpty()) {
@@ -470,7 +475,11 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                 }
             }
             if (field.defaultValue() != null && !field.defaultValue().isBlank()) {
-                property.put("default", field.defaultValue());
+                if (booleanEnum) {
+                    property.put("default", booleanEnumValue(field.defaultValue()));
+                } else {
+                    property.put("default", field.defaultValue());
+                }
             }
             property.put("x-user-required", Boolean.TRUE.equals(field.userRequired() == null ? field.required() : field.userRequired()));
             property.put("x-agent-fill-strategy", field.agentFillStrategy() == null || field.agentFillStrategy().isBlank()
@@ -725,5 +734,48 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
         return "select".equalsIgnoreCase(fieldType)
                 || "radio".equalsIgnoreCase(fieldType)
                 || "aspect_ratio".equalsIgnoreCase(fieldType);
+    }
+
+    private JsonNode enumOptions(JsonNode options) {
+        if (options == null) {
+            return null;
+        }
+        if (options.isArray()) {
+            return options;
+        }
+        JsonNode nested = options.get("options");
+        return nested != null && nested.isArray() ? nested : null;
+    }
+
+    private boolean isBooleanModeField(ToolFieldResponse field) {
+        String key = field.fieldKey() == null ? "" : field.fieldKey().trim().toLowerCase();
+        return "custommode".equals(key) || "custom_mode".equals(key);
+    }
+
+    private boolean allBooleanEnumOptions(JsonNode options) {
+        if (options == null || !options.isArray() || options.isEmpty()) {
+            return false;
+        }
+        for (JsonNode option : options) {
+            String value = option.isTextual()
+                    ? option.asText()
+                    : option.has("value") ? option.get("value").asText() : "";
+            if (!"true".equalsIgnoreCase(value) && !"false".equalsIgnoreCase(value)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void addEnumValue(ArrayNode enumValues, String value, boolean asBoolean) {
+        if (asBoolean) {
+            enumValues.add(booleanEnumValue(value));
+        } else {
+            enumValues.add(value);
+        }
+    }
+
+    private boolean booleanEnumValue(String value) {
+        return "true".equalsIgnoreCase(value) || "1".equals(value) || "yes".equalsIgnoreCase(value) || "on".equalsIgnoreCase(value);
     }
 }

@@ -425,7 +425,28 @@ class OpenAIImagesClient:
                     _redact_url(url),
                 )
                 time.sleep(min(2.0, float(attempt)))
-            except (RequestsConnectionError, ChunkedEncodingError, OpenAIImagesRetryableServerError) as exc:
+            except (RequestsConnectionError, ChunkedEncodingError) as exc:
+                if self._is_non_retryable_response_read_error(exc):
+                    raise OpenAIImagesError(
+                        "openai images response ended before the image result could be read; "
+                        "not retrying this non-idempotent image request to avoid duplicate upstream billing. "
+                        f"detail={exc}"
+                    ) from exc
+                if conn_budget <= 0:
+                    raise OpenAIImagesError(f"openai images request failed: {exc}") from exc
+                conn_budget -= 1
+                conn_retry_index += 1
+                backoff = self._compute_backoff(conn_retry_index)
+                LOGGER.warning(
+                    "openai images transport retry scheduled reason=%s attempt=%s retriesRemaining=%s backoff=%.1fs url=%s",
+                    exc,
+                    attempt + 1,
+                    conn_budget,
+                    backoff,
+                    _redact_url(url),
+                )
+                time.sleep(backoff)
+            except OpenAIImagesRetryableServerError as exc:
                 if conn_budget <= 0:
                     raise OpenAIImagesError(f"openai images request failed: {exc}") from exc
                 conn_budget -= 1
@@ -710,7 +731,28 @@ class OpenAIImagesClient:
                     _redact_url(url),
                 )
                 time.sleep(min(2.0, float(attempt)))
-            except (RequestsConnectionError, ChunkedEncodingError, OpenAIImagesRetryableServerError) as exc:
+            except (RequestsConnectionError, ChunkedEncodingError) as exc:
+                if self._is_non_retryable_response_read_error(exc):
+                    raise OpenAIImagesError(
+                        "openai images edit response ended before the image result could be read; "
+                        "not retrying this non-idempotent image request to avoid duplicate upstream billing. "
+                        f"detail={exc}"
+                    ) from exc
+                if conn_budget <= 0:
+                    raise OpenAIImagesError(f"openai images edit request failed: {exc}") from exc
+                conn_budget -= 1
+                conn_retry_index += 1
+                backoff = self._compute_backoff(conn_retry_index)
+                LOGGER.warning(
+                    "openai images transport retry scheduled reason=%s attempt=%s retriesRemaining=%s backoff=%.1fs url=%s",
+                    exc,
+                    attempt + 1,
+                    conn_budget,
+                    backoff,
+                    _redact_url(url),
+                )
+                time.sleep(backoff)
+            except OpenAIImagesRetryableServerError as exc:
                 if conn_budget <= 0:
                     raise OpenAIImagesError(f"openai images edit request failed: {exc}") from exc
                 conn_budget -= 1
@@ -1022,6 +1064,11 @@ class OpenAIImagesClient:
             return False
         return 500 <= status_code < 600
 
+    def _is_non_retryable_response_read_error(self, exc: BaseException) -> bool:
+        if _as_bool(self.extra_auth.get("retryIncompleteResponses"), False):
+            return False
+        return _is_response_incomplete_error(exc)
+
     def _resolve_quality(self, quality: str | None, *, required: bool = False) -> str:
         force_quality = str(self.extra_auth.get("forceQuality") or "").strip()
         max_quality = str(self.extra_auth.get("maxQuality") or "").strip()
@@ -1291,6 +1338,15 @@ def _response_format_for_log(payload: dict[str, Any]) -> str:
 def _is_ssl_eof_error(exc: BaseException) -> bool:
     message = str(exc).lower()
     return "eof occurred in violation of protocol" in message or "ssleoferror" in message
+
+
+def _is_response_incomplete_error(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return (
+        "incompleteread" in message
+        or "response ended prematurely" in message
+        or "connection broken" in message and "read" in message
+    )
 
 
 def _timeout_kind(exc: Timeout) -> str:
