@@ -9,18 +9,18 @@ const props = defineProps<{
   tool: ToolCardModel
 }>()
 
-const fallbackAsImage = ref(false)
+const coverFailed = ref(false)
 const launchOpen = ref(false)
 
 /** 工具统一弹出配置悬浮框（PPT 独立工作台已下线） */
 const usesWorkspaceRoute = computed(() => false)
-const hasRenderableCover = computed(() => Boolean(props.tool.image || fallbackAsImage.value))
+const hasRenderableCover = computed(() => Boolean(props.tool.image && props.tool.image !== "" && !coverFailed.value))
 
 function handleCoverError(event: Event) {
   const media = event.target as HTMLImageElement | HTMLVideoElement | null
   if (!media || media.dataset.fallbackApplied === "1") return
   media.dataset.fallbackApplied = "1"
-  fallbackAsImage.value = true
+  coverFailed.value = true
 }
 
 function openLaunch() {
@@ -32,9 +32,8 @@ function openLaunch() {
   <article class="workspace-official-tool-card">
     <div class="workspace-official-tool-image">
       <template v-if="hasRenderableCover">
-        <!-- v-if="tool.mediaType === 'video'" -->
         <video
-          v-if="tool.mediaType === 'video' && !fallbackAsImage"
+          v-if="tool.mediaType === 'video'"
           :src="tool.image"
           class="workspace-tool-media"
           muted
@@ -46,7 +45,7 @@ function openLaunch() {
         />
         <img
           v-else
-          :src="fallbackAsImage ? DEFAULT_TOOL_COVER_URL : tool.image"
+          :src="tool.image"
           :alt="tool.title"
           class="workspace-tool-media"
           @error="handleCoverError"

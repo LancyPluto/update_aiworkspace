@@ -198,10 +198,21 @@ echo "Applying pending SQL migrations ..."
 docker compose "\${COMPOSE_ARGS[@]}" up -d mysql
 bash "\$REMOTE_DIR/deploy/scripts/apply_sql_migrations.sh"
 
+# Parallel build: launch all builds concurrently, then wait.
+echo "Building services in parallel: \$DEPLOY_SERVICES"
+pids=()
 for svc in \$DEPLOY_SERVICES; do
-  echo "Building \$svc ..."
-  docker compose "\${COMPOSE_ARGS[@]}" build "\$svc" || true
+  echo "  Starting build: \$svc"
+  docker compose "\${COMPOSE_ARGS[@]}" build "\$svc" &
+  pids+=(\$!)
 done
+failed=0
+for pid in "\${pids[@]}"; do
+  wait "\$pid" || failed=1
+done
+if [ "\$failed" -ne 0 ]; then
+  echo "::warning::One or more builds failed, continuing with recreate..."
+fi
 
 echo "Force-recreating containers: \$DEPLOY_SERVICES"
 docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate \$DEPLOY_SERVICES
@@ -216,14 +227,14 @@ if echo "\$DEPLOY_SERVICES" | grep -qw user-web; then
   docker compose "\${COMPOSE_ARGS[@]}" restart nginx || true
 fi
 
-echo "Waiting for user-web health..."
-for i in \$(seq 1 36); do
+echo "Waiting for services health..."
+for i in \$(seq 1 12); do
   health="\$(docker inspect --format '{{.State.Health.Status}}' ai-supermarket-user-web 2>/dev/null || echo missing)"
-  echo "  attempt \$i: user-web=\$health"
+  echo "  attempt \$i/12: user-web=\$health"
   if [[ "\$health" == "healthy" ]]; then
     break
   fi
-  sleep 10
+  sleep 5
 done
 
 curl -sf -o /dev/null -w "root:%{http_code}\n" http://127.0.0.1/ || true

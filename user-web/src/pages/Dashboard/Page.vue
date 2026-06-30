@@ -73,6 +73,7 @@ import {
 } from "./dashboardAttribution"
 import { buildDashboardTaskParams, buildOptimisticDashboardTask } from "./dashboardTaskFactory"
 import { normalizeMediaUrl } from "@/utils/toolCoverMedia"
+import { resolveCommunityDerivativeUrl, resolveOssVideoPosterUrl } from "@/utils/communityPostMedia"
 import { forceDownload } from "@/utils/download"
 import { isWorkflowToolCode } from "@/adapters/toolPresentationAdapter"
 import { taskFailureHint, taskProgressMessage } from "@/utils/taskStatusLabels"
@@ -1847,7 +1848,6 @@ onUnmounted(() => {
                       <Sparkles class="h-10 w-10 text-white/48" />
                     </div>
                     <span class="marketplace-modality-badge">{{ modalityLabel(tool.outputModality) }}</span>
-                    <span class="marketplace-cost-badge"><Zap class="h-3 w-3" />{{ formatMarketplaceCostLabel(tool) }}</span>
                   </div>
                   <div class="marketplace-tool-overlay">
                     <div class="marketplace-tool-content">
@@ -2389,7 +2389,7 @@ onUnmounted(() => {
                         <img
                           v-for="image in imageItemsForBlocks(item.blocks)"
                           :key="image.url"
-                          :src="image.url"
+                          :src="resolveCommunityDerivativeUrl(image.url, 'image-thumb') || image.url"
                           :alt="image.label || item.task.toolName"
                           class="dashboard-feed-image"
                           loading="lazy"
@@ -2401,9 +2401,10 @@ onUnmounted(() => {
                       <video
                         v-else-if="videoUrlForBlocks(item.blocks)"
                         :src="videoUrlForBlocks(item.blocks)"
+                        :poster="resolveOssVideoPosterUrl(videoUrlForBlocks(item.blocks))"
                         controls
                         playsinline
-                        preload="metadata"
+                        preload="none"
                         class="max-h-[420px] w-full rounded-2xl bg-black object-contain"
                         @loadedmetadata="handleHistoryFeedMediaLoaded"
                       />
@@ -2575,7 +2576,7 @@ onUnmounted(() => {
                         </div>
                       </template>
                       <template v-else-if="primaryBlock(item.blocks)?.type === 'video'">
-                        <video :src="primaryBlock(item.blocks)?.url" controls playsinline preload="metadata" class="block aspect-[4/3] w-full bg-black object-contain" />
+                        <video :src="primaryBlock(item.blocks)?.url" :poster="resolveOssVideoPosterUrl(primaryBlock(item.blocks)?.url)" controls playsinline preload="metadata" class="block aspect-[4/3] w-full bg-black object-contain" />
                       </template>
                       <template v-else-if="primaryBlock(item.blocks)?.type === 'audio'">
                         <div class="space-y-4 bg-white/[0.05] p-4 pt-12">
@@ -3029,7 +3030,6 @@ onUnmounted(() => {
                               <Sparkles class="h-10 w-10 text-white/48" />
                             </div>
                             <span class="marketplace-modality-badge">{{ modalityLabel(tool.outputModality) }}</span>
-                            <span class="marketplace-cost-badge"><Zap class="h-3 w-3" />{{ formatMarketplaceCostLabel(tool) }}</span>
                           </div>
                           <div class="marketplace-tool-overlay">
                             <div class="marketplace-tool-content">

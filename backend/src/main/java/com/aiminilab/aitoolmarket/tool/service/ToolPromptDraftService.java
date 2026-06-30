@@ -6,6 +6,7 @@ import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.ModelConfigCredentialResolver;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.common.util.UrlSecurityValidator;
 import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.tool.dto.ToolPromptDraftFieldRequest;
 import com.aiminilab.aitoolmarket.tool.dto.ToolPromptDraftRequest;
@@ -277,7 +278,11 @@ public class ToolPromptDraftService {
         if (value == null) {
             return null;
         }
-        if (value.startsWith("data:image/") || value.startsWith("http://") || value.startsWith("https://")) {
+        if (value.startsWith("data:image/")) {
+            return value;
+        }
+        if (value.startsWith("http://") || value.startsWith("https://")) {
+            UrlSecurityValidator.validate(value);
             return value;
         }
         if (!value.startsWith("/generated/")) {

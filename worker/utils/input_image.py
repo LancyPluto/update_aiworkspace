@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import requests
 
 from config import settings
+from utils.url_security import safe_get, UrlSecurityError
 
 
 class InputImageError(RuntimeError):
@@ -87,7 +88,7 @@ def _download_to_data_url(value: str, *, session: requests.Session | None = None
     content_type: str | None = None
     chunks: list[bytes] = []
     try:
-        with http.get(url, stream=True, timeout=(10, 120)) as response:
+        with safe_get(url, session=http, stream=True, timeout=(10, 120)) as response:
             response.raise_for_status()
             content_type = response.headers.get("Content-Type")
             total = 0
@@ -100,6 +101,8 @@ def _download_to_data_url(value: str, *, session: requests.Session | None = None
                 chunks.append(chunk)
     except InputImageError:
         raise
+    except UrlSecurityError as exc:
+        raise InputImageError(f"reference image URL rejected for security: {exc}") from exc
     except requests.RequestException as exc:
         raise InputImageError(f"could not download reference image: {value}") from exc
     return _bytes_to_data_url(b"".join(chunks), content_type)
