@@ -3,7 +3,6 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import {
   AlertTriangle,
   Check,
-  Database,
   Loader2,
   Pencil,
   Pin,
@@ -28,8 +27,6 @@ import AgentComposer from "./AgentComposer.vue"
 import AgentMessageRow from "./AgentMessageRow.vue"
 import AgentAvatar from "./AgentAvatar.vue"
 import AgentAmbientBackground from "./AgentAmbientBackground.vue"
-import ConversationScrollNav from "./ConversationScrollNav.vue"
-import ConversationPhaseTimeline from "./ConversationPhaseTimeline.vue"
 import RunTimeline from "./RunTimeline.vue"
 import { filterUserFacingRunEvents } from "./runTimelineEvents"
 import AgentToolConfirmationList from "./AgentToolConfirmationList.vue"
@@ -38,8 +35,7 @@ import CreditRechargeModal from "@/components/CreditRechargeModal.vue"
 import { formatAgentRunFailure } from "@/api/errorMapping"
 import { isCreditInsufficient } from "@/utils/creditInsufficient"
 import {
-  buildConversationPhases,
-  buildScrollNavNodes,
+  truncateSemanticLabel,
 } from "@/utils/conversationPhases"
 import { fetchAgentFilePreviewUrl, isImageAttachment, resolveAgentFileUrl, revokeAgentFilePreviewUrl } from "@/utils/agentAttachment"
 import type { AgentAvatarState } from "./AgentAvatar.vue"
@@ -139,6 +135,19 @@ interface MessageBranchGroup {
 interface BranchSwitcherState {
   activeIndex: number
   total: number
+}
+
+type MinimapNodeKind = "system" | "user"
+
+interface ConversationMinimapNode {
+  id: string
+  messageId: number
+  kind: MinimapNodeKind
+  index: number
+  total: number
+  title: string
+  excerpt: string
+  label: string
 }
 
 const emit = defineEmits<{
@@ -492,7 +501,11 @@ const composerScrollInset = ref(210)
 let composerResizeObserver: ResizeObserver | null = null
 const scrollOffset = ref(0)
 const stickToBottom = ref(true)
-const navLayoutTick = ref(0)
+const minimapDrawerOpen = ref(false)
+const hoveredMinimapNodeId = ref<string | null>(null)
+const hoverCardTop = ref(160)
+const activeMinimapMessageId = ref<number | null>(null)
+let minimapIntersectionObserver: IntersectionObserver | null = null
 const messagesKey = computed(() => `agent_messages_${props.sessionId}`)
 const branchStorageKey = computed(() => `agent_message_branches_${props.sessionId}`)
 const sessionAssetsForComposer = computed(() => collectSessionAssets(messages.value))
@@ -644,22 +657,38 @@ const ambientState = computed(() => {
   return "idle" as const
 })
 
-const conversationPhases = computed(() =>
-  buildConversationPhases(messages.value, events.value),
+const conversationMinimapNodes = computed<ConversationMinimapNode[]>(() => {
+  const raw: Omit<ConversationMinimapNode, "index" | "total">[] = []
+  for (const message of messages.value) {
+    const isUser = message.role === "USER"
+    const title = isUser ? "用户" : "系统"
+    raw.push({
+      id: `message-${message.id}`,
+      messageId: message.id,
+      kind: isUser ? "user" : "system",
+      title,
+      excerpt: truncateSemanticLabel(message.contentText || "空消息", 26),
+      label: `${title}：${truncateSemanticLabel(message.contentText || "空消息", 22)}`,
+    })
+  }
+  const total = raw.length
+  return raw.map((node, index) => ({
+    ...node,
+    index: index + 1,
+    total,
+  }))
+})
+
+const hoveredMinimapNode = computed(() =>
+  conversationMinimapNodes.value.find((node) => node.id === hoveredMinimapNodeId.value) ?? null,
 )
 
-const scrollNavNodes = computed(() => {
-  void navLayoutTick.value
-  const container = messageContainerRef.value
-  if (!container) return []
-  const scrollHeight = container.scrollHeight
-  const offsets = new Map<number, number>()
-  for (const message of messages.value) {
-    const el = container.querySelector(`[data-message-id="${message.id}"]`) as HTMLElement | null
-    if (el) offsets.set(message.id, el.offsetTop)
-  }
-  return buildScrollNavNodes(messages.value, events.value, scrollHeight, offsets)
+const activeMinimapNodeId = computed(() => {
+  const activeMessageId = activeMinimapMessageId.value ?? messages.value[0]?.id
+  return conversationMinimapNodes.value.find((node) => node.messageId === activeMessageId)?.id ?? null
 })
+
+const showConversationMinimap = computed(() => conversationMinimapNodes.value.length > 1)
 
 function isMessageStreaming(message: AgentMessage) {
   return message.id === streamingAssistantMessageId.value
@@ -2795,11 +2824,15 @@ function onMessageContainerScroll() {
   if (!el) return
   scrollOffset.value = el.scrollTop
   stickToBottom.value = isNearBottom()
+  syncActiveMinimapNodeFromViewport()
   persistChatScroll()
 }
 
 function scheduleNavLayoutUpdate() {
-  navLayoutTick.value += 1
+  void nextTick(() => {
+    setupMinimapIntersectionObserver()
+    syncActiveMinimapNodeFromViewport()
+  })
 }
 
 function navigateToMessage(messageId: number) {
@@ -2807,6 +2840,84 @@ function navigateToMessage(messageId: number) {
   if (!container) return
   const el = container.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null
   el?.scrollIntoView({ behavior: "smooth", block: "center" })
+}
+
+function setMinimapHover(node: ConversationMinimapNode, event: Event) {
+  hoveredMinimapNodeId.value = node.id
+  updateMinimapHoverCardTop(event)
+}
+
+function updateMinimapHoverCardTop(event: Event) {
+  if (!("clientY" in event)) return
+  const viewportHeight = window.innerHeight || 720
+  hoverCardTop.value = Math.min(Math.max(Number(event.clientY), 116), viewportHeight - 116)
+}
+
+function clearMinimapHover() {
+  hoveredMinimapNodeId.value = null
+}
+
+function jumpToMinimapNode(node: ConversationMinimapNode) {
+  activeMinimapMessageId.value = node.messageId
+  navigateToMessage(node.messageId)
+}
+
+function toggleMinimapDrawer() {
+  minimapDrawerOpen.value = !minimapDrawerOpen.value
+}
+
+function isMinimapNodeActive(node: ConversationMinimapNode) {
+  return node.id === hoveredMinimapNodeId.value || node.id === activeMinimapNodeId.value
+}
+
+function setupMinimapIntersectionObserver() {
+  minimapIntersectionObserver?.disconnect()
+  minimapIntersectionObserver = null
+  const container = messageContainerRef.value
+  if (!container || typeof IntersectionObserver === "undefined") return
+
+  minimapIntersectionObserver = new IntersectionObserver(
+    () => syncActiveMinimapNodeFromViewport(),
+    {
+      root: container,
+      threshold: [0, 0.01, 0.1, 0.25, 0.5, 0.75, 1],
+    },
+  )
+
+  for (const message of messages.value) {
+    const el = container.querySelector(`[data-message-id="${message.id}"]`) as HTMLElement | null
+    if (el) minimapIntersectionObserver.observe(el)
+  }
+}
+
+function syncActiveMinimapNodeFromViewport() {
+  const container = messageContainerRef.value
+  if (!container || messages.value.length === 0) {
+    activeMinimapMessageId.value = null
+    return
+  }
+
+  const rootRect = container.getBoundingClientRect()
+  const visibleBottom = rootRect.bottom - Math.min(composerScrollInset.value * 0.58, rootRect.height * 0.42)
+  const viewportCenter = rootRect.top + Math.max(80, (visibleBottom - rootRect.top) * 0.5)
+  let closestMessageId: number | null = null
+  let closestDistance = Number.POSITIVE_INFINITY
+
+  for (const message of messages.value) {
+    const el = container.querySelector(`[data-message-id="${message.id}"]`) as HTMLElement | null
+    if (!el) continue
+    const rect = el.getBoundingClientRect()
+    const intersectsViewport = rect.bottom >= rootRect.top && rect.top <= visibleBottom
+    if (!intersectsViewport) continue
+    const messageCenter = rect.top + rect.height / 2
+    const distance = Math.abs(messageCenter - viewportCenter)
+    if (distance < closestDistance) {
+      closestDistance = distance
+      closestMessageId = message.id
+    }
+  }
+
+  activeMinimapMessageId.value = closestMessageId ?? messages.value.at(-1)?.id ?? null
 }
 
 async function scrollBottom(force = false) {
@@ -2848,12 +2959,23 @@ watch(messages, () => {
 }, { deep: true })
 
 watch(
+  [events, runEventsByRunId],
+  () => {
+    scheduleNavLayoutUpdate()
+  },
+  { deep: true },
+)
+
+watch(
   () => props.sessionId,
   () => {
     loadPersistedRunEventCache()
     dismissedAutoMountedReferenceKey.value = null
     stickToBottom.value = true
     scrollOffset.value = 0
+    activeMinimapMessageId.value = null
+    hoveredMinimapNodeId.value = null
+    minimapDrawerOpen.value = false
     void loadRecentAttachments()
     void loadPane()
   },
@@ -2898,6 +3020,8 @@ onUnmounted(() => {
   stopRunEventStream()
   stopRunStatusWatchdog()
   stopStreamingAnimationTimer()
+  minimapIntersectionObserver?.disconnect()
+  minimapIntersectionObserver = null
 })
 
 defineExpose({
@@ -2914,16 +3038,90 @@ defineExpose({
     <AgentAmbientBackground :ambient-state="ambientState" :scroll-offset="scrollOffset" />
 
     <div
+      v-if="showConversationMinimap"
+      class="conversation-minimap"
+      :class="{ 'conversation-minimap--drawer-open': minimapDrawerOpen }"
+      @mouseleave="clearMinimapHover"
+      @dblclick="toggleMinimapDrawer"
+    >
+      <button
+        type="button"
+        class="minimap-drawer-toggle"
+        :class="{ open: minimapDrawerOpen }"
+        aria-label="切换对话大纲"
+        @click.stop="toggleMinimapDrawer"
+      >
+        «
+      </button>
+
+      <div class="minimap-pillar" role="navigation" aria-label="长对话节点缩略导航">
+        <button
+          v-for="node in conversationMinimapNodes"
+          :key="node.id"
+          type="button"
+          class="minimap-segment"
+          :class="[
+            `minimap-segment--${node.kind}`,
+            {
+              'minimap-segment--active': isMinimapNodeActive(node),
+              'minimap-segment--muted': hoveredMinimapNodeId && hoveredMinimapNodeId !== node.id,
+            },
+          ]"
+          :aria-label="node.label"
+          @pointerenter="setMinimapHover(node, $event)"
+          @pointermove="updateMinimapHoverCardTop"
+          @focus="setMinimapHover(node, $event)"
+          @blur="clearMinimapHover"
+          @click="jumpToMinimapNode(node)"
+        />
+      </div>
+
+      <Transition name="minimap-hover-card">
+        <aside
+          v-if="hoveredMinimapNode"
+          class="minimap-hover-card"
+          :class="`minimap-hover-card--${hoveredMinimapNode.kind}`"
+          :style="{ top: `${hoverCardTop}px` }"
+        >
+          <p>{{ hoveredMinimapNode.index }}/{{ hoveredMinimapNode.total }} 节点</p>
+          <strong>{{ hoveredMinimapNode.title }}：{{ hoveredMinimapNode.excerpt }}</strong>
+        </aside>
+      </Transition>
+
+      <Transition name="minimap-outline">
+        <aside v-if="minimapDrawerOpen" class="minimap-outline" aria-label="树状对话大纲面板">
+          <header class="minimap-outline__header">
+            <div>
+              <p>Conversation map</p>
+              <h3>对话大纲</h3>
+            </div>
+            <button type="button" aria-label="收起对话大纲" @click="minimapDrawerOpen = false">×</button>
+          </header>
+
+          <ol class="minimap-outline__list">
+            <li
+              v-for="node in conversationMinimapNodes"
+              :key="`outline-${node.id}`"
+              :class="{ active: node.id === activeMinimapNodeId }"
+            >
+              <button type="button" @click="jumpToMinimapNode(node)">
+                <span class="minimap-outline__dot" :class="`minimap-outline__dot--${node.kind}`" />
+                <span>
+                  <small>{{ node.index }}/{{ node.total }} · {{ node.title }}</small>
+                  <strong>{{ node.excerpt }}</strong>
+                </span>
+              </button>
+            </li>
+          </ol>
+        </aside>
+      </Transition>
+    </div>
+
+    <div
       ref="messageContainerRef"
       class="message-container"
       @scroll.passive="onMessageContainerScroll"
     >
-      <ConversationScrollNav
-        v-if="!paneLoading && messages.length > 0"
-        :nodes="scrollNavNodes"
-        @navigate="navigateToMessage"
-      />
-
       <div v-if="paneLoading" class="empty-state">
         <Loader2 class="h-5 w-5 animate-spin" />
       </div>
@@ -3072,45 +3270,17 @@ defineExpose({
       </TransitionGroup>
     </div>
 
-    <div v-if="!paneLoading" class="chat-floating-actions">
-      <ConversationPhaseTimeline
-        v-if="messages.length > 0"
-        :phases="conversationPhases"
-        @navigate="navigateToMessage"
-      />
-      <div class="assistant-rail" :class="{ 'assistant-rail--active': memoryPanelOpen }">
-        <button
-          type="button"
-          class="assistant-rail-main"
-          aria-label="打开助手记忆"
-          title="助手"
-          @click="memoryPanelOpen ? closeMemoryPanel() : openMemoryPanel()"
-        >
-          <Database class="h-4 w-4" />
-          <span>助手</span>
-        </button>
-        <button
-          type="button"
-          class="assistant-rail-collapse"
-          aria-label="切换助手面板"
-          @click="memoryPanelOpen ? closeMemoryPanel() : openMemoryPanel()"
-        >
-          «
-        </button>
-      </div>
+    <div ref="composerDockRef" class="composer-dock">
       <button
-        v-if="messages.length > 0 && !stickToBottom"
+        v-if="!paneLoading && messages.length > 0 && !stickToBottom"
         type="button"
-        class="chat-float-btn scroll-to-bottom"
+        class="composer-scroll-to-bottom"
         aria-label="回到底部"
         title="回到底部"
         @click="stickToBottom = true; scrollBottom(true)"
       >
         ↓
       </button>
-    </div>
-
-    <div ref="composerDockRef" class="composer-dock">
       <AgentComposer
         ref="composerRef"
         :model-config-id="modelConfigId"
@@ -3178,45 +3348,46 @@ defineExpose({
       @publish="publishPreviewAsset"
       @unpublish="unpublishPreviewAsset"
     />
-    <div v-if="memoryPanelOpen" class="memory-panel-backdrop" @click.self="closeMemoryPanel">
-      <aside class="memory-panel" aria-label="Agent 长期记忆管理">
-        <header class="memory-panel-header">
-          <div>
-            <p class="memory-panel-kicker">Agent memory</p>
-            <h3>长期记忆</h3>
-            <span>只保存长期有价值的偏好、习惯和项目知识。</span>
+    <Transition name="memory-drawer">
+      <div v-if="memoryPanelOpen" class="memory-panel-backdrop" @click.self="closeMemoryPanel">
+        <aside class="memory-panel" aria-label="Agent 长期记忆管理">
+          <header class="memory-panel-header">
+            <div>
+              <p class="memory-panel-kicker">Agent memory</p>
+              <h3>长期记忆</h3>
+              <span>只保存长期有价值的偏好、习惯和项目知识。</span>
+            </div>
+            <button type="button" class="memory-icon-btn" aria-label="关闭记忆管理" @click="closeMemoryPanel">
+              <X class="h-4 w-4" />
+            </button>
+          </header>
+
+          <div class="memory-panel-controls">
+            <select
+              class="memory-select"
+              :value="memoryWorkspaceId ?? ''"
+              :disabled="memoryLoading || memoryWorkspaces.length === 0"
+              @change="changeMemoryWorkspace(($event.target as HTMLSelectElement).value)"
+            >
+              <option v-if="memoryWorkspaces.length === 0" value="">暂无工作区</option>
+              <option v-for="workspace in memoryWorkspaces" :key="workspace.id" :value="workspace.id">
+                {{ workspace.name }}
+              </option>
+            </select>
+            <button type="button" class="memory-refresh-btn" :disabled="memoryLoading" @click="loadMemoryWorkspaces">
+              <Loader2 v-if="memoryLoading" class="h-4 w-4 animate-spin" />
+              <RefreshCw v-else class="h-4 w-4" />
+            </button>
           </div>
-          <button type="button" class="memory-icon-btn" aria-label="关闭记忆管理" @click="closeMemoryPanel">
-            <X class="h-4 w-4" />
-          </button>
-        </header>
 
-        <div class="memory-panel-controls">
-          <select
-            class="memory-select"
-            :value="memoryWorkspaceId ?? ''"
-            :disabled="memoryLoading || memoryWorkspaces.length === 0"
-            @change="changeMemoryWorkspace(($event.target as HTMLSelectElement).value)"
-          >
-            <option v-if="memoryWorkspaces.length === 0" value="">暂无工作区</option>
-            <option v-for="workspace in memoryWorkspaces" :key="workspace.id" :value="workspace.id">
-              {{ workspace.name }}
-            </option>
-          </select>
-          <button type="button" class="memory-refresh-btn" :disabled="memoryLoading" @click="loadMemoryWorkspaces">
-            <Loader2 v-if="memoryLoading" class="h-4 w-4 animate-spin" />
-            <RefreshCw v-else class="h-4 w-4" />
-          </button>
-        </div>
-
-        <div class="memory-tabs">
-          <button type="button" class="memory-tab-btn" :class="{ active: memoryTab === 'active' }" @click="changeMemoryTab('active')">
-            已生效
-          </button>
-          <button type="button" class="memory-tab-btn" :class="{ active: memoryTab === 'candidate' }" @click="changeMemoryTab('candidate')">
-            待确认
-          </button>
-        </div>
+          <div class="memory-tabs">
+            <button type="button" class="memory-tab-btn" :class="{ active: memoryTab === 'active' }" @click="changeMemoryTab('active')">
+              已生效
+            </button>
+            <button type="button" class="memory-tab-btn" :class="{ active: memoryTab === 'candidate' }" @click="changeMemoryTab('candidate')">
+              待确认
+            </button>
+          </div>
 
         <p v-if="memoryError" class="memory-error">{{ memoryError }}</p>
 
@@ -3300,8 +3471,9 @@ defineExpose({
             </article>
           </section>
         </div>
-      </aside>
-    </div>
+        </aside>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -3332,27 +3504,349 @@ defineExpose({
   mask-image: radial-gradient(circle at 50% 44%, rgb(0 0 0 / 0.60) 0%, #000 34%, rgb(0 0 0 / 0.36) 58%, transparent 80%);
 }
 
-.chat-float-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 999px;
-  border: 1px solid rgb(255 255 255 / 0.12);
-  background: rgb(24 24 28 / 0.88);
-  color: rgb(255 255 255 / 0.78);
-  cursor: pointer;
-  backdrop-filter: blur(12px);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
-  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.conversation-minimap {
+  position: fixed;
+  top: 96px;
+  right: 8px;
+  bottom: 96px;
+  z-index: 36;
+  width: 4px;
+  pointer-events: auto;
 }
 
-.chat-float-btn:hover {
-  transform: translateY(-2px);
-  border-color: var(--agent-accent-soft);
+.minimap-pillar {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  padding: 1px 0;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.045), rgb(255 255 255 / 0.012)),
+    rgb(10 12 18 / 0.32);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.026), 0 12px 32px rgb(0 0 0 / 0.20);
+  backdrop-filter: blur(12px) saturate(140%);
+}
+
+.minimap-segment {
+  width: 4px;
+  min-height: 3px;
+  flex: 1 1 0;
+  border: 0;
+  border-bottom: 2px solid #14151a;
+  border-radius: 999px;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.58;
+  transform-origin: right center;
+  transition:
+    width 0.16s ease,
+    opacity 0.16s ease,
+    filter 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+}
+
+.minimap-segment--system {
+  background: #00e5ff;
+  box-shadow: 0 0 8px rgb(0 229 255 / 0.18);
+}
+
+.minimap-segment--user {
+  background: #3b82f6;
+  box-shadow: 0 0 8px rgb(59 130 246 / 0.18);
+}
+
+.minimap-segment:last-child {
+  border-bottom: 0;
+}
+
+.minimap-segment--active,
+.minimap-segment:hover,
+.minimap-segment:focus-visible {
+  width: 8px;
+  opacity: 1;
+  filter: saturate(1.35) brightness(1.18);
+  outline: none;
+  transform: translateX(-1px);
+}
+
+.minimap-segment--system.minimap-segment--active,
+.minimap-segment--system:hover,
+.minimap-segment--system:focus-visible {
+  box-shadow: 0 0 18px rgb(0 229 255 / 0.58), 0 0 34px rgb(0 229 255 / 0.22);
+}
+
+.minimap-segment--user.minimap-segment--active,
+.minimap-segment--user:hover,
+.minimap-segment--user:focus-visible {
+  box-shadow: 0 0 18px rgb(59 130 246 / 0.58), 0 0 34px rgb(59 130 246 / 0.22);
+}
+
+.minimap-segment--muted {
+  width: 3px;
+  opacity: 0.22;
+  filter: saturate(0.65);
+}
+
+.minimap-drawer-toggle {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 2px);
+  width: 20px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgb(255 255 255 / 0);
+  box-shadow: none;
+  cursor: pointer;
+  transform: translateY(-50%) translateX(5px);
+  backdrop-filter: none;
+  opacity: 0;
+  transition: opacity 0.18s ease, color 0.18s ease, transform 0.18s ease, background 0.18s ease;
+}
+
+.conversation-minimap:hover .minimap-drawer-toggle,
+.minimap-drawer-toggle:focus-visible,
+.minimap-drawer-toggle:hover,
+.minimap-drawer-toggle.open {
+  opacity: 1;
+  color: rgb(255 255 255 / 0.64);
+  background: rgb(18 18 22 / 0.34);
+  transform: translateY(-50%) translateX(-2px);
+}
+
+.minimap-drawer-toggle:hover,
+.minimap-drawer-toggle.open {
   color: #fff;
+  background: rgb(18 18 22 / 0.58);
+}
+
+.minimap-hover-card {
+  position: fixed;
+  right: 26px;
+  width: 238px;
+  padding: 12px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 14px;
+  background: rgb(18 18 22 / 0.80);
+  color: rgb(255 255 255 / 0.78);
+  box-shadow: 0 18px 56px rgb(0 0 0 / 0.42), inset 0 1px 0 rgb(255 255 255 / 0.05);
+  backdrop-filter: blur(18px) saturate(145%);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.minimap-hover-card::after {
+  content: "";
+  position: absolute;
+  right: -5px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 14px currentColor, 0 0 28px currentColor;
+  transform: translateY(-50%);
+}
+
+.minimap-hover-card--system {
+  color: #00e5ff;
+}
+
+.minimap-hover-card--user {
+  color: #3b82f6;
+}
+
+.minimap-hover-card p {
+  margin: 0 0 6px;
+  color: rgb(255 255 255 / 0.30);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.minimap-hover-card strong {
+  display: block;
+  overflow: hidden;
+  color: rgb(255 255 255 / 0.70);
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.minimap-hover-card-enter-active,
+.minimap-hover-card-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.minimap-hover-card-enter-from,
+.minimap-hover-card-leave-to {
+  opacity: 0;
+  transform: translateY(-50%) translateX(8px);
+}
+
+.minimap-outline {
+  position: fixed;
+  top: 96px;
+  right: 28px;
+  bottom: 96px;
+  width: min(320px, calc(100vw - 58px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgb(255 255 255 / 0.09);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 12% 0%, var(--agent-accent-soft), transparent 34%),
+    rgb(18 18 22 / 0.94);
+  box-shadow: 0 24px 76px rgb(0 0 0 / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.055);
+  backdrop-filter: blur(22px) saturate(150%);
+  overflow: hidden;
+}
+
+.minimap-outline__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.07);
+}
+
+.minimap-outline__header p,
+.minimap-outline__header h3 {
+  margin: 0;
+}
+
+.minimap-outline__header p {
+  color: rgb(255 255 255 / 0.38);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.minimap-outline__header h3 {
+  margin-top: 4px;
+  color: rgb(255 255 255 / 0.88);
+  font-size: 16px;
+}
+
+.minimap-outline__header button {
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.045);
+  color: rgb(255 255 255 / 0.62);
+  cursor: pointer;
+}
+
+.minimap-outline__list {
+  min-height: 0;
+  margin: 0;
+  padding: 12px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.minimap-outline__list li {
+  position: relative;
+}
+
+.minimap-outline__list li::before {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 26px;
+  bottom: -10px;
+  width: 1px;
+  background: rgb(255 255 255 / 0.07);
+}
+
+.minimap-outline__list li:last-child::before {
+  display: none;
+}
+
+.minimap-outline__list button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  padding: 9px 10px 9px 4px;
+  color: rgb(255 255 255 / 0.70);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.minimap-outline__list button:hover,
+.minimap-outline__list li.active button {
+  background: rgb(255 255 255 / 0.055);
+  color: #fff;
+}
+
+.minimap-outline__dot {
+  position: relative;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  margin: 6px 0 0 6px;
+  border-radius: 999px;
+  box-shadow: 0 0 14px currentColor;
+}
+
+.minimap-outline__dot--system {
+  color: #00e5ff;
+  background: #00e5ff;
+}
+
+.minimap-outline__dot--user {
+  color: #3b82f6;
+  background: #3b82f6;
+}
+
+.minimap-outline__list small,
+.minimap-outline__list strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.minimap-outline__list small {
+  color: rgb(255 255 255 / 0.36);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.minimap-outline__list strong {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.minimap-outline-enter-active,
+.minimap-outline-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.minimap-outline-enter-from,
+.minimap-outline-leave-to {
+  opacity: 0;
+  transform: translateX(18px) scale(0.98);
 }
 
 .chat-scroll-anchor {
@@ -3384,81 +3878,6 @@ defineExpose({
 
 .branch-message-move {
   transition: transform 0.2s ease;
-}
-
-.chat-floating-actions {
-  position: absolute;
-  right: 0;
-  bottom: calc(var(--chat-composer-inset, 210px) + 178px);
-  top: auto;
-  left: auto;
-  z-index: 5;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  pointer-events: none;
-}
-
-@media (max-width: 900px) {
-  .chat-floating-actions {
-    right: 16px;
-    bottom: calc(var(--chat-composer-inset, 196px) + 12px);
-  }
-}
-
-.chat-floating-actions > * {
-  pointer-events: auto;
-}
-
-.assistant-rail {
-  overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 0.10);
-  border-right: 0;
-  border-radius: 18px 0 0 18px;
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.075), rgb(255 255 255 / 0.035)),
-    rgb(24 27 34 / 0.78);
-  color: rgb(255 255 255 / 0.78);
-  box-shadow: 0 22px 60px rgb(0 0 0 / 0.28), inset 0 1px 0 rgb(255 255 255 / 0.06);
-  backdrop-filter: blur(18px) saturate(135%);
-}
-
-.assistant-rail--active {
-  border-color: color-mix(in srgb, var(--agent-accent) 45%, rgb(255 255 255 / 0.12));
-  color: #fff;
-  box-shadow: 0 22px 60px rgb(0 0 0 / 0.30), 0 0 34px var(--agent-accent-glow);
-}
-
-.assistant-rail-main,
-.assistant-rail-collapse {
-  width: 58px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-
-.assistant-rail-main {
-  display: grid;
-  min-height: 66px;
-  place-items: center;
-  gap: 5px;
-  padding: 10px 0 8px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.assistant-rail-main:hover,
-.assistant-rail-collapse:hover {
-  background: rgb(255 255 255 / 0.055);
-}
-
-.assistant-rail-collapse {
-  height: 38px;
-  border-top: 1px solid rgb(255 255 255 / 0.08);
-  font-size: 22px;
-  line-height: 1;
 }
 
 .message-container {
@@ -3494,6 +3913,39 @@ defineExpose({
   z-index: -1;
   background: linear-gradient(180deg, transparent, rgb(18 21 27 / 0.16) 54%, rgb(18 21 27 / 0.34));
   pointer-events: none;
+}
+
+.composer-scroll-to-bottom {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 14px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.10), rgb(255 255 255 / 0.045)),
+    rgb(18 20 26 / 0.74);
+  color: rgb(255 255 255 / 0.82);
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 14px 42px rgb(0 0 0 / 0.30), inset 0 1px 0 rgb(255 255 255 / 0.08);
+  backdrop-filter: blur(16px) saturate(135%);
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.composer-scroll-to-bottom:hover,
+.composer-scroll-to-bottom:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--agent-accent-soft);
+  color: #fff;
+  outline: none;
+  box-shadow: 0 16px 48px rgb(0 0 0 / 0.34), 0 0 24px var(--agent-accent-glow);
 }
 
 .composer-dock :deep(.composer) {
@@ -4246,24 +4698,49 @@ defineExpose({
   z-index: 30;
   display: flex;
   justify-content: flex-end;
-  background: rgb(0 0 0 / 0.48);
-  backdrop-filter: blur(8px);
+  background: rgb(0 0 0 / 0.16);
 }
 
 .memory-panel {
-  width: min(460px, calc(100% - 24px));
-  height: 100%;
+  width: min(320px, calc(100% - 16px));
+  height: calc(100% - 20px);
+  margin: 10px 10px 10px 0;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  border-left: 1px solid rgb(255 255 255 / 0.10);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 22px;
   background:
-    radial-gradient(circle at 20% 0%, var(--agent-composer-tint), transparent 34%),
-    rgb(18 18 22 / 0.96);
-  padding: 20px;
+    radial-gradient(circle at 16% 0%, var(--agent-composer-tint), transparent 38%),
+    linear-gradient(180deg, rgb(32 36 46 / 0.84), rgb(14 16 22 / 0.78));
+  padding: 18px;
   color: rgb(255 255 255 / 0.88);
-  box-shadow: -20px 0 80px rgb(0 0 0 / 0.42);
+  box-shadow:
+    -18px 0 70px rgb(0 0 0 / 0.36),
+    inset 1px 0 0 rgb(255 255 255 / 0.06);
+  backdrop-filter: blur(24px) saturate(135%);
   overflow-y: auto;
+}
+
+.memory-drawer-enter-active,
+.memory-drawer-leave-active {
+  transition: opacity 0.22s ease;
+}
+
+.memory-drawer-enter-active .memory-panel,
+.memory-drawer-leave-active .memory-panel {
+  transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease;
+}
+
+.memory-drawer-enter-from,
+.memory-drawer-leave-to {
+  opacity: 0;
+}
+
+.memory-drawer-enter-from .memory-panel,
+.memory-drawer-leave-to .memory-panel {
+  opacity: 0;
+  transform: translateX(28px);
 }
 
 .memory-panel-header,
@@ -4507,6 +4984,10 @@ defineExpose({
 }
 
 @media (max-width: 900px) {
+  .conversation-minimap {
+    display: none;
+  }
+
   .message-container {
     padding: 36px 14px 16px;
   }
@@ -4517,6 +4998,11 @@ defineExpose({
   }
   .composer-dock {
     padding: 14px 0 max(14px, env(safe-area-inset-bottom));
+  }
+  .composer-scroll-to-bottom {
+    width: 40px;
+    height: 40px;
+    margin-bottom: 10px;
   }
   .composer-model-row {
     align-items: center;
