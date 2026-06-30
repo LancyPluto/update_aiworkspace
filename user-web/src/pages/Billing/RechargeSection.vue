@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue"
-import { Check, Crown, CreditCard, Loader2, MessageCircle, QrCode, Sparkles, X } from "lucide-vue-next"
-import type { CreditAccount, RechargeOrder, RechargePackage } from "@/api/types"
+import { Check, Crown, CreditCard, Gift, Loader2, MessageCircle, QrCode, Sparkles, X } from "lucide-vue-next"
+import type { CreditAccount, GiftCardPackage, RechargeOrder, RechargePackage } from "@/api/types"
 import {
   createRechargeOrder,
+  fetchGiftCardPackages,
   fetchRechargeOrder,
   fetchRechargePackages,
 } from "@/api/creditApi"
@@ -40,6 +41,14 @@ const activeOrder = ref<RechargeOrder | null>(null)
 const paymentResult = ref<"success" | "fail" | null>(null)
 let pollingTimer: ReturnType<typeof setInterval> | null = null
 
+// 模式切换：算力充值 / 礼品卡
+const mode = ref<'credits' | 'giftcard'>('credits')
+const giftCardPackages = ref<GiftCardPackage[]>([])
+const loadingGiftCards = ref(false)
+const pendingGiftCardPackage = ref<GiftCardPackage | null>(null)
+
+const DEFAULT_GRANTED_CREDITS = 200
+
 // Tab 切换逻辑
 const tabs = [
   { value: 'monthly' as const, label: '连续包月', discount: null },
@@ -58,7 +67,7 @@ const filteredPackages = computed(() => {
 })
 
 const membership = ref<{ planName: string; expiryDate: string | null }>({
-  planName: "免费版",
+  planName: "体验版",
   expiryDate: null,
 })
 
@@ -86,6 +95,30 @@ const isAlipayPageRedirect = computed(() =>
   activeOrder.value ? isAlipayPageRedirectOrder(activeOrder.value) : false,
 )
 
+const isGiftCardOrder = computed(() => activeOrder.value?.orderType === 'GIFT_CARD')
+
+const successMessage = computed(() =>
+  isGiftCardOrder.value ? '礼品卡购买成功，请在个人中心查看' : '支付成功，算力已到账',
+)
+
+const pendingDisplay = computed(() => {
+  if (pendingGiftCardPackage.value) {
+    return {
+      name: pendingGiftCardPackage.value.packageName,
+      credits: pendingGiftCardPackage.value.credits,
+      price: pendingGiftCardPackage.value.priceAmount,
+    }
+  }
+  if (pendingPackage.value) {
+    return {
+      name: localizePackageName(pendingPackage.value.packageName),
+      credits: pendingPackage.value.credits,
+      price: pendingPackage.value.priceAmount,
+    }
+  }
+  return null
+})
+
 function redirectToAlipayCheckout(order: RechargeOrder) {
   if (!isAlipayPageRedirectOrder(order) || !order.payUrl) return false
   window.location.assign(resolveAlipayLaunchUrl(order.payUrl))
@@ -97,6 +130,17 @@ function redirectToAlipayCheckout(order: RechargeOrder) {
 function formatMoney(value: number | string | undefined | null) {
   const amount = Number(value ?? 0)
   return Number.isInteger(amount) ? String(amount) : amount.toFixed(2)
+}
+
+const GIFT_CARD_THEMES: Record<string, string> = {
+  blue: 'from-blue-600 to-blue-800 border-blue-400/30',
+  purple: 'from-purple-600 to-purple-800 border-purple-400/30',
+  gold: 'from-amber-600 to-yellow-800 border-amber-400/30',
+  dark: 'from-slate-800 to-slate-950 border-slate-600/30',
+}
+
+function giftCardThemeClass(theme: string | undefined | null) {
+  return GIFT_CARD_THEMES[theme || 'dark'] || GIFT_CARD_THEMES.dark
 }
 
 const PACKAGE_NAME_ZH: Record<string, string> = {
@@ -155,6 +199,7 @@ function closeChannelModal() {
   if (ordering.value) return
   showChannelModal.value = false
   pendingPackage.value = null
+  pendingGiftCardPackage.value = null
 }
 
 function closePayModal() {
@@ -260,38 +305,84 @@ async function createOrder(pkg: RechargePackage, channel: PaymentChannel) {
   }
 }
 
-onMounted(loadPackages)
+async function loadGiftCardPackages() {
+  loadingGiftCards.value = true
+  try {
+    giftCardPackages.value = await fetchGiftCardPackages({ token: auth.token })
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "加载礼品卡套餐失败"
+  } finally {
+    loadingGiftCards.value = false
+  }
+}
+
+function openGiftCardPayment(pkg: GiftCardPackage) {
+  pendingGiftCardPackage.value = pkg
+  paymentResult.value = null
+  error.value = ""
+  showChannelModal.value = true
+}
+
+async function createGiftCardOrder(pkg: GiftCardPackage, channel: PaymentChannel) {
+  ordering.value = true
+  error.value = ""
+  try {
+    const order = await createRechargeOrder(
+      {
+        packageId: 0,
+        paymentChannel: channel,
+        clientRequestId: `giftcard-${pkg.id}-${channel}-${Date.now()}`,
+        orderType: 'GIFT_CARD',
+        giftCardPackageId: pkg.id,
+      },
+      { token: auth.token },
+    )
+    if (!openPayModalForOrder(order, channel)) {
+      return
+    }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "创建礼品卡订单失败"
+  } finally {
+    ordering.value = false
+  }
+}
+
+onMounted(() => {
+  loadPackages()
+  loadGiftCardPackages()
+})
 onUnmounted(clearPolling)
 </script>
 
 <template>
   <section class="space-y-6">
-    <div class="relative overflow-hidden rounded-xl border border-border bg-card p-6 shadow-sm md:p-8">
+    <div class="relative overflow-hidden rounded-2xl border border-slate-700 bg-gradient-to-br from-slate-900 to-slate-800 p-6 shadow-lg md:p-8">
       <div class="relative flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
         <div class="flex flex-col gap-6 sm:flex-row sm:gap-12">
           <div class="flex flex-col gap-1">
-            <span class="text-sm text-muted-foreground">可用算力</span>
-            <p class="text-3xl font-semibold tracking-tight text-foreground">
+            <span class="text-sm font-medium text-slate-400">体验版</span>
+            <p class="text-3xl font-semibold tracking-tight text-white">
               {{ availableDisplay }}
-              <span class="text-base font-normal text-muted-foreground">点</span>
+              <span class="text-base font-normal text-slate-400">/ {{ DEFAULT_GRANTED_CREDITS }}</span>
             </p>
+            <p class="mt-1 text-xs text-slate-500">当前使用：体验版</p>
           </div>
-          <div class="hidden h-12 w-px bg-border sm:block" aria-hidden="true" />
+          <div class="hidden h-12 w-px bg-slate-700 sm:block" aria-hidden="true" />
           <div class="flex flex-col gap-1">
-            <span class="text-sm text-muted-foreground">会员状态</span>
+            <span class="text-sm text-slate-400">会员状态</span>
             <p class="flex flex-wrap items-baseline gap-2 text-xl font-semibold">
               <Crown class="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
-              {{ membership.planName }}
-              <span v-if="membership.expiryDate" class="text-sm font-normal text-muted-foreground">
+              <span class="text-white">{{ membership.planName }}</span>
+              <span v-if="membership.expiryDate" class="text-sm font-normal text-slate-400">
                 有效期至 {{ membership.expiryDate }}
               </span>
-              <span v-else class="text-sm font-normal text-muted-foreground">未开通或永久有效</span>
+              <span v-else class="text-sm font-normal text-slate-400">未开通或永久有效</span>
             </p>
           </div>
         </div>
         <button
           type="button"
-          class="inline-flex items-center justify-center rounded-md border border-primary bg-transparent px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
+          class="inline-flex items-center justify-center rounded-lg border border-primary bg-primary/10 px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/20"
         >
           升级会员
         </button>
@@ -302,7 +393,35 @@ onUnmounted(clearPolling)
       {{ error }}
     </div>
 
-    <div>
+    <!-- 模式切换 -->
+    <div class="flex justify-center">
+      <div class="inline-flex rounded-lg bg-secondary p-1">
+        <button
+          @click="mode = 'credits'"
+          :class="[
+            'px-8 py-2.5 text-sm font-medium rounded-md transition-all',
+            mode === 'credits'
+              ? 'bg-primary text-primary-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          ]"
+        >
+          算力充值
+        </button>
+        <button
+          @click="mode = 'giftcard'"
+          :class="[
+            'px-8 py-2.5 text-sm font-medium rounded-md transition-all',
+            mode === 'giftcard'
+              ? 'bg-primary text-primary-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          ]"
+        >
+          礼品卡
+        </button>
+      </div>
+    </div>
+
+    <div v-if="mode === 'credits'">
       <div class="mb-6 flex items-start gap-3">
         <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Sparkles class="h-5 w-5" aria-hidden="true" />
@@ -419,6 +538,56 @@ onUnmounted(clearPolling)
         </div>
       </div>
     </div>
+
+    <div v-if="mode === 'giftcard'">
+      <div class="mb-6 flex items-start gap-3">
+        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <Gift class="h-5 w-5" aria-hidden="true" />
+        </div>
+        <div>
+          <h2 class="text-lg font-semibold tracking-tight">选择礼品卡</h2>
+          <p class="mt-1 text-sm text-muted-foreground">购买后可在个人中心使用或赠送给好友</p>
+        </div>
+      </div>
+
+      <div v-if="loadingGiftCards" class="rounded-lg border border-border bg-card px-5 py-8 text-center text-sm text-muted-foreground">
+        正在加载礼品卡...
+      </div>
+      <div v-else class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div
+          v-for="pkg in giftCardPackages"
+          :key="pkg.id"
+          class="relative overflow-hidden rounded-2xl border bg-gradient-to-br p-6 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
+          :class="giftCardThemeClass(pkg.cardTheme)"
+        >
+          <h3 class="text-lg font-semibold text-white">
+            {{ pkg.packageName }}
+          </h3>
+
+          <div class="mt-4 flex items-baseline gap-2">
+            <span class="text-4xl font-bold text-white">
+              ¥{{ formatMoney(pkg.priceAmount) }}
+            </span>
+          </div>
+
+          <div class="mt-4 rounded-lg bg-white/10 p-3 border border-white/10">
+            <p class="text-2xl font-bold text-white">
+              {{ pkg.credits.toLocaleString() }}
+              <span class="text-sm font-normal text-white/70">算力</span>
+            </p>
+          </div>
+
+          <button
+            type="button"
+            class="mt-6 w-full rounded-lg bg-white/20 py-3 text-sm font-bold text-white transition-all hover:bg-white/30 disabled:cursor-not-allowed disabled:opacity-60"
+            :disabled="ordering"
+            @click.stop="openGiftCardPayment(pkg)"
+          >
+            {{ ordering ? "下单中..." : "立即购买" }}
+          </button>
+        </div>
+      </div>
+    </div>
     <Teleport to="body">
       <div
         v-if="showChannelModal"
@@ -433,7 +602,7 @@ onUnmounted(clearPolling)
             <div>
               <h3 id="payment-channel-title" class="text-lg font-semibold text-foreground">确认订单</h3>
               <p class="mt-1 text-sm text-muted-foreground">
-                {{ localizePackageName(pendingPackage?.packageName) }} · {{ pendingPackage?.credits.toLocaleString() }} 算力
+                {{ pendingDisplay?.name }} · {{ pendingDisplay?.credits.toLocaleString() }} 算力
               </p>
             </div>
             <button
@@ -452,8 +621,8 @@ onUnmounted(clearPolling)
               :key="option.channel"
               type="button"
               class="flex w-full items-center gap-4 rounded-xl border border-border bg-background px-4 py-3 text-left transition hover:border-primary/50 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60"
-              :disabled="ordering || !pendingPackage"
-              @click="pendingPackage && createOrder(pendingPackage, option.channel)"
+              :disabled="ordering || !pendingDisplay"
+              @click="pendingPackage ? createOrder(pendingPackage, option.channel) : pendingGiftCardPackage && createGiftCardOrder(pendingGiftCardPackage, option.channel)"
             >
               <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
                 <component :is="option.icon" class="h-5 w-5" aria-hidden="true" />
@@ -468,7 +637,7 @@ onUnmounted(clearPolling)
 
           <p class="mt-5 text-center text-xs text-muted-foreground">
             应付金额
-            <span class="font-semibold text-primary">¥{{ formatMoney(pendingPackage?.priceAmount) }}</span>
+            <span class="font-semibold text-primary">¥{{ formatMoney(pendingDisplay?.price) }}</span>
           </p>
         </div>
       </div>
@@ -545,7 +714,7 @@ onUnmounted(clearPolling)
             <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
               <Check class="h-8 w-8" stroke-width="2.5" aria-hidden="true" />
             </div>
-            <p class="mt-5 text-sm font-medium text-foreground">支付成功，算力已到账</p>
+            <p class="mt-5 text-sm font-medium text-foreground">{{ successMessage }}</p>
             <button type="button" class="mt-6 rounded-full bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90" @click="closePayModal">
               关闭
             </button>
