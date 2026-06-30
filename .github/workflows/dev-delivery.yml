@@ -27,8 +27,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Detect changed paths (skip modules on PR when untouched) ────
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      agent: ${{ steps.filter.outputs.agent }}
+      worker: ${{ steps.filter.outputs.worker }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      shared: ${{ steps.filter.outputs.shared }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            agent:
+              - 'agent-service/**'
+            worker:
+              - 'worker/**'
+            frontend:
+              - 'admin-frontend/**'
+              - 'user-web/**'
+            shared:
+              - 'deploy/**'
+              - '.github/**'
+              - 'sql/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'requirements-dev.txt'
+              - '.env.example'
+
   backend-test:
     name: Backend (Maven)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -46,6 +84,8 @@ jobs:
 
   agent-service-test:
     name: Agent Service (pytest)
+    needs: changes
+    if: needs.changes.outputs.agent == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -65,6 +105,8 @@ jobs:
 
   worker-test:
     name: Worker (pytest)
+    needs: changes
+    if: needs.changes.outputs.worker == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -84,6 +126,8 @@ jobs:
 
   frontend-build:
     name: Frontends (build)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -108,13 +152,63 @@ jobs:
           npm ci
           npm run build
 
+  # ── Python import/syntax validation ─────────────────────────────
+  python-import-check:
+    name: Python Import Validation
+    needs: [backend-test, agent-service-test, worker-test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate agent-service syntax
+        run: |
+          echo "Checking agent-service Python syntax..."
+          python -m compileall -q agent-service/app/ || exit 1
+          echo "OK: agent-service syntax valid"
+
+      - name: Validate worker syntax
+        run: |
+          echo "Checking worker Python syntax..."
+          python -m compileall -q worker/ || exit 1
+          echo "OK: worker syntax valid"
+
+  # ── Dependency security audit ───────────────────────────────────
+  security-audit:
+    name: Dependency Security Audit
+    needs: [backend-test, agent-service-test, worker-test]
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit agent-service dependencies
+        run: pip-audit -r agent-service/requirements.txt --desc on 2>&1 | head -80 || true
+
+      - name: Audit worker dependencies
+        run: pip-audit -r worker/requirements.txt --desc on 2>&1 | head -80 || true
+
   deploy-production:
     name: Deploy to Production
-    needs: [backend-test, agent-service-test, worker-test, frontend-build]
-    # 仅 push 到 dev（含 PR merge 后的 push）或手动触发时部署；PR 打开/同步只跑 CI，不碰生产。
+    needs: [changes, backend-test, agent-service-test, worker-test, frontend-build, python-import-check]
+    # 至少一个模块有变更，且事件为 push 到 dev 或手动触发时才部署
     if: |
-      (github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
-      github.event_name == 'workflow_dispatch'
+      (needs.changes.outputs.backend == 'true' || needs.changes.outputs.agent == 'true' || needs.changes.outputs.worker == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.shared == 'true') &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/dev') || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     concurrency:

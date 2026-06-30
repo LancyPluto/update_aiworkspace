@@ -15,12 +15,17 @@ const props = defineProps<{
   fallbackText?: string
 }>()
 
+const emit = defineEmits<{
+  loaded: []
+}>()
+
 const imageLoaded = ref(false)
 const imageFailed = ref(false)
 const lqipFailed = ref(false)
 const posterLoaded = ref(false)
 const posterFailed = ref(false)
 const videoReady = ref(false)
+const videoPreviewFailed = ref(false)
 const hoverActive = ref(false)
 const videoRef = ref<HTMLVideoElement | null>(null)
 let hoverTimer: number | null = null
@@ -38,9 +43,10 @@ const imageLqipUrl = computed(() =>
   useDerivativeMedia ? resolveCommunityDerivativeUrl(props.sourceUrl, "image-lqip") : "",
 )
 const videoPosterUrl = computed(() => resolveOssVideoPosterUrl(props.sourceUrl))
-const videoPreviewUrl = computed(() =>
-  useDerivativeMedia ? resolveCommunityDerivativeUrl(props.sourceUrl, "video-preview") : normalizedSourceUrl.value,
-)
+const videoPreviewUrl = computed(() => {
+  if (videoPreviewFailed.value) return normalizedSourceUrl.value
+  return useDerivativeMedia ? resolveCommunityDerivativeUrl(props.sourceUrl, "video-preview") : normalizedSourceUrl.value
+})
 const isImage = computed(() => props.kind === "image")
 const isVideo = computed(() => props.kind === "video")
 const hasImageLqip = computed(() => Boolean(imageLqipUrl.value) && !lqipFailed.value)
@@ -85,6 +91,13 @@ function onVideoCanPlay() {
   void videoRef.value?.play().catch(() => undefined)
 }
 
+function onVideoError() {
+  if (!videoPreviewFailed.value) {
+    videoPreviewFailed.value = true
+    videoReady.value = false
+  }
+}
+
 watch(
   () => props.sourceUrl,
   () => {
@@ -94,6 +107,7 @@ watch(
     posterLoaded.value = false
     posterFailed.value = false
     videoReady.value = false
+    videoPreviewFailed.value = false
     hoverActive.value = false
     clearHoverTimer()
   },
@@ -136,7 +150,7 @@ onBeforeUnmount(() => {
         :style="{ opacity: imageLoaded ? 1 : 0 }"
         loading="lazy"
         decoding="async"
-        @load="imageLoaded = true"
+        @load="imageLoaded = true; emit('loaded')"
         @error="imageFailed = true"
       />
     </template>
@@ -150,7 +164,7 @@ onBeforeUnmount(() => {
         :style="{ opacity: posterLoaded ? 1 : 0 }"
         loading="lazy"
         decoding="async"
-        @load="posterLoaded = true"
+        @load="posterLoaded = true; emit('loaded')"
         @error="posterFailed = true"
       />
       <div v-else class="media-fallback media-fallback--video">
@@ -172,6 +186,7 @@ onBeforeUnmount(() => {
         autoplay
         preload="none"
         @canplay="onVideoCanPlay"
+        @error="onVideoError"
       />
     </template>
 

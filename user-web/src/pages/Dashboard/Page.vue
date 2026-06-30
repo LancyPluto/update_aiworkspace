@@ -73,6 +73,7 @@ import {
 } from "./dashboardAttribution"
 import { buildDashboardTaskParams, buildOptimisticDashboardTask } from "./dashboardTaskFactory"
 import { normalizeMediaUrl } from "@/utils/toolCoverMedia"
+import { resolveCommunityDerivativeUrl, resolveOssVideoPosterUrl } from "@/utils/communityPostMedia"
 import { forceDownload } from "@/utils/download"
 import { isWorkflowToolCode } from "@/adapters/toolPresentationAdapter"
 import { taskFailureHint, taskProgressMessage } from "@/utils/taskStatusLabels"
@@ -1847,7 +1848,6 @@ onUnmounted(() => {
                       <Sparkles class="h-10 w-10 text-white/48" />
                     </div>
                     <span class="marketplace-modality-badge">{{ modalityLabel(tool.outputModality) }}</span>
-                    <span class="marketplace-cost-badge"><Zap class="h-3 w-3" />{{ formatMarketplaceCostLabel(tool) }}</span>
                   </div>
                   <div class="marketplace-tool-overlay">
                     <div class="marketplace-tool-content">
@@ -2389,7 +2389,7 @@ onUnmounted(() => {
                         <img
                           v-for="image in imageItemsForBlocks(item.blocks)"
                           :key="image.url"
-                          :src="image.url"
+                          :src="resolveCommunityDerivativeUrl(image.url, 'image-thumb') || image.url"
                           :alt="image.label || item.task.toolName"
                           class="dashboard-feed-image"
                           loading="lazy"
@@ -2401,9 +2401,10 @@ onUnmounted(() => {
                       <video
                         v-else-if="videoUrlForBlocks(item.blocks)"
                         :src="videoUrlForBlocks(item.blocks)"
+                        :poster="resolveOssVideoPosterUrl(videoUrlForBlocks(item.blocks))"
                         controls
                         playsinline
-                        preload="metadata"
+                        preload="none"
                         class="max-h-[420px] w-full rounded-2xl bg-black object-contain"
                         @loadedmetadata="handleHistoryFeedMediaLoaded"
                       />
@@ -2503,11 +2504,11 @@ onUnmounted(() => {
                     <div class="relative overflow-hidden bg-[#101014]">
                       <template v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')">
                         <div
-                          class="relative min-h-[300px] overflow-hidden bg-[radial-gradient(circle_at_28%_20%,rgb(176_92_255_/_0.28),transparent_34%),linear-gradient(145deg,rgb(29_30_38),rgb(12_12_14))] p-5"
+                          class="relative aspect-[4/3] overflow-hidden bg-[radial-gradient(circle_at_28%_20%,rgb(176_92_255_/_0.28),transparent_34%),linear-gradient(145deg,rgb(29_30_38),rgb(12_12_14))] p-5"
                           :class="canRetryTask(item.task.status) ? 'ring-1 ring-red-400/25' : ''"
                         >
                           <div class="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent" />
-                          <div class="relative z-10 flex h-full min-h-[260px] flex-col">
+                          <div class="relative z-10 flex h-full flex-col">
                             <div class="flex items-center justify-between gap-2">
                               <span
                                 class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium"
@@ -2575,7 +2576,7 @@ onUnmounted(() => {
                         </div>
                       </template>
                       <template v-else-if="primaryBlock(item.blocks)?.type === 'video'">
-                        <video :src="primaryBlock(item.blocks)?.url" controls playsinline preload="metadata" class="block aspect-[4/3] w-full bg-black object-contain" />
+                        <video :src="primaryBlock(item.blocks)?.url" :poster="resolveOssVideoPosterUrl(primaryBlock(item.blocks)?.url)" controls playsinline preload="metadata" class="block aspect-[4/3] w-full bg-black object-contain" />
                       </template>
                       <template v-else-if="primaryBlock(item.blocks)?.type === 'audio'">
                         <div class="space-y-4 bg-white/[0.05] p-4 pt-12">
@@ -3029,7 +3030,6 @@ onUnmounted(() => {
                               <Sparkles class="h-10 w-10 text-white/48" />
                             </div>
                             <span class="marketplace-modality-badge">{{ modalityLabel(tool.outputModality) }}</span>
-                            <span class="marketplace-cost-badge"><Zap class="h-3 w-3" />{{ formatMarketplaceCostLabel(tool) }}</span>
                           </div>
                           <div class="marketplace-tool-overlay">
                             <div class="marketplace-tool-content">
@@ -3379,7 +3379,7 @@ onUnmounted(() => {
 }
 
 .dashboard-history-grid > .history-card-pending {
-  min-height: 300px;
+  min-height: 0;
 }
 
 @media (max-width: 1280px) {

@@ -99,6 +99,17 @@ class AssetStorage:
             return self._put_oss_public(hashed_key, data, content_type)
         return self._put_local(hashed_key, data)
 
+    def put_bytes_public_raw(self, relative_key: str, data: bytes, content_type: str | None = None) -> str:
+        """Store bytes at the exact relative_key without content hashing.
+
+        Useful for derivative files (e.g. video previews) that must live at a
+        predictable path derived from the original asset URL.
+        """
+        key = self._normalize_relative_key(relative_key)
+        if self.is_oss:
+            return self._put_oss_public(key, data, content_type)
+        return self._put_local(key, data)
+
     def public_url(self, relative_key: str) -> str:
         key = self._normalize_relative_key(relative_key)
         base = self.private_base_url

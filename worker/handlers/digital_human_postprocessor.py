@@ -12,6 +12,7 @@ import requests
 
 from config import settings
 from storage.asset_storage import asset_storage
+from utils.url_security import safe_get, UrlSecurityError
 
 
 class DigitalHumanPostprocessError(RuntimeError):
@@ -298,12 +299,14 @@ class DigitalHumanPostprocessor:
                 )
             fetch_url = f"{backend}{url}"
         try:
-            with requests.get(fetch_url, stream=True, timeout=self.timeout) as response:
+            with safe_get(fetch_url, stream=True, timeout=self.timeout) as response:
                 response.raise_for_status()
                 with destination.open("wb") as file:
                     for chunk in response.iter_content(chunk_size=1024 * 512):
                         if chunk:
                             file.write(chunk)
+        except UrlSecurityError as exc:
+            raise DigitalHumanPostprocessError(f"media URL rejected for security: {exc}") from exc
         except requests.RequestException as exc:
             raise DigitalHumanPostprocessError(f"download media failed: {exc}") from exc
 
