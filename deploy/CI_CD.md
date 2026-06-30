@@ -124,6 +124,8 @@ CI 绿灯 **不等于** 浏览器立刻看到与本地 Vite 完全一致的效�
 - 密码只存在于 GitHub Secrets 与服务器，不出现在 workflow 日志中。
 - 部署 **保留** 服务器 `/root/ai_tool_market/.env`。
 - 建议限制 SSH 来源 IP；长期可改为 SSH 密钥。
+- 商业上线前执行 [商业上线 P0 发布门禁](../docs/商业上线P0发布门禁-2026-06-30.md)：敏感文件不得被 `git ls-files .env WXcert _remote.py _fix_remote.py` 返回，生产必须使用 `APP_PRODUCTION_MODE=true` 或 `APP_ENV=production`，并保持 `TASK_QUEUE_BACKEND=rabbitmq`。
+- 生产环境会拒绝默认内部 token、默认模型 key、mock provider 和 Redis 任务队列；如部署失败，优先检查服务器 `.env` 与 GitHub Secrets。
 
 ## 可交付程度
 

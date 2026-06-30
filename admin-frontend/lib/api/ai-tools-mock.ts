@@ -52,7 +52,7 @@ function delay(ms = 200) {
 }
 
 export function isMockMode(): boolean {
-  return process.env.NEXT_PUBLIC_AI_TOOL_MOCK !== '0'
+  return process.env.NEXT_PUBLIC_AI_TOOL_MOCK === '1' && process.env.NODE_ENV !== 'production'
 }
 
 export async function mockFetchAdminAITools(): Promise<AITool[]> {

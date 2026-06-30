@@ -46,6 +46,7 @@ import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptVersionMapper;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.WorkflowService;
 import com.aiminilab.aitoolmarket.tool.support.ConfigNoteMergeSupport;
+import com.aiminilab.aitoolmarket.tool.support.ToolFrontendStyleConfig;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -198,36 +199,84 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
 
     @Override
     public ConfigBundleDto exportBundle(Long operatorId, boolean includeSecrets) {
-        Map<Long, String> categoryCodesById = toolService.adminCategories().stream()
+        return exportBundle(operatorId, includeSecrets, List.of(), true);
+    }
+
+    @Override
+    public ConfigBundleDto exportBundle(Long operatorId,
+                                        boolean includeSecrets,
+                                        List<String> toolCodes,
+                                        boolean includeMediaAssets) {
+        Set<String> selectedToolCodes = normalizeToolCodes(toolCodes);
+        boolean selective = !selectedToolCodes.isEmpty();
+
+        List<ToolCategoryResponse> allCategories = toolService.adminCategories();
+        List<AgentModelConfigResponse> allModelConfigs = agentModelConfigService.adminList();
+        Map<Long, String> categoryCodesById = allCategories.stream()
                 .collect(Collectors.toMap(ToolCategoryResponse::id, ToolCategoryResponse::categoryCode, (a, b) -> a));
-        Map<Long, String> modelCodesById = agentModelConfigService.adminList().stream()
+        Map<Long, String> modelCodesById = allModelConfigs.stream()
                 .collect(Collectors.toMap(AgentModelConfigResponse::id, this::stableModelConfigCode, (a, b) -> a));
 
-        List<ToolSummaryResponse> tools = exportAllTools();
+        List<ToolSummaryResponse> tools = exportAllTools().stream()
+                .filter(tool -> !selective || selectedToolCodes.contains(normalizeCode(tool.toolCode())))
+                .toList();
         List<ConfigBundleDto.Tool> exportedTools = tools.stream()
-                .map(tool -> exportTool(tool, categoryCodesById, modelCodesById))
+                .map(tool -> exportTool(tool, categoryCodesById, modelCodesById, includeMediaAssets))
                 .toList();
 
-        List<ModelVendorAccount> vendorAccounts = vendorAccountMapper.findAllActive();
+        Set<Long> exportedCategoryIds = tools.stream()
+                .map(ToolSummaryResponse::categoryId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<String> exportedModelCodes = exportedTools.stream()
+                .map(ConfigBundleDto.Tool::modelConfigCode)
+                .filter(code -> !isBlank(code))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        exportedTools.stream()
+                .map(ConfigBundleDto.Tool::workflow)
+                .forEach(workflow -> collectWorkflowModelConfigIds(workflow).stream()
+                        .map(modelCodesById::get)
+                        .filter(code -> !isBlank(code))
+                        .forEach(exportedModelCodes::add));
+
+        List<AgentModelConfigResponse> modelConfigs = selective
+                ? allModelConfigs.stream()
+                .filter(config -> exportedModelCodes.contains(stableModelConfigCode(config)))
+                .toList()
+                : allModelConfigs;
+        Set<Long> exportedVendorAccountIds = modelConfigs.stream()
+                .map(AgentModelConfigResponse::vendorAccountId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        List<ModelVendorAccount> vendorAccounts = vendorAccountMapper.findAllActive().stream()
+                .filter(account -> !selective || exportedVendorAccountIds.contains(account.getId()))
+                .toList();
         Map<Long, String> accountRefById = vendorAccounts.stream()
                 .collect(Collectors.toMap(ModelVendorAccount::getId,
                         account -> accountRef(account.getVendorCode(), account.getAccountName()),
                         (a, b) -> a));
+        List<ToolCategoryResponse> categories = selective
+                ? allCategories.stream()
+                .filter(category -> exportedCategoryIds.contains(category.id()))
+                .toList()
+                : allCategories;
 
         return new ConfigBundleDto(
                 FORMAT,
                 VERSION,
                 OffsetDateTime.now().toString(),
                 operatorId == null ? null : String.valueOf(operatorId),
+                selective ? "SELECTED_TOOLS" : "FULL",
                 !includeSecrets,
-                redactSettings(systemSettingService.settings()),
+                selective ? Map.of() : redactSettings(systemSettingService.settings()),
                 vendorAccounts.stream()
                         .map(account -> exportVendorAccount(account, includeSecrets))
                         .toList(),
-                agentModelConfigService.adminList().stream()
+                modelConfigs.stream()
                         .map(config -> exportModelConfig(config, includeSecrets, accountRefById))
                         .toList(),
-                toolService.adminCategories().stream().map(this::exportCategory).toList(),
+                categories.stream().map(this::exportCategory).toList(),
                 exportedTools
         );
     }
@@ -269,7 +318,9 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             }
         }
 
-        pruneStaleCatalogAfterImport(bundle, accountIdsByRef, modelResult.modelIdsByImportedCode, warnings);
+        if (!isSelectedToolExport(bundle)) {
+            pruneStaleCatalogAfterImport(bundle, accountIdsByRef, modelResult.modelIdsByImportedCode, warnings);
+        }
 
         bypassCacheService.invalidateImportedCatalogData();
 
@@ -287,9 +338,14 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         );
     }
 
+    private boolean isSelectedToolExport(ConfigBundleDto bundle) {
+        return bundle != null && "SELECTED_TOOLS".equalsIgnoreCase(bundle.exportScope());
+    }
+
     private ConfigBundleDto.Tool exportTool(ToolSummaryResponse tool,
                                             Map<Long, String> categoryCodesById,
-                                            Map<Long, String> modelCodesById) {
+                                            Map<Long, String> modelCodesById,
+                                            boolean includeMediaAssets) {
         AgentToolDescriptorExtension extension = agentToolDescriptorExtensionMapper
                 .findByToolCode(tool.toolCode())
                 .orElse(null);
@@ -305,11 +361,11 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 tool.toolName(),
                 categoryCodesById.get(tool.categoryId()),
                 tool.description(),
-                tool.coverUrl(),
+                includeMediaAssets ? tool.coverUrl() : "",
                 tool.toolType(),
                 tool.inputModality(),
                 tool.outputModality(),
-                tool.configNote(),
+                exportConfigNote(tool.configNote(), includeMediaAssets),
                 tool.status(),
                 tool.estimatedCreditCost(),
                 modelCodesById.get(tool.modelConfigId()),
@@ -332,6 +388,102 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 return result;
             }
             page++;
+        }
+    }
+
+    private Set<String> normalizeToolCodes(List<String> toolCodes) {
+        if (toolCodes == null || toolCodes.isEmpty()) {
+            return Set.of();
+        }
+        return toolCodes.stream()
+                .filter(Objects::nonNull)
+                .flatMap(value -> List.of(value.split(",")).stream())
+                .map(this::normalizeCode)
+                .filter(value -> !value.isBlank())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private String normalizeCode(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private String exportConfigNote(String configNote, boolean includeMediaAssets) {
+        if (includeMediaAssets || configNote == null || configNote.isBlank()) {
+            return configNote;
+        }
+        ToolFrontendStyleConfig style = ToolFrontendStyleConfig.fromConfigNote(configNote, OBJECT_MAPPER);
+        ToolFrontendStyleConfig sanitized = new ToolFrontendStyleConfig(
+                style.primaryColor(),
+                style.welcomeMessage(),
+                style.mediaDisplayMode(),
+                "",
+                "",
+                "",
+                "",
+                style.heroTitle(),
+                style.heroSubtitle(),
+                List.of(),
+                style.useCases(),
+                style.steps(),
+                style.recommendedToolCodes(),
+                "",
+                ""
+        );
+        return ToolFrontendStyleConfig.replaceOrAppendFrontendStyleMarker(configNote, sanitized, OBJECT_MAPPER);
+    }
+
+    private Set<Long> collectWorkflowModelConfigIds(ConfigBundleDto.Workflow workflow) {
+        if (workflow == null) {
+            return Set.of();
+        }
+        Set<Long> result = new LinkedHashSet<>();
+        collectModelConfigIdsFromJson(workflow.configJson(), result);
+        collectModelConfigIdsFromJson(workflow.nodesJson(), result);
+        return result;
+    }
+
+    private void collectModelConfigIdsFromJson(String json, Set<Long> result) {
+        if (isBlank(json)) {
+            return;
+        }
+        try {
+            collectModelConfigIds(OBJECT_MAPPER.readTree(json), result, false);
+        } catch (Exception ignored) {
+            // A malformed legacy workflow should not block exporting the rest of the bundle.
+        }
+    }
+
+    private void collectModelConfigIds(JsonNode node, Set<Long> result, boolean insideModelConfigValue) {
+        if (node == null || node.isNull()) {
+            return;
+        }
+        if (insideModelConfigValue) {
+            if (node.isIntegralNumber()) {
+                result.add(node.longValue());
+                return;
+            }
+            if (node.isTextual()) {
+                try {
+                    result.add(Long.parseLong(node.asText().trim()));
+                } catch (NumberFormatException ignored) {
+                    return;
+                }
+            }
+        }
+        if (node.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> entry = fields.next();
+                String key = entry.getKey();
+                boolean isModelConfigKey = "modelConfigId".equals(key) || "modelConfigIds".equals(key);
+                collectModelConfigIds(entry.getValue(), result, insideModelConfigValue || isModelConfigKey);
+            }
+            return;
+        }
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                collectModelConfigIds(item, result, insideModelConfigValue);
+            }
         }
     }
 

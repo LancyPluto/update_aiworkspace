@@ -7,6 +7,7 @@ import { AdminHeader } from "@/components/admin/header"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -24,6 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
   SelectContent,
@@ -591,6 +593,9 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
   const [bundleBusy, setBundleBusy] = useState(false)
   const [importingBundle, setImportingBundle] = useState(false)
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
+  const [exportToolSearch, setExportToolSearch] = useState("")
+  const [selectedExportToolCodes, setSelectedExportToolCodes] = useState<string[]>([])
+  const [includeExportMediaAssets, setIncludeExportMediaAssets] = useState(false)
   const [togglingId, setTogglingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -643,13 +648,48 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
     }
   }
 
+  const selectedExportToolCodeSet = useMemo(() => new Set(selectedExportToolCodes), [selectedExportToolCodes])
+  const selectedExportTools = useMemo(
+    () => toolList.filter((tool) => selectedExportToolCodeSet.has(tool.toolCode)),
+    [selectedExportToolCodeSet, toolList],
+  )
+  const exportToolOptions = useMemo(() => {
+    const keyword = exportToolSearch.trim().toLowerCase()
+    return toolList.filter((tool) => {
+      if (!keyword) return true
+      return [tool.name, tool.toolCode, tool.modelConfigName, tool.modelName, displayCategoryForTool(tool)]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(keyword))
+    })
+  }, [exportToolSearch, toolList])
+
+  function toggleExportTool(toolCode: string, checked: boolean) {
+    setSelectedExportToolCodes((prev) => {
+      const next = new Set(prev)
+      if (checked) {
+        next.add(toolCode)
+      } else {
+        next.delete(toolCode)
+      }
+      return Array.from(next)
+    })
+  }
+
+  function selectVisibleExportTools() {
+    setSelectedExportToolCodes((prev) => Array.from(new Set([...prev, ...exportToolOptions.map((tool) => tool.toolCode)])))
+  }
+
   async function handleExportBundle(includeSecrets: boolean) {
     setBundleBusy(true)
     setError(null)
     setNotice(null)
     setImportResult(null)
     try {
-      const bundle = await exportConfigBundle(includeSecrets)
+      const bundle = await exportConfigBundle({
+        includeSecrets,
+        toolCodes: selectedExportToolCodes,
+        includeMediaAssets: includeExportMediaAssets,
+      })
       downloadConfigBundle(bundle)
       setExportDialogOpen(false)
     } catch (err) {
@@ -2110,13 +2150,87 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       </div>
 
       <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>导出配置包</DialogTitle>
             <DialogDescription>
-              请选择是否把模型 API Key 和额外鉴权信息一起写入 JSON。含密钥文件只适合可信成员之间临时流转。
+              可按工具筛选导出；未选择工具时导出全量。含密钥文件只适合可信成员之间临时流转。
             </DialogDescription>
           </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <Label className="text-sm font-medium">导出范围</Label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {selectedExportTools.length > 0
+                    ? `已选择 ${selectedExportTools.length} 个工具，将自动带上绑定模型、分类和厂商账号。`
+                    : "当前为全量导出。"}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={selectVisibleExportTools} disabled={bundleBusy || exportToolOptions.length === 0}>
+                  选择当前列表
+                </Button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedExportToolCodes([])} disabled={bundleBusy || selectedExportToolCodes.length === 0}>
+                  清空
+                </Button>
+              </div>
+            </div>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={exportToolSearch}
+                onChange={(event) => setExportToolSearch(event.target.value)}
+                placeholder="搜索工具、编码、模型，例如 doubao / 视频"
+                className="pl-9"
+              />
+            </div>
+            <ScrollArea className="h-56 rounded-lg border border-border">
+              <div className="divide-y divide-border">
+                {exportToolOptions.length === 0 ? (
+                  <div className="px-3 py-8 text-center text-sm text-muted-foreground">没有匹配的工具</div>
+                ) : (
+                  exportToolOptions.map((tool) => (
+                    <label key={tool.toolCode} className="flex cursor-pointer items-start gap-3 px-3 py-2.5 hover:bg-secondary/60">
+                      <Checkbox
+                        checked={selectedExportToolCodeSet.has(tool.toolCode)}
+                        onCheckedChange={(checked) => toggleExportTool(tool.toolCode, checked === true)}
+                        disabled={bundleBusy}
+                        className="mt-0.5"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="truncate text-sm font-medium">{tool.name}</span>
+                          <Badge variant="secondary" className="text-[10px] font-normal">
+                            {displayCategoryForTool(tool)}
+                          </Badge>
+                        </span>
+                        <span className="mt-1 block truncate text-xs text-muted-foreground">
+                          {tool.toolCode}
+                          {tool.modelConfigName || tool.modelName ? ` · ${tool.modelConfigName || tool.modelName}` : ""}
+                        </span>
+                      </span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </ScrollArea>
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border px-3 py-3">
+              <Checkbox
+                checked={includeExportMediaAssets}
+                onCheckedChange={(checked) => setIncludeExportMediaAssets(checked === true)}
+                disabled={bundleBusy}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="block text-sm font-medium">包含展示素材 URL</span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                  关闭时会清空工具展示素材和模型效果图/对比图/试听 URL；导入到已有工具时会保留目标环境已有 OSS 地址。
+                </span>
+              </span>
+            </label>
+          </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <button

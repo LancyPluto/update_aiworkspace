@@ -16,6 +16,7 @@ import com.aiminilab.aitoolmarket.task.dto.CreateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.AgentTaskSourceResponse;
 import com.aiminilab.aitoolmarket.task.dto.EstimateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.RegenerateTaskRequest;
+import com.aiminilab.aitoolmarket.task.dto.StaleTaskReconcileResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskDetailResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskEstimateResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskResultResponse;
@@ -50,6 +51,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -290,6 +292,34 @@ public class TaskServiceImpl implements TaskService {
             taskMetrics.recordTaskOutcome(task.getToolCode(), "CANCELLED", task.getCreatedAt(), findTask(taskId).getFinishedAt());
         }
         return TaskStatusResponse.from(findTask(taskId));
+    }
+
+    @Override
+    @Transactional
+    public StaleTaskReconcileResponse adminReconcileStaleTasks(Integer staleMinutes, Integer limit) {
+        int normalizedMinutes = staleMinutes == null ? 120 : Math.max(15, Math.min(staleMinutes, 24 * 60));
+        int normalizedLimit = limit == null ? 100 : Math.max(1, Math.min(limit, 500));
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(normalizedMinutes);
+        List<AiTask> staleTasks = taskMapper.findStaleActiveTasks(cutoff, normalizedLimit);
+        List<Long> timedOutTaskIds = new ArrayList<>();
+        for (AiTask task : staleTasks) {
+            TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.TIMEOUT.name());
+            int updated = taskMapper.markFailed(
+                    task.getId(),
+                    TaskStatus.TIMEOUT.name(),
+                    "STALE_TASK_TIMEOUT",
+                    "任务长时间未完成，已自动超时并释放冻结算力",
+                    "任务超过 " + normalizedMinutes + " 分钟未完成，后台对账标记为超时",
+                    List.of(TaskStatus.QUEUED.name(), TaskStatus.PROCESSING.name())
+            );
+            if (updated == 0) {
+                continue;
+            }
+            creditService.release(task.getUserId(), CreditSourceType.TASK, task.getId(), task.getEstimatedCreditCost());
+            taskMetrics.recordTaskOutcome(task.getToolCode(), TaskStatus.TIMEOUT.name(), task.getCreatedAt(), findTask(task.getId()).getFinishedAt());
+            timedOutTaskIds.add(task.getId());
+        }
+        return new StaleTaskReconcileResponse(normalizedMinutes, staleTasks.size(), timedOutTaskIds.size(), timedOutTaskIds);
     }
 
     private TaskStatusResponse createNewTask(Long userId, String toolCode, JsonNode params, String clientRequestId,

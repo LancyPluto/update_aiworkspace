@@ -249,7 +249,7 @@ class BackendToolBridge:
             ),
         )
         call = await self.backend.create_tool_call(context.runId, ToolCallCreate(toolCode=tool.toolCode, argumentsJson=arguments))
-        task_params = compile_v2_lite_image_task_params(arguments) if _is_v2_lite_image_schema(tool) else arguments
+        task_params = compile_v2_lite_image_task_params(arguments, context=context) if _is_v2_lite_image_schema(tool) else arguments
         task_id: int | None = None
         try:
             task = await self.backend.create_task(
@@ -571,6 +571,8 @@ def enforce_locked_field_defaults(
         strategy = (field.agentFillStrategy or "").strip().lower()
         if strategy != "default" or field.defaultValue in (None, ""):
             continue
+        if _is_mutable_mode_field(field) and field.fieldKey in normalized and normalized[field.fieldKey] not in (None, ""):
+            continue
         override = _user_explicit_override_for_locked_field(field, user_message)
         normalized[field.fieldKey] = override if override is not None else field.defaultValue
     return normalized
@@ -627,6 +629,14 @@ def _field_accepts_value(field, value: str) -> bool:
     if option_values:
         return value in {str(item).strip().lower() for item in option_values}
     return True
+
+
+def _is_mutable_mode_field(field) -> bool:
+    key = (getattr(field, "fieldKey", "") or "").strip().lower()
+    if key not in {"custommode", "custom_mode"}:
+        return False
+    field_type = (getattr(field, "fieldType", "") or "").strip().lower()
+    return field_type in {"radio", "select", "checkbox", "boolean", "bool"}
 
 
 def _with_field_strategy_defaults(tool: ToolDescriptor, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -947,6 +957,8 @@ def finalize_generation_arguments(
 ) -> dict[str, Any]:
     """Re-apply reference role constraints after LLM/enrich overwrites the prompt field."""
     mode = prompt_mode or resolve_prompt_mode(context, tool)
+    if _is_music_generation_tool(tool):
+        arguments = _finalize_music_generation_arguments(context, tool, arguments)
     if _is_v2_lite_image_schema(tool):
         arguments = _finalize_v2_lite_image_arguments(context, arguments, mode=mode)
         return arguments
@@ -973,6 +985,65 @@ def finalize_generation_arguments(
     updated = dict(arguments)
     updated[prompt_key] = _append_reference_semantics_clause(prompt.strip(), context)
     return updated
+
+
+def _is_music_generation_tool(tool: ToolDescriptor) -> bool:
+    text = f"{tool.toolCode} {tool.toolName or ''} {tool.description or ''}".lower()
+    return any(token in text for token in ("suno", "music_generation", "音乐生成", "歌曲", "音乐"))
+
+
+def _finalize_music_generation_arguments(context: RunContext, tool: ToolDescriptor, arguments: dict[str, Any]) -> dict[str, Any]:
+    prompt = arguments.get("prompt")
+    user_requested_custom = _user_requested_music_custom_mode(context.message)
+    prompt_too_long = isinstance(prompt, str) and len(prompt) > 500
+    if not user_requested_custom and not prompt_too_long:
+        return arguments
+    custom_key = _custom_mode_key(tool, arguments)
+    if not custom_key:
+        return arguments
+    if _truthy(arguments.get(custom_key)):
+        return arguments
+    updated = dict(arguments)
+    updated[custom_key] = True
+    return updated
+
+
+def _user_requested_music_custom_mode(message: str | None) -> bool:
+    compact = re.sub(r"\s+", "", (message or "").lower())
+    return any(
+        token in compact
+        for token in (
+            "自定义模式",
+            "高级模式",
+            "custommode",
+            "custom_mode",
+            "custommode=true",
+            "用custom",
+            "使用custom",
+        )
+    )
+
+
+def _custom_mode_key(tool: ToolDescriptor, arguments: dict[str, Any]) -> str | None:
+    for key in ("customMode", "custom_mode"):
+        if key in arguments:
+            return key
+    properties = tool.inputSchema.get("properties", {}) if isinstance(tool.inputSchema, dict) else {}
+    if isinstance(properties, dict):
+        for key in ("customMode", "custom_mode"):
+            if key in properties:
+                return key
+    for field in tool.fields:
+        key = (field.fieldKey or "").strip()
+        if key.lower() in {"custommode", "custom_mode"}:
+            return key
+    return None
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "是", "高级"}
 
 
 def _finalize_v2_lite_image_arguments(
@@ -1004,7 +1075,11 @@ def _finalize_v2_lite_image_arguments(
     return updated
 
 
-def compile_v2_lite_image_task_params(arguments: dict[str, Any]) -> dict[str, Any]:
+def compile_v2_lite_image_task_params(
+    arguments: dict[str, Any],
+    *,
+    context: RunContext | None = None,
+) -> dict[str, Any]:
     """Compile the agent-facing v2-lite image schema into physical workbench params."""
     source = dict(arguments or {})
     operation = str(source.get("operation") or "generate").strip().lower()
@@ -1031,10 +1106,11 @@ def compile_v2_lite_image_task_params(arguments: dict[str, Any]) -> dict[str, An
         physical["prompt"] = prompt
 
     base_image_ref = str(source.get("base_image_ref") or "").strip() if operation in {"edit", "variation"} else ""
+    base_image_ref = _resolve_v2_lite_physical_image_ref(context, base_image_ref)
     if base_image_ref:
         physical["base_image_url"] = base_image_ref
 
-    reference_images = _compile_v2_lite_reference_images(source)
+    reference_images = _compile_v2_lite_reference_images(source, context=context)
     if reference_images:
         physical["reference_images"] = reference_images
 
@@ -1087,13 +1163,17 @@ def _compile_v2_lite_prompt(arguments: dict[str, Any], operation: str) -> str:
     return prompt
 
 
-def _compile_v2_lite_reference_images(arguments: dict[str, Any]) -> list[str]:
+def _compile_v2_lite_reference_images(
+    arguments: dict[str, Any],
+    *,
+    context: RunContext | None = None,
+) -> list[str]:
     images: list[str] = []
     seen: set[str] = set()
 
     def add(value: Any) -> None:
         if isinstance(value, str):
-            text = value.strip()
+            text = _resolve_v2_lite_physical_image_ref(context, value)
             if text and text not in seen:
                 seen.add(text)
                 images.append(text)
@@ -1108,6 +1188,50 @@ def _compile_v2_lite_reference_images(arguments: dict[str, Any]) -> list[str]:
     else:
         add(legacy)
     return images
+
+
+def _resolve_v2_lite_physical_image_ref(context: RunContext | None, value: Any) -> str:
+    text = str(value or "").strip()
+    if not text or context is None:
+        return text
+    if text.startswith(("http://", "https://", "data:image/", "/")):
+        return text
+    latest = latest_generated_image_state(context.recentToolCalls)
+    if latest is not None and text in {"latest_generated_image", "latest_generated_image.url", "{latest_generated_image.url}"}:
+        return latest.image_url
+    plan = build_reference_plan(context)
+    lookup: dict[str, str] = {}
+    for index, mention in enumerate(plan.mentions, start=1):
+        url = str(mention.url or "").strip()
+        if not url:
+            continue
+        for key in (
+            current_attachment_alias(index),
+            mention.assetKey,
+            str(mention.fileId or "") if mention.fileId is not None else "",
+            mention.url,
+            mention.token,
+            mention.refLabel,
+            llm_token_for_mention(mention),
+            mention.name,
+        ):
+            normalized = str(key or "").strip()
+            if normalized and normalized not in lookup:
+                lookup[normalized] = url
+    resolved = lookup.get(text)
+    if resolved:
+        return resolved
+    base = re.match(r"(@(?:图|图片)\d+)", text)
+    if base:
+        resolved = lookup.get(base.group(1))
+        if resolved:
+            return resolved
+    alias = re.fullmatch(r"\[当前参考图_(\d+)\]", text)
+    if alias:
+        index = int(alias.group(1))
+        if 1 <= index <= len(plan.mentions):
+            return str(plan.mentions[index - 1].url or "").strip()
+    return text
 
 
 _V2_REFERENCE_ROLE_PRIORITY = {

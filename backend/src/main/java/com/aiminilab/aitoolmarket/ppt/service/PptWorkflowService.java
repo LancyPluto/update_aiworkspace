@@ -6,8 +6,10 @@ import com.aiminilab.aitoolmarket.ppt.PptConstants;
 import com.aiminilab.aitoolmarket.ppt.config.PptEngineProperties;
 import com.aiminilab.aitoolmarket.ppt.workflow.PptWorkflow;
 import com.aiminilab.aitoolmarket.ppt.workflow.PptWorkflowStep;
+import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationConstants;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
@@ -110,6 +112,18 @@ public class PptWorkflowService {
     public Optional<PptWorkflow> parseWorkflow(String configNote) {
         if (configNote == null || configNote.isBlank()) {
             return Optional.empty();
+        }
+        Matcher integrationMatcher = ToolIntegrationConstants.MARKER_PATTERN.matcher(configNote);
+        if (integrationMatcher.find()) {
+            try {
+                JsonNode root = objectMapper.readTree(integrationMatcher.group(1));
+                JsonNode pptNode = root.path("ppt");
+                if (!pptNode.isMissingNode() && !pptNode.isNull()) {
+                    return Optional.of(objectMapper.treeToValue(pptNode, PptWorkflow.class));
+                }
+            } catch (Exception exception) {
+                // Fall through to legacy marker parsing for compatibility.
+            }
         }
         Matcher matcher = PptConstants.WORKFLOW_PATTERN.matcher(configNote);
         if (!matcher.find()) {

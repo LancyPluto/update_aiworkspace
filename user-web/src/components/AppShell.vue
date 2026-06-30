@@ -526,21 +526,15 @@ watch(
           <PanelLeftClose v-if="sidebarOpen" class="h-4 w-4" aria-hidden="true" />
           <PanelLeft v-else class="h-4 w-4" aria-hidden="true" />
         </button>
-        <div
-          class="app-shell-title-block min-w-0 flex-1 lg:max-w-[360px]"
-          :class="{ 'app-shell-title-block--agent': isAgentRoute }"
-        >
-          <span v-if="isAgentRoute" class="app-shell-title-mark" aria-hidden="true">
-            <Sparkles class="h-5 w-5" />
-          </span>
+        <div class="app-shell-title-block min-w-0 flex-1 lg:max-w-[360px]">
           <span class="min-w-0">
-          <h1
-            v-if="title"
-            class="truncate text-base font-bold text-white"
-          >
-            {{ title }}
-          </h1>
-          <p v-if="description" class="text-xs text-white/45 truncate">{{ description }}</p>
+            <h1
+              v-if="title"
+              class="truncate text-base font-bold text-white"
+            >
+              {{ title }}
+            </h1>
+            <p v-if="description" class="text-xs text-white/45 truncate">{{ description }}</p>
           </span>
         </div>
         <div ref="searchRootRef" class="relative hidden min-w-0 flex-1 lg:block lg:max-w-[520px] xl:max-w-[620px]">
@@ -778,21 +772,6 @@ watch(
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.app-shell-title-mark {
-  display: grid;
-  width: 52px;
-  height: 52px;
-  flex-shrink: 0;
-  place-items: center;
-  border: 1px solid var(--agent-accent-soft, rgb(176 92 255 / 0.24));
-  border-radius: 14px;
-  background:
-    radial-gradient(circle at 30% 18%, rgb(255 255 255 / 0.22), transparent 26%),
-    linear-gradient(135deg, rgb(78 57 125 / 0.92), rgb(46 40 73 / 0.88));
-  color: var(--agent-accent-light, rgb(205 132 255));
-  box-shadow: 0 10px 28px var(--agent-accent-glow, rgb(176 92 255 / 0.20));
 }
 
 .app-shell-header--agent :deep(form) {

@@ -16,6 +16,7 @@ from utils.outbound_http import OutboundRequestsClient
 
 
 LOGGER = logging.getLogger(__name__)
+NON_CUSTOM_PROMPT_LIMIT = 500
 
 
 class SunoMusicError(RuntimeError):
@@ -88,6 +89,11 @@ class SunoMusicClient:
                 raise SunoMusicError("upload cover advanced mode requires lyrics when instrumental is false")
         elif not prompt_text:
             raise SunoMusicError("music prompt is required")
+        if not custom_mode and len(prompt_text) > NON_CUSTOM_PROMPT_LIMIT:
+            raise SunoMusicError(
+                "Suno non-custom mode prompt must be 500 characters or fewer; "
+                "use customMode=true for long lyrics or detailed song structure."
+            )
 
         payload = self._build_payload(
             model=model,

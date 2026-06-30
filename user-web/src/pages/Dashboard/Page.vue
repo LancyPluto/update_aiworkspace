@@ -125,6 +125,9 @@ const historySentinelRef = ref<HTMLElement | null>(null)
 const historyFeedStartRef = ref<HTMLElement | null>(null)
 const historyFeedEndRef = ref<HTMLElement | null>(null)
 const dashboardMainRef = ref<HTMLElement | null>(null)
+const collapsedComposerPanelRef = ref<HTMLElement | null>(null)
+const expandedComposerPanelRef = ref<HTMLElement | null>(null)
+const composerClearance = ref(160)
 const expandedPromptIds = ref<Set<number>>(new Set())
 const shouldScrollHistoryFeedToBottom = ref(false)
 const showHistoryScrollBottom = ref(false)
@@ -133,6 +136,8 @@ let historyFeedAutoStickUntil = 0
 let historyFeedAnchorUntil = 0
 let historyFeedAnchorHeight = 0
 let historyScrollContainer: HTMLElement | null = null
+let composerResizeObserver: ResizeObserver | null = null
+let composerBottomStickUntil = 0
 const taskPollTimers = new Map<number, number>()
 const taskStatusStreamControllers = new Map<number, AbortController>()
 const progressNow = ref(Date.now())
@@ -333,6 +338,9 @@ const audioStatusMaterials = computed(() =>
 )
 const audioWorkbenchVisible = computed(() => selectedModality.value === "AUDIO" && recentTasks.value.length > 0)
 const isHistoryFeedView = computed(() => activePanel.value === "tasks" && historyView.value === "feed")
+const dashboardMainStyle = computed(() => ({
+  "--dashboard-composer-clearance": `${composerClearance.value}px`,
+}))
 
 watch(historyView, (view) => {
   localStorage.setItem(HISTORY_VIEW_KEY, view)
@@ -376,6 +384,13 @@ watch(
     shouldScrollHistoryFeedToBottom.value = false
   },
 )
+
+watch(composerOpen, async () => {
+  await nextTick()
+  updateComposerClearance()
+  queueComposerBottomStick()
+  updateHistoryScrollBottomVisibility()
+})
 
 const primaryAudioStatusItem = computed(() => audioStatusMaterials.value.find((item) => isTaskRunning(item.task.status)) || audioStatusMaterials.value[0] || null)
 const audioRows = computed<DashboardAudioTrack[]>(() =>
@@ -562,8 +577,48 @@ function selectToolByCode(toolCode: string, openComposer = false) {
 }
 
 function expandComposer() {
+  armComposerBottomStickIfNeeded()
   composerManuallyClosed.value = false
   composerOpen.value = true
+}
+
+function updateComposerClearance() {
+  const target = composerOpen.value ? expandedComposerPanelRef.value : collapsedComposerPanelRef.value
+  const fallbackHeight = composerOpen.value ? 380 : 64
+  const height = target?.getBoundingClientRect().height || fallbackHeight
+  composerClearance.value = Math.ceil(height + 56)
+  queueComposerBottomStick()
+}
+
+function setupComposerClearanceObserver() {
+  composerResizeObserver?.disconnect()
+  composerResizeObserver = null
+  updateComposerClearance()
+  if (typeof ResizeObserver === "undefined") return
+  composerResizeObserver = new ResizeObserver(() => updateComposerClearance())
+  if (collapsedComposerPanelRef.value) composerResizeObserver.observe(collapsedComposerPanelRef.value)
+  if (expandedComposerPanelRef.value) composerResizeObserver.observe(expandedComposerPanelRef.value)
+}
+
+function armComposerBottomStickIfNeeded() {
+  if (composerOpen.value || activePanel.value !== "tasks") return
+  const container = resolveHistoryScrollContainer()
+  if (!container || historyBottomDistance(container) > 96) return
+  composerBottomStickUntil = Date.now() + 1400
+}
+
+function shouldStickHistoryToBottomAfterComposerResize() {
+  return composerOpen.value && activePanel.value === "tasks" && Date.now() <= composerBottomStickUntil
+}
+
+function queueComposerBottomStick() {
+  if (!shouldStickHistoryToBottomAfterComposerResize()) return
+  requestAnimationFrame(() => {
+    scrollHistoryToBottom("auto")
+  })
+  window.setTimeout(() => {
+    if (shouldStickHistoryToBottomAfterComposerResize()) scrollHistoryToBottom("auto")
+  }, 120)
 }
 
 function updatePrimaryReferenceInfo(info: PrimaryReferenceMaterialInfo) {
@@ -587,6 +642,7 @@ function removePrimaryReferenceAt(index: number, event: MouseEvent) {
 function collapseComposerForPreview(manual = true) {
   if (!composerOpen.value || submitting.value) return
   if (manual) composerManuallyClosed.value = true
+  composerBottomStickUntil = 0
   composerOpen.value = false
   modelPickerOpen.value = false
 }
@@ -1161,6 +1217,16 @@ function historyBottomDistance(container = resolveHistoryScrollContainer()) {
   return Math.max(0, container.scrollHeight - container.scrollTop - container.clientHeight)
 }
 
+function scrollHistoryToBottom(behavior: ScrollBehavior = "auto") {
+  const container = resolveHistoryScrollContainer()
+  if (container) {
+    container.scrollTo({ top: container.scrollHeight, behavior })
+  } else {
+    historyFeedEndRef.value?.scrollIntoView({ behavior, block: "end" })
+  }
+  showHistoryScrollBottom.value = false
+}
+
 function updateHistoryScrollBottomVisibility() {
   showHistoryScrollBottom.value = isHistoryFeedView.value && historyBottomDistance() > 300
 }
@@ -1288,6 +1354,51 @@ function inferImageAspectRatio(task: TaskDetail): number {
   const sizeRatio = parseSizeRatio(findSizeText(params))
   if (sizeRatio > 0) return sizeRatio
   return 1
+}
+
+function taskExpectedMediaAspectRatio(task: TaskDetail): number {
+  const params = task.params || {}
+  if (findAspectRatioText(params) || findSizeText(params)) {
+    return clampMediaAspectRatio(inferImageAspectRatio(task))
+  }
+  const modality = normalizeModality(task.outputModality || task.result?.resourceType)
+  if (modality === "VIDEO") return 16 / 9
+  return 1
+}
+
+function clampMediaAspectRatio(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 1
+  return Math.min(2.4, Math.max(0.42, value))
+}
+
+function taskExpectedMediaLabel(task: TaskDetail): string {
+  const aspectText = cleanExpectedMediaLabel(findAspectRatioText(task.params || {}))
+  if (aspectText) return aspectText
+  const sizeText = cleanExpectedMediaLabel(findSizeText(task.params || {}))
+  if (sizeText) return sizeText
+  return normalizeModality(task.outputModality || task.result?.resourceType) === "VIDEO" ? "16:9" : "1:1"
+}
+
+function cleanExpectedMediaLabel(value: string): string {
+  const raw = value.trim()
+  if (!raw || raw.toLowerCase() === "auto") return ""
+  const aspect = raw.match(/(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)/)
+  if (aspect) return `${aspect[1]}:${aspect[2]}`
+  const size = raw.match(/(\d{2,5})\s*[x×]\s*(\d{2,5})/i)
+  if (size) return `${size[1]}x${size[2]}`
+  return raw.length <= 16 ? raw : ""
+}
+
+function taskProgressPreviewStyle(task: TaskDetail, variant: "card" | "feed" = "card"): Record<string, string> {
+  const ratio = taskExpectedMediaAspectRatio(task)
+  const style: Record<string, string> = {
+    aspectRatio: String(ratio),
+  }
+  if (variant === "feed") {
+    const width = ratio < 0.8 ? 240 : ratio < 1.2 ? 330 : 438
+    style.width = `min(${width}px, 100%)`
+  }
+  return style
 }
 
 function findAspectRatioText(value: unknown): string {
@@ -1701,6 +1812,7 @@ onMounted(async () => {
   await loadDashboard()
   setupHistoryObserver()
   await nextTick()
+  setupComposerClearanceObserver()
   if (isHistoryFeedView.value) scrollHistoryFeedToBottom("auto")
 })
 
@@ -1708,6 +1820,8 @@ onUnmounted(() => {
   window.removeEventListener("scroll", handleDashboardScroll, true)
   window.removeEventListener("pointerdown", handleDashboardPointerDown, true)
   historyObserver?.disconnect()
+  composerResizeObserver?.disconnect()
+  composerResizeObserver = null
   for (const timer of taskPollTimers.values()) window.clearInterval(timer)
   taskPollTimers.clear()
   stopProgressClock()
@@ -1751,7 +1865,8 @@ onUnmounted(() => {
 
         <main
           ref="dashboardMainRef"
-          class="min-h-0 flex-1 overflow-y-auto px-5 pb-40 pt-6 lg:pl-[132px] xl:px-10 xl:pl-[132px]"
+          class="dashboard-main min-h-0 flex-1 overflow-y-auto px-5 pt-6 lg:pl-[132px] xl:px-10 xl:pl-[132px]"
+          :style="dashboardMainStyle"
           @scroll="handleDashboardScroll"
         >
           <div class="mx-auto w-full max-w-[1380px]">
@@ -2364,20 +2479,28 @@ onUnmounted(() => {
                     <section class="mt-5">
                       <div
                         v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')"
-                        class="rounded-2xl border border-white/8 bg-black/22 p-4"
+                        class="dashboard-progress-preview dashboard-progress-preview--feed"
+                        :class="canRetryTask(item.task.status) ? 'is-error' : ''"
+                        :style="taskProgressPreviewStyle(item.task, 'feed')"
                       >
-                        <div class="flex items-center justify-between gap-4">
-                          <p class="text-sm text-white/62">
-                            {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "任务生成失败，可以复用本次参数重试。" : "任务正在生成，完成后会追加到信息流底部。") }}
-                          </p>
-                          <span class="text-xs tabular-nums text-white/38">{{ taskProgressView(item.task).percentLabel }}</span>
-                        </div>
-                        <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
-                          <div
-                            class="h-full rounded-full transition-all"
-                            :class="canRetryTask(item.task.status) ? 'bg-red-400' : 'bg-primary'"
-                            :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
-                          />
+                        <span class="dashboard-progress-ratio">{{ taskExpectedMediaLabel(item.task) }}</span>
+                        <div class="dashboard-progress-center">
+                          <span class="dashboard-progress-loader" aria-hidden="true">
+                            <i />
+                            <i />
+                            <i />
+                          </span>
+                          <p>{{ canRetryTask(item.task.status) ? "任务生成失败" : "任务提交中" }}</p>
+                          <small>
+                            {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "可以复用本次参数重试。" : "完成后会追加到信息流底部。") }}
+                          </small>
+                          <div class="dashboard-progress-rail">
+                            <span
+                              :class="canRetryTask(item.task.status) ? 'is-error' : ''"
+                              :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
+                            />
+                          </div>
+                          <em>{{ taskProgressView(item.task).percentLabel }}</em>
                         </div>
                       </div>
 
@@ -2504,61 +2627,57 @@ onUnmounted(() => {
                     <div class="relative overflow-hidden bg-[#101014]">
                       <template v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')">
                         <div
-                          class="relative aspect-[4/3] overflow-hidden bg-[radial-gradient(circle_at_28%_20%,rgb(176_92_255_/_0.28),transparent_34%),linear-gradient(145deg,rgb(29_30_38),rgb(12_12_14))] p-5"
-                          :class="canRetryTask(item.task.status) ? 'ring-1 ring-red-400/25' : ''"
+                          class="dashboard-progress-preview dashboard-progress-preview--card"
+                          :class="canRetryTask(item.task.status) ? 'is-error' : ''"
+                          :style="taskProgressPreviewStyle(item.task)"
                         >
-                          <div class="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent" />
-                          <div class="relative z-10 flex h-full flex-col">
-                            <div class="flex items-center justify-between gap-2">
+                          <div class="dashboard-progress-top">
+                            <span
+                              class="dashboard-progress-status"
+                              :class="canRetryTask(item.task.status) ? 'is-error' : ''"
+                            >
+                              <Loader2 v-if="isTaskRunning(item.task.status)" class="h-3.5 w-3.5 animate-spin" />
+                              <X v-else-if="canRetryTask(item.task.status)" class="h-3.5 w-3.5" />
+                              <Clock v-else class="h-3.5 w-3.5" />
+                              {{ taskStatusLabel(item.task.status) }}
+                            </span>
+                            <button
+                              v-if="canCancelTask(item.task.status)"
+                              type="button"
+                              class="dashboard-progress-cancel"
+                              :disabled="
+                                cancellingTaskIds.has(item.task.taskId) ||
+                                deletingTaskIds.has(item.task.taskId) ||
+                                retryingTaskIds.has(item.task.taskId)
+                              "
+                              @click.stop="cancelQueuedTask(item.task)"
+                            >
+                              <Loader2
+                                v-if="cancellingTaskIds.has(item.task.taskId)"
+                                class="h-3 w-3 animate-spin"
+                              />
+                              <X v-else class="h-3 w-3" />
+                              {{ cancellingTaskIds.has(item.task.taskId) ? "取消中" : "取消" }}
+                            </button>
+                          </div>
+                          <span class="dashboard-progress-ratio">{{ taskExpectedMediaLabel(item.task) }}</span>
+                          <div class="dashboard-progress-center">
+                            <span class="dashboard-progress-loader" aria-hidden="true">
+                              <i />
+                              <i />
+                              <i />
+                            </span>
+                            <p>{{ canRetryTask(item.task.status) ? "任务生成失败" : item.task.toolName }}</p>
+                            <small>
+                              {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "可以复用本次参数重试。" : "完成后结果会自动出现在这里。") }}
+                            </small>
+                            <div class="dashboard-progress-rail">
                               <span
-                                class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium"
-                                :class="
-                                  canRetryTask(item.task.status)
-                                    ? 'bg-red-500/15 text-red-100 ring-1 ring-red-400/25'
-                                    : 'bg-primary/15 text-primary ring-1 ring-primary/25'
-                                "
-                              >
-                                <Loader2 v-if="isTaskRunning(item.task.status)" class="h-3.5 w-3.5 animate-spin" />
-                                <X v-else-if="canRetryTask(item.task.status)" class="h-3.5 w-3.5" />
-                                <Clock v-else class="h-3.5 w-3.5" />
-                                {{ taskStatusLabel(item.task.status) }}
-                              </span>
-                              <div class="flex items-center gap-2">
-                                <button
-                                  v-if="canCancelTask(item.task.status)"
-                                  type="button"
-                                  class="inline-flex items-center gap-1 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white/75 transition hover:bg-white/18 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                                  :disabled="
-                                    cancellingTaskIds.has(item.task.taskId) ||
-                                    deletingTaskIds.has(item.task.taskId) ||
-                                    retryingTaskIds.has(item.task.taskId)
-                                  "
-                                  @click.stop="cancelQueuedTask(item.task)"
-                                >
-                                  <Loader2
-                                    v-if="cancellingTaskIds.has(item.task.taskId)"
-                                    class="h-3 w-3 animate-spin"
-                                  />
-                                  <X v-else class="h-3 w-3" />
-                                  {{ cancellingTaskIds.has(item.task.taskId) ? "取消中" : "取消" }}
-                                </button>
-                                <span class="text-xs text-white/35">{{ taskProgressView(item.task).percentLabel }}</span>
-                              </div>
+                                :class="canRetryTask(item.task.status) ? 'is-error' : ''"
+                                :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
+                              />
                             </div>
-
-                            <div class="mt-auto">
-                              <p class="line-clamp-2 text-xl font-semibold text-white">{{ item.task.toolName }}</p>
-                              <p class="mt-2 line-clamp-3 text-sm leading-6 text-white/55">
-                                {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "任务生成失败，可以复用本次参数重试。" : "任务正在生成，完成后结果会自动出现在这里。") }}
-                              </p>
-                              <div class="mt-5 h-1.5 overflow-hidden rounded-full bg-white/10">
-                                <div
-                                  class="h-full rounded-full transition-all"
-                                  :class="canRetryTask(item.task.status) ? 'bg-red-400' : 'bg-primary'"
-                                  :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
-                                />
-                              </div>
-                            </div>
+                            <em>{{ taskProgressView(item.task).percentLabel }}</em>
                           </div>
                         </div>
                       </template>
@@ -2755,6 +2874,7 @@ onUnmounted(() => {
           class="pointer-events-none fixed bottom-6 left-[calc(var(--app-sidebar-width,268px)+(100vw-var(--app-sidebar-width,268px))/2)] z-50 grid w-[min(980px,calc(100vw-2rem))] -translate-x-1/2 transition-[left]"
         >
           <div
+            ref="collapsedComposerPanelRef"
             v-show="!composerOpen"
             class="col-start-1 row-start-1 flex w-full items-center justify-center gap-3 self-end transition-all duration-200"
           >
@@ -2799,6 +2919,7 @@ onUnmounted(() => {
           </div>
 
           <div
+            ref="expandedComposerPanelRef"
             class="pointer-events-auto col-start-1 row-start-1 w-full self-end transition-all duration-200"
             :class="composerOpen ? 'translate-y-0 scale-100 opacity-100' : 'pointer-events-none translate-y-8 scale-[0.98] opacity-0'"
           >
@@ -3097,6 +3218,11 @@ onUnmounted(() => {
 
 <style scoped>
 /* dashboard 局部样式 */
+.dashboard-main {
+  padding-bottom: max(10rem, var(--dashboard-composer-clearance, 10rem));
+  scroll-padding-bottom: max(10rem, var(--dashboard-composer-clearance, 10rem));
+}
+
 .dashboard-credit-estimate {
   display: inline-flex;
   align-items: center;
@@ -3119,6 +3245,231 @@ onUnmounted(() => {
 .audio-wave-hit {
   min-height: 32px;
   cursor: pointer;
+}
+
+.dashboard-progress-preview {
+  --dashboard-loader-primary-rgb: var(--brand-primary-rgb);
+  --dashboard-loader-secondary-rgb: var(--brand-secondary-rgb);
+  --dashboard-loader-tertiary-rgb: var(--brand-tertiary-rgb);
+  position: relative;
+  display: flex;
+  overflow: hidden;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 0.075);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 46% 42%, rgb(var(--dashboard-loader-primary-rgb) / 0.18), transparent 32%),
+    radial-gradient(circle at 62% 54%, rgb(var(--dashboard-loader-secondary-rgb) / 0.12), transparent 34%),
+    linear-gradient(145deg, #23232a, #141419);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.045),
+    inset 0 0 56px rgb(var(--dashboard-loader-primary-rgb) / 0.055);
+}
+
+.dashboard-progress-preview::before {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.025), transparent 34%),
+    linear-gradient(0deg, rgb(0 0 0 / 0.24), transparent 54%);
+  content: "";
+}
+
+.dashboard-progress-preview.is-error {
+  border-color: rgb(248 113 113 / 0.22);
+  background:
+    radial-gradient(circle at 48% 42%, rgb(248 113 113 / 0.14), transparent 34%),
+    linear-gradient(145deg, #272126, #151417);
+}
+
+.dashboard-progress-preview--feed {
+  min-width: 0;
+  margin-top: 2px;
+}
+
+.dashboard-progress-preview--card {
+  width: 100%;
+  min-height: 180px;
+  border-radius: 0;
+  border-width: 0;
+}
+
+.dashboard-progress-top {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dashboard-progress-status,
+.dashboard-progress-cancel {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dashboard-progress-status {
+  color: var(--brand-active-text);
+  background: var(--brand-softer);
+  box-shadow: inset 0 0 0 1px var(--brand-border);
+}
+
+.dashboard-progress-status.is-error {
+  color: rgb(254 202 202);
+  background: rgb(239 68 68 / 0.14);
+  box-shadow: inset 0 0 0 1px rgb(248 113 113 / 0.22);
+}
+
+.dashboard-progress-cancel {
+  color: rgb(255 255 255 / 0.74);
+  background: rgb(255 255 255 / 0.09);
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.dashboard-progress-cancel:hover:not(:disabled) {
+  color: #fff;
+  background: rgb(255 255 255 / 0.15);
+}
+
+.dashboard-progress-cancel:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.dashboard-progress-ratio {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.34);
+  padding: 4px 8px;
+  color: rgb(255 255 255 / 0.46);
+  font-size: 11px;
+  font-weight: 600;
+  backdrop-filter: blur(12px);
+}
+
+.dashboard-progress-preview--card .dashboard-progress-ratio {
+  top: auto;
+  right: 14px;
+  bottom: 12px;
+}
+
+.dashboard-progress-center {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: min(72%, 280px);
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.dashboard-progress-loader {
+  display: inline-flex;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.dashboard-progress-loader i {
+  display: block;
+  width: 6px;
+  height: 22px;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    rgb(var(--dashboard-loader-primary-rgb) / 0.98),
+    rgb(var(--dashboard-loader-tertiary-rgb) / 0.82)
+  );
+  box-shadow: 0 0 16px rgb(var(--dashboard-loader-primary-rgb) / 0.34);
+  animation: dashboard-progress-pulse 850ms ease-in-out infinite;
+}
+
+.dashboard-progress-loader i:nth-child(2) {
+  background: linear-gradient(
+    180deg,
+    rgb(var(--dashboard-loader-secondary-rgb) / 0.96),
+    rgb(var(--dashboard-loader-primary-rgb) / 0.86)
+  );
+  animation-delay: 110ms;
+}
+
+.dashboard-progress-loader i:nth-child(3) {
+  background: linear-gradient(
+    180deg,
+    rgb(var(--dashboard-loader-tertiary-rgb) / 0.96),
+    rgb(var(--dashboard-loader-secondary-rgb) / 0.82)
+  );
+  animation-delay: 220ms;
+}
+
+.dashboard-progress-preview.is-error .dashboard-progress-loader i {
+  background: linear-gradient(180deg, rgb(248 113 113 / 0.98), rgb(251 146 60 / 0.78));
+  box-shadow: 0 0 16px rgb(248 113 113 / 0.28);
+}
+
+.dashboard-progress-center p {
+  margin-top: 10px;
+  max-width: 100%;
+  color: rgb(255 255 255 / 0.86);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.dashboard-progress-center small {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 6px;
+  max-width: 100%;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: rgb(255 255 255 / 0.45);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.dashboard-progress-rail {
+  overflow: hidden;
+  width: min(132px, 100%);
+  height: 4px;
+  margin-top: 14px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.13);
+}
+
+.dashboard-progress-rail span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand-progress-gradient);
+  transition: width 240ms ease;
+}
+
+.dashboard-progress-rail span.is-error {
+  background: rgb(248 113 113);
+}
+
+.dashboard-progress-center em {
+  margin-top: 8px;
+  color: rgb(255 255 255 / 0.38);
+  font-size: 11px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
 }
 
 .dashboard-history-grid {
@@ -3380,6 +3731,19 @@ onUnmounted(() => {
 
 .dashboard-history-grid > .history-card-pending {
   min-height: 0;
+}
+
+@keyframes dashboard-progress-pulse {
+  0%,
+  100% {
+    height: 14px;
+    opacity: 0.64;
+  }
+
+  50% {
+    height: 26px;
+    opacity: 1;
+  }
 }
 
 @media (max-width: 1280px) {

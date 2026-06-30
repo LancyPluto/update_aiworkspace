@@ -117,6 +117,7 @@ public record ToolFrontendStyleConfig(
             root.put("modelIconUrl", modelIconUrl == null ? "" : modelIconUrl);
             root.put("comparisonOriginalUrl", comparisonOriginalUrl == null ? "" : comparisonOriginalUrl);
             root.put("comparisonEffectUrl", comparisonEffectUrl == null ? "" : comparisonEffectUrl);
+            root.put("audioPreviewUrl", audioPreviewUrl == null ? "" : audioPreviewUrl);
             root.put("heroTitle", heroTitle == null ? "" : heroTitle);
             root.put("heroSubtitle", heroSubtitle == null ? "" : heroSubtitle);
             root.putArray("demoThumbnails").addAll(stringArrayNode(objectMapper, demoThumbnails));

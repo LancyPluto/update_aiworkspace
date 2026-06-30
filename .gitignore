@@ -2,6 +2,9 @@
 .env
 .env.local
 .env.*.local
+WXcert/*.pem
+_remote.py
+_fix_remote.py
 
 # logs
 *.log

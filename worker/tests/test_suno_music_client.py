@@ -210,6 +210,22 @@ class SunoMusicClientTest(unittest.TestCase):
         self.assertIn("validation failed", str(raised.exception))
         self.assertEqual(request.call_count, 1)
 
+    def test_non_custom_prompt_over_500_characters_fails_before_request(self):
+        client = SunoMusicClient()
+        with patch.object(OutboundRequestsClient, "request", autospec=True) as request:
+            with self.assertRaises(SunoMusicError) as raised:
+                client.generate(
+                    model="V5_5",
+                    prompt="x" * 501,
+                    base_url="https://api.sunoapi.org",
+                    api_key="secret",
+                    params={"customMode": False},
+                )
+
+        self.assertIn("500 characters or fewer", str(raised.exception))
+        self.assertIn("customMode=true", str(raised.exception))
+        request.assert_not_called()
+
     @patch("client.suno_music_client._ensure_suno_upload_url", return_value="https://tempfile.redpandaai.co/ref.mp3")
     def test_upload_cover_payload_includes_upload_url(self, _mock_upload):
         client = SunoMusicClient()
