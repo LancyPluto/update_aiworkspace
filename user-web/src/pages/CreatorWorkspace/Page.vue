@@ -24,6 +24,7 @@ import { confirmDelete } from "@/composables/useConfirmDelete"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
 import { consumeCreatePendingAsset, openCreateWithAsset } from "@/utils/assetReplay"
 import { assetFromTask } from "@/utils/assetPreviewAdapter"
+import { recommendToolsForAsset as recommendAssetTools } from "@/utils/assetToolRecommendations"
 import {
   buildCreateTimelineItems,
   CREATE_TOOL_MODES,
@@ -532,22 +533,8 @@ function openTaskPreview(task: TaskDetail) {
   })
 }
 
-function normalizeModality(value?: string | null) {
-  return (value || "TEXT").trim().toUpperCase()
-}
-
 function recommendToolsForAsset(asset: AssetPreviewItem): AssetPreviewRecommendation[] {
-  const target = asset.kind === "image" ? "IMAGE" : asset.kind === "video" ? "VIDEO" : asset.kind === "audio" ? "AUDIO" : ""
-  const keyword = asset.kind === "image" ? /图|图片|影像|photo|image|img|改图|参考/i : asset.kind === "video" ? /视频|短片|video|clip|movie/i : /音频|音乐|audio|voice|tts/i
-  const matches = tools.value.filter((tool) => {
-    const input = normalizeModality(tool.inputModality)
-    const text = `${tool.toolName} ${tool.description || ""} ${tool.configNote || ""} ${tool.toolCode}`
-    return (
-      (target && (input.includes(target) || input.includes("MULTIMODAL") || input.includes("FILE"))) ||
-      keyword.test(text)
-    )
-  })
-  return (matches.length ? matches : tools.value).slice(0, 8)
+  return recommendAssetTools(asset, tools.value, { tasks: tasks.value })
 }
 
 function usePreviewAssetWithTool(tool: AssetPreviewRecommendation, asset: AssetPreviewItem) {

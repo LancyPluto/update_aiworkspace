@@ -63,6 +63,7 @@ import { buildTaskResultBlocks, formatAudioDuration, resolveAudioTracks } from "
 import { isCoreField } from "@/utils/fieldUiMeta"
 import { consumeDashboardPendingAsset } from "@/utils/assetReplay"
 import { cleanToolDisplayText, toolDisplayDescription } from "@/utils/toolDisplayText"
+import { recommendToolsForAsset as recommendAssetTools } from "@/utils/assetToolRecommendations"
 import { formatLiveCreditEstimate, formatMarketplaceCostLabel, usesVariableWorkflowCredits } from "@/utils/toolCreditLabel"
 import { useTaskEstimate, type UseTaskEstimateInput } from "@/composables/useTaskEstimate"
 import { randomUUID } from "@/utils/randomUUID"
@@ -1379,6 +1380,53 @@ function taskExpectedMediaLabel(task: TaskDetail): string {
   return normalizeModality(task.outputModality || task.result?.resourceType) === "VIDEO" ? "16:9" : "1:1"
 }
 
+function taskExpectedOutputCount(task: TaskDetail): number {
+  const modality = normalizeModality(task.outputModality || task.result?.resourceType)
+  if (modality !== "IMAGE") return 1
+  return resolveRequestedImageCount(task.params || {}) || 1
+}
+
+function taskProgressPlaceholderItems(task: TaskDetail): number[] {
+  return Array.from({ length: taskExpectedOutputCount(task) }, (_, index) => index)
+}
+
+function resolveRequestedImageCount(value: unknown): number | null {
+  if (!value || typeof value !== "object") return null
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = resolveRequestedImageCount(item)
+      if (found != null) return found
+    }
+    return null
+  }
+  const countKeys = new Set([
+    "count",
+    "outputcount",
+    "imagecount",
+    "image_count",
+    "numimages",
+    "num_images",
+    "numoutputs",
+    "num_outputs",
+    "batchsize",
+    "batch_size",
+    "n",
+    "生成数量",
+  ])
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    const normalizedKey = key.replace(/[\s_-]/g, "").toLowerCase()
+    if (countKeys.has(normalizedKey) || countKeys.has(key)) {
+      const numeric = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN
+      if (Number.isInteger(numeric) && numeric > 0) return Math.min(numeric, 4)
+    }
+  }
+  for (const raw of Object.values(value as Record<string, unknown>)) {
+    const found = resolveRequestedImageCount(raw)
+    if (found != null) return found
+  }
+  return null
+}
+
 function cleanExpectedMediaLabel(value: string): string {
   const raw = value.trim()
   if (!raw || raw.toLowerCase() === "auto") return ""
@@ -1399,6 +1447,19 @@ function taskProgressPreviewStyle(task: TaskDetail, variant: "card" | "feed" = "
     style.width = `min(${width}px, 100%)`
   }
   return style
+}
+
+function taskProgressStackStyle(task: TaskDetail, variant: "card" | "feed" = "card"): Record<string, string> {
+  const count = taskExpectedOutputCount(task)
+  if (count <= 1) return {}
+  if (variant === "feed") {
+    const ratio = taskExpectedMediaAspectRatio(task)
+    const itemWidth = ratio < 0.8 ? 240 : ratio < 1.2 ? 330 : 438
+    return {
+      width: `min(${itemWidth * Math.min(count, 2) + 16}px, 100%)`,
+    }
+  }
+  return {}
 }
 
 function findAspectRatioText(value: unknown): string {
@@ -1614,17 +1675,10 @@ function openAssetPreview(item: { task: TaskDetail; blocks: ResultBlock[]; modal
 }
 
 function recommendToolsForAsset(asset: AssetPreviewItem): AssetPreviewRecommendation[] {
-  const target = asset.kind === "image" ? "IMAGE" : asset.kind === "video" ? "VIDEO" : asset.kind === "audio" ? "AUDIO" : ""
-  const keyword = asset.kind === "image" ? /图|图片|影像|photo|image|img|改图|参考/i : asset.kind === "video" ? /视频|短片|video|clip|movie/i : /音频|音乐|audio|voice|tts/i
-  const matches = tools.value.filter((tool) => {
-    const input = normalizeModality(tool.inputModality)
-    const text = `${tool.toolName} ${tool.description || ""} ${cleanToolDisplayText(tool.configNote)} ${tool.toolCode}`
-    return (
-      (target && (input.includes(target) || input.includes("MULTIMODAL") || input.includes("FILE"))) ||
-      keyword.test(text)
-    )
+  return recommendAssetTools(asset, tools.value, {
+    tasks: tasks.value,
+    fallbackTools: currentTools.value,
   })
-  return (matches.length ? matches : currentTools.value.length ? currentTools.value : tools.value).slice(0, 8)
 }
 
 function useAssetWithTool(tool: AssetPreviewRecommendation, asset: AssetPreviewItem) {
@@ -2479,28 +2533,36 @@ onUnmounted(() => {
                     <section class="mt-5">
                       <div
                         v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')"
-                        class="dashboard-progress-preview dashboard-progress-preview--feed"
-                        :class="canRetryTask(item.task.status) ? 'is-error' : ''"
-                        :style="taskProgressPreviewStyle(item.task, 'feed')"
+                        class="dashboard-progress-stack dashboard-progress-stack--feed"
+                        :class="{ 'dashboard-progress-stack--multi': taskExpectedOutputCount(item.task) > 1 }"
+                        :style="taskProgressStackStyle(item.task, 'feed')"
                       >
-                        <span class="dashboard-progress-ratio">{{ taskExpectedMediaLabel(item.task) }}</span>
-                        <div class="dashboard-progress-center">
-                          <span class="dashboard-progress-loader" aria-hidden="true">
-                            <i />
-                            <i />
-                            <i />
-                          </span>
-                          <p>{{ canRetryTask(item.task.status) ? "任务生成失败" : "任务提交中" }}</p>
-                          <small>
-                            {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "可以复用本次参数重试。" : "完成后会追加到信息流底部。") }}
-                          </small>
-                          <div class="dashboard-progress-rail">
-                            <span
-                              :class="canRetryTask(item.task.status) ? 'is-error' : ''"
-                              :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
-                            />
+                        <div
+                          v-for="placeholderIndex in taskProgressPlaceholderItems(item.task)"
+                          :key="`${item.task.taskId}-feed-progress-${placeholderIndex}`"
+                          class="dashboard-progress-preview dashboard-progress-preview--feed"
+                          :class="canRetryTask(item.task.status) ? 'is-error' : ''"
+                          :style="taskProgressPreviewStyle(item.task, 'feed')"
+                        >
+                          <span class="dashboard-progress-ratio">{{ taskExpectedMediaLabel(item.task) }}</span>
+                          <div class="dashboard-progress-center">
+                            <span class="dashboard-progress-loader" aria-hidden="true">
+                              <i />
+                              <i />
+                              <i />
+                            </span>
+                            <p>{{ canRetryTask(item.task.status) ? "任务生成失败" : "任务提交中" }}</p>
+                            <small>
+                              {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "可以复用本次参数重试。" : "完成后会追加到信息流底部。") }}
+                            </small>
+                            <div class="dashboard-progress-rail">
+                              <span
+                                :class="canRetryTask(item.task.status) ? 'is-error' : ''"
+                                :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
+                              />
+                            </div>
+                            <em>{{ taskProgressView(item.task).percentLabel }}</em>
                           </div>
-                          <em>{{ taskProgressView(item.task).percentLabel }}</em>
                         </div>
                       </div>
 
@@ -2627,57 +2689,64 @@ onUnmounted(() => {
                     <div class="relative overflow-hidden bg-[#101014]">
                       <template v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')">
                         <div
-                          class="dashboard-progress-preview dashboard-progress-preview--card"
-                          :class="canRetryTask(item.task.status) ? 'is-error' : ''"
-                          :style="taskProgressPreviewStyle(item.task)"
+                          class="dashboard-progress-stack dashboard-progress-stack--card"
+                          :class="{ 'dashboard-progress-stack--multi': taskExpectedOutputCount(item.task) > 1 }"
                         >
-                          <div class="dashboard-progress-top">
-                            <span
-                              class="dashboard-progress-status"
-                              :class="canRetryTask(item.task.status) ? 'is-error' : ''"
-                            >
-                              <Loader2 v-if="isTaskRunning(item.task.status)" class="h-3.5 w-3.5 animate-spin" />
-                              <X v-else-if="canRetryTask(item.task.status)" class="h-3.5 w-3.5" />
-                              <Clock v-else class="h-3.5 w-3.5" />
-                              {{ taskStatusLabel(item.task.status) }}
-                            </span>
-                            <button
-                              v-if="canCancelTask(item.task.status)"
-                              type="button"
-                              class="dashboard-progress-cancel"
-                              :disabled="
-                                cancellingTaskIds.has(item.task.taskId) ||
-                                deletingTaskIds.has(item.task.taskId) ||
-                                retryingTaskIds.has(item.task.taskId)
-                              "
-                              @click.stop="cancelQueuedTask(item.task)"
-                            >
-                              <Loader2
-                                v-if="cancellingTaskIds.has(item.task.taskId)"
-                                class="h-3 w-3 animate-spin"
-                              />
-                              <X v-else class="h-3 w-3" />
-                              {{ cancellingTaskIds.has(item.task.taskId) ? "取消中" : "取消" }}
-                            </button>
-                          </div>
-                          <span class="dashboard-progress-ratio">{{ taskExpectedMediaLabel(item.task) }}</span>
-                          <div class="dashboard-progress-center">
-                            <span class="dashboard-progress-loader" aria-hidden="true">
-                              <i />
-                              <i />
-                              <i />
-                            </span>
-                            <p>{{ canRetryTask(item.task.status) ? "任务生成失败" : item.task.toolName }}</p>
-                            <small>
-                              {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "可以复用本次参数重试。" : "完成后结果会自动出现在这里。") }}
-                            </small>
-                            <div class="dashboard-progress-rail">
+                          <div
+                            v-for="placeholderIndex in taskProgressPlaceholderItems(item.task)"
+                            :key="`${item.task.taskId}-card-progress-${placeholderIndex}`"
+                            class="dashboard-progress-preview dashboard-progress-preview--card"
+                            :class="canRetryTask(item.task.status) ? 'is-error' : ''"
+                            :style="taskProgressPreviewStyle(item.task)"
+                          >
+                            <div class="dashboard-progress-top">
                               <span
+                                class="dashboard-progress-status"
                                 :class="canRetryTask(item.task.status) ? 'is-error' : ''"
-                                :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
-                              />
+                              >
+                                <Loader2 v-if="isTaskRunning(item.task.status)" class="h-3.5 w-3.5 animate-spin" />
+                                <X v-else-if="canRetryTask(item.task.status)" class="h-3.5 w-3.5" />
+                                <Clock v-else class="h-3.5 w-3.5" />
+                                {{ taskStatusLabel(item.task.status) }}
+                              </span>
+                              <button
+                                v-if="canCancelTask(item.task.status) && placeholderIndex === 0"
+                                type="button"
+                                class="dashboard-progress-cancel"
+                                :disabled="
+                                  cancellingTaskIds.has(item.task.taskId) ||
+                                  deletingTaskIds.has(item.task.taskId) ||
+                                  retryingTaskIds.has(item.task.taskId)
+                                "
+                                @click.stop="cancelQueuedTask(item.task)"
+                              >
+                                <Loader2
+                                  v-if="cancellingTaskIds.has(item.task.taskId)"
+                                  class="h-3 w-3 animate-spin"
+                                />
+                                <X v-else class="h-3 w-3" />
+                                {{ cancellingTaskIds.has(item.task.taskId) ? "取消中" : "取消" }}
+                              </button>
                             </div>
-                            <em>{{ taskProgressView(item.task).percentLabel }}</em>
+                            <span class="dashboard-progress-ratio">{{ taskExpectedMediaLabel(item.task) }}</span>
+                            <div class="dashboard-progress-center">
+                              <span class="dashboard-progress-loader" aria-hidden="true">
+                                <i />
+                                <i />
+                                <i />
+                              </span>
+                              <p>{{ canRetryTask(item.task.status) ? "任务生成失败" : item.task.toolName }}</p>
+                              <small>
+                                {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "可以复用本次参数重试。" : "完成后结果会自动出现在这里。") }}
+                              </small>
+                              <div class="dashboard-progress-rail">
+                                <span
+                                  :class="canRetryTask(item.task.status) ? 'is-error' : ''"
+                                  :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
+                                />
+                              </div>
+                              <em>{{ taskProgressView(item.task).percentLabel }}</em>
+                            </div>
                           </div>
                         </div>
                       </template>
@@ -3245,6 +3314,40 @@ onUnmounted(() => {
 .audio-wave-hit {
   min-height: 32px;
   cursor: pointer;
+}
+
+.dashboard-progress-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.dashboard-progress-stack--feed {
+  width: 100%;
+  max-width: 100%;
+  align-items: start;
+  grid-template-columns: 1fr;
+}
+
+.dashboard-progress-stack--feed.dashboard-progress-stack--multi {
+  width: min(100%, 100%);
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+}
+
+.dashboard-progress-stack--card {
+  width: 100%;
+  grid-template-columns: 1fr;
+}
+
+.dashboard-progress-stack--card.dashboard-progress-stack--multi {
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  padding: 8px;
+}
+
+.dashboard-progress-stack--card.dashboard-progress-stack--multi .dashboard-progress-preview--card {
+  min-height: 150px;
+  border: 1px solid rgb(255 255 255 / 0.075);
+  border-radius: 14px;
 }
 
 .dashboard-progress-preview {
