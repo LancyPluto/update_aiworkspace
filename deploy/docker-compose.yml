@@ -135,7 +135,12 @@ services:
       - 8.8.8.8
 
   admin-frontend:
-    image: ${DOCKER_REGISTRY:-docker.1ms.run/}node:22-alpine
+    build:
+      context: ..
+      dockerfile: admin-frontend/Dockerfile
+      args:
+        DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.1ms.run/}
+    image: deploy-admin-frontend
     container_name: ai-supermarket-admin-frontend
     working_dir: /app
     restart: unless-stopped
@@ -155,10 +160,6 @@ services:
       - ../admin-frontend:/app
       - admin_frontend_next:/app/.next
       - /app/node_modules
-    command: >-
-      sh -c "npm config set registry https://registry.npmmirror.com && npm install &&
-      if [ \"$${APP_PRODUCTION_MODE}\" = 'true' ]; then export NODE_ENV=production && npm run build && npm run start -- -H 0.0.0.0 -p 5174;
-      else export CHOKIDAR_USEPOLLING=true && npm run dev:docker; fi"
     env_file:
       - ../.env
     dns:
@@ -167,7 +168,12 @@ services:
       - 8.8.8.8
 
   user-web:
-    image: ${DOCKER_REGISTRY:-docker.1ms.run/}node:22-alpine
+    build:
+      context: ..
+      dockerfile: user-web/Dockerfile
+      args:
+        DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.1ms.run/}
+    image: deploy-user-web
     container_name: ai-supermarket-user-web
     working_dir: /app
     restart: unless-stopped
@@ -200,14 +206,10 @@ services:
           "CMD-SHELL",
           "if [ \"$$APP_PRODUCTION_MODE\" = 'true' ]; then test -f /dist-out/index.html; else wget -q -O- http://127.0.0.1:5173/ >/dev/null 2>&1; fi",
         ]
-      interval: 10s
-      timeout: 5s
-      retries: 36
-      start_period: 180s
-    command: >-
-      sh -c "npm config set registry https://registry.npmmirror.com && npm install &&
-      if [ \"$${APP_PRODUCTION_MODE}\" = 'true' ]; then npm run build && cp -r dist/. /dist-out/ && tail -f /dev/null;
-      else npm run dev -- --host 0.0.0.0 --port 5173; fi"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
     dns:
       - 223.5.5.5
       - 1.1.1.1
@@ -267,7 +269,6 @@ services:
     volumes:
       - ../worker:/app
       - ../data/generated-media:/data/generated-media
-    command: sh -c "pip install --no-cache-dir -r requirements.txt && python main.py"
     dns:
       # Avoid Clash/Fake-IP DNS poisoning inside containers (198.18.x.x)
       - 223.5.5.5
@@ -312,7 +313,6 @@ services:
       - "127.0.0.1:${AGENT_SERVICE_PORT:-8090}:8090"
     volumes:
       - ../agent-service:/app
-    command: sh -c "pip install --no-cache-dir -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8090"
     dns:
       # Avoid Clash/Fake-IP DNS poisoning inside containers (198.18.x.x)
       - 223.5.5.5

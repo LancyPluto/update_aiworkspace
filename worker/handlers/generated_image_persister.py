@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import requests
 
 from storage.asset_storage import asset_storage
+from utils.url_security import safe_get, UrlSecurityError
 
 
 class GeneratedImagePersistError(RuntimeError):
@@ -61,13 +62,15 @@ class GeneratedImagePersister:
 
     def _download(self, source_url: str) -> tuple[bytes, str | None]:
         try:
-            with requests.get(source_url, stream=True, timeout=self.timeout) as response:
+            with safe_get(source_url, stream=True, timeout=self.timeout) as response:
                 response.raise_for_status()
                 content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
                 chunks: list[bytes] = []
                 for chunk in response.iter_content(chunk_size=1024 * 512):
                     if chunk:
                         chunks.append(chunk)
+        except UrlSecurityError as exc:
+            raise GeneratedImagePersistError(f"image URL rejected for security: {exc}") from exc
         except requests.RequestException as exc:
             raise GeneratedImagePersistError(f"download generated image failed: {exc}") from exc
         return b"".join(chunks), content_type or None

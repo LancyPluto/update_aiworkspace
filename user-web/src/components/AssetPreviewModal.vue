@@ -498,10 +498,6 @@ function sanitizeDownloadName(value: string) {
                 <p class="mt-1 line-clamp-2 text-xs leading-5 text-white/42">
                   {{ toolDescription(tool) }}
                 </p>
-                <p class="mt-2 inline-flex items-center gap-1 text-xs text-[#d7b77a]/80">
-                  <Zap class="h-3.5 w-3.5 text-[#d7b77a]/70" />
-                  {{ tool.estimatedCreditCost }} 算力/次
-                </p>
               </div>
             </button>
 

@@ -451,7 +451,7 @@ watch(
             </div>
             <div class="min-w-0 flex-1">
               <h3>{{ entry.tool.toolName }}</h3>
-              <p>{{ modalityLabel(entry.tool.outputModality) }} · {{ costLabel(entry.tool) }}</p>
+              <p>{{ modalityLabel(entry.tool.outputModality) }}</p>
             </div>
             <button type="button" class="quick-button" @click="quickLaunch(entry.tool)">快速启动</button>
           </article>
