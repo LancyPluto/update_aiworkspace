@@ -1198,6 +1198,17 @@ function isHistoryFeedNearTop(container: HTMLElement) {
   return topOffset <= 140 && bottomOffset >= -24
 }
 
+// 滚动到页面顶部（用于点击任务卡片时将任务顶上去）
+function scrollToTop(event?: Event) {
+  if (event) event.stopPropagation()
+  const container = resolveHistoryScrollContainer()
+  if (container) {
+    container.scrollTo({ top: 0, behavior: 'smooth' })
+  } else {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+}
+
 function beginHistoryFeedAnchorPreservation(container: HTMLElement) {
   historyFeedAnchorUntil = Date.now() + 1600
   historyFeedAnchorHeight = container.scrollHeight
@@ -1716,7 +1727,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <AppShell title="工作台" description="像 SeaArt 一样选择模态、模型，然后开始创作">
+  <AppShell title="工作台" description="选模态、挑模型，让创意即刻落地">
     <div class="flex h-full min-h-0 bg-black text-white">
       <DashboardModalityDock
         v-model:open="modalityDockOpen"
@@ -1913,15 +1924,37 @@ onUnmounted(() => {
                         v-for="item in audioStatusMaterials"
                         :key="`audio-task-${item.task.taskId}`"
                         class="group px-3 py-3 transition hover:bg-white/[0.045]"
+                        @click.stop="scrollToTop"
                       >
-                        <div class="grid grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3">
-                          <div
-                            class="flex h-10 w-10 items-center justify-center rounded-lg"
-                            :class="canRetryTask(item.task.status) ? 'bg-red-500/12 text-red-200' : 'bg-primary/12 text-primary'"
-                          >
-                            <Loader2 v-if="isTaskRunning(item.task.status)" class="h-4 w-4 animate-spin" />
-                            <X v-else-if="canRetryTask(item.task.status)" class="h-4 w-4" />
-                            <Clock v-else class="h-4 w-4" />
+                        <div class="grid grid-cols-[60px_minmax(0,1fr)_auto] items-center gap-3">
+                          <!-- 圆环进度指示器 -->
+                          <div class="relative h-12 w-12 shrink-0">
+                            <svg class="h-full w-full -rotate-90" viewBox="0 0 100 100">
+                              <circle
+                                cx="50"
+                                cy="50"
+                                r="42"
+                                fill="none"
+                                stroke="rgba(255, 255, 255, 0.1)"
+                                stroke-width="8"
+                              />
+                              <circle
+                                cx="50"
+                                cy="50"
+                                r="42"
+                                fill="none"
+                                :stroke="canRetryTask(item.task.status) ? '#f87171' : '#b05cff'"
+                                stroke-width="8"
+                                stroke-linecap="round"
+                                :stroke-dasharray="`${Math.max(6, taskProgressView(item.task).percent) * 2.64} 264`"
+                                class="transition-all duration-500 ease-out"
+                              />
+                            </svg>
+                            <div class="absolute inset-0 flex items-center justify-center">
+                              <Loader2 v-if="isTaskRunning(item.task.status)" class="h-4 w-4 animate-spin text-primary/60" />
+                              <X v-else-if="canRetryTask(item.task.status)" class="h-4 w-4 text-red-400" />
+                              <Clock v-else class="h-4 w-4 text-white/40" />
+                            </div>
                           </div>
                           <div class="min-w-0">
                             <div class="flex items-center gap-2">
@@ -1938,13 +1971,6 @@ onUnmounted(() => {
                             </p>
                           </div>
                           <span class="text-xs tabular-nums text-white/40">{{ taskProgressView(item.task).percentLabel }}</span>
-                        </div>
-                        <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
-                          <div
-                            class="h-full rounded-full transition-all"
-                            :class="canRetryTask(item.task.status) ? 'bg-red-400' : 'bg-primary'"
-                            :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
-                          />
                         </div>
                         <div class="mt-3 flex items-center justify-between gap-2">
                           <p class="truncate text-xs text-white/30">{{ item.task.taskNo }}</p>
@@ -2214,43 +2240,76 @@ onUnmounted(() => {
                       </div>
                       </template>
                       <div v-else class="flex flex-col justify-center p-8">
-                        <div class="rounded-2xl border border-white/8 bg-black/22 p-6">
-                          <div class="flex items-center gap-4">
-                            <div
-                              class="flex h-14 w-14 items-center justify-center rounded-2xl"
-                              :class="canRetryTask(primaryAudioStatusItem?.task.status) ? 'bg-red-500/12 text-red-200' : 'bg-primary/12 text-primary'"
-                            >
-                              <Loader2 v-if="isTaskRunning(primaryAudioStatusItem?.task.status)" class="h-6 w-6 animate-spin" />
-                              <X v-else-if="canRetryTask(primaryAudioStatusItem?.task.status)" class="h-6 w-6" />
-                              <Clock v-else class="h-6 w-6" />
-                            </div>
-                            <div class="min-w-0 flex-1">
-                              <p class="text-lg font-semibold text-white">{{ primaryAudioStatusItem?.task.toolName || "音乐生成任务" }}</p>
-                              <p class="mt-1 text-sm text-white/45">
+                        <!-- 圆环进度样式 -->
+                        <div
+                          class="relative overflow-hidden rounded-2xl border border-white/8 bg-black/40 transition hover:border-primary/30"
+                          @click.stop="scrollToTop"
+                        >
+                          <div class="relative aspect-[16/9] w-full bg-gradient-to-br from-gray-900 via-black to-gray-900 p-6">
+                            <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+                            
+                            <div class="relative z-10 flex h-full flex-col items-center justify-center gap-4">
+                              <!-- SVG圆环进度条 -->
+                              <div class="relative h-28 w-28">
+                                <svg class="h-full w-full -rotate-90" viewBox="0 0 100 100">
+                                  <circle
+                                    cx="50"
+                                    cy="50"
+                                    r="42"
+                                    fill="none"
+                                    stroke="rgba(255, 255, 255, 0.1)"
+                                    stroke-width="6"
+                                  />
+                                  <circle
+                                    cx="50"
+                                    cy="50"
+                                    r="42"
+                                    fill="none"
+                                    :stroke="canRetryTask(primaryAudioStatusItem?.task.status) ? '#f87171' : '#b05cff'"
+                                    stroke-width="6"
+                                    stroke-linecap="round"
+                                    :stroke-dasharray="`${Math.max(6, primaryAudioStatusItem ? taskProgressView(primaryAudioStatusItem.task).percent : 0) * 2.64} 264`"
+                                    class="transition-all duration-500 ease-out"
+                                  />
+                                </svg>
+                                <div class="absolute inset-0 flex flex-col items-center justify-center">
+                                  <span class="text-2xl font-bold text-white tabular-nums">{{ primaryAudioStatusItem ? taskProgressView(primaryAudioStatusItem.task).percent : 0 }}%</span>
+                                  <Loader2 v-if="isTaskRunning(primaryAudioStatusItem?.task.status)" class="mt-1 h-4 w-4 animate-spin text-primary/60" />
+                                  <X v-else-if="canRetryTask(primaryAudioStatusItem?.task.status)" class="mt-1 h-4 w-4 text-red-400" />
+                                  <Clock v-else class="mt-1 h-4 w-4 text-white/40" />
+                                </div>
+                              </div>
+                              
+                              <!-- 状态标签 -->
+                              <span
+                                class="inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-medium shadow-lg backdrop-blur-sm"
+                                :class="
+                                  canRetryTask(primaryAudioStatusItem?.task.status)
+                                    ? 'bg-red-500/20 text-red-100 ring-1 ring-red-400/30'
+                                    : 'bg-primary/20 text-primary ring-1 ring-primary/30'
+                                "
+                              >
+                                <Loader2 v-if="isTaskRunning(primaryAudioStatusItem?.task.status)" class="h-4 w-4 animate-spin" />
+                                <X v-else-if="canRetryTask(primaryAudioStatusItem?.task.status)" class="h-4 w-4" />
+                                <Clock v-else class="h-4 w-4" />
+                                {{ taskStatusLabel(primaryAudioStatusItem?.task.status) }}
+                              </span>
+                              
+                              <!-- 进度说明文字 -->
+                              <p class="max-w-xs text-center text-sm text-white/50">
                                 {{ primaryAudioStatusItem ? taskProgressSubtitle(primaryAudioStatusItem.task, canRetryTask(primaryAudioStatusItem.task.status) ? "任务生成失败，可以复用参数重试。" : "音乐生成中，完成后会展示版本列表和波形播放器。") : "音乐生成中，完成后会展示版本列表和波形播放器。" }}
                               </p>
                             </div>
-                            <span
-                              class="shrink-0 rounded-full px-3 py-1 text-xs font-medium"
-                              :class="canRetryTask(primaryAudioStatusItem?.task.status) ? 'bg-red-500/15 text-red-100' : 'bg-primary/15 text-primary'"
-                            >
-                              {{ taskStatusLabel(primaryAudioStatusItem?.task.status) }}
-                            </span>
                           </div>
-                          <div class="mt-6 h-2 overflow-hidden rounded-full bg-white/10">
-                            <div
-                              class="h-full rounded-full transition-all"
-                              :class="canRetryTask(primaryAudioStatusItem?.task.status) ? 'bg-red-400' : 'bg-primary'"
-                              :style="{ width: `${Math.max(6, primaryAudioStatusItem ? taskProgressView(primaryAudioStatusItem.task).percent : 0)}%` }"
-                            />
-                          </div>
-                          <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
-                            <p class="text-xs text-white/35">{{ primaryAudioStatusItem?.task.taskNo }}</p>
-                            <div v-if="primaryAudioStatusItem" class="flex gap-2">
+                          
+                          <!-- 底部操作栏 -->
+                          <div class="flex items-center justify-between border-t border-white/8 px-4 py-3">
+                            <p class="truncate text-xs text-white/30">{{ primaryAudioStatusItem?.task.taskNo }}</p>
+                            <div v-if="primaryAudioStatusItem" class="flex shrink-0 items-center gap-2">
                               <button
                                 v-if="canCancelTask(primaryAudioStatusItem.task.status)"
                                 type="button"
-                                class="rounded-xl bg-white/8 px-3 py-2 text-sm font-medium text-white/70 transition hover:bg-white/14 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                class="rounded-full bg-white/8 px-3 py-1.5 text-xs font-medium text-white/60 transition hover:bg-white/14 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
                                 :disabled="
                                   cancellingTaskIds.has(primaryAudioStatusItem.task.taskId) ||
                                   deletingTaskIds.has(primaryAudioStatusItem.task.taskId) ||
@@ -2258,12 +2317,12 @@ onUnmounted(() => {
                                 "
                                 @click.stop="cancelQueuedTask(primaryAudioStatusItem.task)"
                               >
-                                {{ cancellingTaskIds.has(primaryAudioStatusItem.task.taskId) ? "取消中" : "取消任务" }}
+                                {{ cancellingTaskIds.has(primaryAudioStatusItem.task.taskId) ? "取消中" : "取消" }}
                               </button>
                               <button
                                 v-if="canRetryTask(primaryAudioStatusItem.task.status)"
                                 type="button"
-                                class="rounded-xl bg-red-500/15 px-3 py-2 text-sm font-medium text-red-100 transition hover:bg-red-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                class="rounded-full bg-red-500/15 px-3 py-1.5 text-xs font-medium text-red-100 transition hover:bg-red-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
                                 :disabled="
                                   retryingTaskIds.has(primaryAudioStatusItem.task.taskId) ||
                                   deletingTaskIds.has(primaryAudioStatusItem.task.taskId) ||
@@ -2276,10 +2335,24 @@ onUnmounted(() => {
                               <button
                                 v-else-if="!canCancelTask(primaryAudioStatusItem.task.status)"
                                 type="button"
-                                class="rounded-xl bg-primary/15 px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary hover:text-white"
+                                class="rounded-full bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-primary hover:text-white"
                                 @click.stop="replayTask(primaryAudioStatusItem.task)"
                               >
                                 再次生成
+                              </button>
+                              <button
+                                v-if="canDeleteTask(primaryAudioStatusItem.task.status)"
+                                type="button"
+                                class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/8 text-white/45 transition hover:bg-white/14 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                :disabled="
+                                  deletingTaskIds.has(primaryAudioStatusItem.task.taskId) ||
+                                  retryingTaskIds.has(primaryAudioStatusItem.task.taskId) ||
+                                  cancellingTaskIds.has(primaryAudioStatusItem.task.taskId)
+                                "
+                                @click.stop="removeTask(primaryAudioStatusItem.task)"
+                              >
+                                <Loader2 v-if="deletingTaskIds.has(primaryAudioStatusItem.task.taskId)" class="h-4 w-4 animate-spin" />
+                                <Trash2 v-else class="h-4 w-4" />
                               </button>
                             </div>
                           </div>
@@ -2362,22 +2435,131 @@ onUnmounted(() => {
                     </section>
 
                     <section class="mt-5">
+                      <!-- 生成中的任务卡片 - 圆环进度样式 -->
                       <div
                         v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')"
-                        class="rounded-2xl border border-white/8 bg-black/22 p-4"
+                        class="relative overflow-hidden rounded-2xl border border-white/8 bg-black/40 transition hover:border-primary/30"
+                        @click.stop="scrollToTop"
                       >
-                        <div class="flex items-center justify-between gap-4">
-                          <p class="text-sm text-white/62">
-                            {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "任务生成失败，可以复用本次参数重试。" : "任务正在生成，完成后会追加到信息流底部。") }}
-                          </p>
-                          <span class="text-xs tabular-nums text-white/38">{{ taskProgressView(item.task).percentLabel }}</span>
+                        <!-- 黑色占位背景 -->
+                        <div
+                          class="relative aspect-[4/3] w-full bg-gradient-to-br from-gray-900 via-black to-gray-900 p-6"
+                          :class="canRetryTask(item.task.status) ? 'ring-1 ring-red-400/25' : ''"
+                        >
+                          <!-- 渐变光晕效果 -->
+                          <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+                          
+                          <!-- 圆环进度指示器 -->
+                          <div class="relative z-10 flex h-full flex-col items-center justify-center gap-4">
+                            <!-- SVG圆环进度条 -->
+                            <div class="relative h-28 w-28">
+                              <svg class="h-full w-full -rotate-90" viewBox="0 0 100 100">
+                                <!-- 背景圆环 -->
+                                <circle
+                                  cx="50"
+                                  cy="50"
+                                  r="42"
+                                  fill="none"
+                                  stroke="rgba(255, 255, 255, 0.1)"
+                                  stroke-width="6"
+                                />
+                                <!-- 进度圆环 -->
+                                <circle
+                                  cx="50"
+                                  cy="50"
+                                  r="42"
+                                  fill="none"
+                                  :stroke="canRetryTask(item.task.status) ? '#f87171' : '#b05cff'"
+                                  stroke-width="6"
+                                  stroke-linecap="round"
+                                  :stroke-dasharray="`${Math.max(6, taskProgressView(item.task).percent) * 2.64} 264`"
+                                  class="transition-all duration-500 ease-out"
+                                />
+                              </svg>
+                              <!-- 中心百分比文字 -->
+                              <div class="absolute inset-0 flex flex-col items-center justify-center">
+                                <span class="text-2xl font-bold text-white tabular-nums">{{ taskProgressView(item.task).percent }}%</span>
+                                <Loader2 v-if="isTaskRunning(item.task.status)" class="mt-1 h-4 w-4 animate-spin text-primary/60" />
+                                <X v-else-if="canRetryTask(item.task.status)" class="mt-1 h-4 w-4 text-red-400" />
+                                <Clock v-else class="mt-1 h-4 w-4 text-white/40" />
+                              </div>
+                            </div>
+                            
+                            <!-- 状态标签 -->
+                            <span
+                              class="inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-medium shadow-lg backdrop-blur-sm"
+                              :class="
+                                canRetryTask(item.task.status)
+                                  ? 'bg-red-500/20 text-red-100 ring-1 ring-red-400/30'
+                                  : 'bg-primary/20 text-primary ring-1 ring-primary/30'
+                              "
+                            >
+                              <Loader2 v-if="isTaskRunning(item.task.status)" class="h-4 w-4 animate-spin" />
+                              <X v-else-if="canRetryTask(item.task.status)" class="h-4 w-4" />
+                              <Clock v-else class="h-4 w-4" />
+                              {{ taskStatusLabel(item.task.status) }}
+                            </span>
+                            
+                            <!-- 进度说明文字 -->
+                            <p class="max-w-xs text-center text-sm text-white/50">
+                              {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "任务生成失败，可以复用本次参数重试。" : "任务正在生成，完成后会追加到信息流底部。") }}
+                            </p>
+                          </div>
                         </div>
-                        <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
-                          <div
-                            class="h-full rounded-full transition-all"
-                            :class="canRetryTask(item.task.status) ? 'bg-red-400' : 'bg-primary'"
-                            :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
-                          />
+                        
+                        <!-- 底部操作栏 -->
+                        <div class="flex items-center justify-between border-t border-white/8 px-4 py-3">
+                          <p class="truncate text-xs text-white/30">{{ item.task.taskNo }}</p>
+                          <div class="flex shrink-0 items-center gap-2">
+                            <button
+                              v-if="canCancelTask(item.task.status)"
+                              type="button"
+                              class="rounded-full bg-white/8 px-3 py-1.5 text-xs font-medium text-white/60 transition hover:bg-white/14 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                              :disabled="
+                                cancellingTaskIds.has(item.task.taskId) ||
+                                deletingTaskIds.has(item.task.taskId) ||
+                                retryingTaskIds.has(item.task.taskId)
+                              "
+                              @click.stop="cancelQueuedTask(item.task)"
+                            >
+                              {{ cancellingTaskIds.has(item.task.taskId) ? "取消中" : "取消" }}
+                            </button>
+                            <button
+                              v-if="canRetryTask(item.task.status)"
+                              type="button"
+                              class="rounded-full bg-red-500/15 px-3 py-1.5 text-xs font-medium text-red-100 transition hover:bg-red-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                              :disabled="
+                                retryingTaskIds.has(item.task.taskId) ||
+                                deletingTaskIds.has(item.task.taskId) ||
+                                cancellingTaskIds.has(item.task.taskId)
+                              "
+                              @click.stop="retryTask(item.task)"
+                            >
+                              {{ retryingTaskIds.has(item.task.taskId) ? "重试中" : "重试" }}
+                            </button>
+                            <button
+                              v-else-if="!canCancelTask(item.task.status)"
+                              type="button"
+                              class="rounded-full bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-primary hover:text-white"
+                              @click.stop="replayTask(item.task)"
+                            >
+                              再次生成
+                            </button>
+                            <button
+                              v-if="canDeleteTask(item.task.status)"
+                              type="button"
+                              class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/8 text-white/45 transition hover:bg-white/14 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                              :disabled="
+                                deletingTaskIds.has(item.task.taskId) ||
+                                retryingTaskIds.has(item.task.taskId) ||
+                                cancellingTaskIds.has(item.task.taskId)
+                              "
+                              @click.stop="removeTask(item.task)"
+                            >
+                              <Loader2 v-if="deletingTaskIds.has(item.task.taskId)" class="h-4 w-4 animate-spin" />
+                              <Trash2 v-else class="h-4 w-4" />
+                            </button>
+                          </div>
                         </div>
                       </div>
 
@@ -2502,66 +2684,134 @@ onUnmounted(() => {
                     @click="openAssetPreview(item)"
                   >
                     <div class="relative overflow-hidden bg-[#101014]">
-                      <template v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')">
+                    <section class="mt-5">
+                      <!-- 生成中的任务卡片 - 圆环进度样式 -->
+                      <div
+                        v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')"
+                        class="relative overflow-hidden rounded-2xl border border-white/8 bg-black/40 transition hover:border-primary/30"
+                        @click.stop="scrollToTop"
+                      >
+                        <!-- 黑色占位背景 -->
                         <div
-                          class="relative aspect-[4/3] overflow-hidden bg-[radial-gradient(circle_at_28%_20%,rgb(176_92_255_/_0.28),transparent_34%),linear-gradient(145deg,rgb(29_30_38),rgb(12_12_14))] p-5"
+                          class="relative aspect-[4/3] w-full bg-gradient-to-br from-gray-900 via-black to-gray-900 p-6"
                           :class="canRetryTask(item.task.status) ? 'ring-1 ring-red-400/25' : ''"
                         >
-                          <div class="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent" />
-                          <div class="relative z-10 flex h-full flex-col">
-                            <div class="flex items-center justify-between gap-2">
-                              <span
-                                class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium"
-                                :class="
-                                  canRetryTask(item.task.status)
-                                    ? 'bg-red-500/15 text-red-100 ring-1 ring-red-400/25'
-                                    : 'bg-primary/15 text-primary ring-1 ring-primary/25'
-                                "
-                              >
-                                <Loader2 v-if="isTaskRunning(item.task.status)" class="h-3.5 w-3.5 animate-spin" />
-                                <X v-else-if="canRetryTask(item.task.status)" class="h-3.5 w-3.5" />
-                                <Clock v-else class="h-3.5 w-3.5" />
-                                {{ taskStatusLabel(item.task.status) }}
-                              </span>
-                              <div class="flex items-center gap-2">
-                                <button
-                                  v-if="canCancelTask(item.task.status)"
-                                  type="button"
-                                  class="inline-flex items-center gap-1 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white/75 transition hover:bg-white/18 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                                  :disabled="
-                                    cancellingTaskIds.has(item.task.taskId) ||
-                                    deletingTaskIds.has(item.task.taskId) ||
-                                    retryingTaskIds.has(item.task.taskId)
-                                  "
-                                  @click.stop="cancelQueuedTask(item.task)"
-                                >
-                                  <Loader2
-                                    v-if="cancellingTaskIds.has(item.task.taskId)"
-                                    class="h-3 w-3 animate-spin"
-                                  />
-                                  <X v-else class="h-3 w-3" />
-                                  {{ cancellingTaskIds.has(item.task.taskId) ? "取消中" : "取消" }}
-                                </button>
-                                <span class="text-xs text-white/35">{{ taskProgressView(item.task).percentLabel }}</span>
-                              </div>
-                            </div>
-
-                            <div class="mt-auto">
-                              <p class="line-clamp-2 text-xl font-semibold text-white">{{ item.task.toolName }}</p>
-                              <p class="mt-2 line-clamp-3 text-sm leading-6 text-white/55">
-                                {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "任务生成失败，可以复用本次参数重试。" : "任务正在生成，完成后结果会自动出现在这里。") }}
-                              </p>
-                              <div class="mt-5 h-1.5 overflow-hidden rounded-full bg-white/10">
-                                <div
-                                  class="h-full rounded-full transition-all"
-                                  :class="canRetryTask(item.task.status) ? 'bg-red-400' : 'bg-primary'"
-                                  :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
+                          <!-- 渐变光晕效果 -->
+                          <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+                          
+                          <!-- 圆环进度指示器 -->
+                          <div class="relative z-10 flex h-full flex-col items-center justify-center gap-4">
+                            <!-- SVG圆环进度条 -->
+                            <div class="relative h-28 w-28">
+                              <svg class="h-full w-full -rotate-90" viewBox="0 0 100 100">
+                                <!-- 背景圆环 -->
+                                <circle
+                                  cx="50"
+                                  cy="50"
+                                  r="42"
+                                  fill="none"
+                                  stroke="rgba(255, 255, 255, 0.1)"
+                                  stroke-width="6"
                                 />
+                                <!-- 进度圆环 -->
+                                <circle
+                                  cx="50"
+                                  cy="50"
+                                  r="42"
+                                  fill="none"
+                                  :stroke="canRetryTask(item.task.status) ? '#f87171' : '#b05cff'"
+                                  stroke-width="6"
+                                  stroke-linecap="round"
+                                  :stroke-dasharray="`${Math.max(6, taskProgressView(item.task).percent) * 2.64} 264`"
+                                  class="transition-all duration-500 ease-out"
+                                />
+                              </svg>
+                              <!-- 中心百分比文字 -->
+                              <div class="absolute inset-0 flex flex-col items-center justify-center">
+                                <span class="text-2xl font-bold text-white tabular-nums">{{ taskProgressView(item.task).percent }}%</span>
+                                <Loader2 v-if="isTaskRunning(item.task.status)" class="mt-1 h-4 w-4 animate-spin text-primary/60" />
+                                <X v-else-if="canRetryTask(item.task.status)" class="mt-1 h-4 w-4 text-red-400" />
+                                <Clock v-else class="mt-1 h-4 w-4 text-white/40" />
                               </div>
                             </div>
+                            
+                            <!-- 状态标签 -->
+                            <span
+                              class="inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-medium shadow-lg backdrop-blur-sm"
+                              :class="
+                                canRetryTask(item.task.status)
+                                  ? 'bg-red-500/20 text-red-100 ring-1 ring-red-400/30'
+                                  : 'bg-primary/20 text-primary ring-1 ring-primary/30'
+                              "
+                            >
+                              <Loader2 v-if="isTaskRunning(item.task.status)" class="h-4 w-4 animate-spin" />
+                              <X v-else-if="canRetryTask(item.task.status)" class="h-4 w-4" />
+                              <Clock v-else class="h-4 w-4" />
+                              {{ taskStatusLabel(item.task.status) }}
+                            </span>
+                            
+                            <!-- 进度说明文字 -->
+                            <p class="max-w-xs text-center text-sm text-white/50">
+                              {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "任务生成失败，可以复用本次参数重试。" : "任务正在生成，完成后结果会自动出现在这里。") }}
+                            </p>
                           </div>
                         </div>
-                      </template>
+                        
+                        <!-- 底部操作栏 -->
+                        <div class="flex items-center justify-between border-t border-white/8 px-4 py-3">
+                          <p class="truncate text-xs text-white/30">{{ item.task.taskNo }}</p>
+                          <div class="flex shrink-0 items-center gap-2">
+                            <button
+                              v-if="canCancelTask(item.task.status)"
+                              type="button"
+                              class="rounded-full bg-white/8 px-3 py-1.5 text-xs font-medium text-white/60 transition hover:bg-white/14 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                              :disabled="
+                                cancellingTaskIds.has(item.task.taskId) ||
+                                deletingTaskIds.has(item.task.taskId) ||
+                                retryingTaskIds.has(item.task.taskId)
+                              "
+                              @click.stop="cancelQueuedTask(item.task)"
+                            >
+                              {{ cancellingTaskIds.has(item.task.taskId) ? "取消中" : "取消" }}
+                            </button>
+                            <button
+                              v-if="canRetryTask(item.task.status)"
+                              type="button"
+                              class="rounded-full bg-red-500/15 px-3 py-1.5 text-xs font-medium text-red-100 transition hover:bg-red-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                              :disabled="
+                                retryingTaskIds.has(item.task.taskId) ||
+                                deletingTaskIds.has(item.task.taskId) ||
+                                cancellingTaskIds.has(item.task.taskId)
+                              "
+                              @click.stop="retryTask(item.task)"
+                            >
+                              {{ retryingTaskIds.has(item.task.taskId) ? "重试中" : "重试" }}
+                            </button>
+                            <button
+                              v-else-if="!canCancelTask(item.task.status)"
+                              type="button"
+                              class="rounded-full bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-primary hover:text-white"
+                              @click.stop="replayTask(item.task)"
+                            >
+                              再次生成
+                            </button>
+                            <button
+                              v-if="canDeleteTask(item.task.status)"
+                              type="button"
+                              class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/8 text-white/45 transition hover:bg-white/14 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                              :disabled="
+                                deletingTaskIds.has(item.task.taskId) ||
+                                retryingTaskIds.has(item.task.taskId) ||
+                                cancellingTaskIds.has(item.task.taskId)
+                              "
+                              @click.stop="removeTask(item.task)"
+                            >
+                              <Loader2 v-if="deletingTaskIds.has(item.task.taskId)" class="h-4 w-4 animate-spin" />
+                              <Trash2 v-else class="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                       <template v-else-if="primaryBlock(item.blocks)?.type === 'image'">
                         <div
                           class="dashboard-history-media-frame aspect-[4/3] w-full"

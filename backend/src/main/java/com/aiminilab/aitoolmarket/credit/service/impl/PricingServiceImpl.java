@@ -27,8 +27,8 @@ public class PricingServiceImpl implements PricingService {
 
     /** 1 credit = 0.01 CNY (single definition of the credit face value). */
     static final BigDecimal CREDIT_PRICE_CNY = new BigDecimal("0.01");
-    /** Default markup applied when no margin config row matches. Equivalent to the legacy 1.2. */
-    static final BigDecimal DEFAULT_MARKUP = new BigDecimal("1.20");
+    /** Default markup applied when no margin config row matches. Increased from 1.20 to 1.50 for better profit margin (32-33% on monthly packages). */
+    static final BigDecimal DEFAULT_MARKUP = new BigDecimal("1.50");
     private static final BigDecimal ONE_MILLION = BigDecimal.valueOf(1_000_000);
     private static final int IMAGE_INPUT_TOKEN_UPPER_ESTIMATE = 8_000;
     private static final int IMAGE_OUTPUT_TOKEN_UPPER_ESTIMATE = 8_000;

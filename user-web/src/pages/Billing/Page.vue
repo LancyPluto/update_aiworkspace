@@ -176,59 +176,75 @@ onMounted(loadBilling)
       </div>
 
       <section class="rounded-lg border border-border bg-card">
-        <div class="flex items-center gap-2 border-b border-border px-5 py-4">
-          <ReceiptText class="h-4 w-4 text-primary" />
-          <h2 class="text-sm font-semibold">算力流水</h2>
-        </div>
-        <div v-if="loading" class="px-5 py-8 text-center text-sm text-muted-foreground">加载中...</div>
-        <div v-else class="overflow-x-auto">
-          <table class="w-full min-w-[560px] text-sm">
-            <thead class="bg-secondary/70 text-xs text-muted-foreground">
-              <tr>
-                <th class="px-4 py-3 text-left font-medium">{{ "\u65f6\u95f4" }}</th>
-                <th class="px-4 py-3 text-left font-medium">原因</th>
-                <th class="px-4 py-3 text-right font-medium">{{ "\u53d8\u52a8" }}</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-border">
-              <tr v-for="log in pagedLogs" :key="log.id">
-                <td class="px-4 py-3 text-muted-foreground">
-                  {{ formatShanghaiTime(log.createdAt) }}
-                </td>
-                <td class="px-4 py-3">{{ log.reason || "-" }}</td>
-                <td
-                  class="px-4 py-3 text-right"
-                  :class="log.negative ? 'text-destructive' : 'text-primary'"
-                >
-                  {{ log.changeText }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-if="logs.length > 0" class="flex items-center justify-between border-t border-border px-5 py-4 text-sm text-muted-foreground">
-            <span>共 {{ logs.length }} 条，每页 {{ pageSize }} 条</span>
+        <details class="group">
+          <summary class="flex cursor-pointer items-center justify-between border-b border-border px-5 py-4 list-none select-none">
             <div class="flex items-center gap-2">
-              <button
-                type="button"
-                class="rounded-md border border-border px-3 py-1.5 transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
-                :disabled="currentPage <= 1"
-                @click="currentPage -= 1"
-              >
-                上一页
-              </button>
-              <span>{{ currentPage }} / {{ totalPages }}</span>
-              <button
-                type="button"
-                class="rounded-md border border-border px-3 py-1.5 transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
-                :disabled="currentPage >= totalPages"
-                @click="currentPage += 1"
-              >
-                下一页
-              </button>
+              <ReceiptText class="h-4 w-4 text-primary" />
+              <h2 class="text-sm font-semibold">算力流水</h2>
+              <span class="text-xs text-muted-foreground">（共 {{ logs.length }} 条）</span>
             </div>
+            <svg 
+              class="h-4 w-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" 
+              fill="none" 
+              viewBox="0 0 24 24" 
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </summary>
+          
+          <!-- 原有表格内容 -->
+          <div v-if="loading" class="px-5 py-8 text-center text-sm text-muted-foreground">加载中...</div>
+          <div v-else class="overflow-x-auto">
+            <table class="w-full min-w-[560px] text-sm">
+              <thead class="bg-secondary/70 text-xs text-muted-foreground">
+                <tr>
+                  <th class="px-4 py-3 text-left font-medium">{{ "\u65f6\u95f4" }}</th>
+                  <th class="px-4 py-3 text-left font-medium">原因</th>
+                  <th class="px-4 py-3 text-right font-medium">{{ "\u53d8\u52a8" }}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-border">
+                <tr v-for="log in pagedLogs" :key="log.id">
+                  <td class="px-4 py-3 text-muted-foreground">
+                    {{ formatShanghaiTime(log.createdAt) }}
+                  </td>
+                  <td class="px-4 py-3">{{ log.reason || "-" }}</td>
+                  <td
+                    class="px-4 py-3 text-right"
+                    :class="log.negative ? 'text-destructive' : 'text-primary'"
+                  >
+                    {{ log.changeText }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="logs.length > 0" class="flex items-center justify-between border-t border-border px-5 py-4 text-sm text-muted-foreground">
+              <span>共 {{ logs.length }} 条，每页 {{ pageSize }} 条</span>
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="rounded-md border border-border px-3 py-1.5 transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                  :disabled="currentPage <= 1"
+                  @click="currentPage -= 1"
+                >
+                  上一页
+                </button>
+                <span>{{ currentPage }} / {{ totalPages }}</span>
+                <button
+                  type="button"
+                  class="rounded-md border border-border px-3 py-1.5 transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                  :disabled="currentPage >= totalPages"
+                  @click="currentPage += 1"
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
+            <div v-if="logs.length === 0" class="px-5 py-8 text-center text-sm text-muted-foreground">暂无算力流水</div>
           </div>
-          <div v-if="logs.length === 0" class="px-5 py-8 text-center text-sm text-muted-foreground">暂无算力流水</div>
-        </div>
+        </details>
       </section>
     </div>
   </AppShell>

@@ -11,7 +11,7 @@ import java.util.Optional;
 
 public interface CreditMapper extends BaseMapper<CreditAccount> {
 
-    int DEFAULT_GRANTED_CREDITS = 100;
+    int DEFAULT_GRANTED_CREDITS = 200;
 
     default CreditAccount getOrCreateAccount(Long userId) {
         Optional<CreditAccount> existing = findByUserId(userId);
