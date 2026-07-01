@@ -94,6 +94,60 @@ export function resolveCommunityImageUrls(
   return [...new Set(urls)]
 }
 
+export function isVideoMediaUrl(url?: string | null) {
+  const value = (url || "").trim().toLowerCase()
+  if (!value) return false
+  return /\.(mp4|mov|webm|mkv|avi|m4v)(\?|$|#)/i.test(value) || value.startsWith("data:video/")
+}
+
+export function inferMediaExtension(url?: string | null, fallback = "bin") {
+  const value = (url || "").trim().split(/[?#]/, 1)[0] || ""
+  const match = value.match(/\.([a-z0-9]{2,5})$/i)
+  return match?.[1]?.toLowerCase() || fallback
+}
+
+export function resolveCommunityDownloadApiUrl(postId: number, imageIndex = 0) {
+  const index = Number.isFinite(imageIndex) && imageIndex > 0 ? `?index=${imageIndex}` : ""
+  return normalizeCommunityMediaUrl(`/api/v1/community/posts/${postId}/download${index}`)
+}
+
+export function resolveCommunityDownloadFilename(
+  post: Pick<CommunityPost, "id" | "modality">,
+  sourceUrl?: string | null,
+) {
+  const kind = resolveCommunityPostKind(post.modality)
+  const fallback = kind === "video" ? "mp4" : kind === "audio" ? "mp3" : "png"
+  return `community-post-${post.id}.${inferMediaExtension(sourceUrl, fallback)}`
+}
+
+export function resolveCommunityDownloadSourceUrl(
+  post: Pick<CommunityPost, "modality" | "coverUrl" | "mediaUrl" | "mediaUrls">,
+  options?: { imageIndex?: number; extraImageUrls?: string[] },
+) {
+  const kind = resolveCommunityPostKind(post.modality)
+  if (kind === "image") {
+    const urls = resolveCommunityImageUrls(post, options?.extraImageUrls ?? [])
+    if (!urls.length) return ""
+    const index = options?.imageIndex ?? 0
+    return urls[Math.min(Math.max(index, 0), urls.length - 1)] || urls[0] || ""
+  }
+  if (kind === "audio") {
+    const cover = (post.coverUrl || "").trim()
+    const media = (post.mediaUrl || "").trim()
+    if (/\.(mp3|wav|m4a|flac|ogg|aac|webm)(\?|$|#)/i.test(cover)) return normalizeCommunityMediaUrl(cover)
+    if (/\.(mp3|wav|m4a|flac|ogg|aac|webm)(\?|$|#)/i.test(media)) return normalizeCommunityMediaUrl(media)
+    return normalizeCommunityMediaUrl(media || cover)
+  }
+  if (kind === "video") {
+    const media = normalizeCommunityMediaUrl(post.mediaUrl)
+    const cover = normalizeCommunityMediaUrl(post.coverUrl)
+    if (isVideoMediaUrl(media)) return media
+    if (isVideoMediaUrl(cover)) return cover
+    return media || cover
+  }
+  return normalizeCommunityMediaUrl(post.mediaUrl || post.coverUrl)
+}
+
 export function extractImageUrlsFromTask(task?: TaskDetail | null): string[] {
   const content = task?.result?.contentText?.trim()
   if (!content) return []

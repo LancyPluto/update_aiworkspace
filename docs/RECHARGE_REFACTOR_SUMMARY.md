@@ -39,6 +39,18 @@ static final BigDecimal DEFAULT_MARKUP = new BigDecimal("1.50");  // 原 1.20
 
 ---
 
+#### 年度套餐（限时 37 折，相对月卡 ×12）
+| 套餐代码 | 名称 | 折后价 | 算力 | 有效期 |
+|---------|------|--------|------|--------|
+| yearly_starter | 入门版·年卡 | ¥446 | 52,000 | 365天 |
+| yearly_growth | 成长版·年卡 | ¥1,128 | 130,000 | 365天 |
+| yearly_pro | 专业版·年卡 | ¥2,264 | 260,000 | 365天 |
+| yearly_flagship | 旗舰版·年卡 | ¥4,528 | 520,000 | 365天 |
+
+**迁移文件**: `sql/068_yearly_recharge_packages.sql`
+
+---
+
 ### 3. 前端 UI 重构 ✅
 **文件**: `user-web/src/pages/Billing/RechargeSection.vue`
 
