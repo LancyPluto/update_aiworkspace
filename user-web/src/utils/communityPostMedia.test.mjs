@@ -52,3 +52,20 @@ test("resolves community video poster and low-bandwidth preview URLs", () => {
 test("does not derive data URLs", () => {
   assert.equal(media.resolveCommunityDerivativeUrl("data:image/png;base64,abc", "image-thumb"), "")
 })
+
+test("resolves community download API and filenames", () => {
+  assert.equal(media.resolveCommunityDownloadApiUrl(42), "/api/v1/community/posts/42/download")
+  assert.equal(media.resolveCommunityDownloadApiUrl(42, 2), "/api/v1/community/posts/42/download?index=2")
+  assert.equal(
+    media.resolveCommunityDownloadFilename({ id: 7, modality: "VIDEO" }, "https://cdn.example.com/a/b/work.mp4"),
+    "community-post-7.mp4",
+  )
+  assert.equal(
+    media.resolveCommunityDownloadSourceUrl({
+      modality: "VIDEO",
+      coverUrl: "https://cdn.example.com/poster.jpg",
+      mediaUrl: "https://cdn.example.com/work.mp4",
+    }),
+    "https://cdn.example.com/work.mp4",
+  )
+})

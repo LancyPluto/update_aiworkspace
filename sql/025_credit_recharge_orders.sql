@@ -47,9 +47,17 @@ CREATE TABLE IF NOT EXISTS credit_recharge_orders (
 INSERT INTO credit_recharge_packages(package_code, package_name, credits, price_amount, currency, validity_days,
                                      benefits_json, recommended, sort_order, status)
 VALUES
-  ('starter_1000', '入门套餐', 1000, 10.00, 'CNY', 30, JSON_ARRAY('优先排队'), 0, 10, 'ACTIVE'),
-  ('growth_5000', '成长套餐', 5000, 45.00, 'CNY', 90, JSON_ARRAY('优先排队', 'API 加速'), 1, 20, 'ACTIVE'),
-  ('pro_12000', '专业套餐', 12000, 99.00, 'CNY', 180, JSON_ARRAY('优先排队', 'API 加速', '模型咨询服务'), 0, 30, 'ACTIVE')
+  -- 月度套餐（markup 1.50，利润率 32-33%）
+  ('monthly_starter', '入门版·月卡', 4000, 59.00, 'CNY', 30, JSON_ARRAY('优先排队', '每日登录送20算力', '灵活月付'), 0, 10, 'ACTIVE'),
+  ('monthly_growth', '成长版·月卡', 10000, 149.00, 'CNY', 30, JSON_ARRAY('优先排队', 'API 加速', '每日登录送30算力', '灵活月付'), 1, 20, 'ACTIVE'),
+  ('monthly_pro', '专业版·月卡', 20000, 299.00, 'CNY', 30, JSON_ARRAY('优先排队', 'API 加速', '模型咨询服务', '每日登录送50算力', '灵活月付'), 0, 30, 'ACTIVE'),
+  ('monthly_flagship', '旗舰版·月卡', 40000, 599.00, 'CNY', 30, JSON_ARRAY('无限并发', '专属客服', '定制模型支持', '每日登录送100算力', '灵活月付'), 0, 40, 'ACTIVE'),
+
+  -- 季度套餐（季卡 9 折：价格 = 月卡×2.7，算力 = 月卡×3；markup 1.50 下毛利率约 50%）
+  ('quarterly_starter', '入门版·季卡', 12000, 159.00, 'CNY', 90, JSON_ARRAY('优先排队', '每日登录送20算力', '季卡9折优惠'), 0, 50, 'ACTIVE'),
+  ('quarterly_growth', '成长版·季卡', 30000, 399.00, 'CNY', 90, JSON_ARRAY('优先排队', 'API 加速', '每日登录送30算力', '季卡9折优惠'), 1, 60, 'ACTIVE'),
+  ('quarterly_pro', '专业版·季卡', 60000, 799.00, 'CNY', 90, JSON_ARRAY('优先排队', 'API 加速', '模型咨询服务', '每日登录送50算力', '季卡9折优惠'), 0, 70, 'ACTIVE'),
+  ('quarterly_flagship', '旗舰版·季卡', 120000, 1599.00, 'CNY', 90, JSON_ARRAY('无限并发', '专属客服', '定制模型支持', '每日登录送100算力', '季卡9折优惠'), 0, 80, 'ACTIVE')
 ON DUPLICATE KEY UPDATE
   package_name = VALUES(package_name),
   credits = VALUES(credits),

@@ -80,18 +80,24 @@ from pathlib import Path
 
 patch_lines = """
 APP_PRODUCTION_MODE=true
+APP_ENV=production
+TASK_QUEUE_BACKEND=rabbitmq
 VITE_API_BASE_URL=
 VITE_DEV_PROXY_TARGET=http://backend:8080
 ADMIN_NEXT_PUBLIC_API_BASE_URL=
 ADMIN_NEXT_PUBLIC_API_PROXY_TARGET=http://backend:8080
 CORS_ALLOWED_ORIGINS=http://wlcloudai.com,http://www.wlcloudai.com,http://8.134.93.203,https://wlcloudai.com,https://www.wlcloudai.com,https://8.134.93.203
-ASSET_STORAGE_PROVIDER=oss
 ASSET_STORAGE_PUBLIC_BASE_URL=https://cdn.wlcloudai.com
 ASSET_STORAGE_PRIVATE_BASE_URL=/api/v1/assets/private
 ASSET_STORAGE_IMAGE_TRANSFORM_OPTIONS=image/format,webp/quality,Q_85
 HTTP_PROXY=http://host.docker.internal:7890
 HTTPS_PROXY=http://host.docker.internal:7890
 NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn
+OSS_ENDPOINT=oss-cn-guangzhou.aliyuncs.com
+OSS_PUBLIC_BUCKET=wlcloudai-assets-public
+OSS_PRIVATE_BUCKET=wlcloudai-assets-private
+OSS_LEGACY_BUCKET=wlcloudai-assets-prod
+OSS_KEY_PREFIX=
 """.strip().splitlines()
 
 patch = {}
@@ -101,16 +107,57 @@ for line in patch_lines:
     key, value = line.split("=", 1)
     patch[key] = value
 
+OSS_CREDENTIAL_KEYS = (
+    "OSS_ACCESS_KEY_ID",
+    "OSS_ACCESS_KEY_SECRET",
+    "ALIYUN_ACCESS_KEY_ID",
+    "ALIYUN_ACCESS_KEY_SECRET",
+    "ALIYUN_CAPTCHA_ACCESS_KEY_ID",
+    "ALIYUN_CAPTCHA_ACCESS_KEY_SECRET",
+)
+OSS_REQUIRED_KEYS = (
+    "OSS_ENDPOINT",
+    "OSS_PUBLIC_BUCKET",
+    "OSS_PRIVATE_BUCKET",
+)
+
+
+def read_env(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    out: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "=" not in line or line.strip().startswith("#"):
+            continue
+        key, value = line.split("=", 1)
+        out[key.strip()] = value.strip()
+    return out
+
+
+def has_oss_credentials(data: dict[str, str]) -> bool:
+    if any(data.get(key) for key in OSS_CREDENTIAL_KEYS):
+        return True
+    return all(data.get(key) for key in OSS_REQUIRED_KEYS)
+
+
 def patch_env(path: Path) -> None:
+    existing = read_env(path)
+    merged = {**existing, **patch}
+    if has_oss_credentials(merged):
+        merged["ASSET_STORAGE_PROVIDER"] = "oss"
+        print("ASSET_STORAGE_PROVIDER=oss (credentials present)")
+    else:
+        merged.pop("ASSET_STORAGE_PROVIDER", None)
+        print("WARN: OSS credentials missing; not forcing ASSET_STORAGE_PROVIDER=oss", path)
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.exists() else []
-    keys = set(patch)
+    keys = set(merged)
     out = []
     for line in lines:
         key = line.split("=", 1)[0].strip()
         if key in keys:
             continue
         out.append(line)
-    for key, value in patch.items():
+    for key, value in merged.items():
         out.append(f"{key}={value}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(out) + "\n", encoding="utf-8")
@@ -119,6 +166,26 @@ def patch_env(path: Path) -> None:
 # docker compose interpolates deploy/.env and overrides env_file; patch both.
 patch_env(Path("/root/ai_tool_market/.env"))
 patch_env(Path("/root/ai_tool_market/deploy/.env"))
+
+# Re-merge payment keys from backup if a prior deploy stripped them.
+backup_path = Path("/root/ai_tool_market/.env.bak.pre-oss-migration")
+if backup_path.exists():
+    backup = read_env(backup_path)
+    for path in (Path("/root/ai_tool_market/.env"), Path("/root/ai_tool_market/deploy/.env")):
+        current = read_env(path)
+        payment = {
+            k: v for k, v in backup.items()
+            if k.startswith("WECHAT_") or k.startswith("ALIPAY_")
+        }
+        if not payment:
+            continue
+        merged = {**current, **payment}
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.exists() else []
+        keys = set(merged)
+        out = [line for line in lines if line.split("=", 1)[0].strip() not in keys]
+        out.extend(f"{k}={v}" for k, v in merged.items())
+        path.write_text("\n".join(out) + "\n", encoding="utf-8")
+        print("preserved payment keys from backup into", path)
 PY
 
 python3 - <<'PY'
@@ -171,6 +238,19 @@ for key in ("JWT_SECRET", "INTERNAL_API_TOKEN"):
 deploy.parent.mkdir(parents=True, exist_ok=True)
 deploy.write_text("\n".join(lines) + "\n", encoding="utf-8")
 print("mirrored secrets to deploy/.env")
+
+# Worker/agent production checks reject placeholder MODEL_API_KEY; reuse SiliconFlow key when set.
+root = read_env()
+model_key = (root.get("MODEL_API_KEY") or "").strip()
+silicon_key = (root.get("SILICONFLOW_API_KEY") or "").strip()
+if (not model_key or model_key.startswith("replace-with-")) and silicon_key and not silicon_key.startswith("replace-with-"):
+    upsert("MODEL_API_KEY", silicon_key)
+    print("bootstrapped MODEL_API_KEY from SILICONFLOW_API_KEY")
+    root = read_env()
+    lines = deploy.read_text(encoding="utf-8", errors="replace").splitlines() if deploy.exists() else []
+    lines = [line for line in lines if not line.startswith("MODEL_API_KEY=")]
+    lines.append(f"MODEL_API_KEY={root['MODEL_API_KEY']}")
+    deploy.write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
 
 if [ -f "\$REMOTE_DIR/deploy/logs/last-deploy.json" ]; then

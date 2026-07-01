@@ -15,8 +15,10 @@ import com.aiminilab.aitoolmarket.credit.dto.RechargePackageResponse;
 import com.aiminilab.aitoolmarket.credit.dto.RechargePaymentOptionsResponse;
 import com.aiminilab.aitoolmarket.credit.entity.CreditRechargeOrder;
 import com.aiminilab.aitoolmarket.credit.entity.CreditRechargePackage;
+import com.aiminilab.aitoolmarket.credit.entity.GiftCardPackage;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderMapper;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargePackageMapper;
+import com.aiminilab.aitoolmarket.credit.mapper.GiftCardPackageMapper;
 import com.aiminilab.aitoolmarket.credit.service.CreditRechargeService;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.credit.wechat.NativePrepayRequest;
@@ -51,6 +53,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
     private static final int WECHAT_QUERY_THROTTLE_SECONDS = 10;
 
     private final CreditRechargePackageMapper packageMapper;
+    private final GiftCardPackageMapper giftCardPackageMapper;
     private final CreditRechargeOrderMapper orderMapper;
     private final CreditService creditService;
     private final ObjectMapper objectMapper;
@@ -64,6 +67,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
     private final BypassCacheService bypassCacheService;
 
     public CreditRechargeServiceImpl(CreditRechargePackageMapper packageMapper,
+                                     GiftCardPackageMapper giftCardPackageMapper,
                                      CreditRechargeOrderMapper orderMapper,
                                      CreditService creditService,
                                      ObjectMapper objectMapper,
@@ -74,6 +78,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
                                      CreditRechargeCreditDispatcher creditDispatcher,
                                      BypassCacheService bypassCacheService) {
         this.packageMapper = packageMapper;
+        this.giftCardPackageMapper = giftCardPackageMapper;
         this.orderMapper = orderMapper;
         this.creditService = creditService;
         this.objectMapper = objectMapper;
@@ -120,17 +125,17 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
             }
         }
 
-        CreditRechargePackage rechargePackage = activePackageOrThrow(request.packageId());
+        boolean isGiftCard = "GIFT_CARD".equals(request.orderType());
+        String productDescription;
+        BigDecimal orderPriceAmount;
+        String orderCurrency;
+
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime expiresAt = now.plusMinutes(ORDER_EXPIRE_MINUTES);
         String paymentChannel = normalizePaymentChannel(request.paymentChannel());
         CreditRechargeOrder order = new CreditRechargeOrder();
         order.setOrderNo(generateOrderNo());
         order.setUserId(userId);
-        order.setPackageId(rechargePackage.getId());
-        order.setCredits(rechargePackage.getCredits());
-        order.setPriceAmount(rechargePackage.getPriceAmount());
-        order.setCurrency(rechargePackage.getCurrency());
         order.setPaymentChannel(paymentChannel);
         order.setStatus(RechargeOrderStatus.WAITING_PAYMENT.name());
         order.setStatusReason("waiting for payment");
@@ -140,14 +145,41 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         order.setUpdatedAt(now);
         order.setPayUrl(null);
         order.setQrCodeUrl(null);
+
+        if (isGiftCard) {
+            GiftCardPackage giftPkg = giftCardPackageMapper.findActiveById(request.giftCardPackageId());
+            if (giftPkg == null) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "gift card package not found");
+            }
+            order.setPackageId(null);
+            order.setCredits(giftPkg.getCredits());
+            order.setPriceAmount(giftPkg.getPriceAmount());
+            order.setCurrency(giftPkg.getCurrency());
+            order.setOrderType("GIFT_CARD");
+            order.setGiftCardPackageId(giftPkg.getId());
+            productDescription = "Gift card - " + giftPkg.getPackageName();
+            orderPriceAmount = giftPkg.getPriceAmount();
+            orderCurrency = giftPkg.getCurrency();
+        } else {
+            CreditRechargePackage rechargePackage = activePackageOrThrow(request.packageId());
+            order.setPackageId(rechargePackage.getId());
+            order.setCredits(rechargePackage.getCredits());
+            order.setPriceAmount(rechargePackage.getPriceAmount());
+            order.setCurrency(rechargePackage.getCurrency());
+            order.setOrderType("CREDITS");
+            order.setGiftCardPackageId(null);
+            productDescription = "AI Tool Market credits recharge - " + rechargePackage.getPackageName();
+            orderPriceAmount = rechargePackage.getPriceAmount();
+            orderCurrency = rechargePackage.getCurrency();
+        }
         orderMapper.insert(order);
         if ("WECHAT_NATIVE".equals(paymentChannel)) {
             try {
                 NativePrepayResponse prepay = wechatNativePayClient.createNativeOrder(new NativePrepayRequest(
                         order.getOrderNo(),
-                        "AI Tool Market credits recharge - " + rechargePackage.getPackageName(),
-                        priceToFen(rechargePackage.getPriceAmount()),
-                        rechargePackage.getCurrency(),
+                        productDescription,
+                        priceToFen(orderPriceAmount),
+                        orderCurrency,
                         expiresAt
                 ));
                 if (orderMapper.bindPayUrl(order.getId(), prepay.codeUrl(), "WeChat Native prepay created", LocalDateTime.now()) != 1) {
@@ -162,8 +194,8 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
             try {
                 AlipayPagePayResponse prepay = alipayPagePayClient.createPagePayOrder(new AlipayPagePayRequest(
                         order.getOrderNo(),
-                        "AI Tool Market credits recharge - " + rechargePackage.getPackageName(),
-                        rechargePackage.getPriceAmount(),
+                        productDescription,
+                        orderPriceAmount,
                         expiresAt
                 ));
                 String payBinding = prepay.redirectPath();

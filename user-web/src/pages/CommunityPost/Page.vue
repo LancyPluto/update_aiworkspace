@@ -25,11 +25,15 @@ import { resolveCommunityAuthorAvatar, resolveCommunityAuthorName, resolveCommun
 import {
   extractImageUrlsFromTask,
   normalizeCommunityMediaUrl,
+  resolveCommunityDownloadApiUrl,
+  resolveCommunityDownloadFilename,
+  resolveCommunityDownloadSourceUrl,
   resolveCommunityImageUrls,
   resolveCommunityPostKind,
 } from "@/utils/communityPostMedia"
 import { openCreateWithAssetRecommendation } from "@/utils/assetReplay"
 import { resolveCommunityAudioMedia } from "@/utils/communityAudioMedia"
+import { forceDownload as sharedForceDownload } from "@/utils/download"
 
 const route = useRoute()
 const router = useRouter()
@@ -39,27 +43,8 @@ function resolveAuthToken() {
   return auth.token ?? getSessionBearerJwt()
 }
 
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement("a")
-  anchor.href = url
-  anchor.download = filename
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(url)
-}
-
-async function forceDownload(url: string, filename: string) {
-  if (!url) return
-  try {
-    const res = await fetch(url)
-    if (!res.ok) throw new Error("Download failed")
-    const blob = await res.blob()
-    downloadBlob(blob, filename)
-  } catch {
-    window.open(url, "_blank")
-  }
+function forceDownload(url: string, filename: string) {
+  return sharedForceDownload(url, filename, resolveAuthToken())
 }
 
 const post = ref<CommunityPost | null>(null)
@@ -127,10 +112,22 @@ const activeImageUrl = computed(() => {
   return imageUrls.value[Math.min(Math.max(activeImageIndex.value, 0), imageUrls.value.length - 1)] || imageUrls.value[0] || ""
 })
 
+const downloadSourceUrl = computed(() => {
+  if (!post.value) return ""
+  return resolveCommunityDownloadSourceUrl(post.value, {
+    imageIndex: activeImageIndex.value,
+    extraImageUrls: extraImageUrls.value,
+  })
+})
+
 const downloadUrl = computed(() => {
-  if (kind.value === "audio") return audioMedia.value.audioUrl
-  if (kind.value === "image") return activeImageUrl.value
-  return post.value ? normalizeCommunityMediaUrl(post.value.coverUrl) : ""
+  if (!post.value || !downloadSourceUrl.value) return ""
+  return resolveCommunityDownloadApiUrl(post.value.id, kind.value === "image" ? activeImageIndex.value : 0)
+})
+
+const downloadFilename = computed(() => {
+  if (!post.value) return "community-post"
+  return resolveCommunityDownloadFilename(post.value, downloadSourceUrl.value)
 })
 
 const audioProgress = computed(() => {
@@ -648,7 +645,7 @@ onUnmounted(() => {
             v-if="downloadUrl"
             type="button"
             aria-label="下载作品"
-            @click="forceDownload(downloadUrl, `community-post-${post.id}.png`)"
+            @click="forceDownload(downloadUrl, downloadFilename)"
           >
             <Download class="h-4 w-4" />
           </button>

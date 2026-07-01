@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
 import { useRouter } from "vue-router"
-import { Camera, Check, ExternalLink, Loader2, Shield, Sparkles, ToggleLeft, Trash2, Wallet, X } from "lucide-vue-next"
+import { Camera, Check, ClipboardCopy, ExternalLink, Gift, Loader2, Shield, Sparkles, ToggleLeft, Trash2, Wallet, X } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
-import { fetchCreditAccount } from "@/api/creditApi"
+import { fetchCreditAccount, fetchMyGiftCards, redeemGiftCard, redeemGiftCardByCode } from "@/api/creditApi"
 import { fetchTasks } from "@/api/taskApi"
 import { cancelCurrentUserAccount, sendCancelAccountSmsCode } from "@/api/userApi"
-import type { CreditAccount } from "@/api/types"
+import type { CreditAccount, GiftCard } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 
 const auth = useAuthStore()
@@ -33,6 +33,52 @@ const cancelCooldown = ref(0)
 const sendingCancelCode = ref(false)
 const cancellingAccount = ref(false)
 const cancelDebugCode = ref<string | null>(null)
+
+// 礼品卡状态
+const giftCards = ref<GiftCard[]>([])
+const loadingGiftCards = ref(false)
+const redeemingCardId = ref<number | null>(null)
+const redeemCodeDialogOpen = ref(false)
+const redeemCodeInput = ref("")
+const redeemingByCode = ref(false)
+const shareDialogOpen = ref(false)
+const shareCard = ref<GiftCard | null>(null)
+const copyingShareCode = ref(false)
+
+const GIFT_CARD_STYLE_THEMES: Record<string, { bg: string; border: string }> = {
+  blue: { bg: "linear-gradient(135deg, rgb(30 64 175), rgb(15 23 42))", border: "rgb(59 130 246 / 0.3)" },
+  purple: { bg: "linear-gradient(135deg, rgb(107 33 168), rgb(15 23 42))", border: "rgb(168 85 247 / 0.3)" },
+  gold: { bg: "linear-gradient(135deg, rgb(161 98 7), rgb(15 23 42))", border: "rgb(250 204 21 / 0.3)" },
+  dark: { bg: "linear-gradient(135deg, rgb(30 41 59), rgb(10 10 15))", border: "rgb(100 116 139 / 0.3)" },
+}
+
+function giftCardStyle(theme: string | undefined | null) {
+  return GIFT_CARD_STYLE_THEMES[theme || "dark"] || GIFT_CARD_STYLE_THEMES.dark
+}
+
+function maskCardCode(code: string | undefined | null) {
+  if (!code) return "--"
+  if (code.length <= 8) return code
+  return code.slice(0, 3) + "****" + code.slice(-4)
+}
+
+function giftCardStatusLabel(status: string | undefined | null) {
+  switch (status) {
+    case "UNUSED": return "未使用"
+    case "USED": return "已使用"
+    case "EXPIRED": return "已过期"
+    default: return status || "--"
+  }
+}
+
+function giftCardStatusClass(status: string | undefined | null) {
+  switch (status) {
+    case "UNUSED": return "status-unused"
+    case "USED": return "status-used"
+    case "EXPIRED": return "status-expired"
+    default: return ""
+  }
+}
 
 const displayName = computed(() => auth.user?.nickname || auth.user?.username || "用户")
 const joinedLabel = computed(() => `UID ${auth.user?.id ?? "--"}`)
@@ -170,6 +216,78 @@ async function submitCancelAccount() {
   }
 }
 
+async function loadGiftCards() {
+  if (!auth.token) return
+  loadingGiftCards.value = true
+  try {
+    giftCards.value = await fetchMyGiftCards({ token: auth.token })
+  } catch {
+    // 静默失败，不影响页面其他部分
+  } finally {
+    loadingGiftCards.value = false
+  }
+}
+
+async function redeemCard(id: number) {
+  redeemingCardId.value = id
+  error.value = ""
+  success.value = ""
+  try {
+    await redeemGiftCard(id, { token: auth.token })
+    await loadGiftCards()
+    await loadProfileStats()
+    success.value = "礼品卡兑换成功，算力已到账"
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "礼品卡兑换失败"
+  } finally {
+    redeemingCardId.value = null
+  }
+}
+
+function openShareDialog(card: GiftCard) {
+  shareCard.value = card
+  shareDialogOpen.value = true
+}
+
+async function copyShareCode() {
+  if (!shareCard.value?.cardCode) return
+  copyingShareCode.value = true
+  try {
+    await navigator.clipboard.writeText(shareCard.value.cardCode)
+    success.value = "兑换码已复制，可发送给好友"
+    error.value = ""
+  } catch {
+    error.value = "复制失败，请手动复制兑换码"
+  } finally {
+    copyingShareCode.value = false
+  }
+}
+
+function openRedeemCodeDialog() {
+  redeemCodeInput.value = ""
+  redeemCodeDialogOpen.value = true
+}
+
+async function submitRedeemByCode() {
+  const code = redeemCodeInput.value.trim()
+  if (!code) return
+  redeemingByCode.value = true
+  error.value = ""
+  success.value = ""
+  try {
+    await redeemGiftCardByCode({ cardCode: code }, { token: auth.token })
+    redeemCodeDialogOpen.value = false
+    redeemCodeInput.value = ""
+    await loadGiftCards()
+    await loadProfileStats()
+    success.value = "礼品卡兑换成功，算力已到账"
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "礼品卡兑换失败"
+  } finally {
+    redeemingByCode.value = false
+  }
+}
+
 onMounted(async () => {
   if (!auth.user) await auth.fetchCurrentUser({ clearOnFailure: false })
   nickname.value = auth.user?.nickname || auth.user?.username || ""
@@ -177,6 +295,7 @@ onMounted(async () => {
   autoPublishAssets.value = auth.user?.autoPublishAssets !== false
   promptPublicByDefault.value = auth.user?.promptPublicByDefault === true
   void loadProfileStats()
+  void loadGiftCards()
 })
 </script>
 
@@ -296,6 +415,67 @@ onMounted(async () => {
         </div>
       </section>
 
+      <section class="gift-card-zone">
+        <div class="gift-card-header">
+          <div>
+            <p class="panel-kicker">Gift cards</p>
+            <h2>我的礼品卡</h2>
+            <p class="gift-card-subtitle">使用、赠送或输入兑换码领取算力</p>
+          </div>
+          <button type="button" class="gift-card-redeem-entry" @click="openRedeemCodeDialog">
+            <Gift class="h-4 w-4" aria-hidden="true" />
+            兑换礼品卡
+          </button>
+        </div>
+
+        <div v-if="loadingGiftCards" class="gift-card-loading">加载中...</div>
+        <div v-else-if="giftCards.length === 0" class="gift-card-empty">暂无礼品卡</div>
+        <div v-else class="gift-card-list">
+          <div
+            v-for="card in giftCards"
+            :key="card.id"
+            class="gift-card-item"
+            :style="{ background: giftCardStyle(card.cardTheme).bg, borderColor: giftCardStyle(card.cardTheme).border }"
+          >
+            <div class="gift-card-info">
+              <div class="gift-card-credits">
+                {{ card.credits.toLocaleString() }} <span>算力</span>
+              </div>
+              <div class="gift-card-code">{{ maskCardCode(card.cardCode) }}</div>
+            </div>
+            <div class="gift-card-footer">
+              <span class="gift-card-status" :class="giftCardStatusClass(card.status)">
+                {{ giftCardStatusLabel(card.status) }}
+              </span>
+              <div class="gift-card-actions">
+                <template v-if="card.status === 'UNUSED'">
+                  <button
+                    type="button"
+                    class="gift-card-btn redeem-btn"
+                    :disabled="redeemingCardId === card.id"
+                    @click="redeemCard(card.id)"
+                  >
+                    <Loader2 v-if="redeemingCardId === card.id" class="h-4 w-4 animate-spin" />
+                    使用
+                  </button>
+                  <button
+                    type="button"
+                    class="gift-card-btn transfer-btn"
+                    @click="openShareDialog(card)"
+                  >
+                    赠送
+                  </button>
+                </template>
+                <span v-else-if="card.status === 'USED' && card.redeemedAt" class="gift-card-time">
+                  兑换于 {{ card.redeemedAt }}
+                </span>
+                <span v-else-if="card.status === 'USED'" class="gift-card-time">已使用</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="danger-zone">
         <div>
           <p class="panel-kicker">Account closure</p>
@@ -375,6 +555,68 @@ onMounted(async () => {
             >
               <Loader2 v-if="cancellingAccount" class="h-4 w-4 animate-spin" />
               确认注销
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <div v-if="redeemCodeDialogOpen" class="modal-backdrop" @click.self="redeemCodeDialogOpen = false">
+        <section class="transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="redeem-code-title">
+          <button type="button" class="icon-action dark-icon" aria-label="关闭" @click="redeemCodeDialogOpen = false">
+            <X class="h-4 w-4" />
+          </button>
+          <h2 id="redeem-code-title">兑换礼品卡</h2>
+          <p class="transfer-desc">输入好友分享的礼品卡兑换码，兑换后算力将直接到账。</p>
+          <label class="transfer-field">
+            <span>兑换码</span>
+            <input
+              v-model="redeemCodeInput"
+              placeholder="例如 GC-XXXXXXXXXXXXXXXX"
+              autocomplete="off"
+              spellcheck="false"
+              @keyup.enter="submitRedeemByCode"
+            />
+          </label>
+          <div class="transfer-actions">
+            <button type="button" class="cancel-text-action" @click="redeemCodeDialogOpen = false">取消</button>
+            <button
+              type="button"
+              class="primary-action"
+              :disabled="redeemingByCode || !redeemCodeInput.trim()"
+              @click="submitRedeemByCode"
+            >
+              <Loader2 v-if="redeemingByCode" class="h-4 w-4 animate-spin" />
+              确认兑换
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <div v-if="shareDialogOpen && shareCard" class="modal-backdrop" @click.self="shareDialogOpen = false">
+        <section class="transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="share-code-title">
+          <button type="button" class="icon-action dark-icon" aria-label="关闭" @click="shareDialogOpen = false">
+            <X class="h-4 w-4" />
+          </button>
+          <h2 id="share-code-title">赠送礼品卡</h2>
+          <p class="transfer-desc">
+            将下方兑换码发送给好友，对方可在「兑换礼品卡」中输入兑换码领取
+            {{ shareCard.credits.toLocaleString() }} 算力。
+          </p>
+          <div class="gift-share-code-box">
+            <span class="gift-share-code-label">礼品卡兑换码</span>
+            <code class="gift-share-code-value">{{ shareCard.cardCode }}</code>
+          </div>
+          <div class="transfer-actions">
+            <button type="button" class="cancel-text-action" @click="shareDialogOpen = false">关闭</button>
+            <button
+              type="button"
+              class="primary-action"
+              :disabled="copyingShareCode"
+              @click="copyShareCode"
+            >
+              <Loader2 v-if="copyingShareCode" class="h-4 w-4 animate-spin" />
+              <ClipboardCopy v-else class="h-4 w-4" aria-hidden="true" />
+              复制兑换码
             </button>
           </div>
         </section>
@@ -729,6 +971,281 @@ onMounted(async () => {
 .danger-action:disabled {
   cursor: not-allowed;
   opacity: 0.54;
+}
+
+/* ========== 礼品卡区域 ========== */
+.gift-card-zone {
+  margin-top: 22px;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  padding-top: 24px;
+}
+
+.gift-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+
+.gift-card-header h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.gift-card-subtitle {
+  margin: 8px 0 0;
+  color: rgb(255 255 255 / 0.52);
+  font-size: 13px;
+}
+
+.gift-card-redeem-entry {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgb(176 92 255 / 0.35);
+  border-radius: 999px;
+  background: rgb(176 92 255 / 0.12);
+  color: rgb(255 255 255 / 0.9);
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+
+.gift-card-redeem-entry:hover {
+  transform: translateY(-1px);
+  border-color: rgb(176 92 255 / 0.55);
+  background: rgb(176 92 255 / 0.2);
+}
+
+.gift-card-loading,
+.gift-card-empty {
+  color: rgb(255 255 255 / 0.42);
+  font-size: 14px;
+  padding: 24px 0;
+  text-align: center;
+}
+
+.gift-card-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.gift-card-item {
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 20px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 160px;
+}
+
+.gift-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gift-card-credits {
+  font-size: 28px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.gift-card-credits span {
+  font-size: 14px;
+  font-weight: 400;
+  color: rgb(255 255 255 / 0.6);
+}
+
+.gift-card-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  color: rgb(255 255 255 / 0.5);
+  letter-spacing: 0.05em;
+}
+
+.gift-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: auto;
+}
+
+.gift-card-status {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.status-unused {
+  background: rgb(52 211 153 / 0.15);
+  color: rgb(167 243 208);
+  border: 1px solid rgb(52 211 153 / 0.24);
+}
+
+.status-used {
+  background: rgb(255 255 255 / 0.08);
+  color: rgb(255 255 255 / 0.5);
+  border: 1px solid rgb(255 255 255 / 0.08);
+}
+
+.status-expired {
+  background: rgb(248 113 113 / 0.15);
+  color: rgb(254 202 202);
+  border: 1px solid rgb(248 113 113 / 0.24);
+}
+
+.gift-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.gift-card-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.06);
+  color: rgb(255 255 255 / 0.86);
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 700;
+  transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+
+.gift-card-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgb(176 92 255 / 0.42);
+  background: rgb(176 92 255 / 0.16);
+}
+
+.gift-card-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.redeem-btn {
+  border-color: rgb(176 92 255 / 0.4);
+  background: linear-gradient(135deg, rgb(205 132 255), rgb(176 92 255));
+  box-shadow: 0 8px 24px rgb(176 92 255 / 0.22);
+}
+
+.gift-card-time {
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.4);
+}
+
+/* ========== 赠送弹窗 ========== */
+.transfer-dialog {
+  position: relative;
+  width: min(440px, 100%);
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 28px;
+  background: rgb(24 24 28 / 0.95);
+  box-shadow: 0 30px 90px rgb(0 0 0 / 0.5);
+  color: #fff;
+  padding: 24px;
+  backdrop-filter: blur(18px);
+}
+
+.transfer-dialog h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.transfer-desc {
+  margin: 10px 0 0;
+  color: rgb(255 255 255 / 0.52);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.transfer-field {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.transfer-field span {
+  color: rgb(255 255 255 / 0.42);
+  font-size: 13px;
+}
+
+.transfer-field input {
+  height: 48px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 16px;
+  background: rgb(0 0 0 / 0.2);
+  color: #fff;
+  outline: none;
+  padding: 0 14px;
+}
+
+.transfer-field input:focus {
+  border-color: rgb(176 92 255 / 0.46);
+  box-shadow: 0 0 0 3px rgb(176 92 255 / 0.13);
+}
+
+.transfer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 18px;
+  margin-top: 24px;
+}
+
+.transfer-dialog .cancel-text-action {
+  color: rgb(255 255 255 / 0.6);
+}
+
+.gift-share-code-box {
+  margin-top: 20px;
+  border: 1px dashed rgb(176 92 255 / 0.35);
+  border-radius: 18px;
+  background: rgb(0 0 0 / 0.24);
+  padding: 16px;
+}
+
+.gift-share-code-label {
+  display: block;
+  color: rgb(255 255 255 / 0.42);
+  font-size: 12px;
+}
+
+.gift-share-code-value {
+  display: block;
+  margin-top: 10px;
+  color: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  word-break: break-all;
+}
+
+.icon-action.dark-icon {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.06);
+  color: rgb(255 255 255 / 0.6);
 }
 
 .modal-backdrop {

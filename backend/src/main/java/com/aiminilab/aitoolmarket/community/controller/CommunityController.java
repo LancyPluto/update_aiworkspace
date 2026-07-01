@@ -15,6 +15,8 @@ import com.aiminilab.aitoolmarket.community.dto.ReportCommunityPostRequest;
 import com.aiminilab.aitoolmarket.community.dto.CommunityTopicResponse;
 import com.aiminilab.aitoolmarket.community.dto.UpdateCommunityPostRequest;
 import com.aiminilab.aitoolmarket.community.service.CommunityService;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -94,6 +96,14 @@ public class CommunityController {
     @GetMapping("/posts/{postId}")
     public ApiResponse<CommunityPostResponse> detail(@PathVariable Long postId) {
         return ApiResponse.success(communityService.detail(postId, currentUserIdOrNull()));
+    }
+
+    @GetMapping("/posts/{postId}/download")
+    public ResponseEntity<Void> downloadPost(@PathVariable Long postId,
+                                             @RequestParam(required = false) Integer index) {
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .location(communityService.downloadPostMedia(postId, index))
+                .build();
     }
 
     @PostMapping("/posts/{postId}/same-style")

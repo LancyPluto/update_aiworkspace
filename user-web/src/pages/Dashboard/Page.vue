@@ -33,6 +33,7 @@ import {
 } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
+import GenerationLoadingPreview from "@/components/GenerationLoadingPreview.vue"
 import ImageStackPreview from "@/components/ImageStackPreview.vue"
 import CapabilityControls from "@/pages/Chat/CapabilityControls.vue"
 import type { PrimaryReferenceMaterialInfo } from "@/pages/Chat/CapabilityControls.vue"
@@ -73,12 +74,13 @@ import {
   type DashboardAttributionContext,
 } from "./dashboardAttribution"
 import { buildDashboardTaskParams, buildOptimisticDashboardTask } from "./dashboardTaskFactory"
-import { normalizeMediaUrl } from "@/utils/toolCoverMedia"
+import { normalizeMediaUrl, resolveSummaryToolCoverUrl } from "@/utils/toolCoverMedia"
 import { resolveCommunityDerivativeUrl, resolveOssVideoPosterUrl } from "@/utils/communityPostMedia"
 import { forceDownload } from "@/utils/download"
 import { isWorkflowToolCode } from "@/adapters/toolPresentationAdapter"
 import { taskFailureHint, taskProgressMessage } from "@/utils/taskStatusLabels"
 import { buildTaskProgressView } from "@/utils/taskProgressView"
+import { inferTaskAspectRatio } from "@/utils/taskAspectRatio"
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -126,9 +128,6 @@ const historySentinelRef = ref<HTMLElement | null>(null)
 const historyFeedStartRef = ref<HTMLElement | null>(null)
 const historyFeedEndRef = ref<HTMLElement | null>(null)
 const dashboardMainRef = ref<HTMLElement | null>(null)
-const collapsedComposerPanelRef = ref<HTMLElement | null>(null)
-const expandedComposerPanelRef = ref<HTMLElement | null>(null)
-const composerClearance = ref(160)
 const expandedPromptIds = ref<Set<number>>(new Set())
 const shouldScrollHistoryFeedToBottom = ref(false)
 const showHistoryScrollBottom = ref(false)
@@ -137,8 +136,10 @@ let historyFeedAutoStickUntil = 0
 let historyFeedAnchorUntil = 0
 let historyFeedAnchorHeight = 0
 let historyScrollContainer: HTMLElement | null = null
+const COMPOSER_BOTTOM_OFFSET = 24
+const composerDockInset = ref(176)
 let composerResizeObserver: ResizeObserver | null = null
-let composerBottomStickUntil = 0
+let lastComposerMeasuredHeight = 0
 const taskPollTimers = new Map<number, number>()
 const taskStatusStreamControllers = new Map<number, AbortController>()
 const progressNow = ref(Date.now())
@@ -173,6 +174,13 @@ const modalityLabels: Record<string, string> = {
   VIDEO: "视频",
   AUDIO: "音乐",
   TEXT: "文本",
+}
+
+const composerModeLabels: Record<string, string> = {
+  IMAGE: "文/图生图",
+  VIDEO: "文/图生视频",
+  AUDIO: "文生音乐",
+  TEXT: "文本生成",
 }
 
 const modalityDescriptions: Record<string, string> = {
@@ -240,9 +248,11 @@ const coreField = computed(() => {
 
 const coreFieldPlaceholder = computed(() => {
   const field = coreField.value
-  if (!field?.placeholder?.trim()) return `你想创作什么${modalityLabel(selectedModality.value)}内容？`
+  if (!field?.placeholder?.trim()) return "输入您的创意以生成"
   return field.placeholder
 })
+
+const composerModeLabel = computed(() => composerModeLabels[selectedModality.value] || modalityLabel(selectedModality.value))
 
 const estimateInput = computed<UseTaskEstimateInput | null>(() => {
   const tool = selectedTool.value
@@ -272,6 +282,12 @@ const liveCreditView = computed(() =>
 )
 
 const creditInsufficient = computed(() => liveCreditView.value.insufficient)
+
+const composerGenerateCost = computed(() => {
+  if (liveEstimate.value?.variable) return null
+  if (liveEstimate.value?.estimatedCredits != null) return liveEstimate.value.estimatedCredits
+  return null
+})
 
 const sortedCurrentTools = computed(() => {
   const list = currentTools.value.length > 0 ? [...currentTools.value] : [...tools.value]
@@ -339,9 +355,6 @@ const audioStatusMaterials = computed(() =>
 )
 const audioWorkbenchVisible = computed(() => selectedModality.value === "AUDIO" && recentTasks.value.length > 0)
 const isHistoryFeedView = computed(() => activePanel.value === "tasks" && historyView.value === "feed")
-const dashboardMainStyle = computed(() => ({
-  "--dashboard-composer-clearance": `${composerClearance.value}px`,
-}))
 
 watch(historyView, (view) => {
   localStorage.setItem(HISTORY_VIEW_KEY, view)
@@ -578,48 +591,49 @@ function selectToolByCode(toolCode: string, openComposer = false) {
 }
 
 function expandComposer() {
-  armComposerBottomStickIfNeeded()
   composerManuallyClosed.value = false
   composerOpen.value = true
 }
 
-function updateComposerClearance() {
-  const target = composerOpen.value ? expandedComposerPanelRef.value : collapsedComposerPanelRef.value
-  const fallbackHeight = composerOpen.value ? 380 : 64
-  const height = target?.getBoundingClientRect().height || fallbackHeight
-  composerClearance.value = Math.ceil(height + 56)
-  queueComposerBottomStick()
+function updateComposerDockInset() {
+  const root = composerRootRef.value
+  if (!root) return 0
+  const measuredHeight = Math.ceil(root.getBoundingClientRect().height)
+  composerDockInset.value = measuredHeight + COMPOSER_BOTTOM_OFFSET + 16
+  return measuredHeight
 }
 
-function setupComposerClearanceObserver() {
+function liftHistoryFeedForComposerGrowth(heightDelta: number, insetDelta: number) {
+  if (!isHistoryFeedView.value || (heightDelta <= 0 && insetDelta <= 0)) return
+  const container = resolveHistoryScrollContainer()
+  if (!container) return
+  const liftAmount = Math.max(heightDelta, insetDelta)
+  if (liftAmount <= 0) return
+  const nearBottom = historyBottomDistance(container) < Math.max(280, liftAmount + 96)
+  if (!nearBottom) return
+  container.scrollTop += liftAmount
+  updateHistoryScrollBottomVisibility()
+}
+
+function setupComposerResizeObserver() {
+  const root = composerRootRef.value
+  if (!root || composerResizeObserver) return
+  lastComposerMeasuredHeight = Math.ceil(root.getBoundingClientRect().height)
+  updateComposerDockInset()
+  composerResizeObserver = new ResizeObserver(() => {
+    const previousHeight = lastComposerMeasuredHeight
+    const measuredHeight = updateComposerDockInset()
+    const heightDelta = measuredHeight - previousHeight
+    lastComposerMeasuredHeight = measuredHeight
+    const insetDelta = heightDelta > 0 ? heightDelta : 0
+    liftHistoryFeedForComposerGrowth(heightDelta, insetDelta)
+  })
+  composerResizeObserver.observe(root)
+}
+
+function teardownComposerResizeObserver() {
   composerResizeObserver?.disconnect()
   composerResizeObserver = null
-  updateComposerClearance()
-  if (typeof ResizeObserver === "undefined") return
-  composerResizeObserver = new ResizeObserver(() => updateComposerClearance())
-  if (collapsedComposerPanelRef.value) composerResizeObserver.observe(collapsedComposerPanelRef.value)
-  if (expandedComposerPanelRef.value) composerResizeObserver.observe(expandedComposerPanelRef.value)
-}
-
-function armComposerBottomStickIfNeeded() {
-  if (composerOpen.value || activePanel.value !== "tasks") return
-  const container = resolveHistoryScrollContainer()
-  if (!container || historyBottomDistance(container) > 96) return
-  composerBottomStickUntil = Date.now() + 1400
-}
-
-function shouldStickHistoryToBottomAfterComposerResize() {
-  return composerOpen.value && activePanel.value === "tasks" && Date.now() <= composerBottomStickUntil
-}
-
-function queueComposerBottomStick() {
-  if (!shouldStickHistoryToBottomAfterComposerResize()) return
-  requestAnimationFrame(() => {
-    scrollHistoryToBottom("auto")
-  })
-  window.setTimeout(() => {
-    if (shouldStickHistoryToBottomAfterComposerResize()) scrollHistoryToBottom("auto")
-  }, 120)
 }
 
 function updatePrimaryReferenceInfo(info: PrimaryReferenceMaterialInfo) {
@@ -643,7 +657,6 @@ function removePrimaryReferenceAt(index: number, event: MouseEvent) {
 function collapseComposerForPreview(manual = true) {
   if (!composerOpen.value || submitting.value) return
   if (manual) composerManuallyClosed.value = true
-  composerBottomStickUntil = 0
   composerOpen.value = false
   modelPickerOpen.value = false
 }
@@ -1328,197 +1341,22 @@ const brokenToolCoverIds = ref<Set<number>>(new Set())
 
 function toolCardCover(tool: ToolSummary): string {
   if (brokenToolCoverIds.value.has(tool.id)) {
-    return normalizeMediaUrl(
-      tool.frontendStyle?.comparisonEffectUrl ||
-      tool.frontendStyle?.demoThumbnails?.[0] ||
-      "",
-    )
+    return resolveSummaryToolCoverUrl({
+      ...tool,
+      frontendStyle: {
+        ...tool.frontendStyle,
+        comparisonEffectUrl: "",
+        demoThumbnails: [],
+      },
+    })
   }
-  return normalizeMediaUrl(
-    tool.coverUrl ||
-      tool.frontendStyle?.comparisonEffectUrl ||
-      tool.frontendStyle?.demoThumbnails?.[0] ||
-      "",
-  )
+  return resolveSummaryToolCoverUrl(tool)
 }
 
 function onToolCoverError(tool: ToolSummary) {
   if (!brokenToolCoverIds.value.has(tool.id)) {
     brokenToolCoverIds.value = new Set([...brokenToolCoverIds.value, tool.id])
   }
-}
-
-function inferImageAspectRatio(task: TaskDetail): number {
-  const params = task.params || {}
-  const ratio = parseAspectRatio(findAspectRatioText(params))
-  if (ratio > 0) return ratio
-  const sizeRatio = parseSizeRatio(findSizeText(params))
-  if (sizeRatio > 0) return sizeRatio
-  return 1
-}
-
-function taskExpectedMediaAspectRatio(task: TaskDetail): number {
-  const params = task.params || {}
-  if (findAspectRatioText(params) || findSizeText(params)) {
-    return clampMediaAspectRatio(inferImageAspectRatio(task))
-  }
-  const modality = normalizeModality(task.outputModality || task.result?.resourceType)
-  if (modality === "VIDEO") return 16 / 9
-  return 1
-}
-
-function clampMediaAspectRatio(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) return 1
-  return Math.min(2.4, Math.max(0.42, value))
-}
-
-function taskExpectedMediaLabel(task: TaskDetail): string {
-  const aspectText = cleanExpectedMediaLabel(findAspectRatioText(task.params || {}))
-  if (aspectText) return aspectText
-  const sizeText = cleanExpectedMediaLabel(findSizeText(task.params || {}))
-  if (sizeText) return sizeText
-  return normalizeModality(task.outputModality || task.result?.resourceType) === "VIDEO" ? "16:9" : "1:1"
-}
-
-function taskExpectedOutputCount(task: TaskDetail): number {
-  const modality = normalizeModality(task.outputModality || task.result?.resourceType)
-  if (modality !== "IMAGE") return 1
-  return resolveRequestedImageCount(task.params || {}) || 1
-}
-
-function taskProgressPlaceholderItems(task: TaskDetail): number[] {
-  return Array.from({ length: taskExpectedOutputCount(task) }, (_, index) => index)
-}
-
-function resolveRequestedImageCount(value: unknown): number | null {
-  if (!value || typeof value !== "object") return null
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = resolveRequestedImageCount(item)
-      if (found != null) return found
-    }
-    return null
-  }
-  const countKeys = new Set([
-    "count",
-    "outputcount",
-    "imagecount",
-    "image_count",
-    "numimages",
-    "num_images",
-    "numoutputs",
-    "num_outputs",
-    "batchsize",
-    "batch_size",
-    "n",
-    "生成数量",
-  ])
-  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-    const normalizedKey = key.replace(/[\s_-]/g, "").toLowerCase()
-    if (countKeys.has(normalizedKey) || countKeys.has(key)) {
-      const numeric = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN
-      if (Number.isInteger(numeric) && numeric > 0) return Math.min(numeric, 4)
-    }
-  }
-  for (const raw of Object.values(value as Record<string, unknown>)) {
-    const found = resolveRequestedImageCount(raw)
-    if (found != null) return found
-  }
-  return null
-}
-
-function cleanExpectedMediaLabel(value: string): string {
-  const raw = value.trim()
-  if (!raw || raw.toLowerCase() === "auto") return ""
-  const aspect = raw.match(/(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)/)
-  if (aspect) return `${aspect[1]}:${aspect[2]}`
-  const size = raw.match(/(\d{2,5})\s*[x×]\s*(\d{2,5})/i)
-  if (size) return `${size[1]}x${size[2]}`
-  return raw.length <= 16 ? raw : ""
-}
-
-function taskProgressPreviewStyle(task: TaskDetail, variant: "card" | "feed" = "card"): Record<string, string> {
-  const ratio = taskExpectedMediaAspectRatio(task)
-  const style: Record<string, string> = {
-    aspectRatio: String(ratio),
-  }
-  if (variant === "feed") {
-    const width = ratio < 0.8 ? 240 : ratio < 1.2 ? 330 : 438
-    style.width = `min(${width}px, 100%)`
-  }
-  return style
-}
-
-function taskProgressStackStyle(task: TaskDetail, variant: "card" | "feed" = "card"): Record<string, string> {
-  const count = taskExpectedOutputCount(task)
-  if (count <= 1) return {}
-  if (variant === "feed") {
-    const ratio = taskExpectedMediaAspectRatio(task)
-    const itemWidth = ratio < 0.8 ? 240 : ratio < 1.2 ? 330 : 438
-    return {
-      width: `min(${itemWidth * Math.min(count, 2) + 16}px, 100%)`,
-    }
-  }
-  return {}
-}
-
-function findAspectRatioText(value: unknown): string {
-  if (!value || typeof value !== "object") return ""
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findAspectRatioText(item)
-      if (found) return found
-    }
-    return ""
-  }
-  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-    const normalizedKey = key.toLowerCase()
-    if (
-      typeof raw === "string" &&
-      (normalizedKey.includes("aspect") || normalizedKey.includes("ratio") || normalizedKey.includes("比例"))
-    ) {
-      return raw
-    }
-    const nested = findAspectRatioText(raw)
-    if (nested) return nested
-  }
-  return ""
-}
-
-function findSizeText(value: unknown): string {
-  if (!value || typeof value !== "object") return ""
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findSizeText(item)
-      if (found) return found
-    }
-    return ""
-  }
-  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-    const normalizedKey = key.toLowerCase()
-    if (typeof raw === "string" && (normalizedKey.includes("size") || normalizedKey.includes("resolution"))) {
-      return raw
-    }
-    const nested = findSizeText(raw)
-    if (nested) return nested
-  }
-  return ""
-}
-
-function parseAspectRatio(value: string): number {
-  const match = value.match(/(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)/)
-  if (!match) return 0
-  const width = Number(match[1])
-  const height = Number(match[2])
-  return width > 0 && height > 0 ? width / height : 0
-}
-
-function parseSizeRatio(value: string): number {
-  const match = value.match(/(\d{2,5})\s*[x×]\s*(\d{2,5})/i)
-  if (!match) return 0
-  const width = Number(match[1])
-  const height = Number(match[2])
-  return width > 0 && height > 0 ? width / height : 0
 }
 
 function audioTaskTitle(track?: DashboardAudioTrack | null): string {
@@ -1858,6 +1696,33 @@ function modalityLabel(value?: string | null) {
   return modalityLabels[key] || key
 }
 
+watch(
+  () => composerOpen.value,
+  (open) => {
+    if (!open || !isHistoryFeedView.value) return
+    void nextTick(() => {
+      requestAnimationFrame(() => {
+        updateComposerDockInset()
+        const container = resolveHistoryScrollContainer()
+        if (container && historyBottomDistance(container) < 280) {
+          scrollHistoryFeedToBottom("smooth", false)
+        }
+      })
+    })
+  },
+)
+
+watch(
+  () => isHistoryFeedView.value,
+  (active) => {
+    if (!active) return
+    void nextTick(() => {
+      updateComposerDockInset()
+      if (historyBottomDistance() < 280) scrollHistoryFeedToBottom("auto", false)
+    })
+  },
+)
+
 onMounted(async () => {
   window.addEventListener("scroll", handleDashboardScroll, true)
   window.addEventListener("pointerdown", handleDashboardPointerDown, true)
@@ -1866,13 +1731,14 @@ onMounted(async () => {
   await loadDashboard()
   setupHistoryObserver()
   await nextTick()
-  setupComposerClearanceObserver()
+  setupComposerResizeObserver()
   if (isHistoryFeedView.value) scrollHistoryFeedToBottom("auto")
 })
 
 onUnmounted(() => {
   window.removeEventListener("scroll", handleDashboardScroll, true)
   window.removeEventListener("pointerdown", handleDashboardPointerDown, true)
+  teardownComposerResizeObserver()
   historyObserver?.disconnect()
   composerResizeObserver?.disconnect()
   composerResizeObserver = null
@@ -1919,8 +1785,8 @@ onUnmounted(() => {
 
         <main
           ref="dashboardMainRef"
-          class="dashboard-main min-h-0 flex-1 overflow-y-auto px-5 pt-6 lg:pl-[132px] xl:px-10 xl:pl-[132px]"
-          :style="dashboardMainStyle"
+          class="min-h-0 flex-1 overflow-y-auto px-5 pt-6 transition-[padding-bottom] duration-200 lg:pl-[132px] xl:px-10 xl:pl-[132px]"
+          :style="{ paddingBottom: `${composerDockInset}px` }"
           @scroll="handleDashboardScroll"
         >
           <div class="mx-auto w-full max-w-[1380px]">
@@ -2531,40 +2397,13 @@ onUnmounted(() => {
                     </section>
 
                     <section class="mt-5">
-                      <div
+                      <GenerationLoadingPreview
                         v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')"
-                        class="dashboard-progress-stack dashboard-progress-stack--feed"
-                        :class="{ 'dashboard-progress-stack--multi': taskExpectedOutputCount(item.task) > 1 }"
-                        :style="taskProgressStackStyle(item.task, 'feed')"
-                      >
-                        <div
-                          v-for="placeholderIndex in taskProgressPlaceholderItems(item.task)"
-                          :key="`${item.task.taskId}-feed-progress-${placeholderIndex}`"
-                          class="dashboard-progress-preview dashboard-progress-preview--feed"
-                          :class="canRetryTask(item.task.status) ? 'is-error' : ''"
-                          :style="taskProgressPreviewStyle(item.task, 'feed')"
-                        >
-                          <span class="dashboard-progress-ratio">{{ taskExpectedMediaLabel(item.task) }}</span>
-                          <div class="dashboard-progress-center">
-                            <span class="dashboard-progress-loader" aria-hidden="true">
-                              <i />
-                              <i />
-                              <i />
-                            </span>
-                            <p>{{ canRetryTask(item.task.status) ? "任务生成失败" : "任务提交中" }}</p>
-                            <small>
-                              {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "可以复用本次参数重试。" : "完成后会追加到信息流底部。") }}
-                            </small>
-                            <div class="dashboard-progress-rail">
-                              <span
-                                :class="canRetryTask(item.task.status) ? 'is-error' : ''"
-                                :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
-                              />
-                            </div>
-                            <em>{{ taskProgressView(item.task).percentLabel }}</em>
-                          </div>
-                        </div>
-                      </div>
+                        :aspect-ratio="inferTaskAspectRatio(item.task)"
+                        :caption="taskProgressView(item.task).caption || taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? '任务生成失败，可以复用本次参数重试。' : '任务正在生成，完成后会追加到信息流底部。')"
+                        :percent-label="taskProgressView(item.task).percentLabel"
+                        :failed="canRetryTask(item.task.status)"
+                      />
 
                       <div
                         v-else-if="imageItemsForBlocks(item.blocks).length"
@@ -2688,31 +2527,26 @@ onUnmounted(() => {
                   >
                     <div class="relative overflow-hidden bg-[#101014]">
                       <template v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')">
-                        <div
-                          class="dashboard-progress-stack dashboard-progress-stack--card"
-                          :class="{ 'dashboard-progress-stack--multi': taskExpectedOutputCount(item.task) > 1 }"
-                        >
-                          <div
-                            v-for="placeholderIndex in taskProgressPlaceholderItems(item.task)"
-                            :key="`${item.task.taskId}-card-progress-${placeholderIndex}`"
-                            class="dashboard-progress-preview dashboard-progress-preview--card"
-                            :class="canRetryTask(item.task.status) ? 'is-error' : ''"
-                            :style="taskProgressPreviewStyle(item.task)"
-                          >
-                            <div class="dashboard-progress-top">
-                              <span
-                                class="dashboard-progress-status"
-                                :class="canRetryTask(item.task.status) ? 'is-error' : ''"
-                              >
-                                <Loader2 v-if="isTaskRunning(item.task.status)" class="h-3.5 w-3.5 animate-spin" />
-                                <X v-else-if="canRetryTask(item.task.status)" class="h-3.5 w-3.5" />
-                                <Clock v-else class="h-3.5 w-3.5" />
-                                {{ taskStatusLabel(item.task.status) }}
-                              </span>
+                        <div class="relative bg-[#101014] p-4">
+                          <div class="mb-3 flex items-center justify-between gap-2">
+                            <span
+                              class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium"
+                              :class="
+                                canRetryTask(item.task.status)
+                                  ? 'bg-red-500/15 text-red-100 ring-1 ring-red-400/25'
+                                  : 'bg-primary/15 text-primary ring-1 ring-primary/25'
+                              "
+                            >
+                              <Loader2 v-if="isTaskRunning(item.task.status)" class="h-3.5 w-3.5 animate-spin" />
+                              <X v-else-if="canRetryTask(item.task.status)" class="h-3.5 w-3.5" />
+                              <Clock v-else class="h-3.5 w-3.5" />
+                              {{ taskStatusLabel(item.task.status) }}
+                            </span>
+                            <div class="flex items-center gap-2">
                               <button
-                                v-if="canCancelTask(item.task.status) && placeholderIndex === 0"
+                                v-if="canCancelTask(item.task.status)"
                                 type="button"
-                                class="dashboard-progress-cancel"
+                                class="inline-flex items-center gap-1 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white/75 transition hover:bg-white/18 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
                                 :disabled="
                                   cancellingTaskIds.has(item.task.taskId) ||
                                   deletingTaskIds.has(item.task.taskId) ||
@@ -2728,26 +2562,13 @@ onUnmounted(() => {
                                 {{ cancellingTaskIds.has(item.task.taskId) ? "取消中" : "取消" }}
                               </button>
                             </div>
-                            <span class="dashboard-progress-ratio">{{ taskExpectedMediaLabel(item.task) }}</span>
-                            <div class="dashboard-progress-center">
-                              <span class="dashboard-progress-loader" aria-hidden="true">
-                                <i />
-                                <i />
-                                <i />
-                              </span>
-                              <p>{{ canRetryTask(item.task.status) ? "任务生成失败" : item.task.toolName }}</p>
-                              <small>
-                                {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "可以复用本次参数重试。" : "完成后结果会自动出现在这里。") }}
-                              </small>
-                              <div class="dashboard-progress-rail">
-                                <span
-                                  :class="canRetryTask(item.task.status) ? 'is-error' : ''"
-                                  :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
-                                />
-                              </div>
-                              <em>{{ taskProgressView(item.task).percentLabel }}</em>
-                            </div>
                           </div>
+                          <GenerationLoadingPreview
+                            :aspect-ratio="inferTaskAspectRatio(item.task)"
+                            :caption="taskProgressView(item.task).caption || taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? '任务生成失败，可以复用本次参数重试。' : '任务正在生成，完成后结果会自动出现在这里。')"
+                            :percent-label="taskProgressView(item.task).percentLabel"
+                            :failed="canRetryTask(item.task.status)"
+                          />
                         </div>
                       </template>
                       <template v-else-if="primaryBlock(item.blocks)?.type === 'image'">
@@ -2943,7 +2764,6 @@ onUnmounted(() => {
           class="pointer-events-none fixed bottom-6 left-[calc(var(--app-sidebar-width,268px)+(100vw-var(--app-sidebar-width,268px))/2)] z-50 grid w-[min(980px,calc(100vw-2rem))] -translate-x-1/2 transition-[left]"
         >
           <div
-            ref="collapsedComposerPanelRef"
             v-show="!composerOpen"
             class="col-start-1 row-start-1 flex w-full items-center justify-center gap-3 self-end transition-all duration-200"
           >
@@ -2988,7 +2808,6 @@ onUnmounted(() => {
           </div>
 
           <div
-            ref="expandedComposerPanelRef"
             class="pointer-events-auto col-start-1 row-start-1 w-full self-end transition-all duration-200"
             :class="composerOpen ? 'translate-y-0 scale-100 opacity-100' : 'pointer-events-none translate-y-8 scale-[0.98] opacity-0'"
           >
@@ -3022,70 +2841,71 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div class="relative rounded-3xl border border-white/[0.06] bg-[#0f0f14]/70 p-4 shadow-[0_20px_60px_rgb(0_0_0_/_0.45)] backdrop-blur-lg">
+            <div class="dashboard-pollo-composer relative rounded-3xl border border-white/[0.08] bg-[#14151a]/92 p-3 shadow-[0_20px_60px_rgb(0_0_0_/_0.45)] backdrop-blur-lg sm:p-4">
               <button
                 type="button"
-                class="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full text-white/45 transition hover:bg-white/8 hover:text-white"
+                class="absolute right-3 top-3 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full text-white/45 transition hover:bg-white/8 hover:text-white"
                 aria-label="收起创作窗"
                 @click="collapseComposerForPreview"
               >
                 <X class="h-4 w-4" />
               </button>
-              <div class="relative rounded-2xl bg-black/30">
-                <div class="pointer-events-none absolute left-0 top-1 z-10 flex h-10 w-10 items-center justify-center text-white/48">
-                  <MessageSquareText v-if="!primaryReferenceInfo.available" class="h-6 w-6" />
-                </div>
+
+              <div class="dashboard-pollo-composer__input-row">
                 <button
                   v-if="primaryReferenceInfo.available"
                   type="button"
-                  class="absolute left-0 top-1 z-20 flex h-10 w-10 items-center justify-center rounded-xl border border-dashed border-white/16 bg-black/24 text-white/46 shadow-[0_8px_28px_rgb(0_0_0_/_0.2)] transition hover:border-primary/55 hover:bg-primary/10 hover:text-white"
-                  :class="primaryReferenceInfo.count > 0 ? 'border-solid border-primary/35 bg-primary/10' : ''"
-                  :title="primaryReferenceInfo.fieldName || '选择参考素材'"
+                  class="dashboard-pollo-upload"
+                  :class="primaryReferenceInfo.count > 0 ? 'dashboard-pollo-upload--filled' : ''"
+                  :title="primaryReferenceInfo.fieldName || '上传参考素材'"
                   @click="openPrimaryReferencePicker"
                 >
-                  <Loader2 v-if="primaryReferenceInfo.uploading" class="h-4 w-4 animate-spin text-primary" />
+                  <Loader2 v-if="primaryReferenceInfo.uploading" class="h-5 w-5 animate-spin text-primary" />
+                  <img
+                    v-else-if="primaryReferenceInfo.previewUrls[0]"
+                    :src="primaryReferenceInfo.previewUrls[0]"
+                    alt="参考素材"
+                    class="h-full w-full rounded-[10px] object-cover"
+                  />
                   <Plus v-else class="h-5 w-5" />
-                  <span class="sr-only">选择参考素材</span>
                 </button>
-                <textarea
-                  v-model="promptText"
-                  rows="2"
-                  class="min-h-[72px] w-full resize-none bg-transparent pb-1 pr-10 pt-1 text-base leading-7 text-white outline-none placeholder:text-white/28"
-                  :class="primaryReferenceInfo.available ? 'pl-14' : 'pl-10'"
-                  :placeholder="coreFieldPlaceholder"
-                  @focus="expandComposer"
-                />
-                <div
-                  v-if="primaryReferenceInfo.previewUrls.length > 0"
-                  class="mt-3 flex flex-wrap gap-3 px-1"
-                >
+
+                <div class="dashboard-pollo-composer__prompt min-w-0 flex-1">
+                  <textarea
+                    v-model="promptText"
+                    rows="2"
+                    class="dashboard-pollo-textarea"
+                    :placeholder="coreFieldPlaceholder"
+                    @focus="expandComposer"
+                  />
                   <div
-                    v-for="(url, index) in primaryReferenceInfo.previewUrls"
-                    :key="`${url}-${index}`"
-                    class="group relative h-14 w-14 overflow-visible"
+                    v-if="primaryReferenceInfo.previewUrls.length > 1"
+                    class="mt-2 flex flex-wrap gap-2"
                   >
-                    <img
-                      :src="url"
-                      alt="参考图"
-                      class="h-14 w-14 rounded-lg border border-white/10 object-cover"
-                    />
-                    <button
-                      type="button"
-                      class="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/80 text-[10px] text-white opacity-0 transition-colors hover:bg-red-500 group-hover:opacity-100"
-                      aria-label="移除参考图"
-                      @click="removePrimaryReferenceAt(index, $event)"
+                    <div
+                      v-for="(url, index) in primaryReferenceInfo.previewUrls.slice(1)"
+                      :key="`${url}-${index}`"
+                      class="group relative h-12 w-12 overflow-visible"
                     >
-                      ×
+                      <img :src="url" alt="参考图" class="h-12 w-12 rounded-lg border border-white/10 object-cover" />
+                      <button
+                        type="button"
+                        class="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/80 text-[10px] text-white opacity-0 transition-colors hover:bg-red-500 group-hover:opacity-100"
+                        aria-label="移除参考图"
+                        @click="removePrimaryReferenceAt(index + 1, $event)"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <button
+                      v-if="primaryReferenceInfo.count > primaryReferenceInfo.previewUrls.length"
+                      type="button"
+                      class="flex h-12 min-w-12 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-2 text-xs font-medium text-white/45 transition hover:border-primary/40 hover:text-white"
+                      @click="openPrimaryReferencePicker"
+                    >
+                      +{{ primaryReferenceInfo.count - primaryReferenceInfo.previewUrls.length }}
                     </button>
                   </div>
-                  <button
-                    v-if="primaryReferenceInfo.count > primaryReferenceInfo.previewUrls.length"
-                    type="button"
-                    class="flex h-14 min-w-14 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-3 text-xs font-medium text-white/45 transition hover:border-primary/40 hover:text-white"
-                    @click="openPrimaryReferencePicker"
-                  >
-                    +{{ primaryReferenceInfo.count - primaryReferenceInfo.previewUrls.length }}
-                  </button>
                 </div>
               </div>
 
@@ -3096,34 +2916,25 @@ onUnmounted(() => {
                 <Loader2 class="h-3.5 w-3.5 animate-spin" />
                 正在读取后台字段配置...
               </div>
-              <CapabilityControls
-                v-else-if="selectedChatTool"
-                ref="capabilityRef"
-                :capabilities="selectedChatTool.capabilities || []"
-                :fields="selectedChatTool.fields || []"
-                :core-field-key="coreField?.fieldKey"
-                :tool-id="selectedChatTool.id"
-                :initial-params="replayParams"
-                class="mt-3 rounded-2xl bg-white/[0.02] px-3 py-2"
-                @primary-reference-change="updatePrimaryReferenceInfo"
-                @params-change="onCapabilityParamsChange"
-              />
 
-              <p v-if="submitError" class="mt-3 rounded-2xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-                {{ submitError }}
-              </p>
-              <p v-if="submitNotice" class="mt-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
-                {{ submitNotice }}
-              </p>
+              <div v-else class="dashboard-pollo-composer__toolbar">
+                <button
+                  type="button"
+                  class="dashboard-pollo-chip dashboard-pollo-chip--mode"
+                  @click="modelPickerOpen = !modelPickerOpen"
+                >
+                  <component :is="modalityIcons[selectedModality as keyof typeof modalityIcons] || Sparkles" class="h-4 w-4 shrink-0 text-white/55" />
+                  <span class="truncate">{{ composerModeLabel }}</span>
+                  <ChevronDown class="h-3.5 w-3.5 shrink-0 text-white/35" />
+                </button>
 
-              <div class="mt-3 flex flex-wrap items-center gap-2">
-                <div class="relative">
+                <div class="relative min-w-0">
                   <button
                     type="button"
-                    class="flex h-11 max-w-[280px] items-center gap-2 rounded-xl bg-black/25 px-3 text-sm text-white ring-1 ring-white/8 transition hover:bg-white/8"
+                    class="dashboard-pollo-chip dashboard-pollo-chip--model"
                     @click="modelPickerOpen = !modelPickerOpen"
                   >
-                    <span class="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/8 text-primary">
+                    <span class="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md bg-white/8 text-primary">
                       <video
                         v-if="isVideoPreviewUrl(selectedTool?.coverUrl)"
                         :src="normalizeMediaUrl(selectedTool?.coverUrl)"
@@ -3140,12 +2951,12 @@ onUnmounted(() => {
                         :alt="selectedTool.toolName"
                         class="h-full w-full object-cover"
                       />
-                      <Bot v-else class="h-4 w-4" />
+                      <Bot v-else class="h-3.5 w-3.5" />
                     </span>
-                    <span class="min-w-0 flex-1 truncate text-left">
+                    <span class="min-w-0 truncate text-left">
                       {{ selectedTool?.toolName || `${modalityLabel(selectedModality)}模型` }}
                     </span>
-                    <ChevronDown class="h-4 w-4 shrink-0 text-white/45" />
+                    <ChevronDown class="h-3.5 w-3.5 shrink-0 text-white/35" />
                   </button>
 
                   <div
@@ -3239,35 +3050,43 @@ onUnmounted(() => {
                   </div>
                 </div>
 
-                <span class="rounded-xl bg-black/25 px-3 py-2 text-sm text-white/55 ring-1 ring-white/8">
-                  {{ modalityLabel(selectedModality) }}
-                </span>
-                <span class="rounded-xl bg-black/25 px-3 py-2 text-sm text-white/55 ring-1 ring-white/8">
-                  免费体验
-                </span>
-
-                <span
-                  v-if="liveCreditView.label"
-                  class="dashboard-credit-estimate ml-auto"
-                  :class="{ 'dashboard-credit-estimate--insufficient': creditInsufficient }"
-                  :title="liveCreditView.hint"
-                >
-                  <Zap class="h-3.5 w-3.5 shrink-0 text-amber-300/90" />
-                  {{ liveCreditView.label }}
-                </span>
+                <CapabilityControls
+                  v-if="selectedChatTool"
+                  ref="capabilityRef"
+                  layout="composer"
+                  :capabilities="selectedChatTool.capabilities || []"
+                  :fields="selectedChatTool.fields || []"
+                  :core-field-key="coreField?.fieldKey"
+                  :tool-id="selectedChatTool.id"
+                  :initial-params="replayParams"
+                  class="min-w-0 shrink"
+                  @primary-reference-change="updatePrimaryReferenceInfo"
+                  @params-change="onCapabilityParamsChange"
+                />
 
                 <button
                   type="button"
-                  class="inline-flex h-11 min-w-32 items-center justify-center gap-2 rounded-xl bg-[linear-gradient(180deg,rgb(199_128_255),rgb(143_73_226))] px-5 text-sm font-semibold text-white shadow-[0_12px_32px_rgb(176_92_255_/_0.34),inset_0_1px_0_rgb(255_255_255_/_0.16)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-white/12 disabled:text-white/35"
-                  :class="liveCreditView.label ? '' : 'ml-auto'"
+                  class="dashboard-pollo-generate ml-auto shrink-0"
+                  :class="{ 'dashboard-pollo-generate--insufficient': creditInsufficient }"
                   :disabled="!selectedTool || submitting || selectedToolDetailLoading"
+                  :title="liveCreditView.hint"
                   @click.stop="createWithSelectedTool"
                 >
                   <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />
-                  <Send v-else class="h-4 w-4" />
-                  {{ submitting ? "创建中" : "创作" }}
+                  <template v-else>
+                    <Zap v-if="composerGenerateCost != null" class="h-4 w-4 shrink-0 text-amber-200/90" />
+                    <span v-if="composerGenerateCost != null" class="tabular-nums">{{ composerGenerateCost }}</span>
+                  </template>
+                  {{ submitting ? "生成中..." : "生成" }}
                 </button>
               </div>
+
+              <p v-if="submitError" class="mt-3 rounded-2xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                {{ submitError }}
+              </p>
+              <p v-if="submitNotice" class="mt-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+                {{ submitNotice }}
+              </p>
             </div>
           </div>
         </div>
@@ -3975,6 +3794,137 @@ onUnmounted(() => {
   50% {
     height: 10px;
     opacity: 1;
+  }
+}
+
+.dashboard-pollo-composer__input-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-right: 36px;
+}
+
+.dashboard-pollo-upload {
+  display: flex;
+  height: 64px;
+  width: 64px;
+  shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  border: 1px dashed rgb(255 255 255 / 0.18);
+  background: rgb(255 255 255 / 0.03);
+  color: rgb(255 255 255 / 0.42);
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.dashboard-pollo-upload:hover {
+  border-color: rgb(176 92 255 / 0.45);
+  background: rgb(176 92 255 / 0.08);
+  color: white;
+}
+
+.dashboard-pollo-upload--filled {
+  border-style: solid;
+  border-color: rgb(176 92 255 / 0.28);
+  padding: 3px;
+}
+
+.dashboard-pollo-textarea {
+  min-height: 64px;
+  width: 100%;
+  resize: none;
+  background: transparent;
+  padding: 4px 0;
+  font-size: 15px;
+  line-height: 1.65;
+  color: white;
+  outline: none;
+}
+
+.dashboard-pollo-textarea::placeholder {
+  color: rgb(255 255 255 / 0.28);
+}
+
+.dashboard-pollo-composer__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgb(255 255 255 / 0.06);
+}
+
+.dashboard-pollo-chip {
+  display: inline-flex;
+  height: 40px;
+  max-width: min(220px, 38vw);
+  align-items: center;
+  gap: 8px;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.06);
+  padding: 0 12px;
+  font-size: 13px;
+  color: rgb(255 255 255 / 0.78);
+  border: 1px solid rgb(255 255 255 / 0.08);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.dashboard-pollo-chip:hover {
+  background: rgb(255 255 255 / 0.1);
+  color: white;
+}
+
+.dashboard-pollo-chip--mode {
+  max-width: min(180px, 34vw);
+}
+
+.dashboard-pollo-generate {
+  display: inline-flex;
+  height: 40px;
+  min-width: 108px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.92);
+  padding: 0 18px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #14151a;
+  transition: filter 160ms ease, opacity 160ms ease;
+}
+
+.dashboard-pollo-generate:hover:not(:disabled) {
+  filter: brightness(1.04);
+}
+
+.dashboard-pollo-generate:disabled {
+  cursor: not-allowed;
+  background: rgb(255 255 255 / 0.12);
+  color: rgb(255 255 255 / 0.35);
+}
+
+.dashboard-pollo-generate--insufficient:not(:disabled) {
+  background: rgb(254 226 226 / 0.92);
+  color: #7f1d1d;
+}
+
+@media (max-width: 640px) {
+  .dashboard-pollo-composer__toolbar {
+    gap: 6px;
+  }
+
+  .dashboard-pollo-chip {
+    height: 36px;
+    font-size: 12px;
+  }
+
+  .dashboard-pollo-generate {
+    width: 100%;
+    margin-left: 0;
   }
 }
 </style>

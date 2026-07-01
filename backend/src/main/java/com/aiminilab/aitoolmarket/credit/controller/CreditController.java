@@ -10,11 +10,16 @@ import com.aiminilab.aitoolmarket.credit.dto.CreditLogResponse;
 import com.aiminilab.aitoolmarket.credit.dto.AlipayPayDiagnosticResponse;
 import com.aiminilab.aitoolmarket.credit.dto.CreateCustomRechargeOrderRequest;
 import com.aiminilab.aitoolmarket.credit.dto.CreateRechargeOrderRequest;
+import com.aiminilab.aitoolmarket.credit.dto.GiftCardPackageResponse;
+import com.aiminilab.aitoolmarket.credit.dto.GiftCardResponse;
+import com.aiminilab.aitoolmarket.credit.dto.GiftCardRedeemByCodeRequest;
+import com.aiminilab.aitoolmarket.credit.dto.GiftCardTransferRequest;
 import com.aiminilab.aitoolmarket.credit.dto.RechargeOrderResponse;
 import com.aiminilab.aitoolmarket.credit.dto.RechargePackageResponse;
 import com.aiminilab.aitoolmarket.credit.dto.RechargePaymentOptionsResponse;
 import com.aiminilab.aitoolmarket.credit.service.CreditRechargeService;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
+import com.aiminilab.aitoolmarket.credit.service.GiftCardService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,13 +38,16 @@ public class CreditController {
     private final CreditService creditService;
     private final CreditRechargeService creditRechargeService;
     private final BillingService billingService;
+    private final GiftCardService giftCardService;
 
     public CreditController(CreditService creditService,
                             CreditRechargeService creditRechargeService,
-                            BillingService billingService) {
+                            BillingService billingService,
+                            GiftCardService giftCardService) {
         this.creditService = creditService;
         this.creditRechargeService = creditRechargeService;
         this.billingService = billingService;
+        this.giftCardService = giftCardService;
     }
 
     @GetMapping("/account")
@@ -89,5 +97,30 @@ public class CreditController {
     @GetMapping("/recharge-orders/{orderId}/alipay-diagnostic")
     public ApiResponse<AlipayPayDiagnosticResponse> alipayDiagnostic(@PathVariable Long orderId) {
         return ApiResponse.success(creditRechargeService.alipayDiagnostic(AuthContext.get().userId(), orderId));
+    }
+
+    @GetMapping("/gift-card-packages")
+    public ApiResponse<List<GiftCardPackageResponse>> giftCardPackages() {
+        return ApiResponse.success(giftCardService.packages());
+    }
+
+    @GetMapping("/gift-cards")
+    public ApiResponse<List<GiftCardResponse>> myGiftCards(@RequestParam(required = false) String status) {
+        return ApiResponse.success(giftCardService.myGiftCards(AuthContext.get().userId(), status));
+    }
+
+    @PostMapping("/gift-cards/{id}/redeem")
+    public ApiResponse<GiftCardResponse> redeemGiftCard(@PathVariable Long id) {
+        return ApiResponse.success(giftCardService.redeem(AuthContext.get().userId(), id));
+    }
+
+    @PostMapping("/gift-cards/redeem-by-code")
+    public ApiResponse<GiftCardResponse> redeemGiftCardByCode(@Valid @RequestBody GiftCardRedeemByCodeRequest request) {
+        return ApiResponse.success(giftCardService.redeemByCode(AuthContext.get().userId(), request.cardCode()));
+    }
+
+    @PostMapping("/gift-cards/{id}/gift")
+    public ApiResponse<GiftCardResponse> giftCard(@PathVariable Long id, @Valid @RequestBody GiftCardTransferRequest request) {
+        return ApiResponse.success(giftCardService.transfer(AuthContext.get().userId(), id, request.account()));
     }
 }

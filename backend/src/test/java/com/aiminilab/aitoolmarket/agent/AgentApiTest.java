@@ -695,9 +695,9 @@ class AgentApiTest {
                 .andExpect(jsonPath("$.data.list[1].eventType").value("run.failed"));
 
         var account = creditService.account(login.userId());
-        org.assertj.core.api.Assertions.assertThat(account.balance()).isEqualTo(100);
+        org.assertj.core.api.Assertions.assertThat(account.balance()).isEqualTo(200);
         org.assertj.core.api.Assertions.assertThat(account.frozen()).isZero();
-        org.assertj.core.api.Assertions.assertThat(account.available()).isEqualTo(100);
+        org.assertj.core.api.Assertions.assertThat(account.available()).isEqualTo(200);
     }
 
     @Test
@@ -1087,7 +1087,7 @@ class AgentApiTest {
         String username = "agent_low_credit_user";
         register(username);
         LoginResult login = loginWithUser(username);
-        creditService.manualDeduct(login.userId(), 100, "test low credit", 1L);
+        creditService.manualDeduct(login.userId(), 200, "test low credit", 1L);
         Long sessionId = createSession(login.token(), "Low Credit");
         Mockito.clearInvocations(agentServiceClient);
 
@@ -1157,9 +1157,9 @@ class AgentApiTest {
 
         Long runId = sendMessage(login.token(), sessionId, "Use agent credits.").runId();
         var frozen = creditService.account(login.userId());
-        org.assertj.core.api.Assertions.assertThat(frozen.balance()).isEqualTo(100);
+        org.assertj.core.api.Assertions.assertThat(frozen.balance()).isEqualTo(200);
         org.assertj.core.api.Assertions.assertThat(frozen.frozen()).isEqualTo(20);
-        org.assertj.core.api.Assertions.assertThat(frozen.available()).isEqualTo(80);
+        org.assertj.core.api.Assertions.assertThat(frozen.available()).isEqualTo(180);
 
         String completeBody = """
                 {
@@ -1178,9 +1178,9 @@ class AgentApiTest {
                 .andExpect(jsonPath("$.data.consumedCredits").value(7));
 
         var settled = creditService.account(login.userId());
-        org.assertj.core.api.Assertions.assertThat(settled.balance()).isEqualTo(93);
+        org.assertj.core.api.Assertions.assertThat(settled.balance()).isEqualTo(193);
         org.assertj.core.api.Assertions.assertThat(settled.frozen()).isEqualTo(0);
-        org.assertj.core.api.Assertions.assertThat(settled.available()).isEqualTo(93);
+        org.assertj.core.api.Assertions.assertThat(settled.available()).isEqualTo(193);
     }
 
     @Test
@@ -1200,9 +1200,9 @@ class AgentApiTest {
                 .andExpect(jsonPath("$.data.status").value("CANCELLED"));
 
         var released = creditService.account(login.userId());
-        org.assertj.core.api.Assertions.assertThat(released.balance()).isEqualTo(100);
+        org.assertj.core.api.Assertions.assertThat(released.balance()).isEqualTo(200);
         org.assertj.core.api.Assertions.assertThat(released.frozen()).isEqualTo(0);
-        org.assertj.core.api.Assertions.assertThat(released.available()).isEqualTo(100);
+        org.assertj.core.api.Assertions.assertThat(released.available()).isEqualTo(200);
     }
 
     @Test
@@ -1234,9 +1234,9 @@ class AgentApiTest {
                 .andExpect(jsonPath("$.data.consumedCredits").value(3));
 
         var settled = creditService.account(login.userId());
-        org.assertj.core.api.Assertions.assertThat(settled.balance()).isEqualTo(97);
+        org.assertj.core.api.Assertions.assertThat(settled.balance()).isEqualTo(197);
         org.assertj.core.api.Assertions.assertThat(settled.frozen()).isEqualTo(0);
-        org.assertj.core.api.Assertions.assertThat(settled.available()).isEqualTo(97);
+        org.assertj.core.api.Assertions.assertThat(settled.available()).isEqualTo(197);
         Integer billingCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM billing_usage_logs WHERE source_type = 'AGENT_RUN' AND source_id = ? AND charged_credits = 3 AND prompt_tokens = 111 AND completion_tokens = 22 AND total_tokens = 133",
                 Integer.class,
@@ -1273,9 +1273,9 @@ class AgentApiTest {
                 .andExpect(jsonPath("$.data.consumedCredits").value(7));
 
         var settled = creditService.account(login.userId());
-        org.assertj.core.api.Assertions.assertThat(settled.balance()).isEqualTo(93);
+        org.assertj.core.api.Assertions.assertThat(settled.balance()).isEqualTo(193);
         org.assertj.core.api.Assertions.assertThat(settled.frozen()).isEqualTo(0);
-        org.assertj.core.api.Assertions.assertThat(settled.available()).isEqualTo(93);
+        org.assertj.core.api.Assertions.assertThat(settled.available()).isEqualTo(193);
         Integer billingCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM billing_usage_logs WHERE source_type = 'AGENT_RUN' AND source_id = ? AND charged_credits = 7 AND prompt_tokens = 0 AND completion_tokens = 0",
                 Integer.class,
@@ -1744,9 +1744,9 @@ class AgentApiTest {
                 .andExpect(jsonPath("$.data.status").value("CANCELLED"));
 
         var released = creditService.account(login.userId());
-        org.assertj.core.api.Assertions.assertThat(released.balance()).isEqualTo(100);
+        org.assertj.core.api.Assertions.assertThat(released.balance()).isEqualTo(200);
         org.assertj.core.api.Assertions.assertThat(released.frozen()).isEqualTo(0);
-        org.assertj.core.api.Assertions.assertThat(released.available()).isEqualTo(100);
+        org.assertj.core.api.Assertions.assertThat(released.available()).isEqualTo(200);
     }
 
     private void mockExternalAuthDependencies() {

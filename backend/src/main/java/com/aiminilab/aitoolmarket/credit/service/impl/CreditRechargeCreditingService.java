@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.common.enums.RechargeOrderStatus;
 import com.aiminilab.aitoolmarket.credit.entity.CreditRechargeOrder;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderMapper;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
+import com.aiminilab.aitoolmarket.credit.service.GiftCardService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,11 +17,14 @@ public class CreditRechargeCreditingService {
 
     private final CreditRechargeOrderMapper orderMapper;
     private final CreditService creditService;
+    private final GiftCardService giftCardService;
 
     public CreditRechargeCreditingService(CreditRechargeOrderMapper orderMapper,
-                                          CreditService creditService) {
+                                          CreditService creditService,
+                                          GiftCardService giftCardService) {
         this.orderMapper = orderMapper;
         this.creditService = creditService;
+        this.giftCardService = giftCardService;
     }
 
     @Transactional
@@ -36,8 +40,13 @@ public class CreditRechargeCreditingService {
             return;
         }
 
-        creditService.rechargeAdd(order.getUserId(), order.getId(), order.getCredits(),
-                (reason == null || reason.isBlank() ? "Recharge order " + order.getOrderNo() : reason));
+        if ("GIFT_CARD".equals(order.getOrderType())) {
+            giftCardService.createGiftCardFromOrder(order.getUserId(), order.getId(),
+                    order.getGiftCardPackageId(), order.getCredits());
+        } else {
+            creditService.rechargeAdd(order.getUserId(), order.getId(), order.getCredits(),
+                    (reason == null || reason.isBlank() ? "Recharge order " + order.getOrderNo() : reason));
+        }
 
         // Optimistic transition (idempotent): if another thread already credited, transitOrCurrent logic handles it.
         orderMapper.transit(order.getId(), RechargeOrderStatus.PAID.name(), RechargeOrderStatus.CREDITED.name(),

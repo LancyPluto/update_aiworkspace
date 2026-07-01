@@ -31,7 +31,7 @@ import {
   resolveOssVideoPosterUrl,
 } from "@/utils/communityPostMedia"
 import { useTypingPlaceholder } from "@/composables/useTypingPlaceholder"
-import { isVideoPreviewUrl, normalizeMediaUrl } from "@/utils/toolCoverMedia"
+import { isVideoPreviewUrl, normalizeMediaUrl, resolveSummaryToolCoverUrl } from "@/utils/toolCoverMedia"
 
 type HomeTab = "ALL" | "IMAGE" | "VIDEO" | "AUDIO"
 
@@ -203,11 +203,7 @@ function communityPostPrompt(post: CommunityPost) {
 }
 
 function toolCover(tool: ToolSummary) {
-  return normalizeMediaUrl(
-    tool.frontendStyle?.comparisonEffectUrl ||
-      tool.frontendStyle?.demoThumbnails?.[0] ||
-      tool.coverUrl,
-  )
+  return resolveSummaryToolCoverUrl(tool)
 }
 
 function usesComparison(tool: ToolSummary): boolean {

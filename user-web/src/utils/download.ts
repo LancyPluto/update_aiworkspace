@@ -20,16 +20,95 @@ export function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
-export async function forceDownload(url: string, filename: string) {
+const API_ASSET_DOWNLOAD_RE = /\/api\/v1\/assets\/(?:download|private)\//
+const COMMUNITY_DOWNLOAD_RE = /\/api\/v1\/community\/posts\/\d+\/download/
+
+/**
+ * Build the actual fetch URL and headers for downloading.
+ * Private asset URLs (/api/v1/assets/private/…) must go through the
+ * /api/v1/assets/download/ endpoint which requires authentication
+ * and returns a 302 redirect to a signed OSS URL.
+ */
+function resolveDownloadTarget(url: string, token?: string | null): { fetchUrl: string; headers: Record<string, string> } {
+  const headers: Record<string, string> = {}
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+  let fetchUrl = url
+  if (url.includes("/api/v1/assets/private/")) {
+    fetchUrl = url.replace("/api/v1/assets/private/", "/api/v1/assets/download/")
+  }
+  return { fetchUrl, headers }
+}
+
+function triggerNavigationDownload(href: string) {
+  const anchor = document.createElement("a")
+  anchor.href = href
+  anchor.rel = "noopener"
+  anchor.target = "_blank"
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}
+
+async function followApiDownloadRedirect(
+  fetchUrl: string,
+  headers: Record<string, string>,
+): Promise<string | null> {
+  const res = await fetch(fetchUrl, {
+    headers,
+    credentials: "include",
+    redirect: "manual",
+  })
+  if (res.status === 301 || res.status === 302) {
+    return res.headers.get("Location")
+  }
+  if (res.ok) {
+    const blob = await res.blob()
+    return `__blob__:${URL.createObjectURL(blob)}`
+  }
+  return null
+}
+
+export async function forceDownload(url: string, filename: string, token?: string | null) {
   if (!url) return
+  const { fetchUrl, headers } = resolveDownloadTarget(url, token)
+
+  if (COMMUNITY_DOWNLOAD_RE.test(url) || API_ASSET_DOWNLOAD_RE.test(url)) {
+    try {
+      const target = await followApiDownloadRedirect(fetchUrl, headers)
+      if (target?.startsWith("__blob__:")) {
+        const blobUrl = target.slice("__blob__:".length)
+        const anchor = document.createElement("a")
+        anchor.href = blobUrl
+        anchor.download = filename
+        document.body.appendChild(anchor)
+        anchor.click()
+        anchor.remove()
+        URL.revokeObjectURL(blobUrl)
+        return
+      }
+      if (target) {
+        triggerNavigationDownload(target)
+        return
+      }
+    } catch {
+      // fall through to navigation fallback
+    }
+    triggerNavigationDownload(fetchUrl)
+    return
+  }
+
   try {
-    const res = await fetch(url, { redirect: "follow" })
+    const res = await fetch(fetchUrl, {
+      headers,
+      credentials: "include",
+      redirect: "follow",
+    })
     if (!res.ok) throw new Error(`Download failed: ${res.status}`)
     const blob = await res.blob()
     downloadBlob(blob, filename)
   } catch {
-    // fetch 失败（跨域 CORS 限制等），回退到新窗口打开
-    // 后端 download 代理已设置 Content-Disposition: attachment，部分浏览器仍可触发下载
-    window.open(url, "_blank")
+    triggerNavigationDownload(fetchUrl)
   }
 }

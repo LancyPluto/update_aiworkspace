@@ -59,16 +59,63 @@ export function isKlingTool(tool: Pick<AITool, "id" | "name">): boolean {
   return text.includes("kling") || text.includes("可灵")
 }
 
+export function isHappyHorseTool(tool: Pick<AITool, "id" | "name">): boolean {
+  const text = `${tool.id} ${tool.name}`.toLowerCase()
+  return text.includes("happyhorse") || text.includes("happy horse")
+}
+
 export function defaultVideoCoverPath(tool: Pick<AITool, "id" | "name">): string {
-  return isKlingTool(tool) ? "https://cdn.wlcloudai.com/static/3D动画生成.mp4" : "https://cdn.wlcloudai.com/static/猴子视频.mp4"
+  if (isKlingTool(tool)) return "https://cdn.wlcloudai.com/static/3D动画生成.mp4"
+  if (isHappyHorseTool(tool)) return "https://cdn.wlcloudai.com/static/猴子视频.mp4"
+  return "https://cdn.wlcloudai.com/static/猴子视频.mp4"
+}
+
+export interface ToolCoverSource {
+  toolCode: string
+  toolName: string
+  coverUrl?: string | null
+  outputModality?: string | null
+  frontendStyle?: {
+    comparisonEffectUrl?: string | null
+    demoThumbnails?: string[] | null
+  } | null
+}
+
+function collectCoverCandidates(tool: ToolCoverSource): string[] {
+  return [
+    tool.frontendStyle?.comparisonEffectUrl,
+    tool.frontendStyle?.demoThumbnails?.[0],
+    tool.coverUrl,
+  ]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value))
+}
+
+/** 视频类工具优先使用 mp4 封面，避免 effect 配置里的静态图裂图 */
+export function resolveSummaryToolCoverUrl(tool: ToolCoverSource): string {
+  const candidates = collectCoverCandidates(tool)
+  if (normalizeOutputModality(tool.outputModality) === "VIDEO") {
+    const videoUrl = candidates.find((url) => isVideoPreviewUrl(url))
+    if (videoUrl) return normalizeMediaUrl(videoUrl)
+    return normalizeMediaUrl(defaultVideoCoverPath({ id: tool.toolCode, name: tool.toolName }))
+  }
+  const first = candidates[0]
+  return first ? normalizeMediaUrl(first) : ""
 }
 
 export function resolveToolCoverUrl(tool: AITool): string {
-  const configured = tool.iconUrl?.trim()
-  if (configured) return normalizeMediaUrl(configured)
+  const candidates = [tool.comparisonEffectUrl, tool.iconUrl]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value))
+
   if (normalizeOutputModality(tool.outputModality) === "VIDEO") {
+    const videoUrl = candidates.find((url) => isVideoPreviewUrl(url))
+    if (videoUrl) return normalizeMediaUrl(videoUrl)
     return normalizeMediaUrl(defaultVideoCoverPath(tool))
   }
+
+  const configured = candidates[0]
+  if (configured) return normalizeMediaUrl(configured)
   return ""
 }
 

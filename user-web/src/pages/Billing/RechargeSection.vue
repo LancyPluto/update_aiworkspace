@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue"
-import { Check, Crown, CreditCard, Loader2, MessageCircle, QrCode, Sparkles, X } from "lucide-vue-next"
-import type { CreditAccount, RechargeOrder, RechargePackage } from "@/api/types"
+import { Check, CreditCard, Crown, Loader2, MessageCircle, QrCode, X } from "lucide-vue-next"
+import type { CreditAccount, GiftCardPackage, RechargeOrder, RechargePackage } from "@/api/types"
 import {
-  createCustomRechargeOrder,
   createRechargeOrder,
+  fetchGiftCardPackages,
   fetchRechargeOrder,
   fetchRechargePackages,
 } from "@/api/creditApi"
@@ -16,6 +16,14 @@ import {
   resolveAlipayLaunchUrl,
   type RechargePaymentChannel,
 } from "@/utils/rechargePayment"
+import GiftCardSection from "@/pages/Billing/GiftCardSection.vue"
+import BillingCycleSwitcher from "@/components/BillingCycleSwitcher.vue"
+import {
+  BILLING_CYCLES,
+  cycleMonthDivisor,
+  cyclePeriodLabel,
+  type BillingCycle,
+} from "@/utils/billingCycleConfig"
 
 const props = defineProps<{
   account: CreditAccount | null
@@ -27,16 +35,12 @@ const emit = defineEmits<{
 
 type PaymentChannel = RechargePaymentChannel
 
+const activeTab = ref<BillingCycle>("quarterly")
+
 const auth = useAuthStore()
 const packages = ref<RechargePackage[]>([])
 const selectedId = ref<number | null>(null)
-const customAmount = ref("")
-const customCredits = computed(() => {
-  const amount = parseFloat(customAmount.value)
-  return Number.isFinite(amount) && amount > 0 ? Math.floor(amount * 100) : 0
-})
 const pendingPackage = ref<RechargePackage | null>(null)
-const isCustomRecharge = ref(false)
 const loadingPackages = ref(false)
 const ordering = ref(false)
 const orderingPackageId = ref<number | null>(null)
@@ -47,12 +51,37 @@ const activeOrder = ref<RechargeOrder | null>(null)
 const paymentResult = ref<"success" | "fail" | null>(null)
 let pollingTimer: ReturnType<typeof setInterval> | null = null
 
-const membership = ref<{ planName: string; expiryDate: string | null }>({
-  planName: "免费版",
-  expiryDate: null,
+// 模式切换：会员计划 / 礼品卡
+const mode = ref<'credits' | 'giftcard'>('credits')
+const giftCardPackages = ref<GiftCardPackage[]>([])
+const loadingGiftCards = ref(false)
+const pendingGiftCardPackage = ref<GiftCardPackage | null>(null)
+
+const TRIAL_PLAN_NAME = "体验版"
+const TRIAL_GRANTED_CREDITS = 200
+
+const membershipStatus = computed(() => ({
+  planName: TRIAL_PLAN_NAME,
+  availableDisplay: props.account ? props.account.available.toLocaleString() : "--",
+}))
+
+const TIER_META: Record<string, { label: string; subtitle: string; featured?: boolean }> = {
+  starter: { label: "标准版", subtitle: "适合轻度创作者" },
+  growth: { label: "进阶版", subtitle: "适合日常创作" },
+  pro: { label: "高级版", subtitle: "适合专业团队" },
+  flagship: { label: "豪华版", subtitle: "旗舰尊享", featured: true },
+}
+
+const TIER_ORDER = ["starter", "growth", "pro", "flagship"]
+
+const filteredPackages = computed(() => {
+  const prefix = BILLING_CYCLES.find((tab) => tab.value === activeTab.value)?.prefix ?? "monthly_"
+  return packages.value
+    .filter((pkg) => pkg.packageCode.startsWith(prefix))
+    .sort((a, b) => TIER_ORDER.indexOf(tierKey(a.packageCode)) - TIER_ORDER.indexOf(tierKey(b.packageCode)))
 })
 
-const availableDisplay = computed(() => (props.account ? props.account.available.toLocaleString() : "--"))
+const activeCycleMeta = computed(() => BILLING_CYCLES.find((tab) => tab.value === activeTab.value) ?? BILLING_CYCLES[2])
 
 const paymentOptions = computed(() =>
   DEFAULT_RECHARGE_PAYMENT_CHANNELS.map((option) => ({
@@ -76,31 +105,52 @@ const isAlipayPageRedirect = computed(() =>
   activeOrder.value ? isAlipayPageRedirectOrder(activeOrder.value) : false,
 )
 
+const isGiftCardOrder = computed(() => activeOrder.value?.orderType === 'GIFT_CARD')
+
+const successMessage = computed(() =>
+  isGiftCardOrder.value ? '礼品卡购买成功，请在个人中心查看' : '支付成功，算力已到账',
+)
+
+const pendingDisplay = computed(() => {
+  if (pendingGiftCardPackage.value) {
+    return {
+      name: pendingGiftCardPackage.value.packageName,
+      credits: pendingGiftCardPackage.value.credits,
+      price: pendingGiftCardPackage.value.priceAmount,
+    }
+  }
+  if (pendingPackage.value) {
+    return {
+      name: localizePackageName(pendingPackage.value.packageName),
+      credits: pendingPackage.value.credits,
+      price: pendingPackage.value.priceAmount,
+    }
+  }
+  return null
+})
+
 function redirectToAlipayCheckout(order: RechargeOrder) {
   if (!isAlipayPageRedirectOrder(order) || !order.payUrl) return false
   window.location.assign(resolveAlipayLaunchUrl(order.payUrl))
   return true
 }
 
-function normalizeCustomAmountInput(raw: string): string {
-  const value = raw.trim()
-  if (!value) return ""
-  const matched = value.match(/^\d*(?:\.\d{0,2})?/)
-  return matched?.[0] ?? ""
-}
 
-function onCustomAmountInput(event: Event) {
-  const input = event.target as HTMLInputElement
-  const normalized = normalizeCustomAmountInput(input.value)
-  if (normalized !== input.value) {
-    input.value = normalized
-  }
-  customAmount.value = normalized
-}
 
 function formatMoney(value: number | string | undefined | null) {
   const amount = Number(value ?? 0)
   return Number.isInteger(amount) ? String(amount) : amount.toFixed(2)
+}
+
+const GIFT_CARD_THEMES: Record<string, string> = {
+  blue: 'from-blue-600 to-blue-800 border-blue-400/30',
+  purple: 'from-purple-600 to-purple-800 border-purple-400/30',
+  gold: 'from-amber-600 to-yellow-800 border-amber-400/30',
+  dark: 'from-slate-800 to-slate-950 border-slate-600/30',
+}
+
+function giftCardThemeClass(theme: string | undefined | null) {
+  return GIFT_CARD_THEMES[theme || 'dark'] || GIFT_CARD_THEMES.dark
 }
 
 const PACKAGE_NAME_ZH: Record<string, string> = {
@@ -138,6 +188,63 @@ function localizeBenefit(benefit: string) {
     .replace(/\bmodel\s+consulting\b/gi, "模型咨询服务")
 }
 
+function tierKey(packageCode: string) {
+  const parts = packageCode.split("_")
+  return parts[parts.length - 1] ?? packageCode
+}
+
+function tierMeta(packageCode: string) {
+  return TIER_META[tierKey(packageCode)] ?? { label: localizePackageName(packageCode), subtitle: "" }
+}
+
+function periodLabel(cycle: BillingCycle) {
+  return cyclePeriodLabel(cycle)
+}
+
+function originalPrice(pkg: RechargePackage, cycle: BillingCycle) {
+  const rate = BILLING_CYCLES.find((tab) => tab.value === cycle)?.discountRate
+  if (!rate) return null
+  return pkg.priceAmount / rate
+}
+
+function creditsPerMonth(pkg: RechargePackage, cycle: BillingCycle) {
+  return Math.round(pkg.credits / cycleMonthDivisor(cycle))
+}
+
+function creditUnitPrice(pkg: RechargePackage) {
+  if (!pkg.credits) return "0"
+  const unit = pkg.priceAmount / pkg.credits
+  return unit < 0.01 ? unit.toFixed(4) : unit.toFixed(3)
+}
+
+function renewalHint(pkg: RechargePackage, cycle: BillingCycle) {
+  const amount = formatMoney(pkg.priceAmount)
+  if (cycle === "monthly") return `次月续费 ¥${amount}，可随时取消`
+  if (cycle === "quarterly") return `次季续费 ¥${amount}，可随时取消`
+  return `次年续费 ¥${amount}，可随时取消`
+}
+
+function monthlyEquivalentPrice(pkg: RechargePackage, cycle: BillingCycle) {
+  return pkg.priceAmount / cycleMonthDivisor(cycle)
+}
+
+function isFeaturedCard(pkg: RechargePackage) {
+  if (pkg.recommended) return true
+  return tierMeta(pkg.packageCode).featured === true && activeTab.value === "yearly"
+}
+
+function selectDefaultPackage(list: RechargePackage[]) {
+  const prefix = activeCycleMeta.value.prefix
+  const recommended = list.find((item) => item.recommended && item.packageCode.startsWith(prefix))
+  const first = list.find((item) => item.packageCode.startsWith(prefix))
+  selectedId.value = recommended?.id ?? first?.id ?? list[0]?.id ?? null
+}
+
+function onBillingCycleChange(cycle: BillingCycle) {
+  activeTab.value = cycle
+  selectDefaultPackage(packages.value)
+}
+
 function packageBenefits(pkg: RechargePackage) {
   const benefits = pkg.benefits?.filter(Boolean) ?? []
   if (benefits.length > 0) return benefits.map(localizeBenefit)
@@ -159,7 +266,7 @@ function closeChannelModal() {
   if (ordering.value) return
   showChannelModal.value = false
   pendingPackage.value = null
-  isCustomRecharge.value = false
+  pendingGiftCardPackage.value = null
 }
 
 function closePayModal() {
@@ -175,7 +282,7 @@ async function loadPackages() {
   try {
     const list = await fetchRechargePackages({ token: auth.token })
     packages.value = list
-    selectedId.value = list.find((item) => item.recommended)?.id ?? list[0]?.id ?? null
+    selectDefaultPackage(list)
   } catch (err) {
     error.value = err instanceof Error ? err.message : "加载充值套餐失败"
   } finally {
@@ -209,7 +316,6 @@ function startPolling(orderId: number) {
 }
 
 function openPaymentChoice(pkg: RechargePackage) {
-  isCustomRecharge.value = false
   pendingPackage.value = pkg
   selectedId.value = pkg.id
   paymentResult.value = null
@@ -217,48 +323,7 @@ function openPaymentChoice(pkg: RechargePackage) {
   showChannelModal.value = true
 }
 
-function openCustomPaymentChoice() {
-  const amount = Math.round(parseFloat(customAmount.value) * 100) / 100
-  if (!Number.isFinite(amount) || amount < 0.01) {
-    error.value = "请输入有效的充值金额（最低 0.01 元）"
-    return
-  }
-  isCustomRecharge.value = true
-  pendingPackage.value = null
-  selectedId.value = null
-  paymentResult.value = null
-  error.value = ""
-  showChannelModal.value = true
-}
 
-async function submitCustomRecharge(channel: PaymentChannel) {
-  const amount = Math.round(parseFloat(customAmount.value) * 100) / 100
-  if (!Number.isFinite(amount) || amount < 0.01) {
-    error.value = "请输入有效的充值金额（最低 0.01 元）"
-    return
-  }
-  ordering.value = true
-  orderingPackageId.value = -1
-  error.value = ""
-  try {
-    const order = await createCustomRechargeOrder(
-      {
-        amount,
-        paymentChannel: channel,
-        clientRequestId: `custom-recharge-${channel}-${Date.now()}`,
-      },
-      { token: auth.token },
-    )
-    if (!openPayModalForOrder(order, channel)) {
-      return
-    }
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : "创建自定义充值订单失败"
-  } finally {
-    ordering.value = false
-    orderingPackageId.value = null
-  }
-}
 
 function openPayModalForOrder(order: RechargeOrder, channel: PaymentChannel): boolean {
   const hasAlipayLaunch = isAlipayPageRedirectOrder(order, channel)
@@ -303,155 +368,215 @@ async function createOrder(pkg: RechargePackage, channel: PaymentChannel) {
   }
 }
 
-onMounted(loadPackages)
+async function loadGiftCardPackages() {
+  loadingGiftCards.value = true
+  try {
+    giftCardPackages.value = await fetchGiftCardPackages({ token: auth.token })
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "加载礼品卡套餐失败"
+  } finally {
+    loadingGiftCards.value = false
+  }
+}
+
+function openGiftCardPayment(pkg: GiftCardPackage, _quantity = 1) {
+  pendingGiftCardPackage.value = pkg
+  paymentResult.value = null
+  error.value = ""
+  showChannelModal.value = true
+}
+
+async function createGiftCardOrder(pkg: GiftCardPackage, channel: PaymentChannel) {
+  ordering.value = true
+  error.value = ""
+  try {
+    const order = await createRechargeOrder(
+      {
+        packageId: 0,
+        paymentChannel: channel,
+        clientRequestId: `giftcard-${pkg.id}-${channel}-${Date.now()}`,
+        orderType: 'GIFT_CARD',
+        giftCardPackageId: pkg.id,
+      },
+      { token: auth.token },
+    )
+    if (!openPayModalForOrder(order, channel)) {
+      return
+    }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "创建礼品卡订单失败"
+  } finally {
+    ordering.value = false
+  }
+}
+
+onMounted(() => {
+  loadPackages()
+  loadGiftCardPackages()
+})
 onUnmounted(clearPolling)
 </script>
 
 <template>
   <section class="space-y-6">
-    <div class="relative overflow-hidden rounded-xl border border-border bg-card p-6 shadow-sm md:p-8">
-      <div class="relative flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-        <div class="flex flex-col gap-6 sm:flex-row sm:gap-12">
-          <div class="flex flex-col gap-1">
-            <span class="text-sm text-muted-foreground">可用算力</span>
-            <p class="text-3xl font-semibold tracking-tight text-foreground">
-              {{ availableDisplay }}
-              <span class="text-base font-normal text-muted-foreground">点</span>
-            </p>
-          </div>
-          <div class="hidden h-12 w-px bg-border sm:block" aria-hidden="true" />
-          <div class="flex flex-col gap-1">
-            <span class="text-sm text-muted-foreground">会员状态</span>
-            <p class="flex flex-wrap items-baseline gap-2 text-xl font-semibold">
-              <Crown class="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
-              {{ membership.planName }}
-              <span v-if="membership.expiryDate" class="text-sm font-normal text-muted-foreground">
-                有效期至 {{ membership.expiryDate }}
-              </span>
-              <span v-else class="text-sm font-normal text-muted-foreground">未开通或永久有效</span>
-            </p>
-          </div>
+    <article class="membership-status-card">
+      <div class="membership-status-card__main">
+        <div class="membership-status-card__label">当前会员</div>
+        <div class="membership-status-card__plan">
+          <Crown class="h-5 w-5 shrink-0 text-cyan-300" aria-hidden="true" />
+          <span>{{ membershipStatus.planName }}</span>
         </div>
-        <button
-          type="button"
-          class="inline-flex items-center justify-center rounded-md border border-primary bg-transparent px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
-        >
-          升级会员
-        </button>
+        <p class="membership-status-card__meta">
+          可用算力
+          <strong>{{ membershipStatus.availableDisplay }}</strong>
+          <span class="membership-status-card__divider">·</span>
+          体验额度 {{ TRIAL_GRANTED_CREDITS }}
+        </p>
+        <p class="membership-status-card__hint">未开通连续订阅，选择下方套餐即可升级会员</p>
       </div>
-    </div>
+    </article>
 
     <div v-if="error" class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
       {{ error }}
     </div>
 
-    <div>
-      <div class="mb-6 flex items-start gap-3">
-        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <Sparkles class="h-5 w-5" aria-hidden="true" />
-        </div>
-        <div>
-          <h2 class="text-lg font-semibold tracking-tight">选择算力套餐</h2>
-          <p class="mt-1 text-sm text-muted-foreground">下单、支付确认、到账都由充值订单状态机驱动</p>
-        </div>
-      </div>
+    <div class="billing-mode-tabs" role="tablist" aria-label="会员与礼品卡">
+      <button
+        type="button"
+        role="tab"
+        class="billing-mode-tab"
+        :class="{ 'billing-mode-tab--active': mode === 'credits' }"
+        :aria-selected="mode === 'credits'"
+        @click="mode = 'credits'"
+      >
+        会员计划
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="billing-mode-tab"
+        :class="{ 'billing-mode-tab--active': mode === 'giftcard' }"
+        :aria-selected="mode === 'giftcard'"
+        @click="mode = 'giftcard'"
+      >
+        礼品卡
+      </button>
+    </div>
 
-      <div v-if="loadingPackages" class="rounded-lg border border-border bg-card px-5 py-8 text-center text-sm text-muted-foreground">
+    <div v-if="mode === 'credits'" class="space-y-8">
+      <!-- 包年 / 包季 / 包月 切换（即梦风格圆角分段） -->
+      <BillingCycleSwitcher :model-value="activeTab" @update:model-value="onBillingCycleChange" />
+
+      <div v-if="loadingPackages" class="rounded-2xl border border-border bg-card px-5 py-12 text-center text-sm text-muted-foreground">
         正在加载套餐...
       </div>
-      <div v-else class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <div
-          v-for="pkg in packages"
+
+      <div
+        v-else-if="filteredPackages.length === 0"
+        class="rounded-2xl border border-dashed border-border bg-card px-5 py-12 text-center text-sm text-muted-foreground"
+      >
+        当前周期暂无可用套餐，请切换其他订阅周期
+      </div>
+
+      <div
+        v-else
+        class="-mx-1 flex gap-4 overflow-x-auto px-1 pb-4 snap-x snap-mandatory scrollbar-thin lg:grid lg:grid-cols-4 lg:overflow-visible"
+      >
+        <article
+          v-for="pkg in filteredPackages"
           :key="pkg.id"
           role="button"
           tabindex="0"
-          class="group relative flex min-h-[286px] flex-col rounded-xl border bg-card p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/30"
-          :class="selectedId === pkg.id ? 'border-primary ring-1 ring-primary/20' : 'border-border'"
+          class="relative flex min-w-[260px] shrink-0 snap-center flex-col rounded-2xl border bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 p-5 shadow-xl transition-all duration-300 hover:-translate-y-0.5 lg:min-w-0"
+          :class="{
+            'border-cyan-400/70 ring-2 ring-cyan-400/30 shadow-cyan-500/10': isFeaturedCard(pkg),
+            'border-primary/60 ring-1 ring-primary/20': selectedId === pkg.id && !isFeaturedCard(pkg),
+            'border-slate-800': selectedId !== pkg.id && !isFeaturedCard(pkg),
+          }"
           @click="selectPackage(pkg.id)"
           @keydown.enter="selectPackage(pkg.id)"
           @keydown.space.prevent="selectPackage(pkg.id)"
         >
-          <span
-            v-if="pkg.recommended"
-            class="absolute right-4 top-4 rounded-full bg-primary px-2.5 py-0.5 text-xs font-semibold text-primary-foreground"
+          <div
+            v-if="isFeaturedCard(pkg)"
+            class="absolute -top-px left-0 right-0 rounded-t-2xl bg-gradient-to-r from-cyan-500 to-teal-400 px-4 py-1.5 text-center text-xs font-semibold text-slate-950"
           >
-            推荐
-          </span>
-          <p class="text-sm font-medium text-muted-foreground">{{ localizePackageName(pkg.packageName) }}</p>
-          <p class="mt-1 text-3xl font-bold tabular-nums">
-            {{ pkg.credits.toLocaleString() }}
-            <span class="text-sm font-normal text-muted-foreground">算力</span>
+            {{ activeTab === 'yearly' ? '特惠上新 · 比月卡立省 37%' : '🔥 推荐套餐' }}
+          </div>
+
+          <div :class="isFeaturedCard(pkg) ? 'mt-6' : 'mt-1'">
+            <p class="text-sm font-medium text-slate-400">{{ tierMeta(pkg.packageCode).subtitle }}</p>
+            <h3 class="mt-1 text-2xl font-bold tracking-tight text-white">
+              {{ tierMeta(pkg.packageCode).label }}
+            </h3>
+          </div>
+
+          <div class="mt-5 flex flex-wrap items-end gap-2">
+            <span class="text-4xl font-bold leading-none text-white">¥{{ formatMoney(pkg.priceAmount) }}</span>
+            <span class="pb-1 text-sm text-slate-400">/{{ periodLabel(activeTab) }}</span>
+            <span
+              v-if="originalPrice(pkg, activeTab)"
+              class="pb-1 text-sm text-slate-500 line-through"
+            >
+              ¥{{ formatMoney(originalPrice(pkg, activeTab)) }}
+            </span>
+          </div>
+
+          <p class="mt-2 text-xs text-slate-500">{{ renewalHint(pkg, activeTab) }}</p>
+
+          <p class="mt-3 text-xs text-slate-400">
+            约 ¥{{ formatMoney(monthlyEquivalentPrice(pkg, activeTab)) }}/月
+            <span class="mx-1 text-slate-600">·</span>
+            ¥{{ creditUnitPrice(pkg) }}/算力
           </p>
-          <p class="mt-2 text-2xl font-bold text-primary tabular-nums">
-            <span class="text-lg font-semibold">¥</span>{{ formatMoney(pkg.priceAmount) }}
-          </p>
-          <p class="mt-2 border-b border-border pb-4 text-xs text-muted-foreground">
-            套餐权益周期 {{ pkg.validityDays }} 天
-          </p>
-          <ul class="mt-4 flex flex-1 flex-col gap-2">
-            <li v-for="benefit in packageBenefits(pkg)" :key="benefit" class="flex items-center gap-2 text-sm text-muted-foreground">
-              <Check class="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-              {{ benefit }}
-            </li>
-          </ul>
+
+          <div class="mt-5 rounded-xl border border-slate-700/80 bg-slate-800/40 px-4 py-4">
+            <p class="text-3xl font-bold text-white">
+              {{ creditsPerMonth(pkg, activeTab).toLocaleString() }}
+              <span class="text-sm font-medium text-slate-400">算力/月</span>
+            </p>
+            <p class="mt-2 text-xs text-slate-500">
+              约可生成 {{ Math.floor(creditsPerMonth(pkg, activeTab) / 10).toLocaleString() }} 张图
+              <span class="mx-1">|</span>
+              {{ Math.floor(creditsPerMonth(pkg, activeTab) / 50).toLocaleString() }} 个视频
+            </p>
+            <p class="mt-1 text-[11px] text-slate-600">
+              本周期共 {{ pkg.credits.toLocaleString() }} 算力 · 有效期 {{ pkg.validityDays }} 天
+            </p>
+          </div>
+
           <button
             type="button"
-            class="mt-6 w-full rounded-md bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+            class="mt-5 w-full rounded-xl bg-gradient-to-r from-cyan-300 to-teal-300 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition-all hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
             :disabled="ordering"
             @click.stop="openPaymentChoice(pkg)"
           >
-            {{ ordering && orderingPackageId === pkg.id ? "下单中..." : "立即购买" }}
+            {{ ordering && orderingPackageId === pkg.id ? "下单中..." : "立即开通" }}
           </button>
-        </div>
 
-      <!-- 自定义充值卡片 - 金额自选 -->
-        <div
-          class="group relative flex min-h-[286px] flex-col rounded-xl border bg-card p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
-          :class="customAmount && parseFloat(customAmount) >= 0.01 ? 'border-primary ring-1 ring-primary/20' : 'border-border'"
-        >
-          <p class="text-3xl font-bold tabular-nums">
-            {{ customCredits.toLocaleString() }}
-            <span class="text-sm font-normal text-muted-foreground">算力</span>
-          </p>
-          <div class="mt-2">
-            <div class="flex items-center gap-1 text-2xl font-bold text-primary tabular-nums">
-              <span class="text-lg font-semibold">¥</span>
-              <input
-                v-model="customAmount"
-                type="text"
-                inputmode="decimal"
-                placeholder="输入金额"
-                class="w-full border-0 border-b border-border bg-transparent px-0 py-0.5 text-2xl font-bold tabular-nums text-primary outline-none placeholder:text-muted-foreground/40 focus:border-primary focus:ring-0"
-                @click.stop
-                @input="onCustomAmountInput"
-              />
-            </div>
-          </div>
-          <p class="mt-2 border-b border-border pb-4 text-xs text-muted-foreground">
-            自定义金额，1 元 = 100 算力
-          </p>
-          <ul class="mt-4 flex flex-1 flex-col gap-2">
-            <li class="flex items-center gap-2 text-sm text-muted-foreground">
-              <Check class="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-              任意金额随心充
-            </li>
-            <li class="flex items-center gap-2 text-sm text-muted-foreground">
-              <Check class="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-              最低 ¥0.01 起
+          <ul class="mt-5 flex-1 space-y-2 border-t border-slate-800 pt-4">
+            <li
+              v-for="benefit in packageBenefits(pkg)"
+              :key="benefit"
+              class="flex items-start gap-2 text-xs leading-relaxed text-slate-300"
+            >
+              <Check class="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-400" aria-hidden="true" />
+              <span>{{ benefit }}</span>
             </li>
           </ul>
-          <button
-            type="button"
-            class="mt-6 w-full rounded-md bg-primary py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-            :disabled="ordering || !customAmount || parseFloat(customAmount) < 0.01"
-            @click.stop="openCustomPaymentChoice"
-          >
-            {{ ordering ? "下单中..." : "立即购买" }}
-          </button>
-        </div>
-
+        </article>
       </div>
     </div>
+
+    <GiftCardSection
+      v-if="mode === 'giftcard'"
+      :packages="packages"
+      :gift-card-packages="giftCardPackages"
+      :loading="loadingGiftCards || loadingPackages"
+      :ordering="ordering"
+      @buy-member-package="openPaymentChoice"
+      @buy-credit-gift="openGiftCardPayment"
+    />
     <Teleport to="body">
       <div
         v-if="showChannelModal"
@@ -464,10 +589,9 @@ onUnmounted(clearPolling)
         <div class="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-xl" @click.stop>
           <div class="flex items-start justify-between gap-4">
             <div>
-              <h3 id="payment-channel-title" class="text-lg font-semibold text-foreground">选择支付方式</h3>
+              <h3 id="payment-channel-title" class="text-lg font-semibold text-foreground">确认订单</h3>
               <p class="mt-1 text-sm text-muted-foreground">
-                <template v-if="isCustomRecharge">自定义充值 · {{ customCredits.toLocaleString() }} 算力</template>
-              <template v-else>{{ localizePackageName(pendingPackage?.packageName) }} · {{ pendingPackage?.credits.toLocaleString() }} 算力</template>
+                {{ pendingDisplay?.name }} · {{ pendingDisplay?.credits.toLocaleString() }} 算力
               </p>
             </div>
             <button
@@ -486,8 +610,8 @@ onUnmounted(clearPolling)
               :key="option.channel"
               type="button"
               class="flex w-full items-center gap-4 rounded-xl border border-border bg-background px-4 py-3 text-left transition hover:border-primary/50 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60"
-              :disabled="ordering || (!isCustomRecharge && !pendingPackage)"
-              @click="isCustomRecharge ? submitCustomRecharge(option.channel) : (pendingPackage && createOrder(pendingPackage, option.channel))"
+              :disabled="ordering || !pendingDisplay"
+              @click="pendingPackage ? createOrder(pendingPackage, option.channel) : pendingGiftCardPackage && createGiftCardOrder(pendingGiftCardPackage, option.channel)"
             >
               <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
                 <component :is="option.icon" class="h-5 w-5" aria-hidden="true" />
@@ -502,7 +626,7 @@ onUnmounted(clearPolling)
 
           <p class="mt-5 text-center text-xs text-muted-foreground">
             应付金额
-            <span class="font-semibold text-primary">¥{{ isCustomRecharge ? customAmount || "0.00" : formatMoney(pendingPackage?.priceAmount) }}</span>
+            <span class="font-semibold text-primary">¥{{ formatMoney(pendingDisplay?.price) }}</span>
           </p>
         </div>
       </div>
@@ -570,16 +694,13 @@ onUnmounted(clearPolling)
               <Loader2 class="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
               <span>正在确认订单状态</span>
             </div>
-            <p class="mt-6 text-xs text-muted-foreground">
-              您已同意《未来云AI付费服务协议》
-            </p>
           </template>
 
           <div v-else-if="paymentResult === 'success'" class="pt-4">
             <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
               <Check class="h-8 w-8" stroke-width="2.5" aria-hidden="true" />
             </div>
-            <p class="mt-5 text-sm font-medium text-foreground">支付成功，算力已到账</p>
+            <p class="mt-5 text-sm font-medium text-foreground">{{ successMessage }}</p>
             <button type="button" class="mt-6 rounded-full bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90" @click="closePayModal">
               关闭
             </button>
@@ -599,4 +720,105 @@ onUnmounted(clearPolling)
     </Teleport>
   </section>
 </template>
-// HMR check
+
+<style scoped>
+.membership-status-card {
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background: linear-gradient(135deg, rgb(15 23 42 / 0.95), rgb(30 41 59 / 0.88));
+  padding: 20px 24px;
+  box-shadow: 0 16px 40px rgb(0 0 0 / 0.22);
+}
+
+.membership-status-card__label {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgb(255 255 255 / 0.45);
+}
+
+.membership-status-card__plan {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 24px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.01em;
+}
+
+.membership-status-card__meta {
+  margin-top: 12px;
+  font-size: 14px;
+  color: rgb(255 255 255 / 0.55);
+}
+
+.membership-status-card__meta strong {
+  margin-left: 6px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.membership-status-card__divider {
+  margin: 0 8px;
+  color: rgb(255 255 255 / 0.22);
+}
+
+.membership-status-card__hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.38);
+}
+
+.billing-mode-tabs {
+  display: flex;
+  justify-content: center;
+  gap: 48px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.06);
+  padding-bottom: 0;
+}
+
+.billing-mode-tab {
+  position: relative;
+  border: 0;
+  background: transparent;
+  padding: 0 4px 14px;
+  color: rgb(255 255 255 / 0.42);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.billing-mode-tab:hover {
+  color: rgb(255 255 255 / 0.72);
+}
+
+.billing-mode-tab--active {
+  color: #fff;
+}
+
+.billing-mode-tab--active::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  border-radius: 999px 999px 0 0;
+  background: #fff;
+}
+
+@media (max-width: 560px) {
+  .billing-mode-tabs {
+    gap: 32px;
+  }
+
+  .billing-mode-tab {
+    font-size: 15px;
+  }
+}
+</style>

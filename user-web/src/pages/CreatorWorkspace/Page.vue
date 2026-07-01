@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { AlertCircle, CheckCircle2, Clock3, FileUp, Loader2, RefreshCw, Sparkles, Trash2, XCircle } from "lucide-vue-next"
 import WorkspaceShell from "@/components/workspace/WorkspaceShell.vue"
 import WorkspaceComposer from "@/components/workspace/WorkspaceComposer.vue"
+import GenerationLoadingPreview from "@/components/GenerationLoadingPreview.vue"
 import ResultRenderer from "@/components/ResultRenderer/ResultRenderer.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import { ApiBusinessError } from "@/api/client"
@@ -34,6 +35,7 @@ import { randomUUID } from "@/utils/randomUUID"
 import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 import { taskProgressMessage, taskStatusViewKind } from "@/utils/taskStatusLabels"
 import { buildTaskProgressView } from "@/utils/taskProgressView"
+import { inferTaskAspectRatio } from "@/utils/taskAspectRatio"
 
 const route = useRoute()
 const router = useRouter()
@@ -73,8 +75,13 @@ const timelinePollTimer = ref<ReturnType<typeof window.setInterval> | null>(null
 const progressClockTimer = ref<ReturnType<typeof window.setInterval> | null>(null)
 const progressNow = ref(Date.now())
 const composerCondensed = ref(false)
+const composerDockRef = ref<HTMLElement | null>(null)
+const composerDockInset = ref(194)
 const bottomSentinelRef = ref<HTMLElement | null>(null)
 const timelineScrollTimers: Array<ReturnType<typeof window.setTimeout>> = []
+const COMPOSER_DOCK_BOTTOM_OFFSET = 16
+let composerDockResizeObserver: ResizeObserver | null = null
+let lastComposerDockHeight = 0
 const taskStatusStreamControllers = new Map<number, AbortController>()
 const previewAsset = ref<AssetPreviewItem | null>(null)
 
@@ -429,12 +436,54 @@ function updateComposerCondensedFromScroll() {
   composerCondensed.value = bottomDistance > 180
 }
 
-function expandComposerFromClick(event: MouseEvent) {
+function updateComposerDockInset() {
+  const dock = composerDockRef.value
+  if (!dock) return 0
+  const height = Math.ceil(dock.getBoundingClientRect().height)
+  composerDockInset.value = height + COMPOSER_DOCK_BOTTOM_OFFSET + 24
+  return height
+}
+
+function liftTimelineForComposerGrowth(delta: number) {
+  if (delta <= 0) return
+  const bottomDistance = document.documentElement.scrollHeight - window.scrollY - window.innerHeight
+  if (bottomDistance > 240) return
+  window.scrollBy({ top: delta, behavior: "smooth" })
+}
+
+function setupComposerDockResizeObserver() {
+  const dock = composerDockRef.value
+  if (!dock || composerDockResizeObserver) return
+  lastComposerDockHeight = Math.ceil(dock.getBoundingClientRect().height)
+  updateComposerDockInset()
+  composerDockResizeObserver = new ResizeObserver(() => {
+    const previous = lastComposerDockHeight
+    const next = updateComposerDockInset()
+    const delta = next - previous
+    lastComposerDockHeight = next
+    if (!composerCondensed.value && delta > 0) liftTimelineForComposerGrowth(delta)
+  })
+  composerDockResizeObserver.observe(dock)
+}
+
+function teardownComposerDockResizeObserver() {
+  composerDockResizeObserver?.disconnect()
+  composerDockResizeObserver = null
+}
+
+function expandComposerFromClick(_event: MouseEvent) {
   if (!composerCondensed.value) return
-  const target = event.target
-  if (target instanceof HTMLElement && target.closest("textarea")) {
-    composerCondensed.value = false
-  }
+  const previousHeight = composerDockRef.value?.getBoundingClientRect().height ?? lastComposerDockHeight
+  composerCondensed.value = false
+  void nextTick(() => {
+    requestAnimationFrame(() => {
+      const nextHeight = updateComposerDockInset()
+      const delta = nextHeight - previousHeight
+      if (delta > 0) liftTimelineForComposerGrowth(delta)
+      lastComposerDockHeight = nextHeight
+      scrollTimelineToBottom("smooth")
+    })
+  })
 }
 
 function startTimelinePolling() {
@@ -578,14 +627,6 @@ async function unpublishPreviewAsset(asset: AssetPreviewItem) {
   } catch (e) {
     error.value = (e as Error).message || "撤回失败"
   }
-}
-
-function statusIcon(item: CreateTimelineItem) {
-  const kind = taskStatusViewKind(item.task.status)
-  if (kind === "success") return CheckCircle2
-  if (kind === "failed") return XCircle
-  if (kind === "running" || kind === "queued") return Sparkles
-  return Clock3
 }
 
 function statusLabel(item: CreateTimelineItem) {
@@ -760,6 +801,8 @@ onMounted(async () => {
   await refreshTimeline()
   window.addEventListener("scroll", updateComposerCondensedFromScroll, { passive: true })
   window.addEventListener("resize", updateComposerCondensedFromScroll)
+  await nextTick()
+  setupComposerDockResizeObserver()
   settleTimelineToBottom("auto")
 })
 
@@ -767,6 +810,7 @@ onBeforeUnmount(() => {
   stopTimelinePolling()
   stopProgressClock()
   stopAllTaskStatusStreams()
+  teardownComposerDockResizeObserver()
   window.removeEventListener("scroll", updateComposerCondensedFromScroll)
   window.removeEventListener("resize", updateComposerCondensedFromScroll)
   for (const timer of timelineScrollTimers) window.clearTimeout(timer)
@@ -840,15 +884,13 @@ onBeforeUnmount(() => {
             >
               <ResultRenderer :blocks="resultBlocks(item)" mode="compact" />
             </div>
-            <div v-else class="workspace-create-status workspace-create-status-hero" :class="taskStatusViewKind(item.task.status)">
-              <span class="workspace-create-status-mark">
-                <component :is="statusIcon(item)" :size="28" />
-              </span>
-              <strong>{{ progressView(item).percentLabel }}</strong>
-              <span class="workspace-create-progress-caption">{{ progressView(item).caption || statusLabel(item) }}</span>
-              <div class="workspace-create-progress">
-                <b :style="{ width: progressView(item).percent + '%' }" />
-              </div>
+            <div v-else class="workspace-create-result-pending">
+              <GenerationLoadingPreview
+                :aspect-ratio="inferTaskAspectRatio(item.task)"
+                :caption="progressView(item).caption || statusLabel(item)"
+                :percent-label="progressView(item).percentLabel"
+                :failed="taskStatusViewKind(item.task.status) === 'failed'"
+              />
             </div>
           </div>
 
@@ -876,8 +918,13 @@ onBeforeUnmount(() => {
         <div ref="bottomSentinelRef" class="workspace-create-bottom-sentinel" aria-hidden="true" />
       </div>
 
-      <div class="workspace-create-composer-spacer" />
-      <div class="workspace-create-composer-dock" :class="{ condensed: composerCondensed }" @click.capture="expandComposerFromClick">
+      <div class="workspace-create-composer-spacer" :style="{ height: `${composerDockInset}px` }" />
+      <div
+        ref="composerDockRef"
+        class="workspace-create-composer-dock"
+        :class="{ condensed: composerCondensed }"
+        @click.capture="expandComposerFromClick"
+      >
         <WorkspaceComposer
           compact
           :show-mode-tabs="false"
