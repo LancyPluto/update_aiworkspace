@@ -23,6 +23,8 @@ public class CreditRechargeOrder {
     private String qrCodeUrl;
     private String externalTradeNo;
     private String idempotencyKey;
+    private String orderType;
+    private Long giftCardPackageId;
     private LocalDateTime paidAt;
     private LocalDateTime creditedAt;
     private LocalDateTime closedAt;
@@ -58,6 +60,10 @@ public class CreditRechargeOrder {
     public void setExternalTradeNo(String externalTradeNo) { this.externalTradeNo = externalTradeNo; }
     public String getIdempotencyKey() { return idempotencyKey; }
     public void setIdempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; }
+    public String getOrderType() { return orderType; }
+    public void setOrderType(String orderType) { this.orderType = orderType; }
+    public Long getGiftCardPackageId() { return giftCardPackageId; }
+    public void setGiftCardPackageId(Long giftCardPackageId) { this.giftCardPackageId = giftCardPackageId; }
     public LocalDateTime getPaidAt() { return paidAt; }
     public void setPaidAt(LocalDateTime paidAt) { this.paidAt = paidAt; }
     public LocalDateTime getCreditedAt() { return creditedAt; }

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
 import { useRouter } from "vue-router"
-import { Camera, Check, ExternalLink, Loader2, Shield, Sparkles, ToggleLeft, Trash2, Wallet, X } from "lucide-vue-next"
+import { Camera, Check, ExternalLink, Gift, Loader2, Shield, Sparkles, ToggleLeft, Trash2, Wallet, X } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
-import { fetchCreditAccount } from "@/api/creditApi"
+import { fetchCreditAccount, fetchMyGiftCards, redeemGiftCard, transferGiftCard } from "@/api/creditApi"
 import { fetchTasks } from "@/api/taskApi"
 import { cancelCurrentUserAccount, sendCancelAccountSmsCode } from "@/api/userApi"
-import type { CreditAccount } from "@/api/types"
+import type { CreditAccount, GiftCard } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 
 const auth = useAuthStore()
@@ -33,6 +33,50 @@ const cancelCooldown = ref(0)
 const sendingCancelCode = ref(false)
 const cancellingAccount = ref(false)
 const cancelDebugCode = ref<string | null>(null)
+
+// 礼品卡状态
+const giftCards = ref<GiftCard[]>([])
+const loadingGiftCards = ref(false)
+const redeemingCardId = ref<number | null>(null)
+const transferDialogOpen = ref(false)
+const transferCardId = ref<number | null>(null)
+const transferAccount = ref("")
+const transferring = ref(false)
+
+const GIFT_CARD_STYLE_THEMES: Record<string, { bg: string; border: string }> = {
+  blue: { bg: "linear-gradient(135deg, rgb(30 64 175), rgb(15 23 42))", border: "rgb(59 130 246 / 0.3)" },
+  purple: { bg: "linear-gradient(135deg, rgb(107 33 168), rgb(15 23 42))", border: "rgb(168 85 247 / 0.3)" },
+  gold: { bg: "linear-gradient(135deg, rgb(161 98 7), rgb(15 23 42))", border: "rgb(250 204 21 / 0.3)" },
+  dark: { bg: "linear-gradient(135deg, rgb(30 41 59), rgb(10 10 15))", border: "rgb(100 116 139 / 0.3)" },
+}
+
+function giftCardStyle(theme: string | undefined | null) {
+  return GIFT_CARD_STYLE_THEMES[theme || "dark"] || GIFT_CARD_STYLE_THEMES.dark
+}
+
+function maskCardCode(code: string | undefined | null) {
+  if (!code) return "--"
+  if (code.length <= 8) return code
+  return code.slice(0, 3) + "****" + code.slice(-4)
+}
+
+function giftCardStatusLabel(status: string | undefined | null) {
+  switch (status) {
+    case "UNUSED": return "未使用"
+    case "USED": return "已使用"
+    case "EXPIRED": return "已过期"
+    default: return status || "--"
+  }
+}
+
+function giftCardStatusClass(status: string | undefined | null) {
+  switch (status) {
+    case "UNUSED": return "status-unused"
+    case "USED": return "status-used"
+    case "EXPIRED": return "status-expired"
+    default: return ""
+  }
+}
 
 const displayName = computed(() => auth.user?.nickname || auth.user?.username || "用户")
 const joinedLabel = computed(() => `UID ${auth.user?.id ?? "--"}`)
@@ -170,6 +214,57 @@ async function submitCancelAccount() {
   }
 }
 
+async function loadGiftCards() {
+  if (!auth.token) return
+  loadingGiftCards.value = true
+  try {
+    giftCards.value = await fetchMyGiftCards({ token: auth.token })
+  } catch {
+    // 静默失败，不影响页面其他部分
+  } finally {
+    loadingGiftCards.value = false
+  }
+}
+
+async function redeemCard(id: number) {
+  redeemingCardId.value = id
+  error.value = ""
+  success.value = ""
+  try {
+    await redeemGiftCard(id, { token: auth.token })
+    await loadGiftCards()
+    await loadProfileStats()
+    success.value = "礼品卡兑换成功，算力已到账"
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "礼品卡兑换失败"
+  } finally {
+    redeemingCardId.value = null
+  }
+}
+
+function openTransferDialog(id: number) {
+  transferCardId.value = id
+  transferAccount.value = ""
+  transferDialogOpen.value = true
+}
+
+async function submitTransfer() {
+  if (!transferCardId.value || !transferAccount.value.trim()) return
+  transferring.value = true
+  error.value = ""
+  success.value = ""
+  try {
+    await transferGiftCard(transferCardId.value, { account: transferAccount.value.trim() }, { token: auth.token })
+    transferDialogOpen.value = false
+    await loadGiftCards()
+    success.value = "礼品卡赠送成功"
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "礼品卡赠送失败"
+  } finally {
+    transferring.value = false
+  }
+}
+
 onMounted(async () => {
   if (!auth.user) await auth.fetchCurrentUser({ clearOnFailure: false })
   nickname.value = auth.user?.nickname || auth.user?.username || ""
@@ -177,6 +272,7 @@ onMounted(async () => {
   autoPublishAssets.value = auth.user?.autoPublishAssets !== false
   promptPublicByDefault.value = auth.user?.promptPublicByDefault === true
   void loadProfileStats()
+  void loadGiftCards()
 })
 </script>
 
@@ -296,6 +392,63 @@ onMounted(async () => {
         </div>
       </section>
 
+      <section class="gift-card-zone">
+        <div class="gift-card-header">
+          <div>
+            <p class="panel-kicker">Gift cards</p>
+            <h2>我的礼品卡</h2>
+          </div>
+          <p class="gift-card-subtitle">使用或赠送给好友</p>
+        </div>
+
+        <div v-if="loadingGiftCards" class="gift-card-loading">加载中...</div>
+        <div v-else-if="giftCards.length === 0" class="gift-card-empty">暂无礼品卡</div>
+        <div v-else class="gift-card-list">
+          <div
+            v-for="card in giftCards"
+            :key="card.id"
+            class="gift-card-item"
+            :style="{ background: giftCardStyle(card.cardTheme).bg, borderColor: giftCardStyle(card.cardTheme).border }"
+          >
+            <div class="gift-card-info">
+              <div class="gift-card-credits">
+                {{ card.credits.toLocaleString() }} <span>算力</span>
+              </div>
+              <div class="gift-card-code">{{ maskCardCode(card.cardCode) }}</div>
+            </div>
+            <div class="gift-card-footer">
+              <span class="gift-card-status" :class="giftCardStatusClass(card.status)">
+                {{ giftCardStatusLabel(card.status) }}
+              </span>
+              <div class="gift-card-actions">
+                <template v-if="card.status === 'UNUSED'">
+                  <button
+                    type="button"
+                    class="gift-card-btn redeem-btn"
+                    :disabled="redeemingCardId === card.id"
+                    @click="redeemCard(card.id)"
+                  >
+                    <Loader2 v-if="redeemingCardId === card.id" class="h-4 w-4 animate-spin" />
+                    使用
+                  </button>
+                  <button
+                    type="button"
+                    class="gift-card-btn transfer-btn"
+                    @click="openTransferDialog(card.id)"
+                  >
+                    赠送
+                  </button>
+                </template>
+                <span v-else-if="card.status === 'USED' && card.redeemedAt" class="gift-card-time">
+                  兑换于 {{ card.redeemedAt }}
+                </span>
+                <span v-else-if="card.status === 'USED'" class="gift-card-time">已使用</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="danger-zone">
         <div>
           <p class="panel-kicker">Account closure</p>
@@ -375,6 +528,32 @@ onMounted(async () => {
             >
               <Loader2 v-if="cancellingAccount" class="h-4 w-4 animate-spin" />
               确认注销
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <div v-if="transferDialogOpen" class="modal-backdrop" @click.self="transferDialogOpen = false">
+        <section class="transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="transfer-title">
+          <button type="button" class="icon-action dark-icon" aria-label="关闭" @click="transferDialogOpen = false">
+            <X class="h-4 w-4" />
+          </button>
+          <h2 id="transfer-title">赠送礼品卡</h2>
+          <p class="transfer-desc">请输入对方的手机号或用户名，赠送后礼品卡将转移到对方账户。</p>
+          <label class="transfer-field">
+            <span>对方账号</span>
+            <input v-model="transferAccount" placeholder="手机号或用户名" />
+          </label>
+          <div class="transfer-actions">
+            <button type="button" class="cancel-text-action" @click="transferDialogOpen = false">取消</button>
+            <button
+              type="button"
+              class="primary-action"
+              :disabled="transferring || !transferAccount.trim()"
+              @click="submitTransfer"
+            >
+              <Loader2 v-if="transferring" class="h-4 w-4 animate-spin" />
+              确认赠送
             </button>
           </div>
         </section>
@@ -729,6 +908,235 @@ onMounted(async () => {
 .danger-action:disabled {
   cursor: not-allowed;
   opacity: 0.54;
+}
+
+/* ========== 礼品卡区域 ========== */
+.gift-card-zone {
+  margin-top: 22px;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  padding-top: 24px;
+}
+
+.gift-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+
+.gift-card-header h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.gift-card-subtitle {
+  margin: 0;
+  color: rgb(255 255 255 / 0.52);
+  font-size: 13px;
+}
+
+.gift-card-loading,
+.gift-card-empty {
+  color: rgb(255 255 255 / 0.42);
+  font-size: 14px;
+  padding: 24px 0;
+  text-align: center;
+}
+
+.gift-card-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.gift-card-item {
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 20px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 160px;
+}
+
+.gift-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gift-card-credits {
+  font-size: 28px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.gift-card-credits span {
+  font-size: 14px;
+  font-weight: 400;
+  color: rgb(255 255 255 / 0.6);
+}
+
+.gift-card-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  color: rgb(255 255 255 / 0.5);
+  letter-spacing: 0.05em;
+}
+
+.gift-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: auto;
+}
+
+.gift-card-status {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.status-unused {
+  background: rgb(52 211 153 / 0.15);
+  color: rgb(167 243 208);
+  border: 1px solid rgb(52 211 153 / 0.24);
+}
+
+.status-used {
+  background: rgb(255 255 255 / 0.08);
+  color: rgb(255 255 255 / 0.5);
+  border: 1px solid rgb(255 255 255 / 0.08);
+}
+
+.status-expired {
+  background: rgb(248 113 113 / 0.15);
+  color: rgb(254 202 202);
+  border: 1px solid rgb(248 113 113 / 0.24);
+}
+
+.gift-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.gift-card-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.06);
+  color: rgb(255 255 255 / 0.86);
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 700;
+  transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+
+.gift-card-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgb(176 92 255 / 0.42);
+  background: rgb(176 92 255 / 0.16);
+}
+
+.gift-card-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.redeem-btn {
+  border-color: rgb(176 92 255 / 0.4);
+  background: linear-gradient(135deg, rgb(205 132 255), rgb(176 92 255));
+  box-shadow: 0 8px 24px rgb(176 92 255 / 0.22);
+}
+
+.gift-card-time {
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.4);
+}
+
+/* ========== 赠送弹窗 ========== */
+.transfer-dialog {
+  position: relative;
+  width: min(440px, 100%);
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 28px;
+  background: rgb(24 24 28 / 0.95);
+  box-shadow: 0 30px 90px rgb(0 0 0 / 0.5);
+  color: #fff;
+  padding: 24px;
+  backdrop-filter: blur(18px);
+}
+
+.transfer-dialog h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.transfer-desc {
+  margin: 10px 0 0;
+  color: rgb(255 255 255 / 0.52);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.transfer-field {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.transfer-field span {
+  color: rgb(255 255 255 / 0.42);
+  font-size: 13px;
+}
+
+.transfer-field input {
+  height: 48px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 16px;
+  background: rgb(0 0 0 / 0.2);
+  color: #fff;
+  outline: none;
+  padding: 0 14px;
+}
+
+.transfer-field input:focus {
+  border-color: rgb(176 92 255 / 0.46);
+  box-shadow: 0 0 0 3px rgb(176 92 255 / 0.13);
+}
+
+.transfer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 18px;
+  margin-top: 24px;
+}
+
+.transfer-dialog .cancel-text-action {
+  color: rgb(255 255 255 / 0.6);
+}
+
+.icon-action.dark-icon {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.06);
+  color: rgb(255 255 255 / 0.6);
 }
 
 .modal-backdrop {

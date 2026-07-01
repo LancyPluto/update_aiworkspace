@@ -20,10 +20,33 @@ export function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
-export async function forceDownload(url: string, filename: string) {
+/**
+ * Build the actual fetch URL and headers for downloading.
+ * Private asset URLs (/api/v1/assets/private/…) must go through the
+ * /api/v1/assets/download/ endpoint which requires authentication
+ * and returns a 302 redirect to a signed OSS URL.
+ */
+function resolveDownloadTarget(url: string, token?: string | null): { fetchUrl: string; headers: Record<string, string> } {
+  const headers: Record<string, string> = {}
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+  let fetchUrl = url
+  if (url.includes("/api/v1/assets/private/")) {
+    fetchUrl = url.replace("/api/v1/assets/private/", "/api/v1/assets/download/")
+  }
+  return { fetchUrl, headers }
+}
+
+export async function forceDownload(url: string, filename: string, token?: string | null) {
   if (!url) return
+  const { fetchUrl, headers } = resolveDownloadTarget(url, token)
   try {
-    const res = await fetch(url, { redirect: "follow" })
+    const res = await fetch(fetchUrl, {
+      headers,
+      credentials: "include",
+      redirect: "follow",
+    })
     if (!res.ok) throw new Error(`Download failed: ${res.status}`)
     const blob = await res.blob()
     downloadBlob(blob, filename)

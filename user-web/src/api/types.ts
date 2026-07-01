@@ -660,6 +660,35 @@ export interface RechargeOrder {
   closedAt?: string | null
   expiresAt: string
   createdAt: string
+  orderType?: string
+  giftCardPackageId?: number | null
+}
+
+/* ========== 礼品卡相关 ========== */
+
+export interface GiftCardPackage {
+  id: number
+  packageCode: string
+  packageName: string
+  credits: number
+  priceAmount: number
+  currency: string
+  cardTheme: string
+}
+
+export type GiftCardStatus = "UNUSED" | "USED" | "EXPIRED"
+
+export interface GiftCard {
+  id: number
+  cardCode: string
+  packageName: string
+  credits: number
+  status: GiftCardStatus
+  cardTheme: string
+  createdAt: string
+  giftedFromUserId?: number | null
+  giftedAt?: string | null
+  redeemedAt?: string | null
 }
 
 /* ========== Agent ========== */

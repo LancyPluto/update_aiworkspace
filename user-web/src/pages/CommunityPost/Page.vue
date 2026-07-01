@@ -30,6 +30,7 @@ import {
 } from "@/utils/communityPostMedia"
 import { openCreateWithAssetRecommendation } from "@/utils/assetReplay"
 import { resolveCommunityAudioMedia } from "@/utils/communityAudioMedia"
+import { forceDownload as sharedForceDownload } from "@/utils/download"
 
 const route = useRoute()
 const router = useRouter()
@@ -39,27 +40,8 @@ function resolveAuthToken() {
   return auth.token ?? getSessionBearerJwt()
 }
 
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement("a")
-  anchor.href = url
-  anchor.download = filename
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(url)
-}
-
-async function forceDownload(url: string, filename: string) {
-  if (!url) return
-  try {
-    const res = await fetch(url)
-    if (!res.ok) throw new Error("Download failed")
-    const blob = await res.blob()
-    downloadBlob(blob, filename)
-  } catch {
-    window.open(url, "_blank")
-  }
+function forceDownload(url: string, filename: string) {
+  return sharedForceDownload(url, filename, resolveAuthToken())
 }
 
 const post = ref<CommunityPost | null>(null)
