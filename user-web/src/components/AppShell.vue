@@ -46,7 +46,6 @@ import {
   storeBrandAccent,
   type BrandAccent,
 } from "@/utils/theme"
-import AgentThemePicker from "@/pages/AgentHome/AgentThemePicker.vue"
 
 withDefaults(
   defineProps<{
@@ -505,7 +504,10 @@ watch(
     </aside>
 
     <div class="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-      <header class="z-30 flex h-20 shrink-0 items-center gap-4 border-b border-white/8 bg-[#151515]/95 px-5 backdrop-blur-xl">
+      <header
+        class="app-shell-header z-30 flex h-20 shrink-0 items-center gap-4 border-b border-white/8 bg-[#151515]/95 px-5 backdrop-blur-xl"
+        :class="{ 'app-shell-header--agent': isAgentRoute }"
+      >
         <button
           type="button"
           class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white lg:hidden"
@@ -524,14 +526,16 @@ watch(
           <PanelLeftClose v-if="sidebarOpen" class="h-4 w-4" aria-hidden="true" />
           <PanelLeft v-else class="h-4 w-4" aria-hidden="true" />
         </button>
-        <div class="min-w-0 flex-1 lg:max-w-[360px]">
-          <h1
-            v-if="title"
-            class="truncate text-base font-bold text-white"
-          >
-            {{ title }}
-          </h1>
-          <p v-if="description" class="text-xs text-white/45 truncate">{{ description }}</p>
+        <div class="app-shell-title-block min-w-0 flex-1 lg:max-w-[360px]">
+          <span class="min-w-0">
+            <h1
+              v-if="title"
+              class="truncate text-base font-bold text-white"
+            >
+              {{ title }}
+            </h1>
+            <p v-if="description" class="text-xs text-white/45 truncate">{{ description }}</p>
+          </span>
         </div>
         <div ref="searchRootRef" class="relative hidden min-w-0 flex-1 lg:block lg:max-w-[520px] xl:max-w-[620px]">
           <form
@@ -576,6 +580,7 @@ watch(
               @keydown="onSearchKeydown"
             />
             <Loader2 v-if="searchLoading" class="h-4 w-4 shrink-0 animate-spin text-white/45" />
+            <span v-if="isAgentRoute" class="app-shell-search-shortcut">⌘ K</span>
           </form>
 
           <div
@@ -626,8 +631,7 @@ watch(
           <Plus class="h-4 w-4" />
           创建
         </RouterLink>
-        <AgentThemePicker v-if="isAgentRoute" target-selector=".agent-page" />
-        <div ref="brandAccentRootRef" class="relative hidden md:block">
+        <div v-if="!isAgentRoute" ref="brandAccentRootRef" class="relative hidden md:block">
           <button
             type="button"
             class="app-shell-accent-trigger"
@@ -703,7 +707,10 @@ watch(
           </template>
         </div>
       </header>
-      <main class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-[#111111]">
+      <main
+        class="app-shell-main min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-[#111111]"
+        :class="{ 'app-shell-main--agent': isAgentRoute }"
+      >
         <slot />
       </main>
     </div>
@@ -752,6 +759,48 @@ watch(
 </template>
 
 <style scoped>
+.app-shell-header--agent {
+  height: 88px;
+  border-bottom-color: rgb(255 255 255 / 0.075);
+  background:
+    radial-gradient(circle at 18% 0%, var(--agent-accent-soft, rgb(176 92 255 / 0.12)), transparent 32%),
+    linear-gradient(180deg, rgb(35 38 47 / 0.94), rgb(26 28 35 / 0.92));
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.035), 0 18px 60px rgb(0 0 0 / 0.26);
+}
+
+.app-shell-title-block {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-shell-header--agent :deep(form) {
+  height: 50px;
+  border: 1px solid rgb(255 255 255 / 0.105);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.065), rgb(255 255 255 / 0.035)),
+    rgb(22 24 29 / 0.72);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 16px 42px rgb(0 0 0 / 0.20);
+}
+
+.app-shell-search-shortcut {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  border-radius: 8px;
+  padding: 0 8px;
+  color: rgb(255 255 255 / 0.54);
+  font-size: 12px;
+  line-height: 1;
+  background: rgb(255 255 255 / 0.055);
+}
+
+.app-shell-main--agent {
+  background:
+    radial-gradient(circle at 42% 0%, rgb(255 255 255 / 0.035), transparent 30%),
+    #111318;
+}
+
 .sidebar-nav {
   scrollbar-width: thin;
   scrollbar-color: rgb(255 255 255 / 0.12) transparent;

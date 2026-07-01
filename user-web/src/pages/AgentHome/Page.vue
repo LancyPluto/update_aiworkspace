@@ -1,7 +1,7 @@
 <script setup lang="ts">
   import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
   import { useRoute, useRouter } from "vue-router"
-  import { ChevronLeft, ChevronRight, Loader2, Plus, Sparkles, Trash2 } from "lucide-vue-next"
+  import { ChevronDown, ChevronLeft, ChevronRight, Loader2, MessageCircle, Pin, Plus, Sparkles, Trash2 } from "lucide-vue-next"
   import AppShell from "@/components/AppShell.vue"
   import AgentChatPane from "./AgentChatPane.vue"
   import { confirmDelete } from "@/composables/useConfirmDelete"
@@ -18,7 +18,18 @@
   const auth = useAuthStore()
   const route = useRoute()
   const router = useRouter()
-  const sessions = ref<AgentSession[]>([])
+  type AgentSessionWithPin = AgentSession & { isPinned?: boolean }
+
+  interface SessionGroup {
+    key: string
+    label: string
+    sessions: AgentSessionWithPin[]
+    expanded: boolean
+    maxHeight: string
+  }
+
+  const SESSION_ROW_HEIGHT = 52
+  const sessions = ref<AgentSessionWithPin[]>([])
   const agentModels = ref<AgentModelConfig[]>([])
   const activeSessionId = ref<number | null>(null)
   const selectedModelConfigId = ref<number | null>(null)
@@ -31,22 +42,95 @@
   const AGENT_SESSION_SIDEBAR_KEY = "ai_tool_market_agent_session_sidebar_open"
   const AGENT_LAST_SESSION_KEY = "ai_tool_market_agent_last_session_id"
   const AGENT_SELECTED_MODEL_KEY = "ai_tool_market_agent_selected_model_config_id"
+  const AGENT_PINNED_SESSION_KEY = "ai_tool_market_agent_pinned_session_ids"
   const sessionSidebarOpen = ref(true)
   const deletingSessionId = ref<number | null>(null)
   const deleteSessionError = ref<string | null>(null)
+  const pinnedSessionIds = ref<number[]>([])
+  const collapsedSessionGroups = ref<Record<string, boolean>>({})
 
-  const groupedSessions = computed(() => {
-    const map = new Map<string, AgentSession[]>()
-    for (const session of sessions.value) {
+  const groupedSessions = computed<SessionGroup[]>(() => {
+    const map = new Map<string, AgentSessionWithPin[]>()
+    const pinned: AgentSessionWithPin[] = []
+    for (const item of sessions.value) {
+      const session = markSessionPinned(item)
+      if (session.isPinned) {
+        pinned.push(session)
+        continue
+      }
       const label = sessionTimeGroup(session.updatedAt || session.createdAt)
       const list = map.get(label) ?? []
       list.push(session)
       map.set(label, list)
     }
-    return ["今天", "昨天", "前 7 天", "更早"]
-      .map((label) => ({ label, sessions: map.get(label) ?? [] }))
+    const timeGroups = ["今天", "昨天", "前 7 天", "更早"]
+      .map((label) => buildSessionGroup(label, label, map.get(label) ?? []))
       .filter((group) => group.sessions.length > 0)
+    return pinned.length > 0
+      ? [buildSessionGroup("pinned", "已置顶", pinned), ...timeGroups]
+      : timeGroups
   })
+
+  function buildSessionGroup(
+    key: string,
+    label: string,
+    groupSessions: AgentSessionWithPin[],
+  ): SessionGroup {
+    const expanded = !collapsedSessionGroups.value[key]
+    return {
+      key,
+      label,
+      sessions: groupSessions,
+      expanded,
+      maxHeight: expanded ? `${Math.max(groupSessions.length * SESSION_ROW_HEIGHT - 8, 0)}px` : "0px",
+    }
+  }
+
+  function markSessionPinned(session: AgentSessionWithPin): AgentSessionWithPin {
+    return {
+      ...session,
+      isPinned: pinnedSessionIds.value.includes(session.id),
+    }
+  }
+
+  function loadPinnedSessionIds() {
+    const raw = localStorage.getItem(AGENT_PINNED_SESSION_KEY)
+    if (!raw) return
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        pinnedSessionIds.value = parsed
+          .map((item) => Number(item))
+          .filter((item) => Number.isFinite(item) && item > 0)
+      }
+    } catch {
+      pinnedSessionIds.value = []
+    }
+  }
+
+  function persistPinnedSessionIds(ids = pinnedSessionIds.value) {
+    localStorage.setItem(AGENT_PINNED_SESSION_KEY, JSON.stringify(ids))
+  }
+
+  function toggleSessionPin(session: AgentSessionWithPin, event: MouseEvent) {
+    event.stopPropagation()
+    const pinned = pinnedSessionIds.value.includes(session.id)
+    const next = pinned
+      ? pinnedSessionIds.value.filter((id) => id !== session.id)
+      : [session.id, ...pinnedSessionIds.value.filter((id) => id !== session.id)]
+    pinnedSessionIds.value = next
+    persistPinnedSessionIds(next)
+    sessions.value = sessions.value.map((item) =>
+      item.id === session.id ? { ...item, isPinned: !pinned } : item,
+    )
+  }
+
+  function toggleSessionGroup(groupKey: string) {
+    collapsedSessionGroups.value = {
+      ...collapsedSessionGroups.value,
+      [groupKey]: !collapsedSessionGroups.value[groupKey],
+    }
+  }
 
   function sessionTimeGroup(value?: string | null) {
     if (!value) return "更早"
@@ -211,6 +295,11 @@
       delete sessionDrafts.value[session.id]
       const wasActive = activeSessionId.value === session.id
       sessions.value = sessions.value.filter((item) => item.id !== session.id)
+      if (pinnedSessionIds.value.includes(session.id)) {
+        const nextPinnedIds = pinnedSessionIds.value.filter((id) => id !== session.id)
+        pinnedSessionIds.value = nextPinnedIds
+        persistPinnedSessionIds(nextPinnedIds)
+      }
       if (wasActive) {
         activeSessionId.value = null
         const next = sessions.value[0]
@@ -227,6 +316,7 @@
     const saved = localStorage.getItem(AGENT_SESSION_SIDEBAR_KEY)
     if (saved === "0") sessionSidebarOpen.value = false
     if (saved === "1") sessionSidebarOpen.value = true
+    loadPinnedSessionIds()
     void nextTick(() => applyStoredAgentTheme())
     void (async () => {
       await loadAgentModels()
@@ -275,27 +365,50 @@
         </div>
 
         <div class="session-list">
-          <section v-for="group in groupedSessions" :key="group.label" class="session-group">
-            <p class="session-group-label">{{ group.label }}</p>
-            <div
-              v-for="session in group.sessions"
-              :key="session.id"
-              class="session-row"
-              :class="{ active: session.id === activeSessionId }"
+          <section v-for="group in groupedSessions" :key="group.key" class="session-group">
+            <button
+              type="button"
+              class="session-group-header"
+              :aria-expanded="group.expanded"
+              @click="toggleSessionGroup(group.key)"
             >
-              <button type="button" class="session-item" @click="selectSession(session.id)">
-                <span>{{ session.title }}</span>
-              </button>
-              <button
-                type="button"
-                class="session-delete"
-                :disabled="deletingSessionId === session.id"
-                :aria-label="`删除会话：${session.title}`"
-                @click="removeSession(session, $event)"
+              <ChevronDown class="session-group-chevron h-3 w-3" :class="{ collapsed: !group.expanded }" aria-hidden="true" />
+              <span>{{ group.label }}</span>
+            </button>
+            <div
+              class="session-group-items"
+              :style="{ maxHeight: group.maxHeight }"
+            >
+              <div
+                v-for="session in group.sessions"
+                :key="session.id"
+                class="session-row"
+                :class="{ active: session.id === activeSessionId, pinned: session.isPinned }"
               >
-                <Loader2 v-if="deletingSessionId === session.id" class="h-4 w-4 animate-spin" aria-hidden="true" />
-                <Trash2 v-else class="h-4 w-4" aria-hidden="true" />
-              </button>
+                <button
+                  type="button"
+                  class="session-pin"
+                  :class="{ 'session-pin--pinned': session.isPinned }"
+                  :aria-label="session.isPinned ? `取消置顶会话：${session.title}` : `置顶会话：${session.title}`"
+                  @click="toggleSessionPin(session, $event)"
+                >
+                  <MessageCircle class="session-pin-chat h-4 w-4" aria-hidden="true" />
+                  <Pin class="session-pin-icon h-4 w-4" aria-hidden="true" />
+                </button>
+                <button type="button" class="session-item" @click="selectSession(session.id)">
+                  <span>{{ session.title }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="session-delete"
+                  :disabled="deletingSessionId === session.id"
+                  :aria-label="`删除会话：${session.title}`"
+                  @click="removeSession(session, $event)"
+                >
+                  <Loader2 v-if="deletingSessionId === session.id" class="h-4 w-4 animate-spin" aria-hidden="true" />
+                  <Trash2 v-else class="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
             </div>
           </section>
         </div>
@@ -335,13 +448,35 @@
 <style scoped>
   .agent-page {
     display: grid;
-    grid-template-columns: 280px minmax(0, 1fr);
+    grid-template-columns: 320px minmax(0, 1fr);
     height: 100%;
     max-height: 100%;
     min-height: 0;
     overflow: hidden;
     position: relative;
-    background: #0a0a0d;
+    isolation: isolate;
+    background:
+      radial-gradient(circle at 36% 24%, rgb(168 142 118 / 0.18), transparent 30%),
+      radial-gradient(circle at 86% 34%, rgb(65 89 118 / 0.20), transparent 36%),
+      linear-gradient(135deg, #2a2a30 0%, #20242c 52%, #151a21 100%);
+  }
+
+  .agent-page::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image:
+      radial-gradient(circle, rgb(255 255 255 / 0.032) 1px, transparent 1px),
+      radial-gradient(circle at 52% 45%, transparent 0 24%, rgb(255 255 255 / 0.038) 24.08% 24.18%, transparent 24.36%),
+      radial-gradient(circle at 52% 45%, transparent 0 32%, rgb(255 255 255 / 0.044) 32.08% 32.18%, transparent 32.38%),
+      radial-gradient(circle at 52% 45%, transparent 0 40%, rgb(255 255 255 / 0.036) 40.08% 40.18%, transparent 40.40%),
+      radial-gradient(circle at 52% 45%, transparent 0 48%, rgb(255 255 255 / 0.028) 48.08% 48.18%, transparent 48.42%);
+    background-size: 14px 14px, 100% 100%, 100% 100%, 100% 100%, 100% 100%;
+    opacity: 0.82;
+    -webkit-mask-image: radial-gradient(circle at 52% 45%, rgb(0 0 0 / 0.72) 0%, #000 32%, rgb(0 0 0 / 0.44) 58%, transparent 78%);
+    mask-image: radial-gradient(circle at 52% 45%, rgb(0 0 0 / 0.72) 0%, #000 32%, rgb(0 0 0 / 0.44) 58%, transparent 78%);
   }
 
   .agent-page--session-collapsed {
@@ -375,11 +510,11 @@
   }
 
   .agent-sidebar {
-    border-right: 0;
+    border-right: 1px solid rgb(255 255 255 / 0.085);
     background:
-      radial-gradient(circle at 20% 8%, var(--agent-bg-mesh-1, rgb(176 92 255 / 0.10)), transparent 28%),
-      #121214;
-    padding: 16px 12px;
+      radial-gradient(circle at 24% 4%, var(--agent-bg-mesh-1, rgb(176 92 255 / 0.13)), transparent 30%),
+      linear-gradient(180deg, rgb(30 33 41 / 0.86), rgb(20 23 29 / 0.92));
+    padding: 28px 20px 22px;
     min-width: 0;
     transition: opacity 0.15s ease, padding 0.15s ease;
     height: 100%;
@@ -387,7 +522,8 @@
     overflow-x: hidden;
     display: flex;
     flex-direction: column;
-    box-shadow: inset -1px 0 0 rgb(255 255 255 / 0.025);
+    box-shadow: inset -1px 0 0 rgb(255 255 255 / 0.035), 22px 0 70px rgb(0 0 0 / 0.18);
+    backdrop-filter: blur(18px) saturate(128%);
     scrollbar-width: thin;
     scrollbar-color: rgb(255 255 255 / 0.14) transparent;
   }
@@ -420,6 +556,7 @@
   }
 
   .new-chat,
+  .session-pin,
   .session-item,
   .session-delete,
   .chat-pane-empty-btn {
@@ -432,15 +569,17 @@
 
   .new-chat {
     width: 100%;
-    height: 42px;
-    border: 1px solid var(--agent-accent-soft);
-    background: linear-gradient(135deg, var(--agent-accent-soft), rgb(255 255 255 / 0.055) 54%, var(--agent-bg-mesh-2));
+    height: 54px;
+    border: 1px solid color-mix(in srgb, var(--agent-accent) 45%, rgb(255 255 255 / 0.18));
+    background:
+      linear-gradient(135deg, var(--agent-accent-soft), rgb(255 255 255 / 0.06) 54%, var(--agent-bg-mesh-2)),
+      rgb(255 255 255 / 0.035);
     color: rgb(255 255 255 / 0.88);
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 700;
     cursor: pointer;
-    margin-top: 32px;
-    box-shadow: 0 14px 44px var(--agent-accent-glow), 0 10px 24px rgb(0 0 0 / 0.28);
+    margin-top: 0;
+    box-shadow: 0 18px 50px var(--agent-accent-glow), inset 0 1px 0 rgb(255 255 255 / 0.06);
     transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
   }
 
@@ -464,46 +603,155 @@
   }
 
   .session-list {
-    margin-top: 18px;
+    margin-top: 26px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 16px;
     flex: 1;
     min-height: 0;
+    padding: 0 12px;
   }
 
-  .session-group-label {
-    margin: 2px 8px 6px;
-    color: rgb(255 255 255 / 0.28);
+  .session-group {
+    min-width: 0;
+  }
+
+  .session-group-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    border: 0;
+    background: transparent;
+    margin: 2px 0 8px;
+    padding: 0 2px;
+    color: rgb(255 255 255 / 0.30);
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0;
+    letter-spacing: 0.12em;
+    line-height: 1.2;
+    text-align: left;
+    cursor: pointer;
+    transition: color 0.18s ease;
+  }
+
+  .session-group-header:hover,
+  .session-group-header:focus-visible {
+    color: rgb(255 255 255 / 0.58);
+    outline: none;
+  }
+
+  .session-group-chevron {
+    flex-shrink: 0;
+    opacity: 0.72;
+    transition: transform 0.18s ease, opacity 0.18s ease;
+  }
+
+  .session-group-chevron.collapsed {
+    transform: rotate(-90deg);
+    opacity: 0.48;
+  }
+
+  .session-group-items {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow: hidden;
+    transition: max-height 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 
   .session-row {
     display: flex;
     align-items: stretch;
     gap: 2px;
-    border-radius: 14px;
+    border-radius: 12px;
+    min-height: 42px;
     min-width: 0;
-    transition: background 0.18s ease, color 0.18s ease;
+    padding: 2px 4px;
+    transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
   }
 
   .session-row:hover {
-    background: rgb(255 255 255 / 0.035);
+    background: rgb(255 255 255 / 0.04);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.035);
   }
 
   .session-row.active {
-    background: rgb(255 255 255 / 0.052);
-    box-shadow: inset 2px 0 0 var(--agent-accent);
+    background:
+      linear-gradient(90deg, var(--agent-accent-soft), rgb(255 255 255 / 0.075)),
+      rgb(255 255 255 / 0.06);
+    box-shadow: inset 4px 0 0 var(--agent-accent), 0 14px 38px rgb(0 0 0 / 0.16);
+  }
+
+  .session-row.pinned {
+    background: rgb(0 229 255 / 0.035);
+  }
+
+  .session-pin {
+    position: relative;
+    width: 34px;
+    flex-shrink: 0;
+    border: 0;
+    background: transparent;
+    padding: 0;
+    color: rgb(255 255 255 / 0.16);
+    cursor: pointer;
+    transition: color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+  }
+
+  .session-pin svg {
+    position: absolute;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+  }
+
+  .session-pin-chat {
+    opacity: 0.42;
+    transform: scale(0.92);
+  }
+
+  .session-pin-icon {
+    opacity: 0;
+    transform: translateY(2px) scale(0.84) rotate(-12deg);
+  }
+
+  .session-row:hover .session-pin,
+  .session-pin:focus-visible {
+    color: rgb(255 255 255 / 0.68);
+  }
+
+  .session-row:hover .session-pin-chat,
+  .session-pin:focus-visible .session-pin-chat,
+  .session-pin--pinned .session-pin-chat {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.82);
+  }
+
+  .session-row:hover .session-pin-icon,
+  .session-pin:focus-visible .session-pin-icon,
+  .session-pin--pinned .session-pin-icon {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+
+  .session-pin--pinned {
+    color: #00e5ff;
+    text-shadow: 0 0 14px rgb(0 229 255 / 0.42);
+  }
+
+  .session-pin:hover,
+  .session-pin:focus-visible {
+    background: rgb(255 255 255 / 0.055);
+    transform: translateY(-1px);
+    outline: none;
   }
 
   .session-item {
     flex: 1;
     min-width: 0;
+    justify-content: flex-start;
     border: 0;
     background: transparent;
-    padding: 10px 8px 10px 14px;
+    padding: 8px 10px 8px 0;
     color: rgb(255 255 255 / 0.42);
     font-size: 13px;
     text-align: left;
@@ -562,7 +810,7 @@
     min-height: 0;
     height: 100%;
     overflow: hidden;
-    background: #0a0a0d;
+    background: transparent;
   }
 
   .chat-pane-empty {

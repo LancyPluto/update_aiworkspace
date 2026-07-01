@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.task.dto.CreateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.EstimateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.RegenerateTaskRequest;
+import com.aiminilab.aitoolmarket.task.dto.StaleTaskReconcileResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskDetailResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskEstimateResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
@@ -34,4 +35,6 @@ public interface TaskService {
     TaskStatusResponse adminRetry(Long taskId);
 
     TaskStatusResponse adminCancel(Long taskId);
+
+    StaleTaskReconcileResponse adminReconcileStaleTasks(Integer staleMinutes, Integer limit);
 }

@@ -29,13 +29,15 @@
 
 因此，后续实现应以本文档为准，而不是以某一边的当前代码为准。
 
-## 一、Redis 队列消息
+## 一、任务队列消息
 
-队列名：
+生产队列事实源为 RabbitMQ；Redis 队列仅保留本地开发或历史兼容。RabbitMQ 默认队列名：
 
 ```text
-ai:task:queue
+ai.tool.normal
 ```
+
+Redis 兼容队列名为 `ai:task:queue`。
 
 消息体：
 

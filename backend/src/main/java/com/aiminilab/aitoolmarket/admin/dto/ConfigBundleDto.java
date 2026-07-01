@@ -13,6 +13,7 @@ public record ConfigBundleDto(
         Integer version,
         String exportedAt,
         String exportedBy,
+        String exportScope,
         Boolean secretsRedacted,
         Map<String, String> settings,
         List<VendorAccount> vendorAccounts,

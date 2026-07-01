@@ -4,13 +4,17 @@ from config import settings
 from task_queue.rabbitmq_consumer import RabbitMqConsumer
 from task_queue.redis_consumer import RedisConsumer
 
+LOGGER = logging.getLogger(__name__)
+
 
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
-    consumer = RabbitMqConsumer() if settings.task_queue_backend.lower() == "rabbitmq" else RedisConsumer()
+    queue_backend = settings.task_queue_backend.strip().lower()
+    LOGGER.info("worker task queue backend=%s", queue_backend)
+    consumer = RabbitMqConsumer() if queue_backend == "rabbitmq" else RedisConsumer()
     consumer.start()
 
 

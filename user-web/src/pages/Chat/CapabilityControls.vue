@@ -276,6 +276,19 @@ const configuredFields = computed(() =>
 const customModeField = computed(() =>
   (props.fields || []).find((field) => field.fieldKey === "customMode" || field.fieldKey === "custom_mode"),
 )
+const customModeOptions = computed<FieldOption[]>(() => {
+  const field = customModeField.value
+  if (!field) return []
+  const options = fieldOptions(field)
+  return options.length > 0 ? options : [{ label: "常规", value: "false" }, { label: "高级", value: "true" }]
+})
+const customModeValue = computed(() => {
+  const field = customModeField.value
+  if (!field) return "false"
+  const value = state.value.fields[field.fieldKey]
+  if (typeof value === "boolean") return value ? "true" : "false"
+  return String(value ?? "false").trim().toLowerCase()
+})
 
 const aspectRatioOptions = computed<AspectRatioOption[]>(() => {
   const config = imageCapability.value?.config
@@ -672,6 +685,15 @@ function syncCustomModeField(open: boolean) {
   if (!field) return
   if (field.fieldType === "checkbox") setField(field.fieldKey, open)
   else setField(field.fieldKey, open ? "true" : "false")
+}
+
+function setCustomModeValue(value: string) {
+  const field = customModeField.value
+  if (!field) return
+  const enabled = value === "true" || value === "1"
+  if (field.fieldType === "checkbox") setField(field.fieldKey, enabled)
+  else setField(field.fieldKey, value)
+  advancedOpen.value = enabled
 }
 
 function toggleAdvancedOpen() {
@@ -1262,16 +1284,40 @@ defineExpose({
           <h3 class="text-xs font-medium text-white/62">{{ section.label }}</h3>
         </div>
 
-        <button
+        <div
           v-if="section.advanced"
-          type="button"
-          class="inline-flex h-8 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 text-xs font-medium text-white/62 transition hover:border-purple-400/30 hover:bg-purple-500/10 hover:text-white"
-          @click="toggleAdvancedOpen"
+          class="flex flex-wrap items-center justify-between gap-2"
         >
-          <span class="text-white/45">⚙</span>
-          高级配置
-          <span class="text-white/35">{{ advancedOpen ? "收起" : "展开" }}</span>
-        </button>
+          <button
+            type="button"
+            class="inline-flex h-8 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 text-xs font-medium text-white/62 transition hover:border-purple-400/30 hover:bg-purple-500/10 hover:text-white"
+            @click="toggleAdvancedOpen"
+          >
+            <span class="text-white/45">⚙</span>
+            高级配置
+            <span class="text-white/35">{{ advancedOpen ? "收起" : "展开" }}</span>
+          </button>
+
+          <div v-if="customModeField" class="flex min-w-0 items-center gap-2">
+            <span class="shrink-0 text-[11px] font-medium text-white/45">{{ customModeField.fieldName || "创作模式" }}</span>
+            <div class="inline-flex rounded-full border border-white/10 bg-white/[0.04] p-0.5">
+              <button
+                v-for="option in customModeOptions"
+                :key="optionValue(option)"
+                type="button"
+                class="h-7 rounded-full px-3 text-xs font-medium transition"
+                :class="
+                  customModeValue === optionValue(option).toLowerCase()
+                    ? 'bg-purple-500/20 text-purple-200 shadow-[0_0_0_1px_rgb(168_85_247_/_0.25)]'
+                    : 'text-white/42 hover:bg-white/[0.06] hover:text-white/78'
+                "
+                @click="setCustomModeValue(optionValue(option))"
+              >
+                {{ optionLabel(option) }}
+              </button>
+            </div>
+          </div>
+        </div>
 
         <div
           class="grid gap-3 overflow-hidden transition-all duration-300 sm:grid-cols-2 lg:grid-cols-3"

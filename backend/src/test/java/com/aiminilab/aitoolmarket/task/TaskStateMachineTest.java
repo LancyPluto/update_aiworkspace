@@ -14,6 +14,7 @@ class TaskStateMachineTest {
     void allowsOnlyExplicitTransitions() {
         assertThat(TaskStateMachine.canTransition(TaskStatus.QUEUED.name(), TaskStatus.PROCESSING.name())).isTrue();
         assertThat(TaskStateMachine.canTransition(TaskStatus.QUEUED.name(), TaskStatus.CANCELLED.name())).isTrue();
+        assertThat(TaskStateMachine.canTransition(TaskStatus.QUEUED.name(), TaskStatus.TIMEOUT.name())).isTrue();
         assertThat(TaskStateMachine.canTransition(TaskStatus.PROCESSING.name(), TaskStatus.SUCCESS.name())).isTrue();
         assertThat(TaskStateMachine.canTransition(TaskStatus.PROCESSING.name(), TaskStatus.FAILED.name())).isTrue();
         assertThat(TaskStateMachine.canTransition(TaskStatus.PROCESSING.name(), TaskStatus.TIMEOUT.name())).isTrue();

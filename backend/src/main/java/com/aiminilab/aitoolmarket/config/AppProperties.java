@@ -10,6 +10,7 @@ import java.util.Locale;
 public class AppProperties {
 
     private boolean productionMode;
+    private String env = "local";
     private String jwtSecret;
     private String internalApiToken;
     private String aiTaskQueue;
@@ -27,8 +28,20 @@ public class AppProperties {
         return productionMode;
     }
 
+    public boolean isProductionEnvironment() {
+        return productionMode || "production".equalsIgnoreCase(env);
+    }
+
     public void setProductionMode(boolean productionMode) {
         this.productionMode = productionMode;
+    }
+
+    public String getEnv() {
+        return env;
+    }
+
+    public void setEnv(String env) {
+        this.env = env == null || env.isBlank() ? "local" : env.trim();
     }
 
     public String getJwtSecret() {

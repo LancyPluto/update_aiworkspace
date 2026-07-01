@@ -483,6 +483,94 @@ public class DataInitializer implements CommandLineRunner {
                 """.formatted(sqlNullableString(toolCodes), sqlNullableString(sop), sqlNullableString(examples)));
     }
 
+    private void seedMusicGenerationSkillBundle() {
+        String toolCodes = "[\"suno_music\",\"suno\",\"music_generation\"]";
+        String examples = """
+                [
+                  {
+                    "user": "模仿 Owl City 的 good time 风格，创作一首日系女团歌曲",
+                    "tool": "suno_music",
+                    "arguments": {
+                      "customMode": false,
+                      "prompt": "Upbeat Japanese girl-group electropop with bright synth arpeggios, handclaps, sunny festival energy, clean youthful vocals, catchy chorus, optimistic summer-night mood. Original melody and lyrics only.",
+                      "model": "V5_5"
+                    },
+                    "notes": "只提炼非侵权风格特征；非 custom 模式 prompt 控制在 500 字以内。"
+                  },
+                  {
+                    "user": "我写了一整段歌词，帮我做成流行摇滚歌曲",
+                    "tool": "suno_music",
+                    "arguments": {
+                      "customMode": true,
+                      "prompt": "用户提供的完整歌词",
+                      "style": "Mandarin pop rock, energetic drums, emotional guitar, polished idol vocal production",
+                      "title": "根据歌词主题生成的短标题"
+                    },
+                    "notes": "长歌词或完整歌词必须进入 customMode=true。"
+                  }
+                ]
+                """;
+        String sop = """
+                You are using the music_generation Skill Bundle. These rules are mandatory for the next music tool call.
+
+                Contract:
+                - Use this skill for Suno-style music generation tools such as suno_music, suno, and music_generation.
+                - The tool runs with its backend-bound model. Do not invent a different execution model.
+                - Keep model/version selection in the tool's model field. Do not create or request a separate skill for each Suno model version.
+
+                Prompt mode policy:
+                - When customMode=false, prompt must be a compact music brief of 500 characters or fewer.
+                - In non-custom mode, summarize genre, mood, tempo/energy, instrumentation, vocal direction, language, and originality constraints. Do not paste long lyrics.
+                - If the user provides full lyrics, a long poem, verse/chorus sections, or asks to preserve exact lyrics, set customMode=true and put the lyrics in prompt.
+                - In customMode=true, use style for genre/arrangement tags and title for a short song title when available or safely inferable.
+                - If instrumental=true, do not write lyrics. Use prompt/style to describe instrumental mood, genre, arrangement, and structure.
+
+                Copyright and style safety:
+                - If the user asks to imitate a song, artist, band, idol group, or named work, extract high-level musical traits only.
+                - Do not claim to copy melody, lyrics, vocal identity, arrangement, or a copyrighted recording.
+                - Add an originality constraint such as "original melody and lyrics only" when the user references a real artist or song.
+
+                Upload cover policy:
+                - generationType=upload_cover requires referenceAudio.
+                - If upload_cover is requested but no referenceAudio is present, ask the user to upload audio instead of calling the tool.
+                - For upload_cover in simple mode, keep prompt short and describe transformation intent only.
+
+                Defaults:
+                - Use the tool field default model unless the user explicitly names a supported version.
+                - Do not change model solely because the user asks for better quality.
+                - Leave advanced sliders, persona fields, negativeTags, and vocalGender at defaults unless explicitly requested.
+
+                Self-correction:
+                - If a prior Suno error says the non-custom prompt is too long, retry with a shorter prompt under 500 characters or switch to customMode=true for long lyrics.
+                - Do not repeat the same overlong non-custom prompt.
+                """;
+        executeSql("""
+                INSERT INTO agent_skill_bundles (
+                  skill_code, display_name, description, tool_codes_json, sop_rules,
+                  when_to_use, when_not_to_use, field_policy_json, examples_json,
+                  status, version, published_at, created_at, updated_at
+                )
+                SELECT
+                  'music_generation',
+                  '音乐生成',
+                  '创作歌曲、纯音乐或上传音频翻唱；约束 Suno 非 custom prompt 长度、歌词模式、版权风格转写和参考音频要求。',
+                  %s,
+                  %s,
+                  '用户请求生成歌曲、纯音乐、歌词成歌、音乐风格创作、Suno 音乐、上传音频翻唱或改编时使用。',
+                  '用户请求图片、视频、文本问答、PPT、语音朗读或只是在查询已有任务结果时不要使用。',
+                  '{}',
+                  %s,
+                  'PUBLISHED',
+                  1,
+                  CURRENT_TIMESTAMP,
+                  CURRENT_TIMESTAMP,
+                  CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (
+                  SELECT 1 FROM agent_skill_bundles WHERE skill_code = 'music_generation'
+                )
+                """.formatted(sqlNullableString(toolCodes), sqlNullableString(sop), sqlNullableString(examples)));
+    }
+
     private void seedModelProviderMetadata() {
         modelProviderRegistry.listAll().forEach(provider -> {
             Integer count = jdbcTemplate.queryForObject(
@@ -970,6 +1058,7 @@ public class DataInitializer implements CommandLineRunner {
                 )
                 """);
         seedImageGenerationSkillBundle();
+        seedMusicGenerationSkillBundle();
         executeSqlIgnore("ALTER TABLE agent_run_events MODIFY COLUMN event_text MEDIUMTEXT NULL");
         ensureTable("agent_context_snapshots", """
                 CREATE TABLE agent_context_snapshots (
