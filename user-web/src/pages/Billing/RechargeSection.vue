@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue"
-import { Check, Crown, CreditCard, Loader2, MessageCircle, QrCode, X } from "lucide-vue-next"
+import { Check, CreditCard, Crown, Loader2, MessageCircle, QrCode, X } from "lucide-vue-next"
 import type { CreditAccount, GiftCardPackage, RechargeOrder, RechargePackage } from "@/api/types"
 import {
   createRechargeOrder,
@@ -35,7 +35,7 @@ const emit = defineEmits<{
 
 type PaymentChannel = RechargePaymentChannel
 
-const activeTab = ref<BillingCycle>("yearly")
+const activeTab = ref<BillingCycle>("quarterly")
 
 const auth = useAuthStore()
 const packages = ref<RechargePackage[]>([])
@@ -51,13 +51,19 @@ const activeOrder = ref<RechargeOrder | null>(null)
 const paymentResult = ref<"success" | "fail" | null>(null)
 let pollingTimer: ReturnType<typeof setInterval> | null = null
 
-// 模式切换：算力充值 / 礼品卡
+// 模式切换：会员计划 / 礼品卡
 const mode = ref<'credits' | 'giftcard'>('credits')
 const giftCardPackages = ref<GiftCardPackage[]>([])
 const loadingGiftCards = ref(false)
 const pendingGiftCardPackage = ref<GiftCardPackage | null>(null)
 
-const DEFAULT_GRANTED_CREDITS = 200
+const TRIAL_PLAN_NAME = "体验版"
+const TRIAL_GRANTED_CREDITS = 200
+
+const membershipStatus = computed(() => ({
+  planName: TRIAL_PLAN_NAME,
+  availableDisplay: props.account ? props.account.available.toLocaleString() : "--",
+}))
 
 const TIER_META: Record<string, { label: string; subtitle: string; featured?: boolean }> = {
   starter: { label: "标准版", subtitle: "适合轻度创作者" },
@@ -76,13 +82,6 @@ const filteredPackages = computed(() => {
 })
 
 const activeCycleMeta = computed(() => BILLING_CYCLES.find((tab) => tab.value === activeTab.value) ?? BILLING_CYCLES[2])
-
-const membership = ref<{ planName: string; expiryDate: string | null }>({
-  planName: "体验版",
-  expiryDate: null,
-})
-
-const availableDisplay = computed(() => (props.account ? props.account.available.toLocaleString() : "--"))
 
 const paymentOptions = computed(() =>
   DEFAULT_RECHARGE_PAYMENT_CHANNELS.map((option) => ({
@@ -420,69 +419,48 @@ onUnmounted(clearPolling)
 
 <template>
   <section class="space-y-6">
-    <div class="relative overflow-hidden rounded-2xl border border-slate-700 bg-gradient-to-br from-slate-900 to-slate-800 p-6 shadow-lg md:p-8">
-      <div class="relative flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-        <div class="flex flex-col gap-6 sm:flex-row sm:gap-12">
-          <div class="flex flex-col gap-1">
-            <span class="text-sm font-medium text-slate-400">体验版</span>
-            <p class="text-3xl font-semibold tracking-tight text-white">
-              {{ availableDisplay }}
-              <span class="text-base font-normal text-slate-400">/ {{ DEFAULT_GRANTED_CREDITS }}</span>
-            </p>
-            <p class="mt-1 text-xs text-slate-500">当前使用：体验版</p>
-          </div>
-          <div class="hidden h-12 w-px bg-slate-700 sm:block" aria-hidden="true" />
-          <div class="flex flex-col gap-1">
-            <span class="text-sm text-slate-400">会员状态</span>
-            <p class="flex flex-wrap items-baseline gap-2 text-xl font-semibold">
-              <Crown class="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
-              <span class="text-white">{{ membership.planName }}</span>
-              <span v-if="membership.expiryDate" class="text-sm font-normal text-slate-400">
-                有效期至 {{ membership.expiryDate }}
-              </span>
-              <span v-else class="text-sm font-normal text-slate-400">未开通或永久有效</span>
-            </p>
-          </div>
+    <article class="membership-status-card">
+      <div class="membership-status-card__main">
+        <div class="membership-status-card__label">当前会员</div>
+        <div class="membership-status-card__plan">
+          <Crown class="h-5 w-5 shrink-0 text-cyan-300" aria-hidden="true" />
+          <span>{{ membershipStatus.planName }}</span>
         </div>
-        <button
-          type="button"
-          class="inline-flex items-center justify-center rounded-lg border border-primary bg-primary/10 px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/20"
-        >
-          升级会员
-        </button>
+        <p class="membership-status-card__meta">
+          可用算力
+          <strong>{{ membershipStatus.availableDisplay }}</strong>
+          <span class="membership-status-card__divider">·</span>
+          体验额度 {{ TRIAL_GRANTED_CREDITS }}
+        </p>
+        <p class="membership-status-card__hint">未开通连续订阅，选择下方套餐即可升级会员</p>
       </div>
-    </div>
+    </article>
 
     <div v-if="error" class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
       {{ error }}
     </div>
 
-    <!-- 模式切换 -->
-    <div class="flex justify-center">
-      <div class="inline-flex rounded-lg bg-secondary p-1">
-        <button
-          @click="mode = 'credits'"
-          :class="[
-            'px-8 py-2.5 text-sm font-medium rounded-md transition-all',
-            mode === 'credits'
-              ? 'bg-primary text-primary-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground'
-          ]"
-        >
-          算力充值
-        </button>
-        <button
-          @click="mode = 'giftcard'"
-          :class="[
-            'px-8 py-2.5 text-sm font-medium rounded-md transition-all',
-            mode === 'giftcard'
-              ? 'bg-primary text-primary-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground'
-          ]"
-        >
-          礼品卡
-        </button>
-      </div>
+    <div class="billing-mode-tabs" role="tablist" aria-label="会员与礼品卡">
+      <button
+        type="button"
+        role="tab"
+        class="billing-mode-tab"
+        :class="{ 'billing-mode-tab--active': mode === 'credits' }"
+        :aria-selected="mode === 'credits'"
+        @click="mode = 'credits'"
+      >
+        会员计划
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="billing-mode-tab"
+        :class="{ 'billing-mode-tab--active': mode === 'giftcard' }"
+        :aria-selected="mode === 'giftcard'"
+        @click="mode = 'giftcard'"
+      >
+        礼品卡
+      </button>
     </div>
 
     <div v-if="mode === 'credits'" class="space-y-8">
@@ -491,6 +469,13 @@ onUnmounted(clearPolling)
 
       <div v-if="loadingPackages" class="rounded-2xl border border-border bg-card px-5 py-12 text-center text-sm text-muted-foreground">
         正在加载套餐...
+      </div>
+
+      <div
+        v-else-if="filteredPackages.length === 0"
+        class="rounded-2xl border border-dashed border-border bg-card px-5 py-12 text-center text-sm text-muted-foreground"
+      >
+        当前周期暂无可用套餐，请切换其他订阅周期
       </div>
 
       <div
@@ -562,10 +547,7 @@ onUnmounted(clearPolling)
 
           <button
             type="button"
-            class="mt-5 w-full rounded-xl py-3 text-sm font-bold transition-all disabled:cursor-not-allowed disabled:opacity-60"
-            :class="isFeaturedCard(pkg)
-              ? 'bg-gradient-to-r from-cyan-300 to-teal-300 text-slate-950 shadow-lg shadow-cyan-500/20 hover:brightness-105'
-              : 'bg-gradient-to-r from-white to-slate-100 text-slate-900 shadow-md shadow-white/10 hover:brightness-105'"
+            class="mt-5 w-full rounded-xl bg-gradient-to-r from-cyan-300 to-teal-300 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition-all hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
             :disabled="ordering"
             @click.stop="openPaymentChoice(pkg)"
           >
@@ -712,9 +694,6 @@ onUnmounted(clearPolling)
               <Loader2 class="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
               <span>正在确认订单状态</span>
             </div>
-            <p class="mt-6 text-xs text-muted-foreground">
-              您已同意《未来云AI付费服务协议》
-            </p>
           </template>
 
           <div v-else-if="paymentResult === 'success'" class="pt-4">
@@ -741,3 +720,105 @@ onUnmounted(clearPolling)
     </Teleport>
   </section>
 </template>
+
+<style scoped>
+.membership-status-card {
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background: linear-gradient(135deg, rgb(15 23 42 / 0.95), rgb(30 41 59 / 0.88));
+  padding: 20px 24px;
+  box-shadow: 0 16px 40px rgb(0 0 0 / 0.22);
+}
+
+.membership-status-card__label {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgb(255 255 255 / 0.45);
+}
+
+.membership-status-card__plan {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 24px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.01em;
+}
+
+.membership-status-card__meta {
+  margin-top: 12px;
+  font-size: 14px;
+  color: rgb(255 255 255 / 0.55);
+}
+
+.membership-status-card__meta strong {
+  margin-left: 6px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.membership-status-card__divider {
+  margin: 0 8px;
+  color: rgb(255 255 255 / 0.22);
+}
+
+.membership-status-card__hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.38);
+}
+
+.billing-mode-tabs {
+  display: flex;
+  justify-content: center;
+  gap: 48px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.06);
+  padding-bottom: 0;
+}
+
+.billing-mode-tab {
+  position: relative;
+  border: 0;
+  background: transparent;
+  padding: 0 4px 14px;
+  color: rgb(255 255 255 / 0.42);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.billing-mode-tab:hover {
+  color: rgb(255 255 255 / 0.72);
+}
+
+.billing-mode-tab--active {
+  color: #fff;
+}
+
+.billing-mode-tab--active::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  border-radius: 999px 999px 0 0;
+  background: #fff;
+}
+
+@media (max-width: 560px) {
+  .billing-mode-tabs {
+    gap: 32px;
+  }
+
+  .billing-mode-tab {
+    font-size: 15px;
+  }
+}
+</style>

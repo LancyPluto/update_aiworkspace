@@ -33,6 +33,7 @@ import {
 } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
+import GenerationLoadingPreview from "@/components/GenerationLoadingPreview.vue"
 import ImageStackPreview from "@/components/ImageStackPreview.vue"
 import CapabilityControls from "@/pages/Chat/CapabilityControls.vue"
 import type { PrimaryReferenceMaterialInfo } from "@/pages/Chat/CapabilityControls.vue"
@@ -78,6 +79,7 @@ import { forceDownload } from "@/utils/download"
 import { isWorkflowToolCode } from "@/adapters/toolPresentationAdapter"
 import { taskFailureHint, taskProgressMessage } from "@/utils/taskStatusLabels"
 import { buildTaskProgressView } from "@/utils/taskProgressView"
+import { inferTaskAspectRatio } from "@/utils/taskAspectRatio"
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -133,6 +135,10 @@ let historyFeedAutoStickUntil = 0
 let historyFeedAnchorUntil = 0
 let historyFeedAnchorHeight = 0
 let historyScrollContainer: HTMLElement | null = null
+const COMPOSER_BOTTOM_OFFSET = 24
+const composerDockInset = ref(176)
+let composerResizeObserver: ResizeObserver | null = null
+let lastComposerMeasuredHeight = 0
 const taskPollTimers = new Map<number, number>()
 const taskStatusStreamControllers = new Map<number, AbortController>()
 const progressNow = ref(Date.now())
@@ -167,6 +173,13 @@ const modalityLabels: Record<string, string> = {
   VIDEO: "视频",
   AUDIO: "音乐",
   TEXT: "文本",
+}
+
+const composerModeLabels: Record<string, string> = {
+  IMAGE: "文/图生图",
+  VIDEO: "文/图生视频",
+  AUDIO: "文生音乐",
+  TEXT: "文本生成",
 }
 
 const modalityDescriptions: Record<string, string> = {
@@ -234,9 +247,11 @@ const coreField = computed(() => {
 
 const coreFieldPlaceholder = computed(() => {
   const field = coreField.value
-  if (!field?.placeholder?.trim()) return `你想创作什么${modalityLabel(selectedModality.value)}内容？`
+  if (!field?.placeholder?.trim()) return "输入您的创意以生成"
   return field.placeholder
 })
+
+const composerModeLabel = computed(() => composerModeLabels[selectedModality.value] || modalityLabel(selectedModality.value))
 
 const estimateInput = computed<UseTaskEstimateInput | null>(() => {
   const tool = selectedTool.value
@@ -266,6 +281,12 @@ const liveCreditView = computed(() =>
 )
 
 const creditInsufficient = computed(() => liveCreditView.value.insufficient)
+
+const composerGenerateCost = computed(() => {
+  if (liveEstimate.value?.variable) return null
+  if (liveEstimate.value?.estimatedCredits != null) return liveEstimate.value.estimatedCredits
+  return null
+})
 
 const sortedCurrentTools = computed(() => {
   const list = currentTools.value.length > 0 ? [...currentTools.value] : [...tools.value]
@@ -564,6 +585,47 @@ function selectToolByCode(toolCode: string, openComposer = false) {
 function expandComposer() {
   composerManuallyClosed.value = false
   composerOpen.value = true
+}
+
+function updateComposerDockInset() {
+  const root = composerRootRef.value
+  if (!root) return 0
+  const measuredHeight = Math.ceil(root.getBoundingClientRect().height)
+  composerDockInset.value = measuredHeight + COMPOSER_BOTTOM_OFFSET + 16
+  return measuredHeight
+}
+
+function liftHistoryFeedForComposerGrowth(heightDelta: number, insetDelta: number) {
+  if (!isHistoryFeedView.value || (heightDelta <= 0 && insetDelta <= 0)) return
+  const container = resolveHistoryScrollContainer()
+  if (!container) return
+  const liftAmount = Math.max(heightDelta, insetDelta)
+  if (liftAmount <= 0) return
+  const nearBottom = historyBottomDistance(container) < Math.max(280, liftAmount + 96)
+  if (!nearBottom) return
+  container.scrollTop += liftAmount
+  updateHistoryScrollBottomVisibility()
+}
+
+function setupComposerResizeObserver() {
+  const root = composerRootRef.value
+  if (!root || composerResizeObserver) return
+  lastComposerMeasuredHeight = Math.ceil(root.getBoundingClientRect().height)
+  updateComposerDockInset()
+  composerResizeObserver = new ResizeObserver(() => {
+    const previousHeight = lastComposerMeasuredHeight
+    const measuredHeight = updateComposerDockInset()
+    const heightDelta = measuredHeight - previousHeight
+    lastComposerMeasuredHeight = measuredHeight
+    const insetDelta = heightDelta > 0 ? heightDelta : 0
+    liftHistoryFeedForComposerGrowth(heightDelta, insetDelta)
+  })
+  composerResizeObserver.observe(root)
+}
+
+function teardownComposerResizeObserver() {
+  composerResizeObserver?.disconnect()
+  composerResizeObserver = null
 }
 
 function updatePrimaryReferenceInfo(info: PrimaryReferenceMaterialInfo) {
@@ -1279,74 +1341,6 @@ function onToolCoverError(tool: ToolSummary) {
   }
 }
 
-function inferImageAspectRatio(task: TaskDetail): number {
-  const params = task.params || {}
-  const ratio = parseAspectRatio(findAspectRatioText(params))
-  if (ratio > 0) return ratio
-  const sizeRatio = parseSizeRatio(findSizeText(params))
-  if (sizeRatio > 0) return sizeRatio
-  return 1
-}
-
-function findAspectRatioText(value: unknown): string {
-  if (!value || typeof value !== "object") return ""
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findAspectRatioText(item)
-      if (found) return found
-    }
-    return ""
-  }
-  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-    const normalizedKey = key.toLowerCase()
-    if (
-      typeof raw === "string" &&
-      (normalizedKey.includes("aspect") || normalizedKey.includes("ratio") || normalizedKey.includes("比例"))
-    ) {
-      return raw
-    }
-    const nested = findAspectRatioText(raw)
-    if (nested) return nested
-  }
-  return ""
-}
-
-function findSizeText(value: unknown): string {
-  if (!value || typeof value !== "object") return ""
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findSizeText(item)
-      if (found) return found
-    }
-    return ""
-  }
-  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-    const normalizedKey = key.toLowerCase()
-    if (typeof raw === "string" && (normalizedKey.includes("size") || normalizedKey.includes("resolution"))) {
-      return raw
-    }
-    const nested = findSizeText(raw)
-    if (nested) return nested
-  }
-  return ""
-}
-
-function parseAspectRatio(value: string): number {
-  const match = value.match(/(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)/)
-  if (!match) return 0
-  const width = Number(match[1])
-  const height = Number(match[2])
-  return width > 0 && height > 0 ? width / height : 0
-}
-
-function parseSizeRatio(value: string): number {
-  const match = value.match(/(\d{2,5})\s*[x×]\s*(\d{2,5})/i)
-  if (!match) return 0
-  const width = Number(match[1])
-  const height = Number(match[2])
-  return width > 0 && height > 0 ? width / height : 0
-}
-
 function audioTaskTitle(track?: DashboardAudioTrack | null): string {
   if (!track) return "未选择音频"
   return track.title || taskPrompt(track.task) || track.blockTitle || track.task.toolName || `版本 ${track.version}`
@@ -1691,6 +1685,33 @@ function modalityLabel(value?: string | null) {
   return modalityLabels[key] || key
 }
 
+watch(
+  () => composerOpen.value,
+  (open) => {
+    if (!open || !isHistoryFeedView.value) return
+    void nextTick(() => {
+      requestAnimationFrame(() => {
+        updateComposerDockInset()
+        const container = resolveHistoryScrollContainer()
+        if (container && historyBottomDistance(container) < 280) {
+          scrollHistoryFeedToBottom("smooth", false)
+        }
+      })
+    })
+  },
+)
+
+watch(
+  () => isHistoryFeedView.value,
+  (active) => {
+    if (!active) return
+    void nextTick(() => {
+      updateComposerDockInset()
+      if (historyBottomDistance() < 280) scrollHistoryFeedToBottom("auto", false)
+    })
+  },
+)
+
 onMounted(async () => {
   window.addEventListener("scroll", handleDashboardScroll, true)
   window.addEventListener("pointerdown", handleDashboardPointerDown, true)
@@ -1699,12 +1720,14 @@ onMounted(async () => {
   await loadDashboard()
   setupHistoryObserver()
   await nextTick()
+  setupComposerResizeObserver()
   if (isHistoryFeedView.value) scrollHistoryFeedToBottom("auto")
 })
 
 onUnmounted(() => {
   window.removeEventListener("scroll", handleDashboardScroll, true)
   window.removeEventListener("pointerdown", handleDashboardPointerDown, true)
+  teardownComposerResizeObserver()
   historyObserver?.disconnect()
   for (const timer of taskPollTimers.values()) window.clearInterval(timer)
   taskPollTimers.clear()
@@ -1749,7 +1772,8 @@ onUnmounted(() => {
 
         <main
           ref="dashboardMainRef"
-          class="min-h-0 flex-1 overflow-y-auto px-5 pb-40 pt-6 lg:pl-[132px] xl:px-10 xl:pl-[132px]"
+          class="min-h-0 flex-1 overflow-y-auto px-5 pt-6 transition-[padding-bottom] duration-200 lg:pl-[132px] xl:px-10 xl:pl-[132px]"
+          :style="{ paddingBottom: `${composerDockInset}px` }"
           @scroll="handleDashboardScroll"
         >
           <div class="mx-auto w-full max-w-[1380px]">
@@ -2360,24 +2384,13 @@ onUnmounted(() => {
                     </section>
 
                     <section class="mt-5">
-                      <div
+                      <GenerationLoadingPreview
                         v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')"
-                        class="rounded-2xl border border-white/8 bg-black/22 p-4"
-                      >
-                        <div class="flex items-center justify-between gap-4">
-                          <p class="text-sm text-white/62">
-                            {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "任务生成失败，可以复用本次参数重试。" : "任务正在生成，完成后会追加到信息流底部。") }}
-                          </p>
-                          <span class="text-xs tabular-nums text-white/38">{{ taskProgressView(item.task).percentLabel }}</span>
-                        </div>
-                        <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
-                          <div
-                            class="h-full rounded-full transition-all"
-                            :class="canRetryTask(item.task.status) ? 'bg-red-400' : 'bg-primary'"
-                            :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
-                          />
-                        </div>
-                      </div>
+                        :aspect-ratio="inferTaskAspectRatio(item.task)"
+                        :caption="taskProgressView(item.task).caption || taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? '任务生成失败，可以复用本次参数重试。' : '任务正在生成，完成后会追加到信息流底部。')"
+                        :percent-label="taskProgressView(item.task).percentLabel"
+                        :failed="canRetryTask(item.task.status)"
+                      />
 
                       <div
                         v-else-if="imageItemsForBlocks(item.blocks).length"
@@ -2501,63 +2514,48 @@ onUnmounted(() => {
                   >
                     <div class="relative overflow-hidden bg-[#101014]">
                       <template v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')">
-                        <div
-                          class="relative aspect-[4/3] overflow-hidden bg-[radial-gradient(circle_at_28%_20%,rgb(176_92_255_/_0.28),transparent_34%),linear-gradient(145deg,rgb(29_30_38),rgb(12_12_14))] p-5"
-                          :class="canRetryTask(item.task.status) ? 'ring-1 ring-red-400/25' : ''"
-                        >
-                          <div class="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent" />
-                          <div class="relative z-10 flex h-full flex-col">
-                            <div class="flex items-center justify-between gap-2">
-                              <span
-                                class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium"
-                                :class="
-                                  canRetryTask(item.task.status)
-                                    ? 'bg-red-500/15 text-red-100 ring-1 ring-red-400/25'
-                                    : 'bg-primary/15 text-primary ring-1 ring-primary/25'
+                        <div class="relative bg-[#101014] p-4">
+                          <div class="mb-3 flex items-center justify-between gap-2">
+                            <span
+                              class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium"
+                              :class="
+                                canRetryTask(item.task.status)
+                                  ? 'bg-red-500/15 text-red-100 ring-1 ring-red-400/25'
+                                  : 'bg-primary/15 text-primary ring-1 ring-primary/25'
+                              "
+                            >
+                              <Loader2 v-if="isTaskRunning(item.task.status)" class="h-3.5 w-3.5 animate-spin" />
+                              <X v-else-if="canRetryTask(item.task.status)" class="h-3.5 w-3.5" />
+                              <Clock v-else class="h-3.5 w-3.5" />
+                              {{ taskStatusLabel(item.task.status) }}
+                            </span>
+                            <div class="flex items-center gap-2">
+                              <button
+                                v-if="canCancelTask(item.task.status)"
+                                type="button"
+                                class="inline-flex items-center gap-1 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white/75 transition hover:bg-white/18 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                :disabled="
+                                  cancellingTaskIds.has(item.task.taskId) ||
+                                  deletingTaskIds.has(item.task.taskId) ||
+                                  retryingTaskIds.has(item.task.taskId)
                                 "
+                                @click.stop="cancelQueuedTask(item.task)"
                               >
-                                <Loader2 v-if="isTaskRunning(item.task.status)" class="h-3.5 w-3.5 animate-spin" />
-                                <X v-else-if="canRetryTask(item.task.status)" class="h-3.5 w-3.5" />
-                                <Clock v-else class="h-3.5 w-3.5" />
-                                {{ taskStatusLabel(item.task.status) }}
-                              </span>
-                              <div class="flex items-center gap-2">
-                                <button
-                                  v-if="canCancelTask(item.task.status)"
-                                  type="button"
-                                  class="inline-flex items-center gap-1 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white/75 transition hover:bg-white/18 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                                  :disabled="
-                                    cancellingTaskIds.has(item.task.taskId) ||
-                                    deletingTaskIds.has(item.task.taskId) ||
-                                    retryingTaskIds.has(item.task.taskId)
-                                  "
-                                  @click.stop="cancelQueuedTask(item.task)"
-                                >
-                                  <Loader2
-                                    v-if="cancellingTaskIds.has(item.task.taskId)"
-                                    class="h-3 w-3 animate-spin"
-                                  />
-                                  <X v-else class="h-3 w-3" />
-                                  {{ cancellingTaskIds.has(item.task.taskId) ? "取消中" : "取消" }}
-                                </button>
-                                <span class="text-xs text-white/35">{{ taskProgressView(item.task).percentLabel }}</span>
-                              </div>
-                            </div>
-
-                            <div class="mt-auto">
-                              <p class="line-clamp-2 text-xl font-semibold text-white">{{ item.task.toolName }}</p>
-                              <p class="mt-2 line-clamp-3 text-sm leading-6 text-white/55">
-                                {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "任务生成失败，可以复用本次参数重试。" : "任务正在生成，完成后结果会自动出现在这里。") }}
-                              </p>
-                              <div class="mt-5 h-1.5 overflow-hidden rounded-full bg-white/10">
-                                <div
-                                  class="h-full rounded-full transition-all"
-                                  :class="canRetryTask(item.task.status) ? 'bg-red-400' : 'bg-primary'"
-                                  :style="{ width: `${Math.max(6, taskProgressView(item.task).percent)}%` }"
+                                <Loader2
+                                  v-if="cancellingTaskIds.has(item.task.taskId)"
+                                  class="h-3 w-3 animate-spin"
                                 />
-                              </div>
+                                <X v-else class="h-3 w-3" />
+                                {{ cancellingTaskIds.has(item.task.taskId) ? "取消中" : "取消" }}
+                              </button>
                             </div>
                           </div>
+                          <GenerationLoadingPreview
+                            :aspect-ratio="inferTaskAspectRatio(item.task)"
+                            :caption="taskProgressView(item.task).caption || taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? '任务生成失败，可以复用本次参数重试。' : '任务正在生成，完成后结果会自动出现在这里。')"
+                            :percent-label="taskProgressView(item.task).percentLabel"
+                            :failed="canRetryTask(item.task.status)"
+                          />
                         </div>
                       </template>
                       <template v-else-if="primaryBlock(item.blocks)?.type === 'image'">
@@ -2830,70 +2828,71 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div class="relative rounded-3xl border border-white/[0.06] bg-[#0f0f14]/70 p-4 shadow-[0_20px_60px_rgb(0_0_0_/_0.45)] backdrop-blur-lg">
+            <div class="dashboard-pollo-composer relative rounded-3xl border border-white/[0.08] bg-[#14151a]/92 p-3 shadow-[0_20px_60px_rgb(0_0_0_/_0.45)] backdrop-blur-lg sm:p-4">
               <button
                 type="button"
-                class="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full text-white/45 transition hover:bg-white/8 hover:text-white"
+                class="absolute right-3 top-3 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full text-white/45 transition hover:bg-white/8 hover:text-white"
                 aria-label="收起创作窗"
                 @click="collapseComposerForPreview"
               >
                 <X class="h-4 w-4" />
               </button>
-              <div class="relative rounded-2xl bg-black/30">
-                <div class="pointer-events-none absolute left-0 top-1 z-10 flex h-10 w-10 items-center justify-center text-white/48">
-                  <MessageSquareText v-if="!primaryReferenceInfo.available" class="h-6 w-6" />
-                </div>
+
+              <div class="dashboard-pollo-composer__input-row">
                 <button
                   v-if="primaryReferenceInfo.available"
                   type="button"
-                  class="absolute left-0 top-1 z-20 flex h-10 w-10 items-center justify-center rounded-xl border border-dashed border-white/16 bg-black/24 text-white/46 shadow-[0_8px_28px_rgb(0_0_0_/_0.2)] transition hover:border-primary/55 hover:bg-primary/10 hover:text-white"
-                  :class="primaryReferenceInfo.count > 0 ? 'border-solid border-primary/35 bg-primary/10' : ''"
-                  :title="primaryReferenceInfo.fieldName || '选择参考素材'"
+                  class="dashboard-pollo-upload"
+                  :class="primaryReferenceInfo.count > 0 ? 'dashboard-pollo-upload--filled' : ''"
+                  :title="primaryReferenceInfo.fieldName || '上传参考素材'"
                   @click="openPrimaryReferencePicker"
                 >
-                  <Loader2 v-if="primaryReferenceInfo.uploading" class="h-4 w-4 animate-spin text-primary" />
+                  <Loader2 v-if="primaryReferenceInfo.uploading" class="h-5 w-5 animate-spin text-primary" />
+                  <img
+                    v-else-if="primaryReferenceInfo.previewUrls[0]"
+                    :src="primaryReferenceInfo.previewUrls[0]"
+                    alt="参考素材"
+                    class="h-full w-full rounded-[10px] object-cover"
+                  />
                   <Plus v-else class="h-5 w-5" />
-                  <span class="sr-only">选择参考素材</span>
                 </button>
-                <textarea
-                  v-model="promptText"
-                  rows="2"
-                  class="min-h-[72px] w-full resize-none bg-transparent pb-1 pr-10 pt-1 text-base leading-7 text-white outline-none placeholder:text-white/28"
-                  :class="primaryReferenceInfo.available ? 'pl-14' : 'pl-10'"
-                  :placeholder="coreFieldPlaceholder"
-                  @focus="expandComposer"
-                />
-                <div
-                  v-if="primaryReferenceInfo.previewUrls.length > 0"
-                  class="mt-3 flex flex-wrap gap-3 px-1"
-                >
+
+                <div class="dashboard-pollo-composer__prompt min-w-0 flex-1">
+                  <textarea
+                    v-model="promptText"
+                    rows="2"
+                    class="dashboard-pollo-textarea"
+                    :placeholder="coreFieldPlaceholder"
+                    @focus="expandComposer"
+                  />
                   <div
-                    v-for="(url, index) in primaryReferenceInfo.previewUrls"
-                    :key="`${url}-${index}`"
-                    class="group relative h-14 w-14 overflow-visible"
+                    v-if="primaryReferenceInfo.previewUrls.length > 1"
+                    class="mt-2 flex flex-wrap gap-2"
                   >
-                    <img
-                      :src="url"
-                      alt="参考图"
-                      class="h-14 w-14 rounded-lg border border-white/10 object-cover"
-                    />
-                    <button
-                      type="button"
-                      class="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/80 text-[10px] text-white opacity-0 transition-colors hover:bg-red-500 group-hover:opacity-100"
-                      aria-label="移除参考图"
-                      @click="removePrimaryReferenceAt(index, $event)"
+                    <div
+                      v-for="(url, index) in primaryReferenceInfo.previewUrls.slice(1)"
+                      :key="`${url}-${index}`"
+                      class="group relative h-12 w-12 overflow-visible"
                     >
-                      ×
+                      <img :src="url" alt="参考图" class="h-12 w-12 rounded-lg border border-white/10 object-cover" />
+                      <button
+                        type="button"
+                        class="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/80 text-[10px] text-white opacity-0 transition-colors hover:bg-red-500 group-hover:opacity-100"
+                        aria-label="移除参考图"
+                        @click="removePrimaryReferenceAt(index + 1, $event)"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <button
+                      v-if="primaryReferenceInfo.count > primaryReferenceInfo.previewUrls.length"
+                      type="button"
+                      class="flex h-12 min-w-12 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-2 text-xs font-medium text-white/45 transition hover:border-primary/40 hover:text-white"
+                      @click="openPrimaryReferencePicker"
+                    >
+                      +{{ primaryReferenceInfo.count - primaryReferenceInfo.previewUrls.length }}
                     </button>
                   </div>
-                  <button
-                    v-if="primaryReferenceInfo.count > primaryReferenceInfo.previewUrls.length"
-                    type="button"
-                    class="flex h-14 min-w-14 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-3 text-xs font-medium text-white/45 transition hover:border-primary/40 hover:text-white"
-                    @click="openPrimaryReferencePicker"
-                  >
-                    +{{ primaryReferenceInfo.count - primaryReferenceInfo.previewUrls.length }}
-                  </button>
                 </div>
               </div>
 
@@ -2904,34 +2903,25 @@ onUnmounted(() => {
                 <Loader2 class="h-3.5 w-3.5 animate-spin" />
                 正在读取后台字段配置...
               </div>
-              <CapabilityControls
-                v-else-if="selectedChatTool"
-                ref="capabilityRef"
-                :capabilities="selectedChatTool.capabilities || []"
-                :fields="selectedChatTool.fields || []"
-                :core-field-key="coreField?.fieldKey"
-                :tool-id="selectedChatTool.id"
-                :initial-params="replayParams"
-                class="mt-3 rounded-2xl bg-white/[0.02] px-3 py-2"
-                @primary-reference-change="updatePrimaryReferenceInfo"
-                @params-change="onCapabilityParamsChange"
-              />
 
-              <p v-if="submitError" class="mt-3 rounded-2xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-                {{ submitError }}
-              </p>
-              <p v-if="submitNotice" class="mt-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
-                {{ submitNotice }}
-              </p>
+              <div v-else class="dashboard-pollo-composer__toolbar">
+                <button
+                  type="button"
+                  class="dashboard-pollo-chip dashboard-pollo-chip--mode"
+                  @click="modelPickerOpen = !modelPickerOpen"
+                >
+                  <component :is="modalityIcons[selectedModality as keyof typeof modalityIcons] || Sparkles" class="h-4 w-4 shrink-0 text-white/55" />
+                  <span class="truncate">{{ composerModeLabel }}</span>
+                  <ChevronDown class="h-3.5 w-3.5 shrink-0 text-white/35" />
+                </button>
 
-              <div class="mt-3 flex flex-wrap items-center gap-2">
-                <div class="relative">
+                <div class="relative min-w-0">
                   <button
                     type="button"
-                    class="flex h-11 max-w-[280px] items-center gap-2 rounded-xl bg-black/25 px-3 text-sm text-white ring-1 ring-white/8 transition hover:bg-white/8"
+                    class="dashboard-pollo-chip dashboard-pollo-chip--model"
                     @click="modelPickerOpen = !modelPickerOpen"
                   >
-                    <span class="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/8 text-primary">
+                    <span class="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md bg-white/8 text-primary">
                       <video
                         v-if="isVideoPreviewUrl(selectedTool?.coverUrl)"
                         :src="normalizeMediaUrl(selectedTool?.coverUrl)"
@@ -2948,12 +2938,12 @@ onUnmounted(() => {
                         :alt="selectedTool.toolName"
                         class="h-full w-full object-cover"
                       />
-                      <Bot v-else class="h-4 w-4" />
+                      <Bot v-else class="h-3.5 w-3.5" />
                     </span>
-                    <span class="min-w-0 flex-1 truncate text-left">
+                    <span class="min-w-0 truncate text-left">
                       {{ selectedTool?.toolName || `${modalityLabel(selectedModality)}模型` }}
                     </span>
-                    <ChevronDown class="h-4 w-4 shrink-0 text-white/45" />
+                    <ChevronDown class="h-3.5 w-3.5 shrink-0 text-white/35" />
                   </button>
 
                   <div
@@ -3047,35 +3037,43 @@ onUnmounted(() => {
                   </div>
                 </div>
 
-                <span class="rounded-xl bg-black/25 px-3 py-2 text-sm text-white/55 ring-1 ring-white/8">
-                  {{ modalityLabel(selectedModality) }}
-                </span>
-                <span class="rounded-xl bg-black/25 px-3 py-2 text-sm text-white/55 ring-1 ring-white/8">
-                  免费体验
-                </span>
-
-                <span
-                  v-if="liveCreditView.label"
-                  class="dashboard-credit-estimate ml-auto"
-                  :class="{ 'dashboard-credit-estimate--insufficient': creditInsufficient }"
-                  :title="liveCreditView.hint"
-                >
-                  <Zap class="h-3.5 w-3.5 shrink-0 text-amber-300/90" />
-                  {{ liveCreditView.label }}
-                </span>
+                <CapabilityControls
+                  v-if="selectedChatTool"
+                  ref="capabilityRef"
+                  layout="composer"
+                  :capabilities="selectedChatTool.capabilities || []"
+                  :fields="selectedChatTool.fields || []"
+                  :core-field-key="coreField?.fieldKey"
+                  :tool-id="selectedChatTool.id"
+                  :initial-params="replayParams"
+                  class="min-w-0 shrink"
+                  @primary-reference-change="updatePrimaryReferenceInfo"
+                  @params-change="onCapabilityParamsChange"
+                />
 
                 <button
                   type="button"
-                  class="inline-flex h-11 min-w-32 items-center justify-center gap-2 rounded-xl bg-[linear-gradient(180deg,rgb(199_128_255),rgb(143_73_226))] px-5 text-sm font-semibold text-white shadow-[0_12px_32px_rgb(176_92_255_/_0.34),inset_0_1px_0_rgb(255_255_255_/_0.16)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-white/12 disabled:text-white/35"
-                  :class="liveCreditView.label ? '' : 'ml-auto'"
+                  class="dashboard-pollo-generate ml-auto shrink-0"
+                  :class="{ 'dashboard-pollo-generate--insufficient': creditInsufficient }"
                   :disabled="!selectedTool || submitting || selectedToolDetailLoading"
+                  :title="liveCreditView.hint"
                   @click.stop="createWithSelectedTool"
                 >
                   <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />
-                  <Send v-else class="h-4 w-4" />
-                  {{ submitting ? "创建中" : "创作" }}
+                  <template v-else>
+                    <Zap v-if="composerGenerateCost != null" class="h-4 w-4 shrink-0 text-amber-200/90" />
+                    <span v-if="composerGenerateCost != null" class="tabular-nums">{{ composerGenerateCost }}</span>
+                  </template>
+                  {{ submitting ? "生成中..." : "生成" }}
                 </button>
               </div>
+
+              <p v-if="submitError" class="mt-3 rounded-2xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                {{ submitError }}
+              </p>
+              <p v-if="submitNotice" class="mt-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+                {{ submitNotice }}
+              </p>
             </div>
           </div>
         </div>
@@ -3506,6 +3504,137 @@ onUnmounted(() => {
   50% {
     height: 10px;
     opacity: 1;
+  }
+}
+
+.dashboard-pollo-composer__input-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-right: 36px;
+}
+
+.dashboard-pollo-upload {
+  display: flex;
+  height: 64px;
+  width: 64px;
+  shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  border: 1px dashed rgb(255 255 255 / 0.18);
+  background: rgb(255 255 255 / 0.03);
+  color: rgb(255 255 255 / 0.42);
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.dashboard-pollo-upload:hover {
+  border-color: rgb(176 92 255 / 0.45);
+  background: rgb(176 92 255 / 0.08);
+  color: white;
+}
+
+.dashboard-pollo-upload--filled {
+  border-style: solid;
+  border-color: rgb(176 92 255 / 0.28);
+  padding: 3px;
+}
+
+.dashboard-pollo-textarea {
+  min-height: 64px;
+  width: 100%;
+  resize: none;
+  background: transparent;
+  padding: 4px 0;
+  font-size: 15px;
+  line-height: 1.65;
+  color: white;
+  outline: none;
+}
+
+.dashboard-pollo-textarea::placeholder {
+  color: rgb(255 255 255 / 0.28);
+}
+
+.dashboard-pollo-composer__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgb(255 255 255 / 0.06);
+}
+
+.dashboard-pollo-chip {
+  display: inline-flex;
+  height: 40px;
+  max-width: min(220px, 38vw);
+  align-items: center;
+  gap: 8px;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.06);
+  padding: 0 12px;
+  font-size: 13px;
+  color: rgb(255 255 255 / 0.78);
+  border: 1px solid rgb(255 255 255 / 0.08);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.dashboard-pollo-chip:hover {
+  background: rgb(255 255 255 / 0.1);
+  color: white;
+}
+
+.dashboard-pollo-chip--mode {
+  max-width: min(180px, 34vw);
+}
+
+.dashboard-pollo-generate {
+  display: inline-flex;
+  height: 40px;
+  min-width: 108px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.92);
+  padding: 0 18px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #14151a;
+  transition: filter 160ms ease, opacity 160ms ease;
+}
+
+.dashboard-pollo-generate:hover:not(:disabled) {
+  filter: brightness(1.04);
+}
+
+.dashboard-pollo-generate:disabled {
+  cursor: not-allowed;
+  background: rgb(255 255 255 / 0.12);
+  color: rgb(255 255 255 / 0.35);
+}
+
+.dashboard-pollo-generate--insufficient:not(:disabled) {
+  background: rgb(254 226 226 / 0.92);
+  color: #7f1d1d;
+}
+
+@media (max-width: 640px) {
+  .dashboard-pollo-composer__toolbar {
+    gap: 6px;
+  }
+
+  .dashboard-pollo-chip {
+    height: 36px;
+    font-size: 12px;
+  }
+
+  .dashboard-pollo-generate {
+    width: 100%;
+    margin-left: 0;
   }
 }
 </style>

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue"
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import type { Capability } from "@/api/aiToolTypes"
 import type { TaskDetail, ToolField, UserUploadAsset } from "@/api/types"
 import { deleteUploadAsset, uploadToolFile } from "@/api/toolApi"
+import { resolveCommunityDerivativeUrl } from "@/utils/communityPostMedia"
 import { normalizeMediaFieldValue, normalizeMediaUrl } from "@/utils/toolCoverMedia"
 import { useAuthStore } from "@/store/authStore"
 import { buildTaskResultBlocks, resolveAudioTracks } from "@/utils/taskResultBlocks"
@@ -39,8 +40,7 @@ import {
   type KlingOmniVideoReference,
 } from "@/utils/klingOmniVideoList"
 import KlingOmniVideoListField from "@/components/DynamicForm/KlingOmniVideoListField.vue"
-import { Check, ChevronDown, Clock, FileAudio, FileVideo, ImageIcon, ImageUp, Loader2, Mic, Plus, UploadCloud, X } from "lucide-vue-next"
-import { BookOpen } from 'lucide-vue-next'
+import { BookOpen, Check, ChevronDown, Clock, FileAudio, FileVideo, Film, ImageIcon, ImageUp, Loader2, Mic, Plus, SlidersHorizontal, UploadCloud, X } from "lucide-vue-next"
 
 export interface PendingAttachment {
   localId: string
@@ -79,6 +79,7 @@ interface UploadHistoryItem {
   assetId?: number
   kind: MaterialKind
   url: string
+  previewUrl?: string
   name: string
   size?: number
   type?: string
@@ -103,6 +104,7 @@ const props = defineProps<{
   coreFieldKey?: string | null
   toolId?: string | null
   initialParams?: Record<string, unknown> | null
+  layout?: "default" | "composer"
 }>()
 
 const emit = defineEmits<{
@@ -125,6 +127,13 @@ const uploadHistoryField = ref<ToolField | null>(null)
 const uploadHistoryUploading = ref(false)
 const pickerSelectedUrls = ref<string[]>([])
 const advancedOpen = ref(false)
+const quickParamsOpen = ref(false)
+const paramsPillRef = ref<HTMLElement | null>(null)
+const advancedButtonRef = ref<HTMLElement | null>(null)
+const quickPopoverStyle = ref<Record<string, string>>({})
+const advancedPopoverStyle = ref<Record<string, string>>({})
+
+const isComposerLayout = computed(() => props.layout === "composer")
 const referenceUploadScrollRootRef = ref<HTMLElement | null>(null)
 const referenceUploadSentinelRef = ref<HTMLElement | null>(null)
 const referenceMaterialScrollRootRef = ref<HTMLElement | null>(null)
@@ -396,10 +405,14 @@ function closeSelectDropdownOnOutsideClick(event: MouseEvent) {
 
 onMounted(() => {
   document.addEventListener("click", closeSelectDropdownOnOutsideClick)
+  document.addEventListener("click", handleComposerOutsideClick)
+  window.addEventListener("resize", refreshComposerPopoverPositions)
 })
 
 onUnmounted(() => {
   document.removeEventListener("click", closeSelectDropdownOnOutsideClick)
+  document.removeEventListener("click", handleComposerOutsideClick)
+  window.removeEventListener("resize", refreshComposerPopoverPositions)
 })
 
 function defaultFieldValue(field: ToolField): unknown {
@@ -696,9 +709,129 @@ function setCustomModeValue(value: string) {
   advancedOpen.value = enabled
 }
 
+function updatePopoverPosition(anchor: HTMLElement | null, target: typeof quickPopoverStyle) {
+  if (!anchor) return
+  const rect = anchor.getBoundingClientRect()
+  target.value = {
+    position: "fixed",
+    left: `${Math.max(12, Math.min(rect.left, window.innerWidth - 320))}px`,
+    bottom: `${window.innerHeight - rect.top + 10}px`,
+    zIndex: "140",
+    width: "min(360px, calc(100vw - 24px))",
+  }
+}
+
+function refreshComposerPopoverPositions() {
+  if (!isComposerLayout.value) return
+  if (quickParamsOpen.value) updatePopoverPosition(paramsPillRef.value, quickPopoverStyle)
+  if (advancedOpen.value) updatePopoverPosition(advancedButtonRef.value, advancedPopoverStyle)
+}
+
+function toggleQuickParams() {
+  quickParamsOpen.value = !quickParamsOpen.value
+  if (quickParamsOpen.value) {
+    advancedOpen.value = false
+    nextTick(() => refreshComposerPopoverPositions())
+  }
+}
+
 function toggleAdvancedOpen() {
+  if (isComposerLayout.value) {
+    advancedOpen.value = !advancedOpen.value
+    if (advancedOpen.value) {
+      quickParamsOpen.value = false
+      nextTick(() => refreshComposerPopoverPositions())
+    }
+    return
+  }
   advancedOpen.value = !advancedOpen.value
   syncCustomModeField(advancedOpen.value)
+}
+
+function fieldSummaryIcon(field: ToolField): "clock" | "film" | undefined {
+  const key = `${field.fieldKey} ${field.fieldName}`.toLowerCase()
+  if (/duration|时长|second|秒/.test(key)) return "clock"
+  if (/count|num|number|数量|条数|片段|clip|batch/.test(key)) return "film"
+  return undefined
+}
+
+function fieldToolbarSummary(field: ToolField): string {
+  if (isSegmentedOptionField(field) || isSelectOptionField(field)) {
+    const label = selectedOptionLabel(field)
+    return label && label !== "请选择" ? label : ""
+  }
+  if (field.fieldType === "slider" || field.fieldType === "number") {
+    const raw = state.value.fields[field.fieldKey]
+    if (raw === "" || raw === undefined || raw === null) return ""
+    const unit = parseFieldMeta(field).unit || ""
+    const key = `${field.fieldKey} ${field.fieldName}`.toLowerCase()
+    if (/duration|时长|second|秒/.test(key)) return `${raw}s`
+    return `${raw}${unit}`
+  }
+  if (field.fieldType === "checkbox") {
+    return Boolean(state.value.fields[field.fieldKey]) ? field.fieldName : ""
+  }
+  return ""
+}
+
+const quickComposerFields = computed(() =>
+  normalFields.value.filter((field) => {
+    if (!isFieldVisible(field, state.value.fields)) return false
+    if (isReferenceMediaField(field)) return false
+    return (
+      isSegmentedOptionField(field)
+      || isSelectOptionField(field)
+      || field.fieldType === "slider"
+      || field.fieldType === "number"
+      || field.fieldType === "checkbox"
+    )
+  }),
+)
+
+const composerSummaryParts = computed(() => {
+  const parts: Array<{ key: string; label: string; icon?: "clock" | "film" }> = []
+  for (const field of quickComposerFields.value) {
+    const label = fieldToolbarSummary(field)
+    if (label) parts.push({ key: field.fieldKey, label, icon: fieldSummaryIcon(field) })
+  }
+  if (hasAspectRatioControl.value && state.value.imageRatio) {
+    parts.push({ key: "__aspect_ratio__", label: aspectRatioLabel(state.value.imageRatio) })
+  }
+  return parts
+})
+
+const showQuickParamsButton = computed(
+  () => quickComposerFields.value.length > 0 || hasAspectRatioControl.value,
+)
+
+const showAdvancedButton = computed(
+  () => composerAdvancedFields.value.length > 0 || Boolean(customModeField.value),
+)
+
+const composerAdvancedFields = computed(() => {
+  const extraNormal = normalFields.value.filter((field) => {
+    if (!isFieldVisible(field, state.value.fields)) return false
+    if (isReferenceMediaField(field)) return false
+    if (quickComposerFields.value.includes(field)) return false
+    return true
+  })
+  return [...extraNormal, ...advancedFields.value]
+})
+
+function closeComposerPopovers() {
+  quickParamsOpen.value = false
+  advancedOpen.value = false
+}
+
+function handleComposerOutsideClick(event: MouseEvent) {
+  if (!isComposerLayout.value) return
+  const target = event.target as Node | null
+  if (!target) return
+  if (paramsPillRef.value?.contains(target)) return
+  if (advancedButtonRef.value?.contains(target)) return
+  const popover = document.querySelector("[data-capability-composer-popover]")
+  if (popover?.contains(target)) return
+  closeComposerPopovers()
 }
 
 function formatUploadSize(size?: number): string {
@@ -716,6 +849,7 @@ function uploadAssetToHistoryItem(asset: UserUploadAsset): UploadHistoryItem | n
     assetId: asset.id,
     kind,
     url: asset.url,
+    previewUrl: kind === "video" ? materialVideoPreviewUrl(asset.url) : undefined,
     name: asset.name || asset.fileId || "上传素材",
     size: asset.size ?? undefined,
     type: asset.contentType ?? undefined,
@@ -860,6 +994,25 @@ function formatTaskTime(value?: string | null): string {
   return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
 }
 
+function materialVideoPreviewUrl(url: string): string {
+  return resolveCommunityDerivativeUrl(url, "video-poster") || normalizeMediaUrl(url)
+}
+
+function isVideoPosterPreview(url?: string | null): boolean {
+  if (!url) return false
+  const value = url.toLowerCase()
+  return value.includes("x-oss-process=video/snapshot")
+    || /\.(jpe?g|png|webp|gif)(\?|$|#)/.test(value)
+    || value.includes("poster-640")
+}
+
+function materialShowsImagePreview(item: { kind: MaterialKind; previewUrl?: string }): boolean {
+  if (item.kind === "image") return true
+  if (!item.previewUrl) return false
+  if (item.kind === "video") return isVideoPosterPreview(item.previewUrl)
+  return false
+}
+
 function createMaterialAssets(task: TaskDetail, targetKind: MaterialKind): MaterialAsset[] {
   const content = task.result?.contentText || ""
   if (!content.trim()) return []
@@ -885,6 +1038,7 @@ function createMaterialAssets(task: TaskDetail, targetKind: MaterialKind): Mater
         id: `${task.taskId}-video`,
         kind: "video",
         url: block.url,
+        previewUrl: materialVideoPreviewUrl(block.url),
         title: block.title || taskTitle,
         subtitle,
       })
@@ -1274,8 +1428,40 @@ defineExpose({
 </script>
 
 <template>
-  <div v-if="configuredFields.length > 0 || capabilities.length > 0" class="mt-2 space-y-2">
-    <div class="space-y-3">
+  <div v-if="configuredFields.length > 0 || capabilities.length > 0" :class="isComposerLayout ? 'capability-controls--composer' : 'mt-2 space-y-2'">
+    <div v-if="isComposerLayout" class="flex min-w-0 items-center gap-2">
+      <button
+        v-if="showQuickParamsButton"
+        ref="paramsPillRef"
+        type="button"
+        class="inline-flex h-10 max-w-[min(280px,42vw)] items-center gap-1.5 overflow-hidden rounded-xl bg-white/[0.06] px-3 text-sm text-white/72 ring-1 ring-white/8 transition hover:bg-white/[0.1] hover:text-white"
+        @click.stop="toggleQuickParams"
+      >
+        <template v-for="(part, index) in composerSummaryParts" :key="part.key">
+          <span v-if="index > 0" class="text-white/22">|</span>
+          <Clock v-if="part.icon === 'clock'" class="h-3.5 w-3.5 shrink-0 text-white/42" />
+          <Film v-else-if="part.icon === 'film'" class="h-3.5 w-3.5 shrink-0 text-white/42" />
+          <span class="truncate">{{ part.label }}</span>
+        </template>
+        <span v-if="composerSummaryParts.length === 0" class="text-white/45">参数</span>
+        <ChevronDown class="ml-auto h-3.5 w-3.5 shrink-0 text-white/35" />
+      </button>
+
+      <button
+        v-if="showAdvancedButton"
+        ref="advancedButtonRef"
+        type="button"
+        class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] text-white/62 ring-1 ring-white/8 transition hover:bg-white/[0.1] hover:text-white"
+        :class="advancedOpen ? 'bg-white/[0.12] text-white ring-white/16' : ''"
+        aria-label="高级配置"
+        title="高级配置"
+        @click.stop="toggleAdvancedOpen"
+      >
+        <SlidersHorizontal class="h-4 w-4" />
+      </button>
+    </div>
+
+    <div v-if="!isComposerLayout" class="space-y-3">
       <section v-for="section in fieldSections" :key="section.key" class="space-y-2">
         <div
           v-if="!section.advanced && section.key !== '__default__'"
@@ -1584,7 +1770,6 @@ defineExpose({
       </div>
         </div>
       </section>
-    </div>
 
     <div class="space-y-1.5">
       <label v-if="hasAspectRatioControl" class="block text-[11px] font-medium text-muted-foreground">比例</label>
@@ -1650,6 +1835,235 @@ defineExpose({
         语音
       </button>
     </div>
+    </div>
+
+    <Teleport v-if="isComposerLayout" to="body">
+      <div
+        v-if="quickParamsOpen"
+        data-capability-composer-popover
+        class="overflow-hidden rounded-2xl border border-white/10 bg-[#17181d]/98 p-4 shadow-[0_24px_80px_rgb(0_0_0_/_0.55)] backdrop-blur-xl"
+        :style="quickPopoverStyle"
+        @click.stop
+      >
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <h4 class="text-sm font-semibold text-white">生成参数</h4>
+          <button type="button" class="text-white/40 transition hover:text-white" @click="closeComposerPopovers">
+            <X class="h-4 w-4" />
+          </button>
+        </div>
+        <div class="max-h-[min(52vh,420px)] space-y-4 overflow-y-auto pr-1">
+          <div v-if="hasAspectRatioControl" class="space-y-2">
+            <p class="text-xs font-medium text-white/45">比例</p>
+            <div
+              class="grid gap-1 overflow-hidden rounded-xl bg-white/[0.03] p-1"
+              :style="{ gridTemplateColumns: `repeat(${Math.min(aspectRatioOptions.length, 5)}, minmax(0, 1fr))` }"
+            >
+              <button
+                v-for="option in aspectRatioOptions"
+                :key="option.value"
+                type="button"
+                class="flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg border border-transparent px-1 py-2 text-[11px] font-medium transition"
+                :class="
+                  normalizeAspectRatio(state.imageRatio) === option.value
+                    ? 'border-purple-500/30 bg-purple-500/10 text-purple-200'
+                    : 'text-white/42 hover:bg-white/[0.06] hover:text-white/78'
+                "
+                @click="state.imageRatio = option.value"
+              >
+                <span class="truncate">{{ aspectRatioLabel(option.value) }}</span>
+              </button>
+            </div>
+          </div>
+
+          <div v-for="field in quickComposerFields" :key="field.fieldKey" class="space-y-2">
+            <p class="text-xs font-medium text-white/45">{{ field.fieldName }}</p>
+            <div v-if="isSegmentedOptionField(field)" class="flex flex-wrap gap-2">
+              <button
+                v-for="option in fieldOptions(field)"
+                :key="optionValue(option)"
+                type="button"
+                class="min-h-8 rounded-full border px-3 py-1 text-xs font-medium transition"
+                :disabled="isSoundLockedField(field) && optionValue(option) !== 'off'"
+                :class="
+                  strField(field.fieldKey) === optionValue(option)
+                    ? 'border-purple-500/30 bg-purple-500/10 text-purple-200'
+                    : 'border-transparent bg-white/[0.04] text-white/42 hover:bg-white/[0.06] hover:text-white/78'
+                "
+                @click="setField(field.fieldKey, optionValue(option))"
+              >
+                {{ optionLabel(option) }}
+              </button>
+            </div>
+            <div v-else-if="isSelectOptionField(field)" data-capability-select class="relative">
+              <button
+                type="button"
+                class="flex h-9 w-full items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-3 text-xs text-white/78"
+                @click.stop="toggleSelectDropdown(field.fieldKey)"
+              >
+                <span class="truncate">{{ selectedOptionLabel(field) }}</span>
+                <ChevronDown class="h-3.5 w-3.5 shrink-0 text-white/40" />
+              </button>
+              <div
+                v-if="openSelectKey === field.fieldKey"
+                class="absolute left-0 right-0 top-[calc(100%+6px)] z-30 overflow-hidden rounded-xl border border-white/10 bg-[#111217]/98 p-1 shadow-2xl"
+              >
+                <button
+                  v-for="option in fieldOptions(field)"
+                  :key="optionValue(option)"
+                  type="button"
+                  class="flex w-full items-center rounded-lg px-3 py-2 text-left text-xs text-white/72 hover:bg-white/[0.06]"
+                  @click="selectDropdownOption(field.fieldKey, optionValue(option))"
+                >
+                  {{ optionLabel(option) }}
+                </button>
+              </div>
+            </div>
+            <div v-else-if="field.fieldType === 'slider'" class="space-y-1">
+              <input
+                type="range"
+                :min="sliderConfig(field).min"
+                :max="sliderConfig(field).max"
+                :step="sliderConfig(field).step"
+                :value="Number(state.fields[field.fieldKey] ?? sliderConfig(field).min)"
+                class="capability-slider w-full"
+                @input="onSliderInput(field, $event)"
+              />
+              <span class="text-[11px] text-white/40">
+                {{ state.fields[field.fieldKey] ?? sliderConfig(field).min }}{{ parseFieldMeta(field).unit || "" }}
+              </span>
+            </div>
+            <label
+              v-else-if="field.fieldType === 'checkbox'"
+              class="inline-flex h-8 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-xs text-white/72"
+            >
+              <input
+                type="checkbox"
+                :checked="Boolean(state.fields[field.fieldKey])"
+                class="rounded border-white/20"
+                @change="setField(field.fieldKey, ($event.target as HTMLInputElement).checked)"
+              />
+              {{ field.placeholder || "启用" }}
+            </label>
+            <input
+              v-else-if="field.fieldType === 'number'"
+              type="number"
+              :value="strField(field.fieldKey)"
+              class="h-9 w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 text-xs text-white/78"
+              @input="onNumberInput(field.fieldKey, $event)"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div
+        v-if="advancedOpen"
+        data-capability-composer-popover
+        class="overflow-hidden rounded-2xl border border-white/10 bg-[#17181d]/98 p-4 shadow-[0_24px_80px_rgb(0_0_0_/_0.55)] backdrop-blur-xl"
+        :style="advancedPopoverStyle"
+        @click.stop
+      >
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <h4 class="text-sm font-semibold text-white">高级配置</h4>
+          <button type="button" class="text-white/40 transition hover:text-white" @click="closeComposerPopovers">
+            <X class="h-4 w-4" />
+          </button>
+        </div>
+        <div v-if="customModeField" class="mb-4 flex flex-wrap items-center gap-2">
+          <span class="text-xs font-medium text-white/45">{{ customModeField.fieldName || "创作模式" }}</span>
+          <div class="inline-flex rounded-full border border-white/10 bg-white/[0.04] p-0.5">
+            <button
+              v-for="option in customModeOptions"
+              :key="optionValue(option)"
+              type="button"
+              class="h-7 rounded-full px-3 text-xs font-medium transition"
+              :class="
+                customModeValue === optionValue(option).toLowerCase()
+                  ? 'bg-purple-500/20 text-purple-200'
+                  : 'text-white/42 hover:bg-white/[0.06] hover:text-white/78'
+              "
+              @click="setCustomModeValue(optionValue(option))"
+            >
+              {{ optionLabel(option) }}
+            </button>
+          </div>
+        </div>
+        <div class="max-h-[min(58vh,480px)] space-y-4 overflow-y-auto pr-1">
+          <div v-for="field in composerAdvancedFields" :key="field.fieldKey" class="space-y-2">
+            <p class="text-xs font-medium text-white/45">
+              {{ field.fieldName }}<span v-if="field.required" class="text-red-300"> *</span>
+            </p>
+            <div v-if="isSegmentedOptionField(field)" class="flex flex-wrap gap-2">
+              <button
+                v-for="option in fieldOptions(field)"
+                :key="optionValue(option)"
+                type="button"
+                class="min-h-8 rounded-full border px-3 py-1 text-xs font-medium transition"
+                :class="
+                  strField(field.fieldKey) === optionValue(option)
+                    ? 'border-purple-500/30 bg-purple-500/10 text-purple-200'
+                    : 'border-transparent bg-white/[0.04] text-white/42 hover:bg-white/[0.06] hover:text-white/78'
+                "
+                @click="setField(field.fieldKey, optionValue(option))"
+              >
+                {{ optionLabel(option) }}
+              </button>
+            </div>
+            <div v-else-if="isSelectOptionField(field)" data-capability-select class="relative">
+              <button
+                type="button"
+                class="flex h-9 w-full items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-3 text-xs text-white/78"
+                @click.stop="toggleSelectDropdown(field.fieldKey)"
+              >
+                <span class="truncate">{{ selectedOptionLabel(field) }}</span>
+                <ChevronDown class="h-3.5 w-3.5 shrink-0 text-white/40" />
+              </button>
+              <div
+                v-if="openSelectKey === field.fieldKey"
+                class="absolute left-0 right-0 top-[calc(100%+6px)] z-30 overflow-hidden rounded-xl border border-white/10 bg-[#111217]/98 p-1 shadow-2xl"
+              >
+                <button
+                  v-for="option in fieldOptions(field)"
+                  :key="optionValue(option)"
+                  type="button"
+                  class="flex w-full items-center rounded-lg px-3 py-2 text-left text-xs text-white/72 hover:bg-white/[0.06]"
+                  @click="selectDropdownOption(field.fieldKey, optionValue(option))"
+                >
+                  {{ optionLabel(option) }}
+                </button>
+              </div>
+            </div>
+            <div v-else-if="field.fieldType === 'slider'" class="space-y-1">
+              <input
+                type="range"
+                :min="sliderConfig(field).min"
+                :max="sliderConfig(field).max"
+                :step="sliderConfig(field).step"
+                :value="Number(state.fields[field.fieldKey] ?? sliderConfig(field).min)"
+                class="capability-slider w-full"
+                @input="onSliderInput(field, $event)"
+              />
+            </div>
+            <textarea
+              v-else-if="field.fieldType === 'textarea'"
+              :value="strField(field.fieldKey)"
+              :placeholder="field.placeholder || field.fieldName"
+              rows="3"
+              class="min-h-20 w-full resize-none rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 text-xs text-white/78"
+              @input="setField(field.fieldKey, ($event.target as HTMLTextAreaElement).value)"
+            />
+            <input
+              v-else
+              type="text"
+              :value="strField(field.fieldKey)"
+              :placeholder="shortPlaceholder(field)"
+              class="h-9 w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 text-xs text-white/78"
+              @input="setField(field.fieldKey, ($event.target as HTMLInputElement).value)"
+            />
+          </div>
+          <p v-if="composerAdvancedFields.length === 0 && !customModeField" class="text-sm text-white/40">暂无高级配置项</p>
+        </div>
+      </div>
+    </Teleport>
 
     <Teleport to="body">
       <div
@@ -1734,10 +2148,18 @@ defineExpose({
                   >
                     <div class="relative flex aspect-[4/3] items-center justify-center bg-black/20">
                       <img
-                        v-if="item.kind === 'image'"
-                        :src="normalizeMediaUrl(item.url)"
+                        v-if="materialShowsImagePreview(item)"
+                        :src="normalizeMediaUrl(item.previewUrl || item.url)"
                         alt=""
                         class="h-full w-full object-cover"
+                      />
+                      <video
+                        v-else-if="item.kind === 'video' && item.previewUrl"
+                        :src="normalizeMediaUrl(item.previewUrl)"
+                        class="h-full w-full object-cover"
+                        muted
+                        playsinline
+                        preload="metadata"
                       />
                       <FileVideo v-else-if="item.kind === 'video'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
                       <FileAudio v-else-if="item.kind === 'audio'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
@@ -1807,10 +2229,18 @@ defineExpose({
               >
                 <div class="relative flex aspect-[4/3] items-center justify-center bg-black/20">
                   <img
-                    v-if="asset.kind === 'image' && asset.previewUrl"
-                    :src="normalizeMediaUrl(asset.previewUrl)"
+                    v-if="materialShowsImagePreview(asset)"
+                    :src="normalizeMediaUrl(asset.previewUrl!)"
                     alt=""
                     class="h-full w-full object-cover"
+                  />
+                  <video
+                    v-else-if="asset.kind === 'video' && asset.previewUrl"
+                    :src="normalizeMediaUrl(asset.previewUrl)"
+                    class="h-full w-full object-cover"
+                    muted
+                    playsinline
+                    preload="metadata"
                   />
                   <FileVideo v-else-if="asset.kind === 'video'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
                   <FileAudio v-else-if="asset.kind === 'audio'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
@@ -1920,10 +2350,18 @@ defineExpose({
                 >
                   <div class="relative flex aspect-[4/3] items-center justify-center bg-white/[0.04]">
                     <img
-                      v-if="item.kind === 'image'"
-                      :src="normalizeMediaUrl(item.url)"
+                      v-if="materialShowsImagePreview(item)"
+                      :src="normalizeMediaUrl(item.previewUrl || item.url)"
                       alt=""
                       class="h-full w-full object-cover"
+                    />
+                    <video
+                      v-else-if="item.kind === 'video' && item.previewUrl"
+                      :src="normalizeMediaUrl(item.previewUrl)"
+                      class="h-full w-full object-cover"
+                      muted
+                      playsinline
+                      preload="metadata"
                     />
                     <FileVideo v-else-if="item.kind === 'video'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
                     <FileAudio v-else-if="item.kind === 'audio'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
@@ -2025,10 +2463,18 @@ defineExpose({
               >
                 <div class="relative flex aspect-[4/3] items-center justify-center bg-white/[0.04]">
                   <img
-                    v-if="asset.kind === 'image' && asset.previewUrl"
-                    :src="asset.previewUrl"
+                    v-if="materialShowsImagePreview(asset)"
+                    :src="normalizeMediaUrl(asset.previewUrl!)"
                     alt=""
                     class="h-full w-full object-cover"
+                  />
+                  <video
+                    v-else-if="asset.kind === 'video' && asset.previewUrl"
+                    :src="normalizeMediaUrl(asset.previewUrl)"
+                    class="h-full w-full object-cover"
+                    muted
+                    playsinline
+                    preload="metadata"
                   />
                   <FileVideo v-else-if="asset.kind === 'video'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
                   <FileAudio v-else-if="asset.kind === 'audio'" class="h-9 w-9 text-white/35 group-hover:text-primary" />
@@ -2069,7 +2515,7 @@ defineExpose({
             </button>
           </div>
         </div>
-              </div>
+      </div>
     </Teleport>
   </div>
 </template>

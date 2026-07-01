@@ -73,6 +73,17 @@ export async function redeemGiftCard(id: number, options?: { token?: string | nu
   return apiRequest<GiftCard>("POST", `/api/v1/credits/gift-cards/${id}/redeem`, { token: options?.token })
 }
 
+/** POST /api/v1/credits/gift-cards/redeem-by-code */
+export async function redeemGiftCardByCode(
+  body: { cardCode: string },
+  options?: { token?: string | null },
+): Promise<GiftCard> {
+  return apiRequest<GiftCard>("POST", "/api/v1/credits/gift-cards/redeem-by-code", {
+    token: options?.token,
+    body,
+  })
+}
+
 /** POST /api/v1/credits/gift-cards/:id/gift */
 export async function transferGiftCard(
   id: number,

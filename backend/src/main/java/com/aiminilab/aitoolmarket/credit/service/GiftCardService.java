@@ -13,6 +13,8 @@ public interface GiftCardService {
 
     GiftCardResponse redeem(Long userId, Long giftCardId);
 
+    GiftCardResponse redeemByCode(Long userId, String cardCode);
+
     GiftCardResponse transfer(Long userId, Long giftCardId, String recipientAccount);
 
     void createGiftCardFromOrder(Long userId, Long orderId, Long giftCardPackageId, int credits);

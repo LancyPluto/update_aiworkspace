@@ -112,7 +112,7 @@ test("creator workspace keeps task progress monotonic across streams and refresh
   assert.match(page, /progress:\s*monotonicTaskProgress\(existing,\s*task\.progress\)/)
 })
 
-test("creator workspace renders active generation progress as a large status panel", async () => {
+test("creator workspace renders active generation progress as an aspect-ratio preview panel", async () => {
   const [page, css] = await Promise.all([
     readFile(pageUrl, "utf8"),
     readFile(workspaceCssUrl, "utf8"),
@@ -120,17 +120,11 @@ test("creator workspace renders active generation progress as a large status pan
 
   assert.match(page, /buildTaskProgressView/)
   assert.match(page, /function progressView\(item: CreateTimelineItem\)/)
-  assert.match(page, /workspace-create-status-hero/)
-  assert.match(page, /workspace-create-status-mark/)
+  assert.match(page, /GenerationLoadingPreview/)
+  assert.match(page, /inferTaskAspectRatio\(item\.task\)/)
   assert.match(page, /progressView\(item\)\.percentLabel/)
   assert.match(page, /progressView\(item\)\.caption/)
-  assert.match(page, /progressView\(item\)\.percent \+ '%'/)
-  assert.doesNotMatch(page, /statusIcon\(item\)[\s\S]{0,160}'animate-spin'/)
-  assert.match(css, /\.workspace-create-status-hero/)
-  assert.match(css, /\.workspace-create-status-mark/)
-  assert.match(css, /animation:\s*workspace-status-breathe/)
-  assert.match(css, /@keyframes workspace-status-breathe/)
-  assert.match(css, /\.workspace-create-progress-caption/)
+  assert.match(css, /\.workspace-create-result-pending/)
 })
 
 test("creator workspace starts optimistic image tasks at one percent", async () => {
