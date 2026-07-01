@@ -133,6 +133,12 @@ services:
       - 223.5.5.5
       - 1.1.1.1
       - 8.8.8.8
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
 
   admin-frontend:
     build:
