@@ -61,4 +61,17 @@ public interface GiftCardMapper extends BaseMapper<GiftCard> {
     int markRedeemed(@Param("cardId") Long cardId,
                      @Param("userId") Long userId,
                      @Param("eventAt") LocalDateTime eventAt);
+
+    @Update("""
+            UPDATE gift_cards
+            SET status = 'USED',
+                owner_user_id = #{redeemerId},
+                redeemed_at = #{eventAt},
+                updated_at = #{eventAt}
+            WHERE id = #{cardId}
+              AND status = 'UNUSED'
+            """)
+    int markRedeemedByCode(@Param("cardId") Long cardId,
+                           @Param("redeemerId") Long redeemerId,
+                           @Param("eventAt") LocalDateTime eventAt);
 }

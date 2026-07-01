@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
 import { useRouter } from "vue-router"
-import { Camera, Check, ExternalLink, Gift, Loader2, Shield, Sparkles, ToggleLeft, Trash2, Wallet, X } from "lucide-vue-next"
+import { Camera, Check, ClipboardCopy, ExternalLink, Gift, Loader2, Shield, Sparkles, ToggleLeft, Trash2, Wallet, X } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
-import { fetchCreditAccount, fetchMyGiftCards, redeemGiftCard, transferGiftCard } from "@/api/creditApi"
+import { fetchCreditAccount, fetchMyGiftCards, redeemGiftCard, redeemGiftCardByCode } from "@/api/creditApi"
 import { fetchTasks } from "@/api/taskApi"
 import { cancelCurrentUserAccount, sendCancelAccountSmsCode } from "@/api/userApi"
 import type { CreditAccount, GiftCard } from "@/api/types"
@@ -38,10 +38,12 @@ const cancelDebugCode = ref<string | null>(null)
 const giftCards = ref<GiftCard[]>([])
 const loadingGiftCards = ref(false)
 const redeemingCardId = ref<number | null>(null)
-const transferDialogOpen = ref(false)
-const transferCardId = ref<number | null>(null)
-const transferAccount = ref("")
-const transferring = ref(false)
+const redeemCodeDialogOpen = ref(false)
+const redeemCodeInput = ref("")
+const redeemingByCode = ref(false)
+const shareDialogOpen = ref(false)
+const shareCard = ref<GiftCard | null>(null)
+const copyingShareCode = ref(false)
 
 const GIFT_CARD_STYLE_THEMES: Record<string, { bg: string; border: string }> = {
   blue: { bg: "linear-gradient(135deg, rgb(30 64 175), rgb(15 23 42))", border: "rgb(59 130 246 / 0.3)" },
@@ -242,26 +244,47 @@ async function redeemCard(id: number) {
   }
 }
 
-function openTransferDialog(id: number) {
-  transferCardId.value = id
-  transferAccount.value = ""
-  transferDialogOpen.value = true
+function openShareDialog(card: GiftCard) {
+  shareCard.value = card
+  shareDialogOpen.value = true
 }
 
-async function submitTransfer() {
-  if (!transferCardId.value || !transferAccount.value.trim()) return
-  transferring.value = true
+async function copyShareCode() {
+  if (!shareCard.value?.cardCode) return
+  copyingShareCode.value = true
+  try {
+    await navigator.clipboard.writeText(shareCard.value.cardCode)
+    success.value = "兑换码已复制，可发送给好友"
+    error.value = ""
+  } catch {
+    error.value = "复制失败，请手动复制兑换码"
+  } finally {
+    copyingShareCode.value = false
+  }
+}
+
+function openRedeemCodeDialog() {
+  redeemCodeInput.value = ""
+  redeemCodeDialogOpen.value = true
+}
+
+async function submitRedeemByCode() {
+  const code = redeemCodeInput.value.trim()
+  if (!code) return
+  redeemingByCode.value = true
   error.value = ""
   success.value = ""
   try {
-    await transferGiftCard(transferCardId.value, { account: transferAccount.value.trim() }, { token: auth.token })
-    transferDialogOpen.value = false
+    await redeemGiftCardByCode({ cardCode: code }, { token: auth.token })
+    redeemCodeDialogOpen.value = false
+    redeemCodeInput.value = ""
     await loadGiftCards()
-    success.value = "礼品卡赠送成功"
+    await loadProfileStats()
+    success.value = "礼品卡兑换成功，算力已到账"
   } catch (err) {
-    error.value = err instanceof Error ? err.message : "礼品卡赠送失败"
+    error.value = err instanceof Error ? err.message : "礼品卡兑换失败"
   } finally {
-    transferring.value = false
+    redeemingByCode.value = false
   }
 }
 
@@ -397,8 +420,12 @@ onMounted(async () => {
           <div>
             <p class="panel-kicker">Gift cards</p>
             <h2>我的礼品卡</h2>
+            <p class="gift-card-subtitle">使用、赠送或输入兑换码领取算力</p>
           </div>
-          <p class="gift-card-subtitle">使用或赠送给好友</p>
+          <button type="button" class="gift-card-redeem-entry" @click="openRedeemCodeDialog">
+            <Gift class="h-4 w-4" aria-hidden="true" />
+            兑换礼品卡
+          </button>
         </div>
 
         <div v-if="loadingGiftCards" class="gift-card-loading">加载中...</div>
@@ -434,7 +461,7 @@ onMounted(async () => {
                   <button
                     type="button"
                     class="gift-card-btn transfer-btn"
-                    @click="openTransferDialog(card.id)"
+                    @click="openShareDialog(card)"
                   >
                     赠送
                   </button>
@@ -533,27 +560,63 @@ onMounted(async () => {
         </section>
       </div>
 
-      <div v-if="transferDialogOpen" class="modal-backdrop" @click.self="transferDialogOpen = false">
-        <section class="transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="transfer-title">
-          <button type="button" class="icon-action dark-icon" aria-label="关闭" @click="transferDialogOpen = false">
+      <div v-if="redeemCodeDialogOpen" class="modal-backdrop" @click.self="redeemCodeDialogOpen = false">
+        <section class="transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="redeem-code-title">
+          <button type="button" class="icon-action dark-icon" aria-label="关闭" @click="redeemCodeDialogOpen = false">
             <X class="h-4 w-4" />
           </button>
-          <h2 id="transfer-title">赠送礼品卡</h2>
-          <p class="transfer-desc">请输入对方的手机号或用户名，赠送后礼品卡将转移到对方账户。</p>
+          <h2 id="redeem-code-title">兑换礼品卡</h2>
+          <p class="transfer-desc">输入好友分享的礼品卡兑换码，兑换后算力将直接到账。</p>
           <label class="transfer-field">
-            <span>对方账号</span>
-            <input v-model="transferAccount" placeholder="手机号或用户名" />
+            <span>兑换码</span>
+            <input
+              v-model="redeemCodeInput"
+              placeholder="例如 GC-XXXXXXXXXXXXXXXX"
+              autocomplete="off"
+              spellcheck="false"
+              @keyup.enter="submitRedeemByCode"
+            />
           </label>
           <div class="transfer-actions">
-            <button type="button" class="cancel-text-action" @click="transferDialogOpen = false">取消</button>
+            <button type="button" class="cancel-text-action" @click="redeemCodeDialogOpen = false">取消</button>
             <button
               type="button"
               class="primary-action"
-              :disabled="transferring || !transferAccount.trim()"
-              @click="submitTransfer"
+              :disabled="redeemingByCode || !redeemCodeInput.trim()"
+              @click="submitRedeemByCode"
             >
-              <Loader2 v-if="transferring" class="h-4 w-4 animate-spin" />
-              确认赠送
+              <Loader2 v-if="redeemingByCode" class="h-4 w-4 animate-spin" />
+              确认兑换
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <div v-if="shareDialogOpen && shareCard" class="modal-backdrop" @click.self="shareDialogOpen = false">
+        <section class="transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="share-code-title">
+          <button type="button" class="icon-action dark-icon" aria-label="关闭" @click="shareDialogOpen = false">
+            <X class="h-4 w-4" />
+          </button>
+          <h2 id="share-code-title">赠送礼品卡</h2>
+          <p class="transfer-desc">
+            将下方兑换码发送给好友，对方可在「兑换礼品卡」中输入兑换码领取
+            {{ shareCard.credits.toLocaleString() }} 算力。
+          </p>
+          <div class="gift-share-code-box">
+            <span class="gift-share-code-label">礼品卡兑换码</span>
+            <code class="gift-share-code-value">{{ shareCard.cardCode }}</code>
+          </div>
+          <div class="transfer-actions">
+            <button type="button" class="cancel-text-action" @click="shareDialogOpen = false">关闭</button>
+            <button
+              type="button"
+              class="primary-action"
+              :disabled="copyingShareCode"
+              @click="copyShareCode"
+            >
+              <Loader2 v-if="copyingShareCode" class="h-4 w-4 animate-spin" />
+              <ClipboardCopy v-else class="h-4 w-4" aria-hidden="true" />
+              复制兑换码
             </button>
           </div>
         </section>
@@ -919,7 +982,7 @@ onMounted(async () => {
 
 .gift-card-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
   margin-bottom: 20px;
@@ -931,9 +994,30 @@ onMounted(async () => {
 }
 
 .gift-card-subtitle {
-  margin: 0;
+  margin: 8px 0 0;
   color: rgb(255 255 255 / 0.52);
   font-size: 13px;
+}
+
+.gift-card-redeem-entry {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgb(176 92 255 / 0.35);
+  border-radius: 999px;
+  background: rgb(176 92 255 / 0.12);
+  color: rgb(255 255 255 / 0.9);
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+
+.gift-card-redeem-entry:hover {
+  transform: translateY(-1px);
+  border-color: rgb(176 92 255 / 0.55);
+  background: rgb(176 92 255 / 0.2);
 }
 
 .gift-card-loading,
@@ -1122,6 +1206,31 @@ onMounted(async () => {
 
 .transfer-dialog .cancel-text-action {
   color: rgb(255 255 255 / 0.6);
+}
+
+.gift-share-code-box {
+  margin-top: 20px;
+  border: 1px dashed rgb(176 92 255 / 0.35);
+  border-radius: 18px;
+  background: rgb(0 0 0 / 0.24);
+  padding: 16px;
+}
+
+.gift-share-code-label {
+  display: block;
+  color: rgb(255 255 255 / 0.42);
+  font-size: 12px;
+}
+
+.gift-share-code-value {
+  display: block;
+  margin-top: 10px;
+  color: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  word-break: break-all;
 }
 
 .icon-action.dark-icon {

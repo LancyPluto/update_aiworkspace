@@ -19,11 +19,6 @@ function select(value: BillingCycle) {
 
 <template>
   <div class="billing-cycle-shell">
-    <div class="member-tabs" aria-hidden="true">
-      <span class="member-tab member-tab--active">算力会员</span>
-      <span class="member-tab">连续订阅</span>
-    </div>
-
     <div class="billing-cycle-track" role="tablist" aria-label="订阅周期">
       <div
         class="billing-cycle-thumb"
@@ -60,37 +55,7 @@ function select(value: BillingCycle) {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 18px;
-}
-
-.member-tabs {
-  display: inline-flex;
-  align-items: center;
-  gap: 28px;
-}
-
-.member-tab {
-  position: relative;
-  padding-bottom: 10px;
-  color: rgb(255 255 255 / 0.42);
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.member-tab--active {
-  color: #fff;
-}
-
-.member-tab--active::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 3px;
-  border-radius: 999px;
-  background: #fff;
+  gap: 0;
 }
 
 .billing-cycle-track {
@@ -184,11 +149,6 @@ function select(value: BillingCycle) {
     gap: 4px;
     padding: 10px 6px;
     font-size: 12px;
-  }
-
-  .member-tabs {
-    gap: 20px;
-    font-size: 14px;
   }
 }
 </style>

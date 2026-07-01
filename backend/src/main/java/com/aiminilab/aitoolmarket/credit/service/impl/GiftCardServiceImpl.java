@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -82,6 +83,32 @@ public class GiftCardServiceImpl implements GiftCardService {
         }
 
         GiftCard refreshed = giftCardMapper.findByIdAndOwner(giftCardId, userId);
+        GiftCardPackage pkg = packageMapper.selectById(refreshed.getPackageId());
+        return GiftCardResponse.from(refreshed,
+                pkg != null ? pkg.getPackageName() : null,
+                pkg != null ? pkg.getCardTheme() : null);
+    }
+
+    @Override
+    @Transactional
+    public GiftCardResponse redeemByCode(Long userId, String rawCardCode) {
+        String cardCode = normalizeCardCode(rawCardCode);
+        GiftCard card = giftCardMapper.findByCardCode(cardCode);
+        if (card == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "兑换码无效");
+        }
+        if (!"UNUSED".equals(card.getStatus())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "礼品卡已使用");
+        }
+
+        creditService.giftRedeemAdd(userId, card.getId(), card.getCredits(), "礼品卡兑换 " + cardCode);
+
+        int updated = giftCardMapper.markRedeemedByCode(card.getId(), userId, LocalDateTime.now());
+        if (updated != 1) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "礼品卡状态已变更，请刷新后重试");
+        }
+
+        GiftCard refreshed = giftCardMapper.selectById(card.getId());
         GiftCardPackage pkg = packageMapper.selectById(refreshed.getPackageId());
         return GiftCardResponse.from(refreshed,
                 pkg != null ? pkg.getPackageName() : null,
@@ -162,5 +189,12 @@ public class GiftCardServiceImpl implements GiftCardService {
 
     private String generateCardCode() {
         return "GC-" + UUID.randomUUID().toString().replace("-", "").substring(0, 16).toUpperCase();
+    }
+
+    private String normalizeCardCode(String rawCardCode) {
+        if (rawCardCode == null || rawCardCode.isBlank()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "兑换码不能为空");
+        }
+        return rawCardCode.trim().toUpperCase(Locale.ROOT);
     }
 }

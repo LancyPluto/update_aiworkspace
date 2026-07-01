@@ -12,6 +12,7 @@ import com.aiminilab.aitoolmarket.credit.dto.CreateCustomRechargeOrderRequest;
 import com.aiminilab.aitoolmarket.credit.dto.CreateRechargeOrderRequest;
 import com.aiminilab.aitoolmarket.credit.dto.GiftCardPackageResponse;
 import com.aiminilab.aitoolmarket.credit.dto.GiftCardResponse;
+import com.aiminilab.aitoolmarket.credit.dto.GiftCardRedeemByCodeRequest;
 import com.aiminilab.aitoolmarket.credit.dto.GiftCardTransferRequest;
 import com.aiminilab.aitoolmarket.credit.dto.RechargeOrderResponse;
 import com.aiminilab.aitoolmarket.credit.dto.RechargePackageResponse;
@@ -111,6 +112,11 @@ public class CreditController {
     @PostMapping("/gift-cards/{id}/redeem")
     public ApiResponse<GiftCardResponse> redeemGiftCard(@PathVariable Long id) {
         return ApiResponse.success(giftCardService.redeem(AuthContext.get().userId(), id));
+    }
+
+    @PostMapping("/gift-cards/redeem-by-code")
+    public ApiResponse<GiftCardResponse> redeemGiftCardByCode(@Valid @RequestBody GiftCardRedeemByCodeRequest request) {
+        return ApiResponse.success(giftCardService.redeemByCode(AuthContext.get().userId(), request.cardCode()));
     }
 
     @PostMapping("/gift-cards/{id}/gift")

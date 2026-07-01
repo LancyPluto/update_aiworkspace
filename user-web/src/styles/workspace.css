@@ -2140,6 +2140,11 @@
   overflow: auto;
 }
 
+.workspace-create-result-pending {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .workspace-create-status {
   display: flex;
   align-items: center;

@@ -128,7 +128,10 @@ function autoResizeTextarea() {
 
 function toggleExpand() {
   isExpanded.value = !isExpanded.value
-  nextTick(() => autoResizeTextarea())
+  nextTick(() => {
+    autoResizeTextarea()
+    void scrollToBottom()
+  })
 }
 // ---------------------------------
 
