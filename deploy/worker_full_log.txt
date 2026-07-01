@@ -1,0 +1,416 @@
+﻿ai-supermarket-worker  | Looking in indexes: https://mirrors.aliyun.com/pypi/simple/
+ai-supermarket-worker  | Requirement already satisfied: requests>=2.32.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 1)) (2.34.2)
+ai-supermarket-worker  | Requirement already satisfied: openai>=1.40.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 2)) (2.43.0)
+ai-supermarket-worker  | Requirement already satisfied: httpx>=0.27.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 3)) (0.28.1)
+ai-supermarket-worker  | Requirement already satisfied: redis>=5.0.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 4)) (8.0.0)
+ai-supermarket-worker  | Requirement already satisfied: python-dotenv>=1.0.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 5)) (1.2.2)
+ai-supermarket-worker  | Requirement already satisfied: imageio-ffmpeg>=0.5.1 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 6)) (0.6.0)
+ai-supermarket-worker  | Requirement already satisfied: pika>=1.3.2 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 7)) (1.4.1)
+ai-supermarket-worker  | Requirement already satisfied: oss2>=2.18.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 8)) (2.19.1)
+ai-supermarket-worker  | Requirement already satisfied: charset_normalizer<4,>=2 in /usr/local/lib/python3.12/site-packages (from requests>=2.32.0->-r requirements.txt (line 1)) (3.4.7)
+ai-supermarket-worker  | Requirement already satisfied: idna<4,>=2.5 in /usr/local/lib/python3.12/site-packages (from requests>=2.32.0->-r requirements.txt (line 1)) (3.18)
+ai-supermarket-worker  | Requirement already satisfied: urllib3<3,>=1.26 in /usr/local/lib/python3.12/site-packages (from requests>=2.32.0->-r requirements.txt (line 1)) (2.7.0)
+ai-supermarket-worker  | Requirement already satisfied: certifi>=2023.5.7 in /usr/local/lib/python3.12/site-packages (from requests>=2.32.0->-r requirements.txt (line 1)) (2026.6.17)
+ai-supermarket-worker  | Requirement already satisfied: anyio<5,>=3.5.0 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (4.14.0)
+ai-supermarket-worker  | Requirement already satisfied: distro<2,>=1.7.0 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (1.9.0)
+ai-supermarket-worker  | Requirement already satisfied: jiter<1,>=0.10.0 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (0.15.0)
+ai-supermarket-worker  | Requirement already satisfied: pydantic<3,>=1.9.0 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (2.13.4)
+ai-supermarket-worker  | Requirement already satisfied: sniffio in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (1.3.1)
+ai-supermarket-worker  | Requirement already satisfied: tqdm>4 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (4.68.3)
+ai-supermarket-worker  | Requirement already satisfied: typing-extensions<5,>=4.11 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (4.15.0)
+ai-supermarket-worker  | Requirement already satisfied: httpcore==1.* in /usr/local/lib/python3.12/site-packages (from httpx>=0.27.0->-r requirements.txt (line 3)) (1.0.9)
+ai-supermarket-worker  | Requirement already satisfied: h11>=0.16 in /usr/local/lib/python3.12/site-packages (from httpcore==1.*->httpx>=0.27.0->-r requirements.txt (line 3)) (0.16.0)
+ai-supermarket-worker  | Requirement already satisfied: crcmod>=1.7 in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (1.7)
+ai-supermarket-worker  | Requirement already satisfied: pycryptodome>=3.4.7 in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (3.23.0)
+ai-supermarket-worker  | Requirement already satisfied: aliyun-python-sdk-kms>=2.4.1 in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (2.16.5)
+ai-supermarket-worker  | Requirement already satisfied: aliyun-python-sdk-core>=2.13.12 in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (2.16.0)
+ai-supermarket-worker  | Requirement already satisfied: six in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (1.17.0)
+ai-supermarket-worker  | Requirement already satisfied: jmespath<1.0.0,>=0.9.3 in /usr/local/lib/python3.12/site-packages (from aliyun-python-sdk-core>=2.13.12->oss2>=2.18.0->-r requirements.txt (line 8)) (0.10.0)
+ai-supermarket-worker  | Requirement already satisfied: cryptography>=3.0.0 in /usr/local/lib/python3.12/site-packages (from aliyun-python-sdk-core>=2.13.12->oss2>=2.18.0->-r requirements.txt (line 8)) (49.0.0)
+ai-supermarket-worker  | Requirement already satisfied: annotated-types>=0.6.0 in /usr/local/lib/python3.12/site-packages (from pydantic<3,>=1.9.0->openai>=1.40.0->-r requirements.txt (line 2)) (0.7.0)
+ai-supermarket-worker  | Requirement already satisfied: pydantic-core==2.46.4 in /usr/local/lib/python3.12/site-packages (from pydantic<3,>=1.9.0->openai>=1.40.0->-r requirements.txt (line 2)) (2.46.4)
+ai-supermarket-worker  | Requirement already satisfied: typing-inspection>=0.4.2 in /usr/local/lib/python3.12/site-packages (from pydantic<3,>=1.9.0->openai>=1.40.0->-r requirements.txt (line 2)) (0.4.2)
+ai-supermarket-worker  | Requirement already satisfied: cffi>=2.0.0 in /usr/local/lib/python3.12/site-packages (from cryptography>=3.0.0->aliyun-python-sdk-core>=2.13.12->oss2>=2.18.0->-r requirements.txt (line 8)) (2.0.0)
+ai-supermarket-worker  | Requirement already satisfied: pycparser in /usr/local/lib/python3.12/site-packages (from cffi>=2.0.0->cryptography>=3.0.0->aliyun-python-sdk-core>=2.13.12->oss2>=2.18.0->-r requirements.txt (line 8)) (3.0)
+ai-supermarket-worker  | WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+ai-supermarket-worker  | 
+ai-supermarket-worker  | [notice] A new release of pip is available: 25.0.1 -> 26.1.2
+ai-supermarket-worker  | [notice] To update, run: pip install --upgrade pip
+ai-supermarket-worker  | 2026-06-26 15:13:36,787 INFO [pika.adapters.utils.connection_workflow] Pika version 1.4.1 connecting to ('172.18.0.5', 5672)
+ai-supermarket-worker  | 2026-06-26 15:13:36,787 INFO [pika.adapters.utils.io_services_utils] Socket connected: <socket.socket fd=6, family=2, type=1, proto=6, laddr=('172.18.0.10', 47736), raddr=('172.18.0.5', 5672)>
+ai-supermarket-worker  | 2026-06-26 15:13:36,788 INFO [pika.adapters.utils.connection_workflow] Streaming transport linked up: (<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x7b49a6a47aa0>, _StreamingProtocolShim: <SelectConnection PROTOCOL transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x7b49a6a47aa0> params=<ConnectionParameters host=rabbitmq port=5672 virtual_host=/ ssl=False>>).
+ai-supermarket-worker  | 2026-06-26 15:13:36,792 INFO [pika.adapters.utils.connection_workflow] AMQPConnector - reporting success: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x7b49a6a47aa0> params=<ConnectionParameters host=rabbitmq port=5672 virtual_host=/ ssl=False>>
+ai-supermarket-worker  | 2026-06-26 15:13:36,793 INFO [pika.adapters.utils.connection_workflow] AMQPConnectionWorkflow - reporting success: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x7b49a6a47aa0> params=<ConnectionParameters host=rabbitmq port=5672 virtual_host=/ ssl=False>>
+ai-supermarket-worker  | 2026-06-26 15:13:36,793 INFO [pika.adapters.blocking_connection] Connection workflow succeeded: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x7b49a6a47aa0> params=<ConnectionParameters host=rabbitmq port=5672 virtual_host=/ ssl=False>>
+ai-supermarket-worker  | 2026-06-26 15:13:36,793 INFO [pika.adapters.blocking_connection] Created channel=1
+ai-supermarket-worker  | 2026-06-26 15:13:36,876 INFO [task_queue.rabbitmq_consumer] rabbitmq topology declared: exchange=ai.task.exchange queue=ai.tool.normal
+ai-supermarket-worker  | 2026-06-26 15:13:36,878 INFO [task_queue.rabbitmq_consumer] worker is listening rabbitmq queue=ai.tool.normal basic_qos prefetch_count=5 concurrency=5
+ai-supermarket-worker  | Looking in indexes: https://mirrors.aliyun.com/pypi/simple/
+ai-supermarket-worker  | Requirement already satisfied: requests>=2.32.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 1)) (2.34.2)
+ai-supermarket-worker  | Requirement already satisfied: openai>=1.40.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 2)) (2.43.0)
+ai-supermarket-worker  | Requirement already satisfied: httpx>=0.27.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 3)) (0.28.1)
+ai-supermarket-worker  | Requirement already satisfied: redis>=5.0.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 4)) (8.0.0)
+ai-supermarket-worker  | Requirement already satisfied: python-dotenv>=1.0.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 5)) (1.2.2)
+ai-supermarket-worker  | Requirement already satisfied: imageio-ffmpeg>=0.5.1 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 6)) (0.6.0)
+ai-supermarket-worker  | Requirement already satisfied: pika>=1.3.2 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 7)) (1.4.1)
+ai-supermarket-worker  | Requirement already satisfied: oss2>=2.18.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 8)) (2.19.1)
+ai-supermarket-worker  | Requirement already satisfied: charset_normalizer<4,>=2 in /usr/local/lib/python3.12/site-packages (from requests>=2.32.0->-r requirements.txt (line 1)) (3.4.7)
+ai-supermarket-worker  | Requirement already satisfied: idna<4,>=2.5 in /usr/local/lib/python3.12/site-packages (from requests>=2.32.0->-r requirements.txt (line 1)) (3.18)
+ai-supermarket-worker  | Requirement already satisfied: urllib3<3,>=1.26 in /usr/local/lib/python3.12/site-packages (from requests>=2.32.0->-r requirements.txt (line 1)) (2.7.0)
+ai-supermarket-worker  | Requirement already satisfied: certifi>=2023.5.7 in /usr/local/lib/python3.12/site-packages (from requests>=2.32.0->-r requirements.txt (line 1)) (2026.6.17)
+ai-supermarket-worker  | Requirement already satisfied: anyio<5,>=3.5.0 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (4.14.0)
+ai-supermarket-worker  | Requirement already satisfied: distro<2,>=1.7.0 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (1.9.0)
+ai-supermarket-worker  | Requirement already satisfied: jiter<1,>=0.10.0 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (0.15.0)
+ai-supermarket-worker  | Requirement already satisfied: pydantic<3,>=1.9.0 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (2.13.4)
+ai-supermarket-worker  | Requirement already satisfied: sniffio in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (1.3.1)
+ai-supermarket-worker  | Requirement already satisfied: tqdm>4 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (4.68.3)
+ai-supermarket-worker  | Requirement already satisfied: typing-extensions<5,>=4.11 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (4.15.0)
+ai-supermarket-worker  | Requirement already satisfied: httpcore==1.* in /usr/local/lib/python3.12/site-packages (from httpx>=0.27.0->-r requirements.txt (line 3)) (1.0.9)
+ai-supermarket-worker  | Requirement already satisfied: h11>=0.16 in /usr/local/lib/python3.12/site-packages (from httpcore==1.*->httpx>=0.27.0->-r requirements.txt (line 3)) (0.16.0)
+ai-supermarket-worker  | Requirement already satisfied: crcmod>=1.7 in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (1.7)
+ai-supermarket-worker  | Requirement already satisfied: pycryptodome>=3.4.7 in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (3.23.0)
+ai-supermarket-worker  | Requirement already satisfied: aliyun-python-sdk-kms>=2.4.1 in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (2.16.5)
+ai-supermarket-worker  | Requirement already satisfied: aliyun-python-sdk-core>=2.13.12 in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (2.16.0)
+ai-supermarket-worker  | Requirement already satisfied: six in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (1.17.0)
+ai-supermarket-worker  | Requirement already satisfied: jmespath<1.0.0,>=0.9.3 in /usr/local/lib/python3.12/site-packages (from aliyun-python-sdk-core>=2.13.12->oss2>=2.18.0->-r requirements.txt (line 8)) (0.10.0)
+ai-supermarket-worker  | Requirement already satisfied: cryptography>=3.0.0 in /usr/local/lib/python3.12/site-packages (from aliyun-python-sdk-core>=2.13.12->oss2>=2.18.0->-r requirements.txt (line 8)) (49.0.0)
+ai-supermarket-worker  | Requirement already satisfied: annotated-types>=0.6.0 in /usr/local/lib/python3.12/site-packages (from pydantic<3,>=1.9.0->openai>=1.40.0->-r requirements.txt (line 2)) (0.7.0)
+ai-supermarket-worker  | Requirement already satisfied: pydantic-core==2.46.4 in /usr/local/lib/python3.12/site-packages (from pydantic<3,>=1.9.0->openai>=1.40.0->-r requirements.txt (line 2)) (2.46.4)
+ai-supermarket-worker  | Requirement already satisfied: typing-inspection>=0.4.2 in /usr/local/lib/python3.12/site-packages (from pydantic<3,>=1.9.0->openai>=1.40.0->-r requirements.txt (line 2)) (0.4.2)
+ai-supermarket-worker  | Requirement already satisfied: cffi>=2.0.0 in /usr/local/lib/python3.12/site-packages (from cryptography>=3.0.0->aliyun-python-sdk-core>=2.13.12->oss2>=2.18.0->-r requirements.txt (line 8)) (2.0.0)
+ai-supermarket-worker  | Requirement already satisfied: pycparser in /usr/local/lib/python3.12/site-packages (from cffi>=2.0.0->cryptography>=3.0.0->aliyun-python-sdk-core>=2.13.12->oss2>=2.18.0->-r requirements.txt (line 8)) (3.0)
+ai-supermarket-worker  | WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+ai-supermarket-worker  | Could not fetch URL https://mirrors.aliyun.com/pypi/simple/pip/: There was a problem confirming the ssl certificate: HTTPSConnectionPool(host='mirrors.aliyun.com', port=443): Max retries exceeded with url: /pypi/simple/pip/ (Caused by SSLError(SSLEOFError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1010)'))) - skipping
+ai-supermarket-worker  | 2026-06-29 09:46:24,246 INFO [pika.adapters.utils.connection_workflow] Pika version 1.4.1 connecting to ('172.18.0.9', 5672)
+ai-supermarket-worker  | 2026-06-29 09:46:24,247 ERROR [pika.adapters.utils.io_services_utils] Socket failed to connect: <socket.socket fd=6, family=2, type=1, proto=6, laddr=('172.18.0.7', 38340)>; error=111 (Connection refused)
+ai-supermarket-worker  | 2026-06-29 09:46:24,247 ERROR [pika.adapters.utils.connection_workflow] TCP Connection attempt failed: ConnectionRefusedError(111, 'Connection refused'); dest=(<AddressFamily.AF_INET: 2>, <SocketKind.SOCK_STREAM: 1>, 6, '', ('172.18.0.9', 5672))
+ai-supermarket-worker  | 2026-06-29 09:46:24,247 ERROR [pika.adapters.utils.connection_workflow] AMQPConnector - reporting failure: AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused')
+ai-supermarket-worker  | 2026-06-29 09:46:24,248 ERROR [pika.adapters.utils.connection_workflow] AMQP connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None.
+ai-supermarket-worker  | 2026-06-29 09:46:24,248 ERROR [pika.adapters.utils.connection_workflow] AMQPConnectionWorkflow - reporting failure: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:46:24,248 ERROR [pika.adapters.blocking_connection] Connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:46:24,248 ERROR [pika.adapters.blocking_connection] Error in _create_connection().
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:46:24,250 ERROR [task_queue.rabbitmq_consumer] rabbitmq connection/consume failed, retrying in 1s
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/app/task_queue/rabbitmq_consumer.py", line 44, in start
+ai-supermarket-worker  |     connection = pika.BlockingConnection(parameters)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 381, in __init__
+ai-supermarket-worker  |     self._impl = self._create_connection(parameters, _impl_class)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:46:25,352 INFO [pika.adapters.utils.connection_workflow] Pika version 1.4.1 connecting to ('172.18.0.9', 5672)
+ai-supermarket-worker  | 2026-06-29 09:46:25,353 ERROR [pika.adapters.utils.io_services_utils] Socket failed to connect: <socket.socket fd=6, family=2, type=1, proto=6, laddr=('172.18.0.7', 38342)>; error=111 (Connection refused)
+ai-supermarket-worker  | 2026-06-29 09:46:25,353 ERROR [pika.adapters.utils.connection_workflow] TCP Connection attempt failed: ConnectionRefusedError(111, 'Connection refused'); dest=(<AddressFamily.AF_INET: 2>, <SocketKind.SOCK_STREAM: 1>, 6, '', ('172.18.0.9', 5672))
+ai-supermarket-worker  | 2026-06-29 09:46:25,353 ERROR [pika.adapters.utils.connection_workflow] AMQPConnector - reporting failure: AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused')
+ai-supermarket-worker  | 2026-06-29 09:46:25,353 ERROR [pika.adapters.utils.connection_workflow] AMQP connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None.
+ai-supermarket-worker  | 2026-06-29 09:46:25,353 ERROR [pika.adapters.utils.connection_workflow] AMQPConnectionWorkflow - reporting failure: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:46:25,353 ERROR [pika.adapters.blocking_connection] Connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:46:25,353 ERROR [pika.adapters.blocking_connection] Error in _create_connection().
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:46:25,354 ERROR [task_queue.rabbitmq_consumer] rabbitmq connection/consume failed, retrying in 2s
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/app/task_queue/rabbitmq_consumer.py", line 44, in start
+ai-supermarket-worker  |     connection = pika.BlockingConnection(parameters)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 381, in __init__
+ai-supermarket-worker  |     self._impl = self._create_connection(parameters, _impl_class)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:46:27,365 INFO [pika.adapters.utils.connection_workflow] Pika version 1.4.1 connecting to ('172.18.0.9', 5672)
+ai-supermarket-worker  | 2026-06-29 09:46:27,366 ERROR [pika.adapters.utils.io_services_utils] Socket failed to connect: <socket.socket fd=6, family=2, type=1, proto=6, laddr=('172.18.0.7', 33740)>; error=111 (Connection refused)
+ai-supermarket-worker  | 2026-06-29 09:46:27,367 ERROR [pika.adapters.utils.connection_workflow] TCP Connection attempt failed: ConnectionRefusedError(111, 'Connection refused'); dest=(<AddressFamily.AF_INET: 2>, <SocketKind.SOCK_STREAM: 1>, 6, '', ('172.18.0.9', 5672))
+ai-supermarket-worker  | 2026-06-29 09:46:27,367 ERROR [pika.adapters.utils.connection_workflow] AMQPConnector - reporting failure: AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused')
+ai-supermarket-worker  | 2026-06-29 09:46:27,367 ERROR [pika.adapters.utils.connection_workflow] AMQP connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None.
+ai-supermarket-worker  | 2026-06-29 09:46:27,367 ERROR [pika.adapters.utils.connection_workflow] AMQPConnectionWorkflow - reporting failure: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:46:27,367 ERROR [pika.adapters.blocking_connection] Connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:46:27,367 ERROR [pika.adapters.blocking_connection] Error in _create_connection().
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:46:27,368 ERROR [task_queue.rabbitmq_consumer] rabbitmq connection/consume failed, retrying in 4s
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/app/task_queue/rabbitmq_consumer.py", line 44, in start
+ai-supermarket-worker  |     connection = pika.BlockingConnection(parameters)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 381, in __init__
+ai-supermarket-worker  |     self._impl = self._create_connection(parameters, _impl_class)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:46:31,405 INFO [pika.adapters.utils.connection_workflow] Pika version 1.4.1 connecting to ('172.18.0.9', 5672)
+ai-supermarket-worker  | 2026-06-29 09:46:31,405 ERROR [pika.adapters.utils.io_services_utils] Socket failed to connect: <socket.socket fd=6, family=2, type=1, proto=6, laddr=('172.18.0.7', 33742)>; error=111 (Connection refused)
+ai-supermarket-worker  | 2026-06-29 09:46:31,405 ERROR [pika.adapters.utils.connection_workflow] TCP Connection attempt failed: ConnectionRefusedError(111, 'Connection refused'); dest=(<AddressFamily.AF_INET: 2>, <SocketKind.SOCK_STREAM: 1>, 6, '', ('172.18.0.9', 5672))
+ai-supermarket-worker  | 2026-06-29 09:46:31,405 ERROR [pika.adapters.utils.connection_workflow] AMQPConnector - reporting failure: AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused')
+ai-supermarket-worker  | 2026-06-29 09:46:31,405 ERROR [pika.adapters.utils.connection_workflow] AMQP connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None.
+ai-supermarket-worker  | 2026-06-29 09:46:31,405 ERROR [pika.adapters.utils.connection_workflow] AMQPConnectionWorkflow - reporting failure: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:46:31,405 ERROR [pika.adapters.blocking_connection] Connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:46:31,405 ERROR [pika.adapters.blocking_connection] Error in _create_connection().
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:46:31,406 ERROR [task_queue.rabbitmq_consumer] rabbitmq connection/consume failed, retrying in 8s
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/app/task_queue/rabbitmq_consumer.py", line 44, in start
+ai-supermarket-worker  |     connection = pika.BlockingConnection(parameters)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 381, in __init__
+ai-supermarket-worker  |     self._impl = self._create_connection(parameters, _impl_class)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:46:39,483 INFO [pika.adapters.utils.connection_workflow] Pika version 1.4.1 connecting to ('172.18.0.9', 5672)
+ai-supermarket-worker  | 2026-06-29 09:46:39,484 ERROR [pika.adapters.utils.io_services_utils] Socket failed to connect: <socket.socket fd=6, family=2, type=1, proto=6, laddr=('172.18.0.7', 56620)>; error=111 (Connection refused)
+ai-supermarket-worker  | 2026-06-29 09:46:39,484 ERROR [pika.adapters.utils.connection_workflow] TCP Connection attempt failed: ConnectionRefusedError(111, 'Connection refused'); dest=(<AddressFamily.AF_INET: 2>, <SocketKind.SOCK_STREAM: 1>, 6, '', ('172.18.0.9', 5672))
+ai-supermarket-worker  | 2026-06-29 09:46:39,484 ERROR [pika.adapters.utils.connection_workflow] AMQPConnector - reporting failure: AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused')
+ai-supermarket-worker  | 2026-06-29 09:46:39,484 ERROR [pika.adapters.utils.connection_workflow] AMQP connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None.
+ai-supermarket-worker  | 2026-06-29 09:46:39,484 ERROR [pika.adapters.utils.connection_workflow] AMQPConnectionWorkflow - reporting failure: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:46:39,484 ERROR [pika.adapters.blocking_connection] Connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:46:39,484 ERROR [pika.adapters.blocking_connection] Error in _create_connection().
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:46:39,485 ERROR [task_queue.rabbitmq_consumer] rabbitmq connection/consume failed, retrying in 16s
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/app/task_queue/rabbitmq_consumer.py", line 44, in start
+ai-supermarket-worker  |     connection = pika.BlockingConnection(parameters)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 381, in __init__
+ai-supermarket-worker  |     self._impl = self._create_connection(parameters, _impl_class)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:46:55,500 INFO [pika.adapters.utils.connection_workflow] Pika version 1.4.1 connecting to ('172.18.0.9', 5672)
+ai-supermarket-worker  | 2026-06-29 09:46:55,500 INFO [pika.adapters.utils.io_services_utils] Socket connected: <socket.socket fd=6, family=2, type=1, proto=6, laddr=('172.18.0.7', 40166), raddr=('172.18.0.9', 5672)>
+ai-supermarket-worker  | 2026-06-29 09:46:55,501 INFO [pika.adapters.utils.connection_workflow] Streaming transport linked up: (<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x7d0d6e6e5b20>, _StreamingProtocolShim: <SelectConnection PROTOCOL transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x7d0d6e6e5b20> params=<ConnectionParameters host=rabbitmq port=5672 virtual_host=/ ssl=False>>).
+ai-supermarket-worker  | 2026-06-29 09:46:55,504 INFO [pika.adapters.utils.connection_workflow] AMQPConnector - reporting success: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x7d0d6e6e5b20> params=<ConnectionParameters host=rabbitmq port=5672 virtual_host=/ ssl=False>>
+ai-supermarket-worker  | 2026-06-29 09:46:55,506 INFO [pika.adapters.utils.connection_workflow] AMQPConnectionWorkflow - reporting success: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x7d0d6e6e5b20> params=<ConnectionParameters host=rabbitmq port=5672 virtual_host=/ ssl=False>>
+ai-supermarket-worker  | 2026-06-29 09:46:55,507 INFO [pika.adapters.blocking_connection] Connection workflow succeeded: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x7d0d6e6e5b20> params=<ConnectionParameters host=rabbitmq port=5672 virtual_host=/ ssl=False>>
+ai-supermarket-worker  | 2026-06-29 09:46:55,507 INFO [pika.adapters.blocking_connection] Created channel=1
+ai-supermarket-worker  | 2026-06-29 09:46:55,516 INFO [task_queue.rabbitmq_consumer] rabbitmq topology declared: exchange=ai.task.exchange queue=ai.tool.normal
+ai-supermarket-worker  | 2026-06-29 09:46:55,516 INFO [task_queue.rabbitmq_consumer] worker is listening rabbitmq queue=ai.tool.normal basic_qos prefetch_count=5 concurrency=5
+ai-supermarket-worker  | Looking in indexes: https://mirrors.aliyun.com/pypi/simple/
+ai-supermarket-worker  | Requirement already satisfied: requests>=2.32.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 1)) (2.34.2)
+ai-supermarket-worker  | Requirement already satisfied: openai>=1.40.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 2)) (2.43.0)
+ai-supermarket-worker  | Requirement already satisfied: httpx>=0.27.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 3)) (0.28.1)
+ai-supermarket-worker  | Requirement already satisfied: redis>=5.0.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 4)) (8.0.0)
+ai-supermarket-worker  | Requirement already satisfied: python-dotenv>=1.0.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 5)) (1.2.2)
+ai-supermarket-worker  | Requirement already satisfied: imageio-ffmpeg>=0.5.1 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 6)) (0.6.0)
+ai-supermarket-worker  | Requirement already satisfied: pika>=1.3.2 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 7)) (1.4.1)
+ai-supermarket-worker  | Requirement already satisfied: oss2>=2.18.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 8)) (2.19.1)
+ai-supermarket-worker  | Requirement already satisfied: charset_normalizer<4,>=2 in /usr/local/lib/python3.12/site-packages (from requests>=2.32.0->-r requirements.txt (line 1)) (3.4.7)
+ai-supermarket-worker  | Requirement already satisfied: idna<4,>=2.5 in /usr/local/lib/python3.12/site-packages (from requests>=2.32.0->-r requirements.txt (line 1)) (3.18)
+ai-supermarket-worker  | Requirement already satisfied: urllib3<3,>=1.26 in /usr/local/lib/python3.12/site-packages (from requests>=2.32.0->-r requirements.txt (line 1)) (2.7.0)
+ai-supermarket-worker  | Requirement already satisfied: certifi>=2023.5.7 in /usr/local/lib/python3.12/site-packages (from requests>=2.32.0->-r requirements.txt (line 1)) (2026.6.17)
+ai-supermarket-worker  | Requirement already satisfied: anyio<5,>=3.5.0 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (4.14.0)
+ai-supermarket-worker  | Requirement already satisfied: distro<2,>=1.7.0 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (1.9.0)
+ai-supermarket-worker  | Requirement already satisfied: jiter<1,>=0.10.0 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (0.15.0)
+ai-supermarket-worker  | Requirement already satisfied: pydantic<3,>=1.9.0 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (2.13.4)
+ai-supermarket-worker  | Requirement already satisfied: sniffio in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (1.3.1)
+ai-supermarket-worker  | Requirement already satisfied: tqdm>4 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (4.68.3)
+ai-supermarket-worker  | Requirement already satisfied: typing-extensions<5,>=4.11 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (4.15.0)
+ai-supermarket-worker  | Requirement already satisfied: httpcore==1.* in /usr/local/lib/python3.12/site-packages (from httpx>=0.27.0->-r requirements.txt (line 3)) (1.0.9)
+ai-supermarket-worker  | Requirement already satisfied: h11>=0.16 in /usr/local/lib/python3.12/site-packages (from httpcore==1.*->httpx>=0.27.0->-r requirements.txt (line 3)) (0.16.0)
+ai-supermarket-worker  | Requirement already satisfied: crcmod>=1.7 in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (1.7)
+ai-supermarket-worker  | Requirement already satisfied: pycryptodome>=3.4.7 in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (3.23.0)
+ai-supermarket-worker  | Requirement already satisfied: aliyun-python-sdk-kms>=2.4.1 in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (2.16.5)
+ai-supermarket-worker  | Requirement already satisfied: aliyun-python-sdk-core>=2.13.12 in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (2.16.0)
+ai-supermarket-worker  | Requirement already satisfied: six in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (1.17.0)
+ai-supermarket-worker  | Requirement already satisfied: jmespath<1.0.0,>=0.9.3 in /usr/local/lib/python3.12/site-packages (from aliyun-python-sdk-core>=2.13.12->oss2>=2.18.0->-r requirements.txt (line 8)) (0.10.0)
+ai-supermarket-worker  | Requirement already satisfied: cryptography>=3.0.0 in /usr/local/lib/python3.12/site-packages (from aliyun-python-sdk-core>=2.13.12->oss2>=2.18.0->-r requirements.txt (line 8)) (49.0.0)
+ai-supermarket-worker  | Requirement already satisfied: annotated-types>=0.6.0 in /usr/local/lib/python3.12/site-packages (from pydantic<3,>=1.9.0->openai>=1.40.0->-r requirements.txt (line 2)) (0.7.0)
+ai-supermarket-worker  | Requirement already satisfied: pydantic-core==2.46.4 in /usr/local/lib/python3.12/site-packages (from pydantic<3,>=1.9.0->openai>=1.40.0->-r requirements.txt (line 2)) (2.46.4)
+ai-supermarket-worker  | Requirement already satisfied: typing-inspection>=0.4.2 in /usr/local/lib/python3.12/site-packages (from pydantic<3,>=1.9.0->openai>=1.40.0->-r requirements.txt (line 2)) (0.4.2)
+ai-supermarket-worker  | Requirement already satisfied: cffi>=2.0.0 in /usr/local/lib/python3.12/site-packages (from cryptography>=3.0.0->aliyun-python-sdk-core>=2.13.12->oss2>=2.18.0->-r requirements.txt (line 8)) (2.0.0)
+ai-supermarket-worker  | Requirement already satisfied: pycparser in /usr/local/lib/python3.12/site-packages (from cffi>=2.0.0->cryptography>=3.0.0->aliyun-python-sdk-core>=2.13.12->oss2>=2.18.0->-r requirements.txt (line 8)) (3.0)
+ai-supermarket-worker  | WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+ai-supermarket-worker  | 
+ai-supermarket-worker  | [notice] A new release of pip is available: 25.0.1 -> 26.1.2
+ai-supermarket-worker  | [notice] To update, run: pip install --upgrade pip
+ai-supermarket-worker  | 2026-06-29 09:57:01,199 INFO [pika.adapters.utils.connection_workflow] Pika version 1.4.1 connecting to ('172.18.0.5', 5672)
+ai-supermarket-worker  | 2026-06-29 09:57:01,200 ERROR [pika.adapters.utils.io_services_utils] Socket failed to connect: <socket.socket fd=6, family=2, type=1, proto=6, laddr=('172.18.0.4', 60366)>; error=111 (Connection refused)
+ai-supermarket-worker  | 2026-06-29 09:57:01,200 ERROR [pika.adapters.utils.connection_workflow] TCP Connection attempt failed: ConnectionRefusedError(111, 'Connection refused'); dest=(<AddressFamily.AF_INET: 2>, <SocketKind.SOCK_STREAM: 1>, 6, '', ('172.18.0.5', 5672))
+ai-supermarket-worker  | 2026-06-29 09:57:01,200 ERROR [pika.adapters.utils.connection_workflow] AMQPConnector - reporting failure: AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused')
+ai-supermarket-worker  | 2026-06-29 09:57:01,200 ERROR [pika.adapters.utils.connection_workflow] AMQP connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None.
+ai-supermarket-worker  | 2026-06-29 09:57:01,201 ERROR [pika.adapters.utils.connection_workflow] AMQPConnectionWorkflow - reporting failure: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:57:01,201 ERROR [pika.adapters.blocking_connection] Connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:57:01,201 ERROR [pika.adapters.blocking_connection] Error in _create_connection().
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:57:01,203 ERROR [task_queue.rabbitmq_consumer] rabbitmq connection/consume failed, retrying in 1s
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/app/task_queue/rabbitmq_consumer.py", line 44, in start
+ai-supermarket-worker  |     connection = pika.BlockingConnection(parameters)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 381, in __init__
+ai-supermarket-worker  |     self._impl = self._create_connection(parameters, _impl_class)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:57:02,229 INFO [pika.adapters.utils.connection_workflow] Pika version 1.4.1 connecting to ('172.18.0.5', 5672)
+ai-supermarket-worker  | 2026-06-29 09:57:02,229 ERROR [pika.adapters.utils.io_services_utils] Socket failed to connect: <socket.socket fd=6, family=2, type=1, proto=6, laddr=('172.18.0.4', 60382)>; error=111 (Connection refused)
+ai-supermarket-worker  | 2026-06-29 09:57:02,229 ERROR [pika.adapters.utils.connection_workflow] TCP Connection attempt failed: ConnectionRefusedError(111, 'Connection refused'); dest=(<AddressFamily.AF_INET: 2>, <SocketKind.SOCK_STREAM: 1>, 6, '', ('172.18.0.5', 5672))
+ai-supermarket-worker  | 2026-06-29 09:57:02,230 ERROR [pika.adapters.utils.connection_workflow] AMQPConnector - reporting failure: AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused')
+ai-supermarket-worker  | 2026-06-29 09:57:02,230 ERROR [pika.adapters.utils.connection_workflow] AMQP connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None.
+ai-supermarket-worker  | 2026-06-29 09:57:02,230 ERROR [pika.adapters.utils.connection_workflow] AMQPConnectionWorkflow - reporting failure: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:57:02,230 ERROR [pika.adapters.blocking_connection] Connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:57:02,230 ERROR [pika.adapters.blocking_connection] Error in _create_connection().
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:57:02,230 ERROR [task_queue.rabbitmq_consumer] rabbitmq connection/consume failed, retrying in 2s
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/app/task_queue/rabbitmq_consumer.py", line 44, in start
+ai-supermarket-worker  |     connection = pika.BlockingConnection(parameters)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 381, in __init__
+ai-supermarket-worker  |     self._impl = self._create_connection(parameters, _impl_class)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:57:04,239 INFO [pika.adapters.utils.connection_workflow] Pika version 1.4.1 connecting to ('172.18.0.5', 5672)
+ai-supermarket-worker  | 2026-06-29 09:57:04,240 ERROR [pika.adapters.utils.io_services_utils] Socket failed to connect: <socket.socket fd=6, family=2, type=1, proto=6, laddr=('172.18.0.4', 60396)>; error=111 (Connection refused)
+ai-supermarket-worker  | 2026-06-29 09:57:04,240 ERROR [pika.adapters.utils.connection_workflow] TCP Connection attempt failed: ConnectionRefusedError(111, 'Connection refused'); dest=(<AddressFamily.AF_INET: 2>, <SocketKind.SOCK_STREAM: 1>, 6, '', ('172.18.0.5', 5672))
+ai-supermarket-worker  | 2026-06-29 09:57:04,240 ERROR [pika.adapters.utils.connection_workflow] AMQPConnector - reporting failure: AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused')
+ai-supermarket-worker  | 2026-06-29 09:57:04,240 ERROR [pika.adapters.utils.connection_workflow] AMQP connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None.
+ai-supermarket-worker  | 2026-06-29 09:57:04,240 ERROR [pika.adapters.utils.connection_workflow] AMQPConnectionWorkflow - reporting failure: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:57:04,240 ERROR [pika.adapters.blocking_connection] Connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:57:04,240 ERROR [pika.adapters.blocking_connection] Error in _create_connection().
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:57:04,240 ERROR [task_queue.rabbitmq_consumer] rabbitmq connection/consume failed, retrying in 4s
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/app/task_queue/rabbitmq_consumer.py", line 44, in start
+ai-supermarket-worker  |     connection = pika.BlockingConnection(parameters)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 381, in __init__
+ai-supermarket-worker  |     self._impl = self._create_connection(parameters, _impl_class)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:57:08,247 INFO [pika.adapters.utils.connection_workflow] Pika version 1.4.1 connecting to ('172.18.0.5', 5672)
+ai-supermarket-worker  | 2026-06-29 09:57:08,247 ERROR [pika.adapters.utils.io_services_utils] Socket failed to connect: <socket.socket fd=6, family=2, type=1, proto=6, laddr=('172.18.0.4', 35988)>; error=111 (Connection refused)
+ai-supermarket-worker  | 2026-06-29 09:57:08,247 ERROR [pika.adapters.utils.connection_workflow] TCP Connection attempt failed: ConnectionRefusedError(111, 'Connection refused'); dest=(<AddressFamily.AF_INET: 2>, <SocketKind.SOCK_STREAM: 1>, 6, '', ('172.18.0.5', 5672))
+ai-supermarket-worker  | 2026-06-29 09:57:08,247 ERROR [pika.adapters.utils.connection_workflow] AMQPConnector - reporting failure: AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused')
+ai-supermarket-worker  | 2026-06-29 09:57:08,247 ERROR [pika.adapters.utils.connection_workflow] AMQP connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None.
+ai-supermarket-worker  | 2026-06-29 09:57:08,247 ERROR [pika.adapters.utils.connection_workflow] AMQPConnectionWorkflow - reporting failure: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:57:08,247 ERROR [pika.adapters.blocking_connection] Connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:57:08,247 ERROR [pika.adapters.blocking_connection] Error in _create_connection().
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:57:08,248 ERROR [task_queue.rabbitmq_consumer] rabbitmq connection/consume failed, retrying in 8s
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/app/task_queue/rabbitmq_consumer.py", line 44, in start
+ai-supermarket-worker  |     connection = pika.BlockingConnection(parameters)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 381, in __init__
+ai-supermarket-worker  |     self._impl = self._create_connection(parameters, _impl_class)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:57:16,251 INFO [pika.adapters.utils.connection_workflow] Pika version 1.4.1 connecting to ('172.18.0.5', 5672)
+ai-supermarket-worker  | 2026-06-29 09:57:16,252 ERROR [pika.adapters.utils.io_services_utils] Socket failed to connect: <socket.socket fd=6, family=2, type=1, proto=6, laddr=('172.18.0.4', 39616)>; error=111 (Connection refused)
+ai-supermarket-worker  | 2026-06-29 09:57:16,252 ERROR [pika.adapters.utils.connection_workflow] TCP Connection attempt failed: ConnectionRefusedError(111, 'Connection refused'); dest=(<AddressFamily.AF_INET: 2>, <SocketKind.SOCK_STREAM: 1>, 6, '', ('172.18.0.5', 5672))
+ai-supermarket-worker  | 2026-06-29 09:57:16,252 ERROR [pika.adapters.utils.connection_workflow] AMQPConnector - reporting failure: AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused')
+ai-supermarket-worker  | 2026-06-29 09:57:16,252 ERROR [pika.adapters.utils.connection_workflow] AMQP connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None.
+ai-supermarket-worker  | 2026-06-29 09:57:16,252 ERROR [pika.adapters.utils.connection_workflow] AMQPConnectionWorkflow - reporting failure: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:57:16,252 ERROR [pika.adapters.blocking_connection] Connection workflow failed: AMQPConnectionWorkflowFailed: 1 exceptions in all; last exception - AMQPConnectorSocketConnectError: ConnectionRefusedError(111, 'Connection refused'); first exception - None
+ai-supermarket-worker  | 2026-06-29 09:57:16,252 ERROR [pika.adapters.blocking_connection] Error in _create_connection().
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:57:16,253 ERROR [task_queue.rabbitmq_consumer] rabbitmq connection/consume failed, retrying in 16s
+ai-supermarket-worker  | Traceback (most recent call last):
+ai-supermarket-worker  |   File "/app/task_queue/rabbitmq_consumer.py", line 44, in start
+ai-supermarket-worker  |     connection = pika.BlockingConnection(parameters)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 381, in __init__
+ai-supermarket-worker  |     self._impl = self._create_connection(parameters, _impl_class)
+ai-supermarket-worker  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ai-supermarket-worker  |   File "/usr/local/lib/python3.12/site-packages/pika/adapters/blocking_connection.py", line 478, in _create_connection
+ai-supermarket-worker  |     raise self._reap_last_connection_workflow_error(error)
+ai-supermarket-worker  | pika.exceptions.AMQPConnectionError
+ai-supermarket-worker  | 2026-06-29 09:57:32,256 INFO [pika.adapters.utils.connection_workflow] Pika version 1.4.1 connecting to ('172.18.0.5', 5672)
+ai-supermarket-worker  | 2026-06-29 09:57:32,257 INFO [pika.adapters.utils.io_services_utils] Socket connected: <socket.socket fd=6, family=2, type=1, proto=6, laddr=('172.18.0.4', 49732), raddr=('172.18.0.5', 5672)>
+ai-supermarket-worker  | 2026-06-29 09:57:32,257 INFO [pika.adapters.utils.connection_workflow] Streaming transport linked up: (<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x79dd2167be00>, _StreamingProtocolShim: <SelectConnection PROTOCOL transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x79dd2167be00> params=<ConnectionParameters host=rabbitmq port=5672 virtual_host=/ ssl=False>>).
+ai-supermarket-worker  | 2026-06-29 09:57:32,260 INFO [pika.adapters.utils.connection_workflow] AMQPConnector - reporting success: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x79dd2167be00> params=<ConnectionParameters host=rabbitmq port=5672 virtual_host=/ ssl=False>>
+ai-supermarket-worker  | 2026-06-29 09:57:32,262 INFO [pika.adapters.utils.connection_workflow] AMQPConnectionWorkflow - reporting success: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x79dd2167be00> params=<ConnectionParameters host=rabbitmq port=5672 virtual_host=/ ssl=False>>
+ai-supermarket-worker  | 2026-06-29 09:57:32,262 INFO [pika.adapters.blocking_connection] Connection workflow succeeded: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x79dd2167be00> params=<ConnectionParameters host=rabbitmq port=5672 virtual_host=/ ssl=False>>
+ai-supermarket-worker  | 2026-06-29 09:57:32,262 INFO [pika.adapters.blocking_connection] Created channel=1
+ai-supermarket-worker  | 2026-06-29 09:57:32,268 INFO [task_queue.rabbitmq_consumer] rabbitmq topology declared: exchange=ai.task.exchange queue=ai.tool.normal
+ai-supermarket-worker  | 2026-06-29 09:57:32,268 INFO [task_queue.rabbitmq_consumer] worker is listening rabbitmq queue=ai.tool.normal basic_qos prefetch_count=5 concurrency=5
+ai-supermarket-worker  | Looking in indexes: https://mirrors.aliyun.com/pypi/simple/
+ai-supermarket-worker  | Requirement already satisfied: requests>=2.32.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 1)) (2.34.2)
+ai-supermarket-worker  | Requirement already satisfied: openai>=1.40.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 2)) (2.43.0)
+ai-supermarket-worker  | Requirement already satisfied: httpx>=0.27.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 3)) (0.28.1)
+ai-supermarket-worker  | Requirement already satisfied: redis>=5.0.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 4)) (8.0.0)
+ai-supermarket-worker  | Requirement already satisfied: python-dotenv>=1.0.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 5)) (1.2.2)
+ai-supermarket-worker  | Requirement already satisfied: imageio-ffmpeg>=0.5.1 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 6)) (0.6.0)
+ai-supermarket-worker  | Requirement already satisfied: pika>=1.3.2 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 7)) (1.4.1)
+ai-supermarket-worker  | Requirement already satisfied: oss2>=2.18.0 in /usr/local/lib/python3.12/site-packages (from -r requirements.txt (line 8)) (2.19.1)
+ai-supermarket-worker  | Requirement already satisfied: charset_normalizer<4,>=2 in /usr/local/lib/python3.12/site-packages (from requests>=2.32.0->-r requirements.txt (line 1)) (3.4.7)
+ai-supermarket-worker  | Requirement already satisfied: idna<4,>=2.5 in /usr/local/lib/python3.12/site-packages (from requests>=2.32.0->-r requirements.txt (line 1)) (3.18)
+ai-supermarket-worker  | Requirement already satisfied: urllib3<3,>=1.26 in /usr/local/lib/python3.12/site-packages (from requests>=2.32.0->-r requirements.txt (line 1)) (2.7.0)
+ai-supermarket-worker  | Requirement already satisfied: certifi>=2023.5.7 in /usr/local/lib/python3.12/site-packages (from requests>=2.32.0->-r requirements.txt (line 1)) (2026.6.17)
+ai-supermarket-worker  | Requirement already satisfied: anyio<5,>=3.5.0 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (4.14.0)
+ai-supermarket-worker  | Requirement already satisfied: distro<2,>=1.7.0 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (1.9.0)
+ai-supermarket-worker  | Requirement already satisfied: jiter<1,>=0.10.0 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (0.15.0)
+ai-supermarket-worker  | Requirement already satisfied: pydantic<3,>=1.9.0 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (2.13.4)
+ai-supermarket-worker  | Requirement already satisfied: sniffio in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (1.3.1)
+ai-supermarket-worker  | Requirement already satisfied: tqdm>4 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (4.68.3)
+ai-supermarket-worker  | Requirement already satisfied: typing-extensions<5,>=4.11 in /usr/local/lib/python3.12/site-packages (from openai>=1.40.0->-r requirements.txt (line 2)) (4.15.0)
+ai-supermarket-worker  | Requirement already satisfied: httpcore==1.* in /usr/local/lib/python3.12/site-packages (from httpx>=0.27.0->-r requirements.txt (line 3)) (1.0.9)
+ai-supermarket-worker  | Requirement already satisfied: h11>=0.16 in /usr/local/lib/python3.12/site-packages (from httpcore==1.*->httpx>=0.27.0->-r requirements.txt (line 3)) (0.16.0)
+ai-supermarket-worker  | Requirement already satisfied: crcmod>=1.7 in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (1.7)
+ai-supermarket-worker  | Requirement already satisfied: pycryptodome>=3.4.7 in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (3.23.0)
+ai-supermarket-worker  | Requirement already satisfied: aliyun-python-sdk-kms>=2.4.1 in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (2.16.5)
+ai-supermarket-worker  | Requirement already satisfied: aliyun-python-sdk-core>=2.13.12 in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (2.16.0)
+ai-supermarket-worker  | Requirement already satisfied: six in /usr/local/lib/python3.12/site-packages (from oss2>=2.18.0->-r requirements.txt (line 8)) (1.17.0)
+ai-supermarket-worker  | Requirement already satisfied: jmespath<1.0.0,>=0.9.3 in /usr/local/lib/python3.12/site-packages (from aliyun-python-sdk-core>=2.13.12->oss2>=2.18.0->-r requirements.txt (line 8)) (0.10.0)
+ai-supermarket-worker  | Requirement already satisfied: cryptography>=3.0.0 in /usr/local/lib/python3.12/site-packages (from aliyun-python-sdk-core>=2.13.12->oss2>=2.18.0->-r requirements.txt (line 8)) (49.0.0)
+ai-supermarket-worker  | Requirement already satisfied: annotated-types>=0.6.0 in /usr/local/lib/python3.12/site-packages (from pydantic<3,>=1.9.0->openai>=1.40.0->-r requirements.txt (line 2)) (0.7.0)
+ai-supermarket-worker  | Requirement already satisfied: pydantic-core==2.46.4 in /usr/local/lib/python3.12/site-packages (from pydantic<3,>=1.9.0->openai>=1.40.0->-r requirements.txt (line 2)) (2.46.4)
+ai-supermarket-worker  | Requirement already satisfied: typing-inspection>=0.4.2 in /usr/local/lib/python3.12/site-packages (from pydantic<3,>=1.9.0->openai>=1.40.0->-r requirements.txt (line 2)) (0.4.2)
+ai-supermarket-worker  | Requirement already satisfied: cffi>=2.0.0 in /usr/local/lib/python3.12/site-packages (from cryptography>=3.0.0->aliyun-python-sdk-core>=2.13.12->oss2>=2.18.0->-r requirements.txt (line 8)) (2.0.0)
+ai-supermarket-worker  | Requirement already satisfied: pycparser in /usr/local/lib/python3.12/site-packages (from cffi>=2.0.0->cryptography>=3.0.0->aliyun-python-sdk-core>=2.13.12->oss2>=2.18.0->-r requirements.txt (line 8)) (3.0)
+ai-supermarket-worker  | WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+ai-supermarket-worker  | 
+ai-supermarket-worker  | [notice] A new release of pip is available: 25.0.1 -> 26.1.2
+ai-supermarket-worker  | [notice] To update, run: pip install --upgrade pip
+ai-supermarket-worker  | 2026-06-29 11:09:58,475 INFO [pika.adapters.utils.connection_workflow] Pika version 1.4.1 connecting to ('172.18.0.5', 5672)
+ai-supermarket-worker  | 2026-06-29 11:09:58,476 INFO [pika.adapters.utils.io_services_utils] Socket connected: <socket.socket fd=6, family=2, type=1, proto=6, laddr=('172.18.0.9', 40450), raddr=('172.18.0.5', 5672)>
+ai-supermarket-worker  | 2026-06-29 11:09:58,477 INFO [pika.adapters.utils.connection_workflow] Streaming transport linked up: (<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x7b82d5eca000>, _StreamingProtocolShim: <SelectConnection PROTOCOL transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x7b82d5eca000> params=<ConnectionParameters host=rabbitmq port=5672 virtual_host=/ ssl=False>>).
+ai-supermarket-worker  | 2026-06-29 11:09:58,482 INFO [pika.adapters.utils.connection_workflow] AMQPConnector - reporting success: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x7b82d5eca000> params=<ConnectionParameters host=rabbitmq port=5672 virtual_host=/ ssl=False>>
+ai-supermarket-worker  | 2026-06-29 11:09:58,482 INFO [pika.adapters.utils.connection_workflow] AMQPConnectionWorkflow - reporting success: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x7b82d5eca000> params=<ConnectionParameters host=rabbitmq port=5672 virtual_host=/ ssl=False>>
+ai-supermarket-worker  | 2026-06-29 11:09:58,483 INFO [pika.adapters.blocking_connection] Connection workflow succeeded: <SelectConnection OPEN transport=<pika.adapters.utils.io_services_utils._AsyncPlaintextTransport object at 0x7b82d5eca000> params=<ConnectionParameters host=rabbitmq port=5672 virtual_host=/ ssl=False>>
+ai-supermarket-worker  | 2026-06-29 11:09:58,483 INFO [pika.adapters.blocking_connection] Created channel=1
+ai-supermarket-worker  | 2026-06-29 11:09:58,502 INFO [task_queue.rabbitmq_consumer] rabbitmq topology declared: exchange=ai.task.exchange queue=ai.tool.normal
+ai-supermarket-worker  | 2026-06-29 11:09:58,505 INFO [task_queue.rabbitmq_consumer] worker is listening rabbitmq queue=ai.tool.normal basic_qos prefetch_count=5 concurrency=5
