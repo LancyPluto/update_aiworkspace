@@ -43,8 +43,8 @@ class TaskCreditApiTest {
                         .header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.data.balance").value(100))
-                .andExpect(jsonPath("$.data.totalGranted").value(100))
+                .andExpect(jsonPath("$.data.balance").value(200))
+                .andExpect(jsonPath("$.data.totalGranted").value(200))
                 .andExpect(jsonPath("$.data.totalConsumed").value(0));
 
         String taskResponse = mockMvc.perform(post("/api/v1/tasks")
@@ -76,9 +76,9 @@ class TaskCreditApiTest {
         mockMvc.perform(get("/api/v1/credits/account")
                         .header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.balance").value(100))
+                .andExpect(jsonPath("$.data.balance").value(200))
                 .andExpect(jsonPath("$.data.frozen").value(10))
-                .andExpect(jsonPath("$.data.available").value(90))
+                .andExpect(jsonPath("$.data.available").value(190))
                 .andExpect(jsonPath("$.data.totalConsumed").value(0));
 
         mockMvc.perform(get("/api/v1/tasks/{taskId}/status", taskId)
@@ -107,7 +107,7 @@ class TaskCreditApiTest {
     @Test
     void rejectsTaskCreationWhenCreditIsNotEnough() throws Exception {
         String adminToken = login("/api/admin/v1/auth/login", "admin");
-        Long toolId = createTool(adminToken, "expensive_tool", 101);
+        Long toolId = createTool(adminToken, "expensive_tool", 201);
         publishTool(adminToken, toolId);
         String userToken = login("/api/v1/auth/login", "user1");
 
@@ -125,8 +125,8 @@ class TaskCreditApiTest {
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("CREDIT_NOT_ENOUGH"))
-                .andExpect(jsonPath("$.data.availableCredits").value(100))
-                .andExpect(jsonPath("$.data.requiredCredits").value(101))
+                .andExpect(jsonPath("$.data.availableCredits").value(200))
+                .andExpect(jsonPath("$.data.requiredCredits").value(201))
                 .andExpect(jsonPath("$.data.toolCode").value("expensive_tool"));
     }
 

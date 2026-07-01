@@ -24,7 +24,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * Regression around the legacy estimate API. With no margin/rule rows configured the unified
- * pricing engine must reproduce the historical numbers (markup 1.20, no floor, no rules).
+ * pricing engine must reproduce the historical numbers (markup 1.50, no floor, no rules).
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -56,7 +56,7 @@ class TaskCreditEstimateServiceTest {
         modelConfig.setUnitPrice(new BigDecimal("0.03"));
 
         assertThat(taskCreditEstimateService.estimateTaskCredits(tool, modelConfig)).isEqualTo(3);
-        assertThat(taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig)).isEqualTo(4);
+        assertThat(taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig)).isEqualTo(5);
     }
 
     @Test
@@ -84,7 +84,7 @@ class TaskCreditEstimateServiceTest {
                 tool,
                 modelConfig,
                 OBJECT_MAPPER.readTree("{\"duration\":5}")
-        )).isEqualTo(12);
+        )).isEqualTo(15);
     }
 
     @Test
@@ -96,7 +96,7 @@ class TaskCreditEstimateServiceTest {
         modelConfig.setBillingUnit("PER_SECOND");
         modelConfig.setUnitPrice(new BigDecimal("0.02"));
 
-        assertThat(taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig)).isEqualTo(12);
+        assertThat(taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig)).isEqualTo(15);
     }
 
     @Test
@@ -121,7 +121,7 @@ class TaskCreditEstimateServiceTest {
         modelConfig.setOutputTokenPricePer1m(new BigDecimal("30"));
 
         assertThat(taskCreditEstimateService.estimateTaskCredits(tool, modelConfig)).isEqualTo(31);
-        assertThat(taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig)).isEqualTo(38);
+        assertThat(taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig)).isEqualTo(47);
     }
 
     @Test
@@ -137,6 +137,6 @@ class TaskCreditEstimateServiceTest {
         when(modelCapabilityService.resolveModelConfigForTool(tool)).thenReturn(modelConfig);
 
         assertThat(taskCreditEstimateService.estimateForTool(tool)).isEqualTo(10);
-        assertThat(taskCreditEstimateService.estimateUserFacingTaskCredits(tool)).isEqualTo(12);
+        assertThat(taskCreditEstimateService.estimateUserFacingTaskCredits(tool)).isEqualTo(15);
     }
 }

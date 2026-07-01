@@ -65,7 +65,7 @@ class PricingServiceImplTest {
         PricingQuote settlement = pricingService.computeQuote(tool, config, params,
                 new PricingUsage(0, 0, 5), 0);
 
-        assertThat(estimate.chargeCredits()).isEqualTo(12);
+        assertThat(estimate.chargeCredits()).isEqualTo(15);
         assertThat(settlement.chargeCredits()).isEqualTo(estimate.chargeCredits());
     }
 
@@ -79,11 +79,11 @@ class PricingServiceImplTest {
 
         JsonNode params720 = OBJECT_MAPPER.readTree("{\"duration\":3,\"resolution\":\"720P\"}");
         PricingQuote q720 = pricingService.computeQuote(tool, config, params720, null, 0);
-        assertThat(q720.chargeCredits()).isEqualTo(324);
+        assertThat(q720.chargeCredits()).isEqualTo(405);
 
         JsonNode params1080 = OBJECT_MAPPER.readTree("{\"duration\":3,\"resolution\":\"1080P\"}");
         PricingQuote q1080 = pricingService.computeQuote(tool, config, params1080, null, 0);
-        assertThat(q1080.chargeCredits()).isEqualTo(578);
+        assertThat(q1080.chargeCredits()).isEqualTo(722);
     }
 
     private PricingRule happyHorse1080pRule() {
@@ -111,10 +111,10 @@ class PricingServiceImplTest {
         when(pricingRuleMapper.findActiveForScopes(anyLong(), any(), any())).thenReturn(List.of(rule));
 
         JsonNode params = OBJECT_MAPPER.readTree("{\"duration\":5,\"count\":3}");
-        // base 0.10 -> x3 count -> 0.30 -> 30 credits -> x1.20 = 36
+        // base 0.10 -> x3 count -> 0.30 -> 30 credits -> x1.50 = 45
         PricingQuote quote = pricingService.computeQuote(tool, config, params, null, 0);
         assertThat(quote.baseCredits()).isEqualTo(30);
-        assertThat(quote.chargeCredits()).isEqualTo(36);
+        assertThat(quote.chargeCredits()).isEqualTo(45);
     }
 
     @Test
@@ -134,19 +134,19 @@ class PricingServiceImplTest {
 
         JsonNode low = OBJECT_MAPPER.readTree("{\"quality\":\"low\",\"count\":\"1\"}");
         PricingQuote qLow = pricingService.computeQuote(tool, config, low, null, 38);
-        assertThat(qLow.chargeCredits()).isEqualTo(38);
+        assertThat(qLow.chargeCredits()).isEqualTo(47);
 
         JsonNode medium = OBJECT_MAPPER.readTree("{\"quality\":\"medium\",\"count\":\"1\"}");
         PricingQuote qMedium = pricingService.computeQuote(tool, config, medium, null, 38);
-        assertThat(qMedium.chargeCredits()).isEqualTo(323);
+        assertThat(qMedium.chargeCredits()).isEqualTo(404);
 
         JsonNode high = OBJECT_MAPPER.readTree("{\"quality\":\"high\",\"count\":\"1\"}");
         PricingQuote qHigh = pricingService.computeQuote(tool, config, high, null, 38);
-        assertThat(qHigh.chargeCredits()).isEqualTo(1284);
+        assertThat(qHigh.chargeCredits()).isEqualTo(1605);
 
         JsonNode lowCount3 = OBJECT_MAPPER.readTree("{\"quality\":\"low\",\"count\":\"3\"}");
         PricingQuote qLowCount3 = pricingService.computeQuote(tool, config, lowCount3, null, 38);
-        assertThat(qLowCount3.chargeCredits()).isEqualTo(111);
+        assertThat(qLowCount3.chargeCredits()).isEqualTo(138);
     }
 
     private PricingRule gptImage2CountRule() {
@@ -196,10 +196,10 @@ class PricingServiceImplTest {
         when(pricingRuleMapper.findActiveForScopes(anyLong(), any(), any())).thenReturn(List.of(rule));
 
         JsonNode params = OBJECT_MAPPER.createObjectNode().put("duration", 5).put("quality", "1080p");
-        // base cost 0.10 -> x2 -> 0.20 -> 20 credits -> x1.20 markup = 24
+        // base cost 0.10 -> x2 -> 0.20 -> 20 credits -> x1.50 markup = 30
         PricingQuote quote = pricingService.computeQuote(tool, config, params, null, 0);
         assertThat(quote.baseCredits()).isEqualTo(20);
-        assertThat(quote.chargeCredits()).isEqualTo(24);
+        assertThat(quote.chargeCredits()).isEqualTo(30);
     }
 
     @Test
@@ -216,10 +216,10 @@ class PricingServiceImplTest {
         when(pricingRuleMapper.findActiveForScopes(anyLong(), any(), any())).thenReturn(List.of(rule));
 
         JsonNode params = OBJECT_MAPPER.createObjectNode().put("duration", 5).put("watermarkFree", true);
-        // base 10 credits + 5 additive = 15 -> x1.20 = 18
+        // base 10 credits + 5 additive = 15 -> x1.50 = 23
         PricingQuote quote = pricingService.computeQuote(tool, config, params, null, 0);
         assertThat(quote.baseCredits()).isEqualTo(15);
-        assertThat(quote.chargeCredits()).isEqualTo(18);
+        assertThat(quote.chargeCredits()).isEqualTo(23);
     }
 
     @Test
@@ -250,10 +250,10 @@ class PricingServiceImplTest {
         config.setInputTokenPricePer1m(new BigDecimal("10"));
         config.setOutputTokenPricePer1m(new BigDecimal("30"));
 
-        // input 1,000,000 * 10 / 1e6 = 10 CNY; output 0 -> 10 CNY -> 1000 credits -> x1.2 = 1200
+        // input 1,000,000 * 10 / 1e6 = 10 CNY; output 0 -> 10 CNY -> 1000 credits -> x1.5 = 1500
         PricingQuote quote = pricingService.computeTokenQuote(config, 1_000_000, 0);
         assertThat(quote.baseCredits()).isEqualTo(1000);
-        assertThat(quote.chargeCredits()).isEqualTo(1200);
+        assertThat(quote.chargeCredits()).isEqualTo(1500);
     }
 
     @Test

@@ -131,8 +131,8 @@ class CreditRechargeApiTest {
         mockMvc.perform(get("/api/v1/credits/account")
                         .header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.balance").value(1100))
-                .andExpect(jsonPath("$.data.totalGranted").value(1100));
+                .andExpect(jsonPath("$.data.balance").value(1200))
+                .andExpect(jsonPath("$.data.totalGranted").value(1200));
 
         mockMvc.perform(get("/api/v1/credits/logs")
                         .param("logType", "RECHARGE")
