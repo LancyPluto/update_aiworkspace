@@ -53,6 +53,8 @@ public interface CreditService {
 
     CreditAccountResponse rechargeAdd(Long userId, Long rechargeOrderId, int amount, String reason);
 
+    CreditAccountResponse giftRedeemAdd(Long userId, Long giftCardId, int amount, String reason);
+
     PageResponse<CreditLogResponse> logs(Long userId, String logType, Integer pageNo, Integer pageSize);
 
     PageResponse<CreditLogResponse> logs(Long userId, String logType, Integer pageNo, Integer pageSize, boolean includeInternal);

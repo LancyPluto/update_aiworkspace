@@ -48,16 +48,16 @@ INSERT INTO credit_recharge_packages(package_code, package_name, credits, price_
                                      benefits_json, recommended, sort_order, status)
 VALUES
   -- 月度套餐（markup 1.50，利润率 32-33%）
-  ('monthly_starter', '入门版·月卡', 4000, 59.00, 'CNY', 30, JSON_ARRAY('优先排队', '每日登录送20算力'), 0, 10, 'ACTIVE'),
-  ('monthly_growth', '成长版·月卡', 10000, 149.00, 'CNY', 30, JSON_ARRAY('优先排队', 'API 加速', '每日登录送30算力'), 1, 20, 'ACTIVE'),
-  ('monthly_pro', '专业版·月卡', 20000, 299.00, 'CNY', 30, JSON_ARRAY('优先排队', 'API 加速', '模型咨询服务', '每日登录送50算力'), 0, 30, 'ACTIVE'),
-  ('monthly_flagship', '旗舰版·月卡', 40000, 599.00, 'CNY', 30, JSON_ARRAY('无限并发', '专属客服', '定制模型支持', '每日登录送100算力'), 0, 40, 'ACTIVE'),
+  ('monthly_starter', '入门版·月卡', 4000, 59.00, 'CNY', 30, JSON_ARRAY('优先排队', '每日登录送20算力', '灵活月付'), 0, 10, 'ACTIVE'),
+  ('monthly_growth', '成长版·月卡', 10000, 149.00, 'CNY', 30, JSON_ARRAY('优先排队', 'API 加速', '每日登录送30算力', '灵活月付'), 1, 20, 'ACTIVE'),
+  ('monthly_pro', '专业版·月卡', 20000, 299.00, 'CNY', 30, JSON_ARRAY('优先排队', 'API 加速', '模型咨询服务', '每日登录送50算力', '灵活月付'), 0, 30, 'ACTIVE'),
+  ('monthly_flagship', '旗舰版·月卡', 40000, 599.00, 'CNY', 30, JSON_ARRAY('无限并发', '专属客服', '定制模型支持', '每日登录送100算力', '灵活月付'), 0, 40, 'ACTIVE'),
 
-  -- 季度套餐（限时9折，markup 1.65，利润率 17-19%）
-  ('quarterly_starter', '入门版·季卡', 13000, 160.00, 'CNY', 90, JSON_ARRAY('优先排队', '每日登录送20算力', '限时9折优惠'), 0, 50, 'ACTIVE'),
-  ('quarterly_growth', '成长版·季卡', 33000, 400.00, 'CNY', 90, JSON_ARRAY('优先排队', 'API 加速', '每日登录送30算力', '限时9折优惠'), 1, 60, 'ACTIVE'),
-  ('quarterly_pro', '专业版·季卡', 66000, 800.00, 'CNY', 90, JSON_ARRAY('优先排队', 'API 加速', '模型咨询服务', '每日登录送50算力', '限时9折优惠'), 0, 70, 'ACTIVE'),
-  ('quarterly_flagship', '旗舰版·季卡', 130000, 1600.00, 'CNY', 90, JSON_ARRAY('无限并发', '专属客服', '定制模型支持', '每日登录送100算力', '限时9折优惠'), 0, 80, 'ACTIVE')
+  -- 季度套餐（季卡 9 折：价格 = 月卡×2.7，算力 = 月卡×3；markup 1.50 下毛利率约 50%）
+  ('quarterly_starter', '入门版·季卡', 12000, 159.00, 'CNY', 90, JSON_ARRAY('优先排队', '每日登录送20算力', '季卡9折优惠'), 0, 50, 'ACTIVE'),
+  ('quarterly_growth', '成长版·季卡', 30000, 399.00, 'CNY', 90, JSON_ARRAY('优先排队', 'API 加速', '每日登录送30算力', '季卡9折优惠'), 1, 60, 'ACTIVE'),
+  ('quarterly_pro', '专业版·季卡', 60000, 799.00, 'CNY', 90, JSON_ARRAY('优先排队', 'API 加速', '模型咨询服务', '每日登录送50算力', '季卡9折优惠'), 0, 70, 'ACTIVE'),
+  ('quarterly_flagship', '旗舰版·季卡', 120000, 1599.00, 'CNY', 90, JSON_ARRAY('无限并发', '专属客服', '定制模型支持', '每日登录送100算力', '季卡9折优惠'), 0, 80, 'ACTIVE')
 ON DUPLICATE KEY UPDATE
   package_name = VALUES(package_name),
   credits = VALUES(credits),

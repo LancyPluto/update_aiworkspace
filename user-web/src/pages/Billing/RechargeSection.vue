@@ -17,6 +17,13 @@ import {
   type RechargePaymentChannel,
 } from "@/utils/rechargePayment"
 import GiftCardSection from "@/pages/Billing/GiftCardSection.vue"
+import BillingCycleSwitcher from "@/components/BillingCycleSwitcher.vue"
+import {
+  BILLING_CYCLES,
+  cycleMonthDivisor,
+  cyclePeriodLabel,
+  type BillingCycle,
+} from "@/utils/billingCycleConfig"
 
 const props = defineProps<{
   account: CreditAccount | null
@@ -27,6 +34,8 @@ const emit = defineEmits<{
 }>()
 
 type PaymentChannel = RechargePaymentChannel
+
+const activeTab = ref<BillingCycle>("yearly")
 
 const auth = useAuthStore()
 const packages = ref<RechargePackage[]>([])
@@ -50,21 +59,6 @@ const pendingGiftCardPackage = ref<GiftCardPackage | null>(null)
 
 const DEFAULT_GRANTED_CREDITS = 200
 
-type BillingCycle = "monthly" | "quarterly" | "yearly"
-
-const billingCycles: Array<{
-  value: BillingCycle
-  label: string
-  discount: string | null
-  prefix: string
-  discountRate: number | null
-}> = [
-  { value: "yearly", label: "连续包年", discount: "限时37折", prefix: "yearly_", discountRate: 0.63 },
-  { value: "quarterly", label: "连续包季", discount: "限时9折", prefix: "quarterly_", discountRate: 0.9 },
-  { value: "monthly", label: "连续包月", discount: null, prefix: "monthly_", discountRate: null },
-]
-const activeTab = ref<BillingCycle>("quarterly")
-
 const TIER_META: Record<string, { label: string; subtitle: string; featured?: boolean }> = {
   starter: { label: "标准版", subtitle: "适合轻度创作者" },
   growth: { label: "进阶版", subtitle: "适合日常创作" },
@@ -75,13 +69,13 @@ const TIER_META: Record<string, { label: string; subtitle: string; featured?: bo
 const TIER_ORDER = ["starter", "growth", "pro", "flagship"]
 
 const filteredPackages = computed(() => {
-  const prefix = billingCycles.find((tab) => tab.value === activeTab.value)?.prefix ?? "monthly_"
+  const prefix = BILLING_CYCLES.find((tab) => tab.value === activeTab.value)?.prefix ?? "monthly_"
   return packages.value
     .filter((pkg) => pkg.packageCode.startsWith(prefix))
     .sort((a, b) => TIER_ORDER.indexOf(tierKey(a.packageCode)) - TIER_ORDER.indexOf(tierKey(b.packageCode)))
 })
 
-const activeCycleMeta = computed(() => billingCycles.find((tab) => tab.value === activeTab.value) ?? billingCycles[2])
+const activeCycleMeta = computed(() => BILLING_CYCLES.find((tab) => tab.value === activeTab.value) ?? BILLING_CYCLES[2])
 
 const membership = ref<{ planName: string; expiryDate: string | null }>({
   planName: "体验版",
@@ -194,18 +188,17 @@ function tierMeta(packageCode: string) {
 }
 
 function periodLabel(cycle: BillingCycle) {
-  return ({ monthly: "月", quarterly: "季", yearly: "年" } as const)[cycle]
+  return cyclePeriodLabel(cycle)
 }
 
 function originalPrice(pkg: RechargePackage, cycle: BillingCycle) {
-  const rate = billingCycles.find((tab) => tab.value === cycle)?.discountRate
+  const rate = BILLING_CYCLES.find((tab) => tab.value === cycle)?.discountRate
   if (!rate) return null
   return pkg.priceAmount / rate
 }
 
 function creditsPerMonth(pkg: RechargePackage, cycle: BillingCycle) {
-  const divisor = ({ monthly: 1, quarterly: 3, yearly: 12 } as const)[cycle]
-  return Math.round(pkg.credits / divisor)
+  return Math.round(pkg.credits / cycleMonthDivisor(cycle))
 }
 
 function creditUnitPrice(pkg: RechargePackage) {
@@ -222,8 +215,7 @@ function renewalHint(pkg: RechargePackage, cycle: BillingCycle) {
 }
 
 function monthlyEquivalentPrice(pkg: RechargePackage, cycle: BillingCycle) {
-  const divisor = ({ monthly: 1, quarterly: 3, yearly: 12 } as const)[cycle]
-  return pkg.priceAmount / divisor
+  return pkg.priceAmount / cycleMonthDivisor(cycle)
 }
 
 function isFeaturedCard(pkg: RechargePackage) {
@@ -483,38 +475,8 @@ onUnmounted(clearPolling)
     </div>
 
     <div v-if="mode === 'credits'" class="space-y-8">
-      <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 class="text-xl font-semibold tracking-tight text-foreground">会员套餐</h2>
-          <p class="mt-1 text-sm text-muted-foreground">连续订阅享折扣，算力即时到账，支持微信 / 支付宝支付</p>
-        </div>
-        <p class="text-xs text-muted-foreground">购买即视为同意《未来云AI付费服务协议》</p>
-      </div>
-
-      <!-- 包年 / 包季 / 包月 切换 -->
-      <div class="flex justify-center">
-        <div class="inline-flex flex-wrap items-center justify-center gap-1 rounded-full border border-slate-700/80 bg-slate-900/80 p-1.5 shadow-inner">
-          <button
-            v-for="tab in billingCycles"
-            :key="tab.value"
-            type="button"
-            class="relative rounded-full px-5 py-2.5 text-sm font-medium transition-all"
-            :class="activeTab === tab.value
-              ? 'bg-slate-700 text-white shadow-sm'
-              : 'text-slate-400 hover:text-slate-200'"
-            @click="onBillingCycleChange(tab.value)"
-          >
-            {{ tab.label }}
-            <span
-              v-if="tab.discount"
-              class="ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold"
-              :class="activeTab === tab.value ? 'bg-cyan-500/20 text-cyan-300' : 'bg-rose-500/15 text-rose-300'"
-            >
-              {{ tab.discount }}
-            </span>
-          </button>
-        </div>
-      </div>
+      <!-- 包年 / 包季 / 包月 切换（即梦风格圆角分段） -->
+      <BillingCycleSwitcher :model-value="activeTab" @update:model-value="onBillingCycleChange" />
 
       <div v-if="loadingPackages" class="rounded-2xl border border-border bg-card px-5 py-12 text-center text-sm text-muted-foreground">
         正在加载套餐...
@@ -591,8 +553,8 @@ onUnmounted(clearPolling)
             type="button"
             class="mt-5 w-full rounded-xl py-3 text-sm font-bold transition-all disabled:cursor-not-allowed disabled:opacity-60"
             :class="isFeaturedCard(pkg)
-              ? 'bg-white text-slate-900 hover:bg-slate-100'
-              : 'bg-slate-100 text-slate-900 hover:bg-white'"
+              ? 'bg-gradient-to-r from-cyan-300 to-teal-300 text-slate-950 shadow-lg shadow-cyan-500/20 hover:brightness-105'
+              : 'bg-gradient-to-r from-white to-slate-100 text-slate-900 shadow-md shadow-white/10 hover:brightness-105'"
             :disabled="ordering"
             @click.stop="openPaymentChoice(pkg)"
           >
@@ -768,4 +730,3 @@ onUnmounted(clearPolling)
     </Teleport>
   </section>
 </template>
-// HMR check

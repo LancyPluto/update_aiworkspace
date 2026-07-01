@@ -22,6 +22,8 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
         CreditAccount account = new CreditAccount();
         account.setUserId(userId);
         account.setBalance(DEFAULT_GRANTED_CREDITS);
+        account.setMembershipBalance(DEFAULT_GRANTED_CREDITS);
+        account.setGiftBalance(0);
         account.setFrozen(0);
         account.setTotalGranted(DEFAULT_GRANTED_CREDITS);
         account.setTotalConsumed(0);
@@ -55,6 +57,8 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
             UPDATE credit_accounts
             SET balance = balance - #{amount},
                 frozen = frozen - #{amount},
+                membership_balance = membership_balance - LEAST(#{amount}, membership_balance),
+                gift_balance = gift_balance - GREATEST(0, #{amount} - LEAST(#{amount}, membership_balance)),
                 total_consumed = total_consumed + #{amount},
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{accountId} AND frozen >= #{amount} AND balance >= #{amount} AND status = 'ACTIVE'
@@ -68,6 +72,8 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
     @Update("""
             UPDATE credit_accounts
             SET balance = balance - #{amount},
+                membership_balance = membership_balance - LEAST(#{amount}, membership_balance),
+                gift_balance = gift_balance - GREATEST(0, #{amount} - LEAST(#{amount}, membership_balance)),
                 total_consumed = total_consumed + #{amount},
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{accountId} AND balance - frozen >= #{amount} AND status = 'ACTIVE'
@@ -92,6 +98,7 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
     @Update("""
             UPDATE credit_accounts
             SET balance = balance + #{amount},
+                membership_balance = membership_balance + #{amount},
                 total_granted = total_granted + #{amount},
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{accountId} AND status = 'ACTIVE'
@@ -105,6 +112,7 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
     @Update("""
             UPDATE credit_accounts
             SET balance = balance + #{amount},
+                membership_balance = membership_balance + #{amount},
                 total_granted = total_granted + #{amount},
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{accountId} AND status = 'ACTIVE'
@@ -117,7 +125,24 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
 
     @Update("""
             UPDATE credit_accounts
-            SET balance = balance - #{amount}, updated_at = CURRENT_TIMESTAMP
+            SET balance = balance + #{amount},
+                gift_balance = gift_balance + #{amount},
+                total_granted = total_granted + #{amount},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND status = 'ACTIVE'
+            """)
+    int giftRedeemAddRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+
+    default boolean giftRedeemAdd(Long accountId, int amount) {
+        return giftRedeemAddRows(accountId, amount) == 1;
+    }
+
+    @Update("""
+            UPDATE credit_accounts
+            SET balance = balance - #{amount},
+                membership_balance = membership_balance - LEAST(#{amount}, membership_balance),
+                gift_balance = gift_balance - GREATEST(0, #{amount} - LEAST(#{amount}, membership_balance)),
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = #{accountId} AND balance - frozen >= #{amount} AND status = 'ACTIVE'
             """)
     int manualDeductRows(@Param("accountId") Long accountId, @Param("amount") int amount);

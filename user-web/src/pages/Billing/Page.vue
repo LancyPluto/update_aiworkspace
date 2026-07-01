@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
-import { ReceiptText, Wallet } from "lucide-vue-next"
+import { ReceiptText } from "lucide-vue-next"
 import AppShell from "@/components/AppShell.vue"
 import RechargeSection from "@/pages/Billing/RechargeSection.vue"
 import { fetchCreditAccount, fetchCreditLogs, fetchCreditUsageLogs } from "@/api/creditApi"
@@ -153,44 +153,6 @@ onMounted(loadBilling)
       </div>
 
       <RechargeSection :account="account" @credits-updated="loadBilling" />
-
-      <!-- 体验版会员卡 -->
-      <div class="relative overflow-hidden rounded-2xl border border-slate-700 bg-gradient-to-br from-slate-900 to-slate-800 p-6 shadow-lg">
-        <div class="flex items-center justify-between">
-          <div class="flex flex-col gap-2">
-            <span class="text-sm font-medium text-slate-400">体验版</span>
-            <p class="text-4xl font-bold tracking-tight text-white">
-              {{ account?.available ?? "--" }}
-              <span class="text-lg font-normal text-slate-400">/ 200</span>
-            </p>
-            <p class="text-xs text-slate-500">当前使用：体验版</p>
-          </div>
-          <button
-            type="button"
-            class="inline-flex items-center justify-center rounded-lg border border-primary bg-primary/10 px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/20"
-          >
-            升级会员
-          </button>
-        </div>
-      </div>
-
-      <!-- 统计卡片 -->
-      <div class="grid gap-4 md:grid-cols-3">
-        <div class="rounded-lg border border-border bg-card p-4">
-          <div class="flex items-center gap-2 text-sm text-muted-foreground">
-            <Wallet class="h-4 w-4 text-primary" /> 当前余额
-          </div>
-          <p class="mt-3 text-2xl font-semibold">{{ account?.balance ?? "--" }}</p>
-        </div>
-        <div class="rounded-lg border border-border bg-card p-4">
-          <p class="text-sm text-muted-foreground">冻结算力</p>
-          <p class="mt-3 text-2xl font-semibold">{{ account?.frozen ?? "--" }}</p>
-        </div>
-        <div class="rounded-lg border border-border bg-card p-4">
-          <p class="text-sm text-muted-foreground">累计消耗</p>
-          <p class="mt-3 text-2xl font-semibold">{{ account?.totalConsumed ?? "--" }}</p>
-        </div>
-      </div>
 
       <section class="rounded-lg border border-border bg-card">
         <details class="group">
