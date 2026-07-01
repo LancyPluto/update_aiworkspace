@@ -685,6 +685,18 @@ public class AssetStorageService {
         return "/api/v1/assets/download/" + ref.relativeKey();
     }
 
+    public Optional<String> resolveDownloadRedirect(String url, String filename) {
+        if (url == null || url.isBlank()) {
+            return Optional.empty();
+        }
+        AssetReference ref = parseManagedAssetUrl(url);
+        if (ref == null) {
+            return Optional.empty();
+        }
+        AssetVisibility visibility = resolveVisibility(ref.relativeKey());
+        return Optional.of(generateDownloadSignedUrl(ref.relativeKey(), visibility, 3600, filename));
+    }
+
     public String generateDownloadSignedUrl(String relativeKey, AssetVisibility visibility, int expirationSeconds,
                                              String filename) {
         if (!isOssMode() || ossClient == null) {

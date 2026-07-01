@@ -2,6 +2,7 @@ import type { Component } from "vue"
 import type { ToolSummary } from "@/api/types"
 import { cleanToolDisplayText } from "@/utils/toolDisplayText"
 import { formatToolCreditLabel } from "@/utils/toolCreditLabel"
+import { resolveSummaryToolCoverUrl } from "@/utils/toolCoverMedia"
 
 export type ToolModeFilter = "all" | "video" | "image" | "workflow" | "digitalHuman" | "audio"
 
@@ -147,12 +148,8 @@ function fallbackCoverUrl(tool: Partial<ToolSummary>): string {
   return DEFAULT_TOOL_COVER_URL
 }
 
-function preferredToolCover(tool: ToolSummary): string | null | undefined {
-  return (
-    tool.frontendStyle?.comparisonEffectUrl ||
-    tool.frontendStyle?.demoThumbnails?.[0] ||
-    tool.coverUrl
-  )
+function preferredToolCover(tool: ToolSummary): string {
+  return resolveSummaryToolCoverUrl(tool)
 }
 
 export function toWorkspaceToolCard(tool: ToolSummary): ToolCardModel {

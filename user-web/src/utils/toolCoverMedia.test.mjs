@@ -33,3 +33,17 @@ test("normalizeMediaUrl keeps external CDN URLs unchanged", () => {
   const url = "https://cdn.example.com/assets/demo.png"
   assert.equal(media.normalizeMediaUrl(url), url)
 })
+
+test("resolveSummaryToolCoverUrl prefers mp4 for video tools over effect jpg", () => {
+  const cover = media.resolveSummaryToolCoverUrl({
+    toolCode: "happyhorse_video_edit",
+    toolName: "HappyHorse-视频编辑",
+    outputModality: "VIDEO",
+    coverUrl: "https://cdn.example.com/tool-covers/demo.mp4",
+    frontendStyle: {
+      comparisonEffectUrl: "https://cdn.example.com/tool-covers/broken.jpg",
+      demoThumbnails: [],
+    },
+  })
+  assert.match(cover, /\.mp4(?:[?#]|$)/)
+})

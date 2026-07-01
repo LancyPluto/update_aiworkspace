@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue"
-import { Check, Crown, CreditCard, Gift, Loader2, MessageCircle, QrCode, Sparkles, X } from "lucide-vue-next"
+import { Check, Crown, CreditCard, Loader2, MessageCircle, QrCode, X } from "lucide-vue-next"
 import type { CreditAccount, GiftCardPackage, RechargeOrder, RechargePackage } from "@/api/types"
 import {
   createRechargeOrder,
@@ -16,6 +16,7 @@ import {
   resolveAlipayLaunchUrl,
   type RechargePaymentChannel,
 } from "@/utils/rechargePayment"
+import GiftCardSection from "@/pages/Billing/GiftCardSection.vue"
 
 const props = defineProps<{
   account: CreditAccount | null
@@ -49,22 +50,38 @@ const pendingGiftCardPackage = ref<GiftCardPackage | null>(null)
 
 const DEFAULT_GRANTED_CREDITS = 200
 
-// Tab 切换逻辑
-const tabs = [
-  { value: 'monthly' as const, label: '连续包月', discount: null },
-  { value: 'quarterly' as const, label: '连续包季', discount: '限时9折' },
+type BillingCycle = "monthly" | "quarterly" | "yearly"
+
+const billingCycles: Array<{
+  value: BillingCycle
+  label: string
+  discount: string | null
+  prefix: string
+  discountRate: number | null
+}> = [
+  { value: "yearly", label: "连续包年", discount: "限时37折", prefix: "yearly_", discountRate: 0.63 },
+  { value: "quarterly", label: "连续包季", discount: "限时9折", prefix: "quarterly_", discountRate: 0.9 },
+  { value: "monthly", label: "连续包月", discount: null, prefix: "monthly_", discountRate: null },
 ]
-const activeTab = ref<'monthly' | 'quarterly'>('monthly')
+const activeTab = ref<BillingCycle>("quarterly")
+
+const TIER_META: Record<string, { label: string; subtitle: string; featured?: boolean }> = {
+  starter: { label: "标准版", subtitle: "适合轻度创作者" },
+  growth: { label: "进阶版", subtitle: "适合日常创作" },
+  pro: { label: "高级版", subtitle: "适合专业团队" },
+  flagship: { label: "豪华版", subtitle: "旗舰尊享", featured: true },
+}
+
+const TIER_ORDER = ["starter", "growth", "pro", "flagship"]
 
 const filteredPackages = computed(() => {
-  return packages.value.filter(pkg => {
-    if (activeTab.value === 'monthly') {
-      return pkg.packageCode.startsWith('monthly_')
-    } else {
-      return pkg.packageCode.startsWith('quarterly_')
-    }
-  })
+  const prefix = billingCycles.find((tab) => tab.value === activeTab.value)?.prefix ?? "monthly_"
+  return packages.value
+    .filter((pkg) => pkg.packageCode.startsWith(prefix))
+    .sort((a, b) => TIER_ORDER.indexOf(tierKey(a.packageCode)) - TIER_ORDER.indexOf(tierKey(b.packageCode)))
 })
+
+const activeCycleMeta = computed(() => billingCycles.find((tab) => tab.value === activeTab.value) ?? billingCycles[2])
 
 const membership = ref<{ planName: string; expiryDate: string | null }>({
   planName: "体验版",
@@ -178,6 +195,65 @@ function localizeBenefit(benefit: string) {
     .replace(/\bmodel\s+consulting\b/gi, "模型咨询服务")
 }
 
+function tierKey(packageCode: string) {
+  const parts = packageCode.split("_")
+  return parts[parts.length - 1] ?? packageCode
+}
+
+function tierMeta(packageCode: string) {
+  return TIER_META[tierKey(packageCode)] ?? { label: localizePackageName(packageCode), subtitle: "" }
+}
+
+function periodLabel(cycle: BillingCycle) {
+  return ({ monthly: "月", quarterly: "季", yearly: "年" } as const)[cycle]
+}
+
+function originalPrice(pkg: RechargePackage, cycle: BillingCycle) {
+  const rate = billingCycles.find((tab) => tab.value === cycle)?.discountRate
+  if (!rate) return null
+  return pkg.priceAmount / rate
+}
+
+function creditsPerMonth(pkg: RechargePackage, cycle: BillingCycle) {
+  const divisor = ({ monthly: 1, quarterly: 3, yearly: 12 } as const)[cycle]
+  return Math.round(pkg.credits / divisor)
+}
+
+function creditUnitPrice(pkg: RechargePackage) {
+  if (!pkg.credits) return "0"
+  const unit = pkg.priceAmount / pkg.credits
+  return unit < 0.01 ? unit.toFixed(4) : unit.toFixed(3)
+}
+
+function renewalHint(pkg: RechargePackage, cycle: BillingCycle) {
+  const amount = formatMoney(pkg.priceAmount)
+  if (cycle === "monthly") return `次月续费 ¥${amount}，可随时取消`
+  if (cycle === "quarterly") return `次季续费 ¥${amount}，可随时取消`
+  return `次年续费 ¥${amount}，可随时取消`
+}
+
+function monthlyEquivalentPrice(pkg: RechargePackage, cycle: BillingCycle) {
+  const divisor = ({ monthly: 1, quarterly: 3, yearly: 12 } as const)[cycle]
+  return pkg.priceAmount / divisor
+}
+
+function isFeaturedCard(pkg: RechargePackage) {
+  if (pkg.recommended) return true
+  return tierMeta(pkg.packageCode).featured === true && activeTab.value === "yearly"
+}
+
+function selectDefaultPackage(list: RechargePackage[]) {
+  const prefix = activeCycleMeta.value.prefix
+  const recommended = list.find((item) => item.recommended && item.packageCode.startsWith(prefix))
+  const first = list.find((item) => item.packageCode.startsWith(prefix))
+  selectedId.value = recommended?.id ?? first?.id ?? list[0]?.id ?? null
+}
+
+function onBillingCycleChange(cycle: BillingCycle) {
+  activeTab.value = cycle
+  selectDefaultPackage(packages.value)
+}
+
 function packageBenefits(pkg: RechargePackage) {
   const benefits = pkg.benefits?.filter(Boolean) ?? []
   if (benefits.length > 0) return benefits.map(localizeBenefit)
@@ -215,10 +291,7 @@ async function loadPackages() {
   try {
     const list = await fetchRechargePackages({ token: auth.token })
     packages.value = list
-    // 默认选中推荐套餐或第一个月度套餐
-    const recommended = list.find((item) => item.recommended)
-    const monthlyFirst = list.find((item) => item.packageCode.startsWith('monthly_'))
-    selectedId.value = recommended?.id ?? monthlyFirst?.id ?? list[0]?.id ?? null
+    selectDefaultPackage(list)
   } catch (err) {
     error.value = err instanceof Error ? err.message : "加载充值套餐失败"
   } finally {
@@ -252,7 +325,6 @@ function startPolling(orderId: number) {
 }
 
 function openPaymentChoice(pkg: RechargePackage) {
-  isCustomRecharge.value = false
   pendingPackage.value = pkg
   selectedId.value = pkg.id
   paymentResult.value = null
@@ -316,7 +388,7 @@ async function loadGiftCardPackages() {
   }
 }
 
-function openGiftCardPayment(pkg: GiftCardPackage) {
+function openGiftCardPayment(pkg: GiftCardPackage, _quantity = 1) {
   pendingGiftCardPackage.value = pkg
   paymentResult.value = null
   error.value = ""
@@ -421,173 +493,146 @@ onUnmounted(clearPolling)
       </div>
     </div>
 
-    <div v-if="mode === 'credits'">
-      <div class="mb-6 flex items-start gap-3">
-        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <Sparkles class="h-5 w-5" aria-hidden="true" />
-        </div>
+    <div v-if="mode === 'credits'" class="space-y-8">
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 class="text-lg font-semibold tracking-tight">选择算力套餐</h2>
-          <p class="mt-1 text-sm text-muted-foreground">下单、支付确认、到账都由充值订单状态机驱动</p>
+          <h2 class="text-xl font-semibold tracking-tight text-foreground">会员套餐</h2>
+          <p class="mt-1 text-sm text-muted-foreground">连续订阅享折扣，算力即时到账，支持微信 / 支付宝支付</p>
         </div>
+        <p class="text-xs text-muted-foreground">购买即视为同意《未来云AI付费服务协议》</p>
       </div>
 
-      <!-- Tab 切换 -->
-      <div class="flex justify-center mb-8">
-        <div class="inline-flex rounded-lg bg-secondary p-1">
+      <!-- 包年 / 包季 / 包月 切换 -->
+      <div class="flex justify-center">
+        <div class="inline-flex flex-wrap items-center justify-center gap-1 rounded-full border border-slate-700/80 bg-slate-900/80 p-1.5 shadow-inner">
           <button
-            v-for="tab in tabs"
+            v-for="tab in billingCycles"
             :key="tab.value"
-            @click="activeTab = tab.value; selectedId = null"
-            :class="[
-              'px-6 py-2.5 text-sm font-medium rounded-md transition-all',
-              activeTab === tab.value 
-                ? 'bg-primary text-primary-foreground shadow-sm' 
-                : 'text-muted-foreground hover:text-foreground'
-            ]"
+            type="button"
+            class="relative rounded-full px-5 py-2.5 text-sm font-medium transition-all"
+            :class="activeTab === tab.value
+              ? 'bg-slate-700 text-white shadow-sm'
+              : 'text-slate-400 hover:text-slate-200'"
+            @click="onBillingCycleChange(tab.value)"
           >
             {{ tab.label }}
-            <span v-if="tab.discount" class="ml-2 text-xs bg-destructive text-white px-1.5 py-0.5 rounded">
+            <span
+              v-if="tab.discount"
+              class="ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+              :class="activeTab === tab.value ? 'bg-cyan-500/20 text-cyan-300' : 'bg-rose-500/15 text-rose-300'"
+            >
               {{ tab.discount }}
             </span>
           </button>
         </div>
       </div>
 
-      <div v-if="loadingPackages" class="rounded-lg border border-border bg-card px-5 py-8 text-center text-sm text-muted-foreground">
+      <div v-if="loadingPackages" class="rounded-2xl border border-border bg-card px-5 py-12 text-center text-sm text-muted-foreground">
         正在加载套餐...
       </div>
-      <div v-else class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <div
+
+      <div
+        v-else
+        class="-mx-1 flex gap-4 overflow-x-auto px-1 pb-4 snap-x snap-mandatory scrollbar-thin lg:grid lg:grid-cols-4 lg:overflow-visible"
+      >
+        <article
           v-for="pkg in filteredPackages"
           :key="pkg.id"
           role="button"
           tabindex="0"
-          class="relative group overflow-hidden rounded-2xl border bg-gradient-to-br from-slate-900 to-slate-800 p-6 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:border-primary/50 hover:shadow-xl"
+          class="relative flex min-w-[260px] shrink-0 snap-center flex-col rounded-2xl border bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 p-5 shadow-xl transition-all duration-300 hover:-translate-y-0.5 lg:min-w-0"
           :class="{
-            'border-primary ring-2 ring-primary/30': selectedId === pkg.id,
-            'border-slate-700': selectedId !== pkg.id,
-            'ring-2 ring-blue-500/50': pkg.recommended
+            'border-cyan-400/70 ring-2 ring-cyan-400/30 shadow-cyan-500/10': isFeaturedCard(pkg),
+            'border-primary/60 ring-1 ring-primary/20': selectedId === pkg.id && !isFeaturedCard(pkg),
+            'border-slate-800': selectedId !== pkg.id && !isFeaturedCard(pkg),
           }"
           @click="selectPackage(pkg.id)"
           @keydown.enter="selectPackage(pkg.id)"
           @keydown.space.prevent="selectPackage(pkg.id)"
         >
-          <!-- 推荐标签 -->
-          <span
-            v-if="pkg.recommended"
-            class="absolute right-4 top-4 rounded-full bg-blue-500 px-3 py-1 text-xs font-bold text-white shadow-lg z-10"
+          <div
+            v-if="isFeaturedCard(pkg)"
+            class="absolute -top-px left-0 right-0 rounded-t-2xl bg-gradient-to-r from-cyan-500 to-teal-400 px-4 py-1.5 text-center text-xs font-semibold text-slate-950"
           >
-            🔥 推荐
-          </span>
+            {{ activeTab === 'yearly' ? '特惠上新 · 比月卡立省 37%' : '🔥 推荐套餐' }}
+          </div>
 
-          <!-- 限时折扣标签 -->
-          <span
-            v-if="activeTab === 'quarterly'"
-            class="absolute left-4 top-4 rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-xs font-semibold text-emerald-400 border border-emerald-500/30 z-10"
-          >
-            限时9折
-          </span>
+          <div :class="isFeaturedCard(pkg) ? 'mt-6' : 'mt-1'">
+            <p class="text-sm font-medium text-slate-400">{{ tierMeta(pkg.packageCode).subtitle }}</p>
+            <h3 class="mt-1 text-2xl font-bold tracking-tight text-white">
+              {{ tierMeta(pkg.packageCode).label }}
+            </h3>
+          </div>
 
-          <!-- 套餐名称 -->
-          <h3 class="mt-8 text-lg font-semibold text-slate-100">
-            {{ localizePackageName(pkg.packageName) }}
-          </h3>
-
-          <!-- 价格区域 -->
-          <div class="mt-4 flex items-baseline gap-2">
-            <span class="text-4xl font-bold text-white">
-              ¥{{ formatMoney(pkg.priceAmount) }}
-            </span>
-            <span class="text-sm text-slate-400">
-              /{{ activeTab === 'monthly' ? '月' : '季' }}
-            </span>
-            <span v-if="activeTab === 'quarterly'" class="text-sm text-slate-500 line-through">
-              ¥{{ formatMoney(pkg.priceAmount / 0.9) }}
+          <div class="mt-5 flex flex-wrap items-end gap-2">
+            <span class="text-4xl font-bold leading-none text-white">¥{{ formatMoney(pkg.priceAmount) }}</span>
+            <span class="pb-1 text-sm text-slate-400">/{{ periodLabel(activeTab) }}</span>
+            <span
+              v-if="originalPrice(pkg, activeTab)"
+              class="pb-1 text-sm text-slate-500 line-through"
+            >
+              ¥{{ formatMoney(originalPrice(pkg, activeTab)) }}
             </span>
           </div>
 
-          <!-- 算力显示 -->
-          <div class="mt-4 rounded-lg bg-slate-800/50 p-3 border border-slate-700">
-            <p class="text-2xl font-bold text-primary">
-              {{ pkg.credits.toLocaleString() }}
-              <span class="text-sm font-normal text-slate-400">算力</span>
+          <p class="mt-2 text-xs text-slate-500">{{ renewalHint(pkg, activeTab) }}</p>
+
+          <p class="mt-3 text-xs text-slate-400">
+            约 ¥{{ formatMoney(monthlyEquivalentPrice(pkg, activeTab)) }}/月
+            <span class="mx-1 text-slate-600">·</span>
+            ¥{{ creditUnitPrice(pkg) }}/算力
+          </p>
+
+          <div class="mt-5 rounded-xl border border-slate-700/80 bg-slate-800/40 px-4 py-4">
+            <p class="text-3xl font-bold text-white">
+              {{ creditsPerMonth(pkg, activeTab).toLocaleString() }}
+              <span class="text-sm font-medium text-slate-400">算力/月</span>
             </p>
-            <p class="mt-1 text-xs text-slate-500">
-              约可生成 {{ Math.floor(pkg.credits / 10) }} 张图片 · {{ Math.floor(pkg.credits / 50) }} 个视频
+            <p class="mt-2 text-xs text-slate-500">
+              约可生成 {{ Math.floor(creditsPerMonth(pkg, activeTab) / 10).toLocaleString() }} 张图
+              <span class="mx-1">|</span>
+              {{ Math.floor(creditsPerMonth(pkg, activeTab) / 50).toLocaleString() }} 个视频
+            </p>
+            <p class="mt-1 text-[11px] text-slate-600">
+              本周期共 {{ pkg.credits.toLocaleString() }} 算力 · 有效期 {{ pkg.validityDays }} 天
             </p>
           </div>
 
-          <!-- 权益列表 -->
-          <ul class="mt-5 space-y-2.5">
-            <li v-for="benefit in packageBenefits(pkg)" :key="benefit" class="flex items-start gap-2.5 text-sm text-slate-300">
-              <Check class="h-4 w-4 shrink-0 mt-0.5 text-emerald-400" aria-hidden="true" />
-              <span>{{ benefit }}</span>
-            </li>
-          </ul>
-
-          <!-- 按钮 -->
           <button
             type="button"
-            class="mt-6 w-full rounded-lg bg-primary py-3 text-sm font-bold text-primary-foreground transition-all hover:bg-primary/90 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
+            class="mt-5 w-full rounded-xl py-3 text-sm font-bold transition-all disabled:cursor-not-allowed disabled:opacity-60"
+            :class="isFeaturedCard(pkg)
+              ? 'bg-white text-slate-900 hover:bg-slate-100'
+              : 'bg-slate-100 text-slate-900 hover:bg-white'"
             :disabled="ordering"
             @click.stop="openPaymentChoice(pkg)"
           >
             {{ ordering && orderingPackageId === pkg.id ? "下单中..." : "立即开通" }}
           </button>
-        </div>
+
+          <ul class="mt-5 flex-1 space-y-2 border-t border-slate-800 pt-4">
+            <li
+              v-for="benefit in packageBenefits(pkg)"
+              :key="benefit"
+              class="flex items-start gap-2 text-xs leading-relaxed text-slate-300"
+            >
+              <Check class="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-400" aria-hidden="true" />
+              <span>{{ benefit }}</span>
+            </li>
+          </ul>
+        </article>
       </div>
     </div>
 
-    <div v-if="mode === 'giftcard'">
-      <div class="mb-6 flex items-start gap-3">
-        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <Gift class="h-5 w-5" aria-hidden="true" />
-        </div>
-        <div>
-          <h2 class="text-lg font-semibold tracking-tight">选择礼品卡</h2>
-          <p class="mt-1 text-sm text-muted-foreground">购买后可在个人中心使用或赠送给好友</p>
-        </div>
-      </div>
-
-      <div v-if="loadingGiftCards" class="rounded-lg border border-border bg-card px-5 py-8 text-center text-sm text-muted-foreground">
-        正在加载礼品卡...
-      </div>
-      <div v-else class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <div
-          v-for="pkg in giftCardPackages"
-          :key="pkg.id"
-          class="relative overflow-hidden rounded-2xl border bg-gradient-to-br p-6 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
-          :class="giftCardThemeClass(pkg.cardTheme)"
-        >
-          <h3 class="text-lg font-semibold text-white">
-            {{ pkg.packageName }}
-          </h3>
-
-          <div class="mt-4 flex items-baseline gap-2">
-            <span class="text-4xl font-bold text-white">
-              ¥{{ formatMoney(pkg.priceAmount) }}
-            </span>
-          </div>
-
-          <div class="mt-4 rounded-lg bg-white/10 p-3 border border-white/10">
-            <p class="text-2xl font-bold text-white">
-              {{ pkg.credits.toLocaleString() }}
-              <span class="text-sm font-normal text-white/70">算力</span>
-            </p>
-          </div>
-
-          <button
-            type="button"
-            class="mt-6 w-full rounded-lg bg-white/20 py-3 text-sm font-bold text-white transition-all hover:bg-white/30 disabled:cursor-not-allowed disabled:opacity-60"
-            :disabled="ordering"
-            @click.stop="openGiftCardPayment(pkg)"
-          >
-            {{ ordering ? "下单中..." : "立即购买" }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <GiftCardSection
+      v-if="mode === 'giftcard'"
+      :packages="packages"
+      :gift-card-packages="giftCardPackages"
+      :loading="loadingGiftCards || loadingPackages"
+      :ordering="ordering"
+      @buy-member-package="openPaymentChoice"
+      @buy-credit-gift="openGiftCardPayment"
+    />
     <Teleport to="body">
       <div
         v-if="showChannelModal"

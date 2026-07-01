@@ -37,6 +37,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -346,6 +347,20 @@ public class CommunityServiceImpl implements CommunityService {
             recordEvent(viewerId, new CommunityEventRequest(postId, "detail_view", "detail", post.getToolCode(), null, null));
         }
         return response(requirePost(postId), viewerId);
+    }
+
+    @Override
+    public URI downloadPostMedia(Long postId, Integer index) {
+        CommunityPost post = requirePublished(postId);
+        int mediaIndex = index == null ? 0 : Math.max(index, 0);
+        String sourceUrl = resolvePostDownloadSourceUrl(post, mediaIndex);
+        if (sourceUrl == null || sourceUrl.isBlank()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "Media not found");
+        }
+        String filename = buildPostDownloadFilename(post, sourceUrl);
+        return assetStorageService.resolveDownloadRedirect(sourceUrl, filename)
+                .map(URI::create)
+                .orElseGet(() -> URI.create(sourceUrl.trim()));
     }
 
     @Override
@@ -1045,6 +1060,77 @@ public class CommunityServiceImpl implements CommunityService {
             urls.add(post.getCoverUrl());
         }
         return new ArrayList<>(urls);
+    }
+
+    private String resolvePostDownloadSourceUrl(CommunityPost post, int index) {
+        String modality = post.getModality() == null ? "" : post.getModality().trim().toUpperCase(Locale.ROOT);
+        if ("IMAGE".equals(modality)) {
+            List<String> urls = resolvePostMediaUrls(post);
+            if (urls.isEmpty()) {
+                return null;
+            }
+            int safeIndex = Math.min(Math.max(index, 0), urls.size() - 1);
+            return urls.get(safeIndex);
+        }
+        if ("AUDIO".equals(modality)) {
+            return resolveAudioDownloadUrl(post.getCoverUrl(), post.getMediaUrl());
+        }
+        if ("VIDEO".equals(modality)) {
+            String mediaUrl = post.getMediaUrl();
+            String coverUrl = post.getCoverUrl();
+            if (looksLikeVideoUrl(mediaUrl)) {
+                return mediaUrl;
+            }
+            if (looksLikeVideoUrl(coverUrl)) {
+                return coverUrl;
+            }
+            return firstNonBlank(mediaUrl, coverUrl);
+        }
+        return firstNonBlank(post.getMediaUrl(), post.getCoverUrl());
+    }
+
+    private String resolveAudioDownloadUrl(String coverUrl, String mediaUrl) {
+        if (looksLikeAudioUrl(coverUrl)) {
+            return coverUrl;
+        }
+        if (looksLikeAudioUrl(mediaUrl)) {
+            return mediaUrl;
+        }
+        return firstNonBlank(mediaUrl, coverUrl);
+    }
+
+    private String buildPostDownloadFilename(CommunityPost post, String sourceUrl) {
+        String extension = inferDownloadExtension(sourceUrl, post.getModality());
+        return "community-post-" + post.getId() + "." + extension;
+    }
+
+    private static String inferDownloadExtension(String sourceUrl, String modality) {
+        String path = sourceUrl == null ? "" : sourceUrl.trim().split("[?#]", 2)[0];
+        int dot = path.lastIndexOf('.');
+        if (dot > path.lastIndexOf('/') && dot < path.length() - 1) {
+            String ext = path.substring(dot + 1).toLowerCase(Locale.ROOT);
+            if (!ext.isBlank() && ext.length() <= 5) {
+                return ext;
+            }
+        }
+        String normalized = modality == null ? "" : modality.trim().toUpperCase(Locale.ROOT);
+        if ("VIDEO".equals(normalized)) {
+            return "mp4";
+        }
+        if ("AUDIO".equals(normalized)) {
+            return "mp3";
+        }
+        return "png";
+    }
+
+    private static String firstNonBlank(String first, String second) {
+        if (first != null && !first.isBlank()) {
+            return first.trim();
+        }
+        if (second != null && !second.isBlank()) {
+            return second.trim();
+        }
+        return null;
     }
 
     private List<String> resolvePostMediaUrlsBatch(CommunityPost post, Map<Long, String> firstResultByTaskId) {

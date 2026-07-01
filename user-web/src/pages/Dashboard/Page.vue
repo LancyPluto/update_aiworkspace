@@ -72,7 +72,7 @@ import {
   type DashboardAttributionContext,
 } from "./dashboardAttribution"
 import { buildDashboardTaskParams, buildOptimisticDashboardTask } from "./dashboardTaskFactory"
-import { normalizeMediaUrl } from "@/utils/toolCoverMedia"
+import { normalizeMediaUrl, resolveSummaryToolCoverUrl } from "@/utils/toolCoverMedia"
 import { resolveCommunityDerivativeUrl, resolveOssVideoPosterUrl } from "@/utils/communityPostMedia"
 import { forceDownload } from "@/utils/download"
 import { isWorkflowToolCode } from "@/adapters/toolPresentationAdapter"
@@ -1261,18 +1261,16 @@ const brokenToolCoverIds = ref<Set<number>>(new Set())
 
 function toolCardCover(tool: ToolSummary): string {
   if (brokenToolCoverIds.value.has(tool.id)) {
-    return normalizeMediaUrl(
-      tool.frontendStyle?.comparisonEffectUrl ||
-      tool.frontendStyle?.demoThumbnails?.[0] ||
-      "",
-    )
+    return resolveSummaryToolCoverUrl({
+      ...tool,
+      frontendStyle: {
+        ...tool.frontendStyle,
+        comparisonEffectUrl: "",
+        demoThumbnails: [],
+      },
+    })
   }
-  return normalizeMediaUrl(
-    tool.coverUrl ||
-      tool.frontendStyle?.comparisonEffectUrl ||
-      tool.frontendStyle?.demoThumbnails?.[0] ||
-      "",
-  )
+  return resolveSummaryToolCoverUrl(tool)
 }
 
 function onToolCoverError(tool: ToolSummary) {

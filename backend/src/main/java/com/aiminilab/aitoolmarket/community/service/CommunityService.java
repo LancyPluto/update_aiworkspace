@@ -12,6 +12,8 @@ import com.aiminilab.aitoolmarket.community.dto.PublishPostRequest;
 import com.aiminilab.aitoolmarket.community.dto.UpdateCommunityPostRequest;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 
+import java.net.URI;
+
 public interface CommunityService {
     void autoPublishTask(AiTask task, String resourceType, String contentText);
     CommunityPostResponse publish(Long userId, PublishPostRequest request);
@@ -25,6 +27,7 @@ public interface CommunityService {
     CommunityCreatorResponse creator(Long userId, Long viewerId);
     PageResponse<CommunityPostResponse> publicPosts(Long userId, String modality, Long viewerId, Integer pageNo, Integer pageSize);
     CommunityPostResponse detail(Long postId, Long viewerId);
+    URI downloadPostMedia(Long postId, Integer index);
     void recordEvent(Long userId, CommunityEventRequest request);
     java.util.List<CommunityCollectionResponse> collections(Long userId);
     CommunityCollectionResponse createCollection(Long userId, String name);
