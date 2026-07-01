@@ -3,7 +3,6 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import {
   AlertTriangle,
   Check,
-  Database,
   Loader2,
   Pencil,
   Pin,
@@ -20,14 +19,14 @@ import {
   buildReferenceMentionsPayload,
   displayLabelForMention,
   findReferenceMentionByAsset,
+  mentionDedupeKey,
   type AgentReferenceMention,
 } from "@/utils/agentReferenceMentions"
+import type { ComposerContentPart } from "@/utils/agentComposerMentionEditor"
 import AgentComposer from "./AgentComposer.vue"
 import AgentMessageRow from "./AgentMessageRow.vue"
 import AgentAvatar from "./AgentAvatar.vue"
 import AgentAmbientBackground from "./AgentAmbientBackground.vue"
-import ConversationScrollNav from "./ConversationScrollNav.vue"
-import ConversationPhaseTimeline from "./ConversationPhaseTimeline.vue"
 import RunTimeline from "./RunTimeline.vue"
 import { filterUserFacingRunEvents } from "./runTimelineEvents"
 import AgentToolConfirmationList from "./AgentToolConfirmationList.vue"
@@ -36,8 +35,7 @@ import CreditRechargeModal from "@/components/CreditRechargeModal.vue"
 import { formatAgentRunFailure } from "@/api/errorMapping"
 import { isCreditInsufficient } from "@/utils/creditInsufficient"
 import {
-  buildConversationPhases,
-  buildScrollNavNodes,
+  truncateSemanticLabel,
 } from "@/utils/conversationPhases"
 import { fetchAgentFilePreviewUrl, isImageAttachment, resolveAgentFileUrl, revokeAgentFilePreviewUrl } from "@/utils/agentAttachment"
 import type { AgentAvatarState } from "./AgentAvatar.vue"
@@ -99,12 +97,14 @@ import {
   resolveTaskIdFromRunEvents,
 } from "@/utils/assetPreviewAdapter"
 import { openCreateWithAssetRecommendation } from "@/utils/assetReplay"
+import { recommendToolsForAsset as recommendAssetTools } from "@/utils/assetToolRecommendations"
 import { publishAssetToCommunity, type CommunityPublishPayload } from "@/utils/publishCommunityAsset"
 import { buildTaskResultBlocks, resolveAudioTracks } from "@/utils/taskResultBlocks"
 import { useGeneratedMaterialList, useUploadHistoryList } from "@/composables/useMaterialPickerLists"
 import {
   chatAssetRefByUrl,
   dragPayloadToUrlAttachment,
+  type ChatAssetRef,
   type ChatAssetDragPayload,
 } from "@/utils/agentChatAssetRefs"
 
@@ -136,6 +136,19 @@ interface MessageBranchGroup {
 interface BranchSwitcherState {
   activeIndex: number
   total: number
+}
+
+type MinimapNodeKind = "system" | "user"
+
+interface ConversationMinimapNode {
+  id: string
+  messageId: number
+  kind: MinimapNodeKind
+  index: number
+  total: number
+  title: string
+  excerpt: string
+  label: string
 }
 
 const emit = defineEmits<{
@@ -489,10 +502,24 @@ const composerScrollInset = ref(210)
 let composerResizeObserver: ResizeObserver | null = null
 const scrollOffset = ref(0)
 const stickToBottom = ref(true)
-const navLayoutTick = ref(0)
+const minimapDrawerOpen = ref(false)
+const hoveredMinimapNodeId = ref<string | null>(null)
+const hoverCardTop = ref(160)
+const activeMinimapMessageId = ref<number | null>(null)
+let minimapIntersectionObserver: IntersectionObserver | null = null
 const messagesKey = computed(() => `agent_messages_${props.sessionId}`)
 const branchStorageKey = computed(() => `agent_message_branches_${props.sessionId}`)
 const sessionAssetsForComposer = computed(() => collectSessionAssets(messages.value))
+const autoMountedReference = computed<AgentReferenceMention | null>(() => {
+  if (hasActiveRun.value || sending.value || editingRegenerating.value || regeneratingMessageId.value != null) return null
+  if (files.value.length > 0 || urlAttachments.value.length > 0 || draftReferenceMentions.value.length > 0) return null
+  if (hasTypedReferenceToken(input.value)) return null
+  const latest = latestImageSessionAsset(sessionAssetsForComposer.value)
+  if (!latest) return null
+  const mention = sessionAssetToReferenceMention(latest)
+  const key = mentionDedupeKey(mention)
+  return key && key === dismissedAutoMountedReferenceKey.value ? null : mention
+})
 let runStreamAbort: AbortController | null = null
 let runStatusWatchdog: number | null = null
 let streamingAnimationTimer: number | null = null
@@ -557,15 +584,9 @@ const input = computed({
 })
 
 const draftReferenceMentions = ref<AgentReferenceMention[]>([])
+const dismissedAutoMountedReferenceKey = ref<string | null>(null)
 
 const sessionAssetRefMap = computed(() => chatAssetRefByUrl(messages.value))
-
-const suggestions = [
-  "帮我写一篇小红书种草笔记",
-  "帮我优化一个电商商品标题",
-  "给朋友圈生成一段新品文案",
-  "我想做公众号长文，先推荐工具",
-]
 
 const confirmationEvents = computed(() =>
   events.value
@@ -637,22 +658,38 @@ const ambientState = computed(() => {
   return "idle" as const
 })
 
-const conversationPhases = computed(() =>
-  buildConversationPhases(messages.value, events.value),
+const conversationMinimapNodes = computed<ConversationMinimapNode[]>(() => {
+  const raw: Omit<ConversationMinimapNode, "index" | "total">[] = []
+  for (const message of messages.value) {
+    const isUser = message.role === "USER"
+    const title = isUser ? "用户" : "系统"
+    raw.push({
+      id: `message-${message.id}`,
+      messageId: message.id,
+      kind: isUser ? "user" : "system",
+      title,
+      excerpt: truncateSemanticLabel(message.contentText || "空消息", 26),
+      label: `${title}：${truncateSemanticLabel(message.contentText || "空消息", 22)}`,
+    })
+  }
+  const total = raw.length
+  return raw.map((node, index) => ({
+    ...node,
+    index: index + 1,
+    total,
+  }))
+})
+
+const hoveredMinimapNode = computed(() =>
+  conversationMinimapNodes.value.find((node) => node.id === hoveredMinimapNodeId.value) ?? null,
 )
 
-const scrollNavNodes = computed(() => {
-  void navLayoutTick.value
-  const container = messageContainerRef.value
-  if (!container) return []
-  const scrollHeight = container.scrollHeight
-  const offsets = new Map<number, number>()
-  for (const message of messages.value) {
-    const el = container.querySelector(`[data-message-id="${message.id}"]`) as HTMLElement | null
-    if (el) offsets.set(message.id, el.offsetTop)
-  }
-  return buildScrollNavNodes(messages.value, events.value, scrollHeight, offsets)
+const activeMinimapNodeId = computed(() => {
+  const activeMessageId = activeMinimapMessageId.value ?? messages.value[0]?.id
+  return conversationMinimapNodes.value.find((node) => node.messageId === activeMessageId)?.id ?? null
 })
+
+const showConversationMinimap = computed(() => conversationMinimapNodes.value.length > 1)
 
 function isMessageStreaming(message: AgentMessage) {
   return message.id === streamingAssistantMessageId.value
@@ -683,6 +720,94 @@ function messageTime(value?: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   })
+}
+
+function hasTypedReferenceToken(value: string) {
+  return /@(?:图|图片|视频|音频|文件)\d+/i.test(value)
+}
+
+function latestImageSessionAsset(assets: ChatAssetRef[]) {
+  return [...assets].reverse().find((asset) => asset.kind === "image" && Boolean(asset.url)) ?? null
+}
+
+function sessionAssetToReferenceMention(asset: ChatAssetRef): AgentReferenceMention {
+  return {
+    token: baseImageLabel(asset.refLabel) || "@图1",
+    refLabel: asset.refLabel,
+    assetKey: asset.assetKey,
+    url: asset.url,
+    kind: "image",
+    name: asset.name,
+    contentType: asset.contentType || "image/*",
+    previewUrl: resolveAgentFileUrl(asset.url),
+    source: "session_asset_auto",
+  }
+}
+
+function dismissAutoMountedReference(mention: AgentReferenceMention) {
+  dismissedAutoMountedReferenceKey.value = mentionDedupeKey(mention)
+}
+
+function autoMountedReferenceToAttachment(mention: AgentReferenceMention): AgentUrlAttachment {
+  return {
+    id: mention.assetKey || mention.fileId || mention.url,
+    name: mention.refLabel || mention.name || "最新图片",
+    refLabel: mention.refLabel || mention.name || "最新图片",
+    contentType: mention.contentType || "image/*",
+    url: mention.url,
+    source: "chat_reference_auto",
+  }
+}
+
+function mergeAutoMountedAttachment(
+  attachments: AgentUrlAttachment[],
+  mention: AgentReferenceMention | null,
+) {
+  if (!mention?.url) return attachments
+  if (attachments.some((item) => item.url === mention.url)) return attachments
+  return [...attachments, autoMountedReferenceToAttachment(mention)]
+}
+
+function mergeAutoMountedMention(
+  mentions: AgentReferenceMention[],
+  mention: AgentReferenceMention | null,
+) {
+  if (!mention?.url) return mentions
+  const key = mentionDedupeKey(mention)
+  if (mentions.some((item) => mentionDedupeKey(item) === key)) return mentions
+  return [...mentions, mention]
+}
+
+function contentPartForAutoMountedReference(mention: AgentReferenceMention): ComposerContentPart {
+  const part: ComposerContentPart = {
+    type: "image",
+    asset_key: mention.assetKey || (mention.fileId == null ? mention.url : `file_${mention.fileId}`),
+    url: mention.url,
+    name: mention.refLabel || mention.name || "最新图片",
+    content_type: mention.contentType || "image/*",
+  }
+  if (mention.fileId != null) {
+    part.file_id = mention.fileId
+  }
+  return part
+}
+
+function mergeAutoMountedContentParts(
+  parts: ComposerContentPart[],
+  text: string,
+  mention: AgentReferenceMention | null,
+) {
+  if (!mention?.url) return parts
+  const next = parts.length > 0 ? [...parts] : (text ? [{ type: "text" as const, text }] : [])
+  const key = mention.assetKey || mention.url
+  const hasPart = next.some((part) => {
+    if (part.type === "text") return false
+    return part.url === mention.url || part.asset_key === key
+  })
+  if (!hasPart) {
+    next.push(contentPartForAutoMountedReference(mention))
+  }
+  return next
 }
 
 function messageContentJsonForFiles(
@@ -1657,6 +1782,7 @@ async function submitMessage(content = input.value) {
     agentError.value = "请先选择一个 Agent 模型。"
     return
   }
+  const autoReferenceForSubmission = autoMountedReference.value
   sending.value = true
   agentError.value = null
   confirmationError.value = null
@@ -1665,14 +1791,27 @@ async function submitMessage(content = input.value) {
   const submittedParentMessageId = messages.value.at(-1)?.id ?? null
   try {
     const submittedFiles = [...files.value]
-    const submittedUrlAttachments = [...urlAttachments.value]
+    const submittedUrlAttachments = mergeAutoMountedAttachment([...urlAttachments.value], autoReferenceForSubmission)
     const submittedReferenceCatalog = buildAttachmentLabelCatalog(
       submittedUrlAttachments,
       submittedFiles,
       collectSessionAssets(messages.value),
     )
     const submittedPreferredToolCode = selectedToolCode.value
-    const submittedMentions = [...(composerSnapshot?.mentions ?? draftReferenceMentions.value)]
+    const submittedMentions = mergeAutoMountedMention(
+      [...(composerSnapshot?.mentions ?? draftReferenceMentions.value)],
+      autoReferenceForSubmission,
+    )
+    const submittedContentParts = mergeAutoMountedContentParts(
+      composerSnapshot?.contentParts ?? [],
+      text,
+      autoReferenceForSubmission,
+    )
+    const submittedPositionalPrompt = autoReferenceForSubmission?.url
+      ? submittedContentParts
+        .map((part) => part.type === "text" ? part.text : `{${part.asset_key}}`)
+        .join("")
+      : composerSnapshot?.positionalPrompt
     const submittedGlobalFileIds = globalFileIdsFor(submittedFiles, submittedUrlAttachments)
     input.value = ""
     draftReferenceMentions.value = []
@@ -1682,8 +1821,8 @@ async function submitMessage(content = input.value) {
       text,
       submittedMentions,
       {
-        contentParts: composerSnapshot?.contentParts ?? [],
-        positionalPrompt: composerSnapshot?.positionalPrompt,
+        contentParts: submittedContentParts,
+        positionalPrompt: submittedPositionalPrompt,
         globalFileIds: submittedGlobalFileIds,
       },
     )
@@ -1724,8 +1863,8 @@ async function submitMessage(content = input.value) {
         })),
         referenceMentions: referenceMentionsForApi(submittedMentions),
         globalFileIds: submittedGlobalFileIds,
-        contentParts: composerSnapshot?.contentParts ?? [],
-        positionalPrompt: composerSnapshot?.positionalPrompt,
+        contentParts: submittedContentParts,
+        positionalPrompt: submittedPositionalPrompt,
       },
       { token: props.token },
     )
@@ -2574,22 +2713,8 @@ function containsMediaResult(value: unknown): boolean {
   return Object.values(record).some(containsMediaResult)
 }
 
-function normalizeModality(value?: string | null) {
-  return (value || "TEXT").trim().toUpperCase()
-}
-
 function recommendToolsForAsset(asset: AssetPreviewItem): AssetPreviewRecommendation[] {
-  const target = asset.kind === "image" ? "IMAGE" : asset.kind === "video" ? "VIDEO" : asset.kind === "audio" ? "AUDIO" : ""
-  const keyword = asset.kind === "image" ? /图|图片|影像|photo|image|img|改图|参考/i : asset.kind === "video" ? /视频|短片|video|clip|movie/i : /音频|音乐|audio|voice|tts/i
-  const matches = previewTools.value.filter((tool) => {
-    const input = normalizeModality(tool.inputModality)
-    const text = `${tool.toolName} ${tool.description || ""} ${tool.configNote || ""} ${tool.toolCode}`
-    return (
-      (target && (input.includes(target) || input.includes("MULTIMODAL") || input.includes("FILE"))) ||
-      keyword.test(text)
-    )
-  })
-  return (matches.length ? matches : previewTools.value).slice(0, 8)
+  return recommendAssetTools(asset, previewTools.value)
 }
 
 async function openAssetPreview(asset: AssetPreviewItem, message?: AgentMessage) {
@@ -2686,11 +2811,15 @@ function onMessageContainerScroll() {
   if (!el) return
   scrollOffset.value = el.scrollTop
   stickToBottom.value = isNearBottom()
+  syncActiveMinimapNodeFromViewport()
   persistChatScroll()
 }
 
 function scheduleNavLayoutUpdate() {
-  navLayoutTick.value += 1
+  void nextTick(() => {
+    setupMinimapIntersectionObserver()
+    syncActiveMinimapNodeFromViewport()
+  })
 }
 
 function navigateToMessage(messageId: number) {
@@ -2698,6 +2827,84 @@ function navigateToMessage(messageId: number) {
   if (!container) return
   const el = container.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null
   el?.scrollIntoView({ behavior: "smooth", block: "center" })
+}
+
+function setMinimapHover(node: ConversationMinimapNode, event: Event) {
+  hoveredMinimapNodeId.value = node.id
+  updateMinimapHoverCardTop(event)
+}
+
+function updateMinimapHoverCardTop(event: Event) {
+  if (!("clientY" in event)) return
+  const viewportHeight = window.innerHeight || 720
+  hoverCardTop.value = Math.min(Math.max(Number(event.clientY), 116), viewportHeight - 116)
+}
+
+function clearMinimapHover() {
+  hoveredMinimapNodeId.value = null
+}
+
+function jumpToMinimapNode(node: ConversationMinimapNode) {
+  activeMinimapMessageId.value = node.messageId
+  navigateToMessage(node.messageId)
+}
+
+function toggleMinimapDrawer() {
+  minimapDrawerOpen.value = !minimapDrawerOpen.value
+}
+
+function isMinimapNodeActive(node: ConversationMinimapNode) {
+  return node.id === hoveredMinimapNodeId.value || node.id === activeMinimapNodeId.value
+}
+
+function setupMinimapIntersectionObserver() {
+  minimapIntersectionObserver?.disconnect()
+  minimapIntersectionObserver = null
+  const container = messageContainerRef.value
+  if (!container || typeof IntersectionObserver === "undefined") return
+
+  minimapIntersectionObserver = new IntersectionObserver(
+    () => syncActiveMinimapNodeFromViewport(),
+    {
+      root: container,
+      threshold: [0, 0.01, 0.1, 0.25, 0.5, 0.75, 1],
+    },
+  )
+
+  for (const message of messages.value) {
+    const el = container.querySelector(`[data-message-id="${message.id}"]`) as HTMLElement | null
+    if (el) minimapIntersectionObserver.observe(el)
+  }
+}
+
+function syncActiveMinimapNodeFromViewport() {
+  const container = messageContainerRef.value
+  if (!container || messages.value.length === 0) {
+    activeMinimapMessageId.value = null
+    return
+  }
+
+  const rootRect = container.getBoundingClientRect()
+  const visibleBottom = rootRect.bottom - Math.min(composerScrollInset.value * 0.58, rootRect.height * 0.42)
+  const viewportCenter = rootRect.top + Math.max(80, (visibleBottom - rootRect.top) * 0.5)
+  let closestMessageId: number | null = null
+  let closestDistance = Number.POSITIVE_INFINITY
+
+  for (const message of messages.value) {
+    const el = container.querySelector(`[data-message-id="${message.id}"]`) as HTMLElement | null
+    if (!el) continue
+    const rect = el.getBoundingClientRect()
+    const intersectsViewport = rect.bottom >= rootRect.top && rect.top <= visibleBottom
+    if (!intersectsViewport) continue
+    const messageCenter = rect.top + rect.height / 2
+    const distance = Math.abs(messageCenter - viewportCenter)
+    if (distance < closestDistance) {
+      closestDistance = distance
+      closestMessageId = message.id
+    }
+  }
+
+  activeMinimapMessageId.value = closestMessageId ?? messages.value.at(-1)?.id ?? null
 }
 
 async function scrollBottom(force = false) {
@@ -2739,11 +2946,23 @@ watch(messages, () => {
 }, { deep: true })
 
 watch(
+  [events, runEventsByRunId],
+  () => {
+    scheduleNavLayoutUpdate()
+  },
+  { deep: true },
+)
+
+watch(
   () => props.sessionId,
   () => {
     loadPersistedRunEventCache()
+    dismissedAutoMountedReferenceKey.value = null
     stickToBottom.value = true
     scrollOffset.value = 0
+    activeMinimapMessageId.value = null
+    hoveredMinimapNodeId.value = null
+    minimapDrawerOpen.value = false
     void loadRecentAttachments()
     void loadPane()
   },
@@ -2788,6 +3007,8 @@ onUnmounted(() => {
   stopRunEventStream()
   stopRunStatusWatchdog()
   stopStreamingAnimationTimer()
+  minimapIntersectionObserver?.disconnect()
+  minimapIntersectionObserver = null
 })
 
 defineExpose({
@@ -2804,16 +3025,90 @@ defineExpose({
     <AgentAmbientBackground :ambient-state="ambientState" :scroll-offset="scrollOffset" />
 
     <div
+      v-if="showConversationMinimap"
+      class="conversation-minimap"
+      :class="{ 'conversation-minimap--drawer-open': minimapDrawerOpen }"
+      @mouseleave="clearMinimapHover"
+      @dblclick="toggleMinimapDrawer"
+    >
+      <button
+        type="button"
+        class="minimap-drawer-toggle"
+        :class="{ open: minimapDrawerOpen }"
+        aria-label="切换对话大纲"
+        @click.stop="toggleMinimapDrawer"
+      >
+        «
+      </button>
+
+      <div class="minimap-pillar" role="navigation" aria-label="长对话节点缩略导航">
+        <button
+          v-for="node in conversationMinimapNodes"
+          :key="node.id"
+          type="button"
+          class="minimap-segment"
+          :class="[
+            `minimap-segment--${node.kind}`,
+            {
+              'minimap-segment--active': isMinimapNodeActive(node),
+              'minimap-segment--muted': hoveredMinimapNodeId && hoveredMinimapNodeId !== node.id,
+            },
+          ]"
+          :aria-label="node.label"
+          @pointerenter="setMinimapHover(node, $event)"
+          @pointermove="updateMinimapHoverCardTop"
+          @focus="setMinimapHover(node, $event)"
+          @blur="clearMinimapHover"
+          @click="jumpToMinimapNode(node)"
+        />
+      </div>
+
+      <Transition name="minimap-hover-card">
+        <aside
+          v-if="hoveredMinimapNode"
+          class="minimap-hover-card"
+          :class="`minimap-hover-card--${hoveredMinimapNode.kind}`"
+          :style="{ top: `${hoverCardTop}px` }"
+        >
+          <p>{{ hoveredMinimapNode.index }}/{{ hoveredMinimapNode.total }} 节点</p>
+          <strong>{{ hoveredMinimapNode.title }}：{{ hoveredMinimapNode.excerpt }}</strong>
+        </aside>
+      </Transition>
+
+      <Transition name="minimap-outline">
+        <aside v-if="minimapDrawerOpen" class="minimap-outline" aria-label="树状对话大纲面板">
+          <header class="minimap-outline__header">
+            <div>
+              <p>Conversation map</p>
+              <h3>对话大纲</h3>
+            </div>
+            <button type="button" aria-label="收起对话大纲" @click="minimapDrawerOpen = false">×</button>
+          </header>
+
+          <ol class="minimap-outline__list">
+            <li
+              v-for="node in conversationMinimapNodes"
+              :key="`outline-${node.id}`"
+              :class="{ active: node.id === activeMinimapNodeId }"
+            >
+              <button type="button" @click="jumpToMinimapNode(node)">
+                <span class="minimap-outline__dot" :class="`minimap-outline__dot--${node.kind}`" />
+                <span>
+                  <small>{{ node.index }}/{{ node.total }} · {{ node.title }}</small>
+                  <strong>{{ node.excerpt }}</strong>
+                </span>
+              </button>
+            </li>
+          </ol>
+        </aside>
+      </Transition>
+    </div>
+
+    <div
       ref="messageContainerRef"
       class="message-container"
       @scroll.passive="onMessageContainerScroll"
     >
-      <ConversationScrollNav
-        v-if="!paneLoading && messages.length > 0"
-        :nodes="scrollNavNodes"
-        @navigate="navigateToMessage"
-      />
-
       <div v-if="paneLoading" class="empty-state">
         <Loader2 class="h-5 w-5 animate-spin" />
       </div>
@@ -2821,12 +3116,7 @@ defineExpose({
       <div v-else-if="messages.length === 0" class="empty-state">
         <div class="empty-mark"><Sparkles class="h-6 w-6" /></div>
         <h2>想完成什么，直接告诉我</h2>
-        <p>Agent 会先分析需求，推荐合适工具，首次调用前让你确认。</p>
-        <div class="suggestions">
-          <button v-for="item in suggestions" :key="item" type="button" @click="submitMessage(item)">
-            {{ item }}
-          </button>
-        </div>
+        <p>我会先分析需求，推荐合适工具，关键操作前让你确认。</p>
       </div>
 
       <TransitionGroup v-else name="branch-message" tag="div" class="message-list-transition">
@@ -2967,35 +3257,17 @@ defineExpose({
       </TransitionGroup>
     </div>
 
-    <div v-if="!paneLoading" class="chat-floating-actions">
-      <ConversationPhaseTimeline
-        v-if="messages.length > 0"
-        :phases="conversationPhases"
-        @navigate="navigateToMessage"
-      />
+    <div ref="composerDockRef" class="composer-dock">
       <button
+        v-if="!paneLoading && messages.length > 0 && !stickToBottom"
         type="button"
-        class="chat-float-btn memory-float-btn"
-        :class="{ 'memory-float-btn--active': memoryPanelOpen }"
-        aria-label="记忆记录"
-        title="长期记忆"
-        @click="memoryPanelOpen ? closeMemoryPanel() : openMemoryPanel()"
-      >
-        <Database class="h-4 w-4" />
-      </button>
-      <button
-        v-if="messages.length > 0 && !stickToBottom"
-        type="button"
-        class="chat-float-btn scroll-to-bottom"
+        class="composer-scroll-to-bottom"
         aria-label="回到底部"
         title="回到底部"
         @click="stickToBottom = true; scrollBottom(true)"
       >
         ↓
       </button>
-    </div>
-
-    <div ref="composerDockRef" class="composer-dock">
       <AgentComposer
         ref="composerRef"
         :model-config-id="modelConfigId"
@@ -3027,6 +3299,7 @@ defineExpose({
         :intelligence-level="intelligenceLevel"
         :session-assets="sessionAssetsForComposer"
         :reference-mentions="draftReferenceMentions"
+        :auto-mounted-reference="autoMountedReference"
         @update:draft="emit('update:draft', $event)"
         @update:reference-mentions="draftReferenceMentions = $event"
         @update:selected-tool-code="selectedToolCode = $event"
@@ -3049,6 +3322,7 @@ defineExpose({
         @load-more-material-assets="loadMoreMaterialAssets"
         @refresh-agent-tools="loadAgentTools"
         @add-reference-attachment="addReferenceAttachment"
+        @dismiss-auto-mounted-reference="dismissAutoMountedReference"
         @open-memory="openMemoryPanel"
       />
     </div>
@@ -3061,45 +3335,46 @@ defineExpose({
       @publish="publishPreviewAsset"
       @unpublish="unpublishPreviewAsset"
     />
-    <div v-if="memoryPanelOpen" class="memory-panel-backdrop" @click.self="closeMemoryPanel">
-      <aside class="memory-panel" aria-label="Agent 长期记忆管理">
-        <header class="memory-panel-header">
-          <div>
-            <p class="memory-panel-kicker">Agent memory</p>
-            <h3>长期记忆</h3>
-            <span>只保存长期有价值的偏好、习惯和项目知识。</span>
+    <Transition name="memory-drawer">
+      <div v-if="memoryPanelOpen" class="memory-panel-backdrop" @click.self="closeMemoryPanel">
+        <aside class="memory-panel" aria-label="Agent 长期记忆管理">
+          <header class="memory-panel-header">
+            <div>
+              <p class="memory-panel-kicker">Agent memory</p>
+              <h3>长期记忆</h3>
+              <span>只保存长期有价值的偏好、习惯和项目知识。</span>
+            </div>
+            <button type="button" class="memory-icon-btn" aria-label="关闭记忆管理" @click="closeMemoryPanel">
+              <X class="h-4 w-4" />
+            </button>
+          </header>
+
+          <div class="memory-panel-controls">
+            <select
+              class="memory-select"
+              :value="memoryWorkspaceId ?? ''"
+              :disabled="memoryLoading || memoryWorkspaces.length === 0"
+              @change="changeMemoryWorkspace(($event.target as HTMLSelectElement).value)"
+            >
+              <option v-if="memoryWorkspaces.length === 0" value="">暂无工作区</option>
+              <option v-for="workspace in memoryWorkspaces" :key="workspace.id" :value="workspace.id">
+                {{ workspace.name }}
+              </option>
+            </select>
+            <button type="button" class="memory-refresh-btn" :disabled="memoryLoading" @click="loadMemoryWorkspaces">
+              <Loader2 v-if="memoryLoading" class="h-4 w-4 animate-spin" />
+              <RefreshCw v-else class="h-4 w-4" />
+            </button>
           </div>
-          <button type="button" class="memory-icon-btn" aria-label="关闭记忆管理" @click="closeMemoryPanel">
-            <X class="h-4 w-4" />
-          </button>
-        </header>
 
-        <div class="memory-panel-controls">
-          <select
-            class="memory-select"
-            :value="memoryWorkspaceId ?? ''"
-            :disabled="memoryLoading || memoryWorkspaces.length === 0"
-            @change="changeMemoryWorkspace(($event.target as HTMLSelectElement).value)"
-          >
-            <option v-if="memoryWorkspaces.length === 0" value="">暂无工作区</option>
-            <option v-for="workspace in memoryWorkspaces" :key="workspace.id" :value="workspace.id">
-              {{ workspace.name }}
-            </option>
-          </select>
-          <button type="button" class="memory-refresh-btn" :disabled="memoryLoading" @click="loadMemoryWorkspaces">
-            <Loader2 v-if="memoryLoading" class="h-4 w-4 animate-spin" />
-            <RefreshCw v-else class="h-4 w-4" />
-          </button>
-        </div>
-
-        <div class="memory-tabs">
-          <button type="button" class="memory-tab-btn" :class="{ active: memoryTab === 'active' }" @click="changeMemoryTab('active')">
-            已生效
-          </button>
-          <button type="button" class="memory-tab-btn" :class="{ active: memoryTab === 'candidate' }" @click="changeMemoryTab('candidate')">
-            待确认
-          </button>
-        </div>
+          <div class="memory-tabs">
+            <button type="button" class="memory-tab-btn" :class="{ active: memoryTab === 'active' }" @click="changeMemoryTab('active')">
+              已生效
+            </button>
+            <button type="button" class="memory-tab-btn" :class="{ active: memoryTab === 'candidate' }" @click="changeMemoryTab('candidate')">
+              待确认
+            </button>
+          </div>
 
         <p v-if="memoryError" class="memory-error">{{ memoryError }}</p>
 
@@ -3183,8 +3458,9 @@ defineExpose({
             </article>
           </section>
         </div>
-      </aside>
-    </div>
+        </aside>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -3197,37 +3473,367 @@ defineExpose({
   overflow: hidden !important;
   position: relative;
   background:
-    radial-gradient(circle at 50% 100%, rgb(176 92 255 / 0.045), transparent 34%),
-    #0a0a0d;
+    radial-gradient(circle at 50% 102%, var(--agent-accent-glow), transparent 34%),
+    transparent;
 }
 
-.chat-float-btn {
-  width: 36px;
-  height: 36px;
+.agent-chat-pane::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 44%, transparent 0 30%, rgb(255 255 255 / 0.040) 30.08% 30.20%, transparent 30.40%),
+    radial-gradient(circle at 50% 44%, transparent 0 38%, rgb(255 255 255 / 0.034) 38.08% 38.20%, transparent 38.44%),
+    radial-gradient(circle at 50% 44%, transparent 0 46%, rgb(255 255 255 / 0.026) 46.08% 46.20%, transparent 46.48%);
+  opacity: 0.72;
+  -webkit-mask-image: radial-gradient(circle at 50% 44%, rgb(0 0 0 / 0.60) 0%, #000 34%, rgb(0 0 0 / 0.36) 58%, transparent 80%);
+  mask-image: radial-gradient(circle at 50% 44%, rgb(0 0 0 / 0.60) 0%, #000 34%, rgb(0 0 0 / 0.36) 58%, transparent 80%);
+}
+
+.conversation-minimap {
+  position: fixed;
+  top: 96px;
+  right: 8px;
+  bottom: 96px;
+  z-index: 36;
+  width: 4px;
+  pointer-events: auto;
+}
+
+.minimap-pillar {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  padding: 1px 0;
   border-radius: 999px;
-  border: 1px solid rgb(255 255 255 / 0.12);
-  background: rgb(24 24 28 / 0.88);
-  color: rgb(255 255 255 / 0.78);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.045), rgb(255 255 255 / 0.012)),
+    rgb(10 12 18 / 0.32);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.026), 0 12px 32px rgb(0 0 0 / 0.20);
+  backdrop-filter: blur(12px) saturate(140%);
+}
+
+.minimap-segment {
+  width: 4px;
+  min-height: 3px;
+  flex: 1 1 0;
+  border: 0;
+  border-bottom: 2px solid #14151a;
+  border-radius: 999px;
+  padding: 0;
   cursor: pointer;
-  backdrop-filter: blur(12px);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
-  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
-  flex-shrink: 0;
-  display: inline-flex;
+  opacity: 0.58;
+  transform-origin: right center;
+  transition:
+    width 0.16s ease,
+    opacity 0.16s ease,
+    filter 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+}
+
+.minimap-segment--system {
+  background: #00e5ff;
+  box-shadow: 0 0 8px rgb(0 229 255 / 0.18);
+}
+
+.minimap-segment--user {
+  background: #3b82f6;
+  box-shadow: 0 0 8px rgb(59 130 246 / 0.18);
+}
+
+.minimap-segment:last-child {
+  border-bottom: 0;
+}
+
+.minimap-segment--active,
+.minimap-segment:hover,
+.minimap-segment:focus-visible {
+  width: 8px;
+  opacity: 1;
+  filter: saturate(1.35) brightness(1.18);
+  outline: none;
+  transform: translateX(-1px);
+}
+
+.minimap-segment--system.minimap-segment--active,
+.minimap-segment--system:hover,
+.minimap-segment--system:focus-visible {
+  box-shadow: 0 0 18px rgb(0 229 255 / 0.58), 0 0 34px rgb(0 229 255 / 0.22);
+}
+
+.minimap-segment--user.minimap-segment--active,
+.minimap-segment--user:hover,
+.minimap-segment--user:focus-visible {
+  box-shadow: 0 0 18px rgb(59 130 246 / 0.58), 0 0 34px rgb(59 130 246 / 0.22);
+}
+
+.minimap-segment--muted {
+  width: 3px;
+  opacity: 0.22;
+  filter: saturate(0.65);
+}
+
+.minimap-drawer-toggle {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 2px);
+  width: 20px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgb(255 255 255 / 0);
+  box-shadow: none;
+  cursor: pointer;
+  transform: translateY(-50%) translateX(5px);
+  backdrop-filter: none;
+  opacity: 0;
+  transition: opacity 0.18s ease, color 0.18s ease, transform 0.18s ease, background 0.18s ease;
+}
+
+.conversation-minimap:hover .minimap-drawer-toggle,
+.minimap-drawer-toggle:focus-visible,
+.minimap-drawer-toggle:hover,
+.minimap-drawer-toggle.open {
+  opacity: 1;
+  color: rgb(255 255 255 / 0.64);
+  background: rgb(18 18 22 / 0.34);
+  transform: translateY(-50%) translateX(-2px);
+}
+
+.minimap-drawer-toggle:hover,
+.minimap-drawer-toggle.open {
+  color: #fff;
+  background: rgb(18 18 22 / 0.58);
+}
+
+.minimap-hover-card {
+  position: fixed;
+  right: 26px;
+  width: 238px;
+  padding: 12px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 14px;
+  background: rgb(18 18 22 / 0.80);
+  color: rgb(255 255 255 / 0.78);
+  box-shadow: 0 18px 56px rgb(0 0 0 / 0.42), inset 0 1px 0 rgb(255 255 255 / 0.05);
+  backdrop-filter: blur(18px) saturate(145%);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.minimap-hover-card::after {
+  content: "";
+  position: absolute;
+  right: -5px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 14px currentColor, 0 0 28px currentColor;
+  transform: translateY(-50%);
+}
+
+.minimap-hover-card--system {
+  color: #00e5ff;
+}
+
+.minimap-hover-card--user {
+  color: #3b82f6;
+}
+
+.minimap-hover-card p {
+  margin: 0 0 6px;
+  color: rgb(255 255 255 / 0.30);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.minimap-hover-card strong {
+  display: block;
+  overflow: hidden;
+  color: rgb(255 255 255 / 0.70);
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.minimap-hover-card-enter-active,
+.minimap-hover-card-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.minimap-hover-card-enter-from,
+.minimap-hover-card-leave-to {
+  opacity: 0;
+  transform: translateY(-50%) translateX(8px);
+}
+
+.minimap-outline {
+  position: fixed;
+  top: 96px;
+  right: 28px;
+  bottom: 96px;
+  width: min(320px, calc(100vw - 58px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgb(255 255 255 / 0.09);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 12% 0%, var(--agent-accent-soft), transparent 34%),
+    rgb(18 18 22 / 0.94);
+  box-shadow: 0 24px 76px rgb(0 0 0 / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.055);
+  backdrop-filter: blur(22px) saturate(150%);
+  overflow: hidden;
+}
+
+.minimap-outline__header {
+  display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.07);
 }
 
-.chat-float-btn:hover {
-  transform: translateY(-2px);
-  border-color: var(--agent-accent-soft);
+.minimap-outline__header p,
+.minimap-outline__header h3 {
+  margin: 0;
+}
+
+.minimap-outline__header p {
+  color: rgb(255 255 255 / 0.38);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.minimap-outline__header h3 {
+  margin-top: 4px;
+  color: rgb(255 255 255 / 0.88);
+  font-size: 16px;
+}
+
+.minimap-outline__header button {
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.045);
+  color: rgb(255 255 255 / 0.62);
+  cursor: pointer;
+}
+
+.minimap-outline__list {
+  min-height: 0;
+  margin: 0;
+  padding: 12px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.minimap-outline__list li {
+  position: relative;
+}
+
+.minimap-outline__list li::before {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 26px;
+  bottom: -10px;
+  width: 1px;
+  background: rgb(255 255 255 / 0.07);
+}
+
+.minimap-outline__list li:last-child::before {
+  display: none;
+}
+
+.minimap-outline__list button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  padding: 9px 10px 9px 4px;
+  color: rgb(255 255 255 / 0.70);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.minimap-outline__list button:hover,
+.minimap-outline__list li.active button {
+  background: rgb(255 255 255 / 0.055);
   color: #fff;
 }
 
-.memory-float-btn--active {
-  border-color: rgb(176 92 255 / 0.42);
-  background: rgb(176 92 255 / 0.18);
-  color: #fff;
+.minimap-outline__dot {
+  position: relative;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  margin: 6px 0 0 6px;
+  border-radius: 999px;
+  box-shadow: 0 0 14px currentColor;
+}
+
+.minimap-outline__dot--system {
+  color: #00e5ff;
+  background: #00e5ff;
+}
+
+.minimap-outline__dot--user {
+  color: #3b82f6;
+  background: #3b82f6;
+}
+
+.minimap-outline__list small,
+.minimap-outline__list strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.minimap-outline__list small {
+  color: rgb(255 255 255 / 0.36);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.minimap-outline__list strong {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.minimap-outline-enter-active,
+.minimap-outline-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.minimap-outline-enter-from,
+.minimap-outline-leave-to {
+  opacity: 0;
+  transform: translateX(18px) scale(0.98);
 }
 
 .chat-scroll-anchor {
@@ -3238,6 +3844,8 @@ defineExpose({
 
 .message-list-transition {
   width: 100%;
+  display: block;
+  padding-top: 26px;
 }
 
 .message-list-item {
@@ -3259,31 +3867,6 @@ defineExpose({
   transition: transform 0.2s ease;
 }
 
-.chat-floating-actions {
-  position: absolute;
-  right: clamp(20px, 4vw, 56px);
-  bottom: calc(var(--chat-composer-inset, 210px) + 14px);
-  top: auto;
-  left: auto;
-  z-index: 5;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  pointer-events: none;
-}
-
-@media (max-width: 900px) {
-  .chat-floating-actions {
-    right: 16px;
-    bottom: calc(var(--chat-composer-inset, 196px) + 12px);
-  }
-}
-
-.chat-floating-actions > * {
-  pointer-events: auto;
-}
-
 .message-container {
   flex: 1;
   overflow-y: auto;
@@ -3292,7 +3875,7 @@ defineExpose({
   z-index: 1;
   height: 100%;
   max-height: none;
-  padding: 64px clamp(40px, 7vw, 128px) 24px;
+  padding: 72px clamp(40px, 7vw, 128px) 24px;
   scroll-behavior: smooth;
   scrollbar-gutter: stable both-edges;
   scrollbar-width: thin;
@@ -3305,7 +3888,7 @@ defineExpose({
   right: 0;
   bottom: 0;
   z-index: 4;
-  padding: 18px 0 max(18px, env(safe-area-inset-bottom));
+  padding: 20px 0 max(36px, env(safe-area-inset-bottom));
   background: transparent;
   pointer-events: none;
 }
@@ -3315,8 +3898,41 @@ defineExpose({
   position: absolute;
   inset: -80px 0 0;
   z-index: -1;
-  background: linear-gradient(180deg, transparent, rgb(10 10 13 / 0.24) 54%, rgb(10 10 13 / 0.36));
+  background: linear-gradient(180deg, transparent, rgb(18 21 27 / 0.16) 54%, rgb(18 21 27 / 0.34));
   pointer-events: none;
+}
+
+.composer-scroll-to-bottom {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 14px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.10), rgb(255 255 255 / 0.045)),
+    rgb(18 20 26 / 0.74);
+  color: rgb(255 255 255 / 0.82);
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 14px 42px rgb(0 0 0 / 0.30), inset 0 1px 0 rgb(255 255 255 / 0.08);
+  backdrop-filter: blur(16px) saturate(135%);
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.composer-scroll-to-bottom:hover,
+.composer-scroll-to-bottom:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--agent-accent-soft);
+  color: #fff;
+  outline: none;
+  box-shadow: 0 16px 48px rgb(0 0 0 / 0.34), 0 0 24px var(--agent-accent-glow);
 }
 
 .composer-dock :deep(.composer) {
@@ -3337,12 +3953,13 @@ defineExpose({
 }
 
 .composer {
-  width: min(720px, calc(100% - 112px));
+  width: min(960px, calc(100% - 184px));
   margin: 0 auto;
+  min-height: 198px;
   border: 1px solid rgb(255 255 255 / 0.105);
-  border-radius: 28px;
+  border-radius: 24px;
   background: var(--agent-composer-bg);
-  padding: 10px 12px 11px;
+  padding: 16px 20px 14px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -3350,9 +3967,9 @@ defineExpose({
   position: relative;
   z-index: 2;
   box-shadow:
-    0 -18px 56px var(--agent-accent-glow, rgb(176 92 255 / 0.10)),
+    0 -24px 72px var(--agent-accent-glow, rgb(176 92 255 / 0.12)),
     0 24px 72px rgb(0 0 0 / 0.52),
-    0 0 0 1px color-mix(in srgb, var(--theme-color), transparent 86%),
+    0 0 0 1px color-mix(in srgb, var(--agent-accent), transparent 86%),
     inset 0 1px 0 rgb(255 255 255 / 0.08);
   backdrop-filter: blur(24px) saturate(145%);
 }
@@ -3585,56 +4202,42 @@ defineExpose({
 }
 
 .empty-state {
-  min-height: 60vh;
+  min-height: 54vh;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   text-align: center;
   color: rgb(255 255 255 / 0.48);
+  transform: translateY(-36px);
 }
 
 .empty-mark {
-  width: 62px;
-  height: 62px;
+  width: 76px;
+  height: 76px;
   display: grid;
   place-items: center;
   border-radius: 24px;
-  border: 1px solid var(--agent-accent-soft);
-  background: linear-gradient(145deg, var(--agent-accent-soft), rgb(255 255 255 / 0.05));
-  color: var(--agent-accent);
+  border: 1px solid color-mix(in srgb, var(--agent-accent) 32%, rgb(255 255 255 / 0.14));
+  background:
+    radial-gradient(circle at 34% 18%, rgb(255 255 255 / 0.22), transparent 30%),
+    linear-gradient(145deg, var(--agent-accent-soft), rgb(255 255 255 / 0.055));
+  color: var(--agent-accent-light);
+  box-shadow: 0 24px 60px var(--agent-accent-glow), inset 0 1px 0 rgb(255 255 255 / 0.10);
   animation: breathe-soft 2.8s ease-in-out infinite;
 }
 
 .empty-state h2 {
-  margin: 18px 0 8px;
-  font-size: 28px;
+  margin: 30px 0 10px;
+  font-size: 30px;
+  line-height: 1.2;
   color: #fff;
 }
 
-.suggestions {
-  margin-top: 22px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(180px, 1fr));
-  gap: 10px;
-  width: min(620px, 100%);
-}
-
-.suggestions button {
-  min-height: 44px;
-  border: 1px solid rgb(255 255 255 / 0.09);
-  border-radius: 18px;
-  background: linear-gradient(180deg, rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.035));
-  color: rgb(255 255 255 / 0.74);
-  cursor: pointer;
-  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, transform 0.18s ease;
-}
-
-.suggestions button:hover {
-  border-color: var(--agent-accent-soft);
-  background: var(--agent-accent-soft);
-  color: #fff;
-  transform: translateY(-1px);
+.empty-state p {
+  margin: 0;
+  color: rgb(255 255 255 / 0.48);
+  font-size: 15px;
 }
 
 .agent-message {
@@ -4082,24 +4685,49 @@ defineExpose({
   z-index: 30;
   display: flex;
   justify-content: flex-end;
-  background: rgb(0 0 0 / 0.48);
-  backdrop-filter: blur(8px);
+  background: rgb(0 0 0 / 0.16);
 }
 
 .memory-panel {
-  width: min(460px, calc(100% - 24px));
-  height: 100%;
+  width: min(320px, calc(100% - 16px));
+  height: calc(100% - 20px);
+  margin: 10px 10px 10px 0;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  border-left: 1px solid rgb(255 255 255 / 0.10);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 22px;
   background:
-    radial-gradient(circle at 20% 0%, var(--agent-composer-tint), transparent 34%),
-    rgb(18 18 22 / 0.96);
-  padding: 20px;
+    radial-gradient(circle at 16% 0%, var(--agent-composer-tint), transparent 38%),
+    linear-gradient(180deg, rgb(32 36 46 / 0.84), rgb(14 16 22 / 0.78));
+  padding: 18px;
   color: rgb(255 255 255 / 0.88);
-  box-shadow: -20px 0 80px rgb(0 0 0 / 0.42);
+  box-shadow:
+    -18px 0 70px rgb(0 0 0 / 0.36),
+    inset 1px 0 0 rgb(255 255 255 / 0.06);
+  backdrop-filter: blur(24px) saturate(135%);
   overflow-y: auto;
+}
+
+.memory-drawer-enter-active,
+.memory-drawer-leave-active {
+  transition: opacity 0.22s ease;
+}
+
+.memory-drawer-enter-active .memory-panel,
+.memory-drawer-leave-active .memory-panel {
+  transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease;
+}
+
+.memory-drawer-enter-from,
+.memory-drawer-leave-to {
+  opacity: 0;
+}
+
+.memory-drawer-enter-from .memory-panel,
+.memory-drawer-leave-to .memory-panel {
+  opacity: 0;
+  transform: translateX(28px);
 }
 
 .memory-panel-header,
@@ -4343,18 +4971,25 @@ defineExpose({
 }
 
 @media (max-width: 900px) {
+  .conversation-minimap {
+    display: none;
+  }
+
   .message-container {
     padding: 36px 14px 16px;
   }
   .composer {
     width: calc(100% - 24px);
+    min-height: 176px;
     border-radius: 24px;
   }
   .composer-dock {
     padding: 14px 0 max(14px, env(safe-area-inset-bottom));
   }
-  .suggestions {
-    grid-template-columns: 1fr;
+  .composer-scroll-to-bottom {
+    width: 40px;
+    height: 40px;
+    margin-bottom: 10px;
   }
   .composer-model-row {
     align-items: center;

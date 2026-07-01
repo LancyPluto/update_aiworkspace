@@ -16,15 +16,32 @@ if load_dotenv is not None:
     load_dotenv()
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_production_env(app_env: str) -> bool:
+    return _env_bool("APP_PRODUCTION_MODE", False) or app_env.strip().lower() == "production"
+
+
+def _is_missing_or_placeholder(value: str | None, *placeholders: str) -> bool:
+    normalized = (value or "").strip()
+    return not normalized or normalized in placeholders or normalized.startswith("replace-with-")
+
+
 @dataclass(slots=True)
 class Settings:
+    app_env: str = os.getenv('APP_ENV', 'local')
     redis_host: str = os.getenv('REDIS_HOST', '127.0.0.1')
     redis_port: int = int(os.getenv('REDIS_PORT', '6379'))
     redis_password: str = os.getenv('REDIS_PASSWORD', '')
     redis_database: int = int(os.getenv('REDIS_DATABASE', '0'))
     redis_retry_interval_seconds: float = float(os.getenv('REDIS_RETRY_INTERVAL_SECONDS', '5'))
     ai_task_queue: str = os.getenv('AI_TASK_QUEUE', 'ai:task:queue')
-    task_queue_backend: str = os.getenv('TASK_QUEUE_BACKEND', 'redis')
+    task_queue_backend: str = os.getenv('TASK_QUEUE_BACKEND', 'rabbitmq')
     rabbitmq_host: str = os.getenv('RABBITMQ_HOST', '127.0.0.1')
     rabbitmq_port: int = int(os.getenv('RABBITMQ_PORT', '5672'))
     rabbitmq_username: str = os.getenv('RABBITMQ_USERNAME', 'guest')
@@ -100,7 +117,21 @@ class Settings:
     }
 
 
+def validate_startup_settings(settings: Settings) -> None:
+    if not _is_production_env(settings.app_env):
+        return
+    if settings.task_queue_backend.strip().lower() == "redis":
+        raise RuntimeError("Production mode requires TASK_QUEUE_BACKEND=rabbitmq")
+    if _is_missing_or_placeholder(settings.internal_api_token, "local-internal-token", "replace-with-internal-token"):
+        raise RuntimeError("Production mode requires a non-default INTERNAL_API_TOKEN")
+    if settings.model_provider.strip().lower() == "mock":
+        raise RuntimeError("Production mode does not allow MODEL_PROVIDER=mock")
+    if _is_missing_or_placeholder(settings.model_api_key, "replace-with-model-key"):
+        raise RuntimeError("Production mode requires a real MODEL_API_KEY")
+
+
 settings = Settings()
+validate_startup_settings(settings)
 
 
 def resolve_siliconflow_api_key(model_config: dict[str, Any] | None = None) -> str:

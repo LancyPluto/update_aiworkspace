@@ -109,6 +109,27 @@ class WorkerCallbackIdempotencyTest {
     }
 
     @Test
+    void cancelThenFailedCallbackReturnsCancelledAndDoesNotReleaseTwice() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long toolId = createTool(adminToken, "cancel_then_failed_tool", 6);
+        publishTool(adminToken, toolId);
+        String userToken = login("/api/v1/auth/login", "user1");
+        Long taskId = createTask(userToken, "cancel_then_failed_tool", "cancel-then-failed-request");
+
+        mockMvc.perform(post("/api/v1/tasks/{taskId}/cancel", taskId)
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+
+        markFailed(taskId, "late worker failure")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+
+        org.assertj.core.api.Assertions.assertThat(countCreditLogs(taskId, "RELEASE")).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(countCreditLogs(taskId, "DEDUCT")).isZero();
+    }
+
+    @Test
     void adminRetryFromFailedReturnsTaskToQueued() throws Exception {
         String adminToken = login("/api/admin/v1/auth/login", "admin");
         Long toolId = createTool(adminToken, "retry_failed_tool", 3);

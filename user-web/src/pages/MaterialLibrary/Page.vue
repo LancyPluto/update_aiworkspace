@@ -31,6 +31,7 @@ import type { ResultBlock } from "@/types/result"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { assetFromTask, taskPromptPreview } from "@/utils/assetPreviewAdapter"
+import { recommendToolsForAsset as recommendAssetTools } from "@/utils/assetToolRecommendations"
 import { openCreateWithAssetRecommendation } from "@/utils/assetReplay"
 import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 import SubjectLibraryPanel from "@/pages/MaterialLibrary/SubjectLibraryPanel.vue"
@@ -59,6 +60,7 @@ const assetTabOptions: Array<{ value: AssetTab; label: string; to: string }> = [
 const loading = ref(false)
 const error = ref("")
 const tasks = ref<TaskDetail[]>([])
+const usageTasks = ref<TaskDetail[]>([])
 const tools = ref<ToolSummary[]>([])
 const selectedModality = ref<MaterialModality>("all")
 const selectTool = ref("all")
@@ -200,8 +202,12 @@ async function loadMaterials(reset = true) {
     hasNextPage.value = response.hasNext
     currentPage.value += 1
     if (reset) {
-      const toolResponse = await fetchTools({ token: auth.token, query: { pageNo: 1, pageSize: 120 } })
+      const [toolResponse, usageResponse] = await Promise.all([
+        fetchTools({ token: auth.token, query: { pageNo: 1, pageSize: 120 } }),
+        fetchTasks({ token: auth.token, query: { pageNo: 1, pageSize: 120 } }).catch(() => null),
+      ])
       tools.value = toolResponse.list
+      usageTasks.value = usageResponse?.list || response.list
     }
   } catch (err) {
     error.value = err instanceof Error ? err.message : "加载素材库失败"
@@ -257,22 +263,8 @@ function patchTaskCommunityPost(taskId: number, communityPostId?: number | null)
   )
 }
 
-function normalizeModality(value?: string | null) {
-  return (value || "TEXT").trim().toUpperCase()
-}
-
 function recommendToolsForAsset(asset: AssetPreviewItem): AssetPreviewRecommendation[] {
-  const target = asset.kind === "image" ? "IMAGE" : asset.kind === "video" ? "VIDEO" : asset.kind === "audio" ? "AUDIO" : ""
-  const keyword = asset.kind === "image" ? /图|图片|影像|photo|image|img|改图|参考/i : asset.kind === "video" ? /视频|短片|video|clip|movie/i : /音频|音乐|audio|voice|tts/i
-  const matches = tools.value.filter((tool) => {
-    const input = normalizeModality(tool.inputModality)
-    const text = `${tool.toolName} ${tool.description || ""} ${tool.configNote || ""} ${tool.toolCode}`
-    return (
-      (target && (input.includes(target) || input.includes("MULTIMODAL") || input.includes("FILE"))) ||
-      keyword.test(text)
-    )
-  })
-  return (matches.length ? matches : tools.value).slice(0, 8)
+  return recommendAssetTools(asset, tools.value, { tasks: usageTasks.value })
 }
 
 function useAssetWithTool(tool: AssetPreviewRecommendation) {

@@ -239,7 +239,7 @@ def trim_tool_parameters(
             str(spec_dict.get("x-agent-fill-strategy") or "").strip().lower() == "default"
             and spec_dict.get("default") not in (None, "")
         )
-        if prune_fields and is_locked_default and not is_core and not is_media:
+        if prune_fields and is_locked_default and not is_core and not is_media and not _is_mutable_mode_control(key, spec_dict):
             continue
         if prune_fields and not (is_core or is_media or is_user_required or has_enum):
             continue
@@ -252,6 +252,15 @@ def trim_tool_parameters(
     if required:
         out["required"] = required
     return out
+
+
+def _is_mutable_mode_control(key: str, spec: dict[str, Any]) -> bool:
+    lower = key.strip().lower()
+    if lower not in {"custommode", "custom_mode"}:
+        return False
+    enum = spec.get("enum")
+    options = spec.get("options")
+    return (isinstance(enum, list) and bool(enum)) or isinstance(options, list)
 
 
 def _is_v2_lite_image_schema(schema: dict[str, Any]) -> bool:

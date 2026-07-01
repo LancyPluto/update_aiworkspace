@@ -10,6 +10,9 @@ import com.aiminilab.aitoolmarket.ppt.PptConstants;
 import com.aiminilab.aitoolmarket.ppt.dto.PptAdminWorkflowDetailResponse;
 import com.aiminilab.aitoolmarket.ppt.workflow.PptWorkflow;
 import com.aiminilab.aitoolmarket.ppt.workflow.PptWorkflowStep;
+import com.aiminilab.aitoolmarket.tool.integration.IntegrationMode;
+import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationConfig;
+import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationConstants;
 import com.aiminilab.aitoolmarket.tool.integration.api.ToolIntegrationApiCatalog;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
@@ -21,7 +24,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
 
 @Service
 public class PptAdminWorkflowService {
@@ -195,16 +197,20 @@ public class PptAdminWorkflowService {
 
     String mergeWorkflowIntoConfigNote(String configNote, PptWorkflow workflow) {
         try {
-            String json = objectMapper.writeValueAsString(workflow);
-            String marker = "<!-- ppt-workflow:" + json + " -->";
-            if (configNote == null || configNote.isBlank()) {
-                return marker;
-            }
-            Matcher matcher = PptConstants.WORKFLOW_PATTERN.matcher(configNote);
-            if (matcher.find()) {
-                return matcher.replaceFirst(Matcher.quoteReplacement(marker));
-            }
-            return configNote.strip() + "\n" + marker;
+            ToolIntegrationConfig config = new ToolIntegrationConfig();
+            config.setIntegrationMode(IntegrationMode.PPT_WORKSPACE);
+            config.setPluginId(ToolIntegrationApiCatalog.PPT_PLUGIN);
+            config.setApiPrefix("/api/v1/ppt");
+            config.setCustomUiRoute(workflow.getCustomUiRoute());
+            config.putExtra(ToolIntegrationApiCatalog.PPT_PLUGIN, objectMapper.valueToTree(workflow));
+            String marker = ToolIntegrationConstants.MARKER_PREFIX
+                    + objectMapper.writeValueAsString(config)
+                    + ToolIntegrationConstants.MARKER_SUFFIX;
+            String text = configNote == null ? "" : configNote;
+            text = PptConstants.WORKFLOW_PATTERN.matcher(text).replaceAll("");
+            text = ToolIntegrationConstants.MARKER_PATTERN.matcher(text).replaceAll("");
+            text = text.strip();
+            return text.isBlank() ? marker : text + "\n" + marker;
         } catch (Exception exception) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "工作流 JSON 序列化失败");
         }

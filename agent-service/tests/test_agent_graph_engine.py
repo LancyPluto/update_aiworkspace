@@ -8,11 +8,12 @@ from app.clients.model_client import ChatToolCall, ChatTurnResult
 from app.core.event_types import (
     MESSAGE_COMPLETED,
     PLAN_UPDATED,
+    SKILL_HYDRATED,
     TOOL_CALL_LOOP_COMPLETED,
     TOOL_CONFIRMATION_REQUIRED,
     TOOL_SELECTED,
 )
-from app.core.schemas import RunContext, TaskDetailResponse, TaskResultResponse, ToolDescriptor
+from app.core.schemas import AgentSkillDescriptor, RunContext, TaskDetailResponse, TaskResultResponse, ToolDescriptor
 from app.runtime.agent_graph import AgentGraphEngine
 
 
@@ -105,6 +106,29 @@ class FakeBackend:
     async def fail_tool_call(self, tool_call_id, payload):
         self.failed_tool_calls.append(payload)
 
+    async def get_agent_skill(self, skill_code):
+        if skill_code == "music_generation":
+            return {
+                "skillCode": "music_generation",
+                "displayName": "音乐生成",
+                "version": 1,
+                "sopRules": (
+                    "When customMode=false, prompt must be a compact music brief of 500 characters or fewer. "
+                    "Use customMode=true for long lyrics. Do not copy melody, lyrics, vocal identity, or recordings."
+                ),
+                "examples": [
+                    {
+                        "user": "模仿 Owl City good time 风格，创作日系女团歌曲",
+                        "tool": "suno_music",
+                        "arguments": {
+                            "customMode": False,
+                            "prompt": "Upbeat Japanese girl-group electropop, original melody and lyrics only.",
+                        },
+                    }
+                ],
+            }
+        raise AssertionError(f"unexpected skill lookup: {skill_code}")
+
 
 def _event_types(backend):
     return [event.eventType for event in backend.events]
@@ -124,6 +148,26 @@ def _v2_image_tool():
                 "generation_prompt": {"type": "string"},
                 "base_image_ref": {"type": "string"},
                 "references": {"type": "array"},
+            },
+        },
+    )
+
+
+def _suno_music_tool():
+    return ToolDescriptor(
+        toolCode="suno_music",
+        toolName="Suno Music",
+        description="Generate music with Suno",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "required": ["prompt"],
+            "properties": {
+                "prompt": {"type": "string"},
+                "customMode": {"type": "boolean"},
+                "style": {"type": "string"},
+                "title": {"type": "string"},
+                "model": {"type": "string", "enum": ["V5_5", "V5"]},
             },
         },
     )
@@ -225,6 +269,86 @@ async def test_graph_engine_forces_retry_when_schema_validation_reply_has_no_too
     assert backend.completed_runs[0].finalAnswer.startswith("图片已生成")
     assert backend.tool_calls[-1][1]["generation_prompt"] == "完整视觉提示词，冷蓝电影海报，主体清晰。"
     assert len(model.calls) == 4
+
+
+@pytest.mark.asyncio
+async def test_graph_engine_hydrates_music_skill_before_executing_suno_music():
+    detail = TaskDetailResponse(
+        taskId=1154,
+        status="SUCCESS",
+        result=TaskResultResponse(
+            resourceType="AUDIO",
+            contentText='{"audios":[{"url":"https://cdn.example/song.mp3"}]}',
+        ),
+    )
+    backend = FakeBackend(task_detail=detail)
+    context = RunContext(
+        runId=54,
+        sessionId=2,
+        userId=3,
+        message="模仿 Owl City good time 风格，创作一首日系女团歌曲",
+        availableTools=[_suno_music_tool()],
+        availableSkills=[
+            AgentSkillDescriptor(
+                skillCode="music_generation",
+                displayName="音乐生成",
+                description="Suno music generation",
+                toolCodes=["suno_music", "suno", "music_generation"],
+                version=1,
+            )
+        ],
+        creditBudget=100,
+    )
+    model = FakeModel(
+        [
+            ChatTurnResult(
+                content="",
+                tool_calls=[
+                    ChatToolCall(
+                        id="c1",
+                        name="agent_tool__suno_music",
+                        arguments={
+                            "customMode": False,
+                            "prompt": "x" * 700,
+                            "model": "V5_5",
+                        },
+                    )
+                ],
+            ),
+            ChatTurnResult(
+                content="",
+                tool_calls=[
+                    ChatToolCall(
+                        id="c2",
+                        name="agent_tool__suno_music",
+                        arguments={
+                            "customMode": False,
+                            "prompt": (
+                                "Upbeat Japanese girl-group electropop with bright synths, handclaps, sunny summer "
+                                "energy, catchy chorus, clean youthful vocals, original melody and lyrics only."
+                            ),
+                            "model": "V5_5",
+                        },
+                    )
+                ],
+            ),
+            ChatTurnResult(content="音乐已生成：https://cdn.example/song.mp3", tool_calls=[]),
+        ]
+    )
+    engine = AgentGraphEngine(backend, model)
+
+    await engine.run(context)
+
+    assert SKILL_HYDRATED in _event_types(backend)
+    assert len(backend.tool_calls) == 1
+    tool_code, arguments = backend.tool_calls[0]
+    assert tool_code == "suno_music"
+    assert arguments["customMode"] is False
+    assert len(arguments["prompt"]) <= 500
+    assert "original melody and lyrics only" in arguments["prompt"]
+    second_call_system_messages = [m.content for m in model.calls[1]["messages"] if m.role == "system"]
+    assert any("music_generation" in text and "500 characters" in text for text in second_call_system_messages)
+    assert backend.completed_runs[0].finalAnswer.startswith("音乐已生成")
 
 
 @pytest.mark.asyncio

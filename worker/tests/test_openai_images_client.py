@@ -445,6 +445,84 @@ def test_openai_images_504_is_not_retried(monkeypatch) -> None:
     assert attempts["count"] == 1
 
 
+def test_openai_images_multipart_incomplete_response_is_not_retried_by_default(monkeypatch) -> None:
+    attempts = {"count": 0}
+
+    def fake_post(*_args, **_kwargs):
+        attempts["count"] += 1
+        raise requests.exceptions.ChunkedEncodingError(
+            "Connection broken: IncompleteRead(8185 bytes read, 2055 more expected)"
+        )
+
+    client = OpenAIImagesClient(
+        base_url="https://api.ofox.ai/v1",
+        api_key="fake-key",
+        extra_auth_json='{"connectionRetries":2}',
+    )
+    monkeypatch.setattr(client.session, "post", fake_post)
+
+    with pytest.raises(Exception, match="not retrying this non-idempotent image request"):
+        client._post_multipart_with_ssl_retries(
+            "https://api.ofox.ai/v1/images/edits",
+            {"model": "openai/gpt-image-2", "prompt": "edit", "n": "1", "size": "auto", "quality": "low"},
+            [("ref.png", b"fake", "image/png")],
+        )
+
+    assert attempts["count"] == 1
+
+
+def test_openai_images_json_incomplete_response_is_not_retried_by_default(monkeypatch) -> None:
+    attempts = {"count": 0}
+
+    def fake_post(*_args, **_kwargs):
+        attempts["count"] += 1
+        raise requests.exceptions.ChunkedEncodingError("Response ended prematurely")
+
+    client = OpenAIImagesClient(
+        base_url="https://api.ofox.ai/v1",
+        api_key="fake-key",
+        extra_auth_json='{"connectionRetries":2}',
+    )
+    monkeypatch.setattr(client.session, "post", fake_post)
+
+    with pytest.raises(Exception, match="not retrying this non-idempotent image request"):
+        client._post("/images/generations", {"model": "openai/gpt-image-2", "prompt": "test"})
+
+    assert attempts["count"] == 1
+
+
+def test_openai_images_incomplete_response_retry_can_be_enabled(monkeypatch) -> None:
+    attempts = {"count": 0}
+
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"data": [{"url": "https://example.com/recovered.png"}]}
+
+    def fake_post(*_args, **_kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise requests.exceptions.ChunkedEncodingError("Response ended prematurely")
+        return FakeResponse()
+
+    client = OpenAIImagesClient(
+        base_url="https://api.ofox.ai/v1",
+        api_key="fake-key",
+        extra_auth_json='{"connectionRetries":1,"retryIncompleteResponses":true}',
+    )
+    monkeypatch.setattr(client.session, "post", fake_post)
+
+    response = client._post("/images/generations", {"model": "openai/gpt-image-2", "prompt": "test"})
+
+    assert response["data"][0]["url"] == "https://example.com/recovered.png"
+    assert attempts["count"] == 2
+
+
 def test_openai_images_force_quality_overrides_params() -> None:
     client = OpenAIImagesClient(
         base_url="https://api.ofox.ai/v1",

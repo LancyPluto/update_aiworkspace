@@ -34,6 +34,7 @@ spring:
       timeout: 2s
 
 app:
+  env: ${APP_ENV:local}
   cache:
     enabled: ${APP_CACHE_ENABLED:true}
     default-ttl-seconds: ${APP_CACHE_DEFAULT_TTL_SECONDS:300}

@@ -622,6 +622,40 @@ def test_compile_v2_lite_image_task_params_generate_uses_physical_prompt_and_ref
     assert "references" not in params
 
 
+def test_compile_v2_lite_image_task_params_resolves_current_reference_alias_with_context():
+    from app.tools.backend_tool import compile_v2_lite_image_task_params
+
+    context = RunContext(
+        runId=1,
+        sessionId=1,
+        userId=7,
+        message="生成图片 @图片1",
+        status="RUNNING",
+        referenceMentions=[
+            ReferenceMention(
+                token="@图片1",
+                refLabel="@图片1-style.png",
+                url="/generated/uploads/style.png",
+                kind="image",
+                source="current_turn",
+            )
+        ],
+    )
+
+    params = compile_v2_lite_image_task_params(
+        {
+            "operation": "generate",
+            "generation_prompt": "冷蓝电影海报，柔焦真实光影。",
+            "references": [
+                {"id": "style_ref_1", "role": "style_ref", "source_ref": "[当前参考图_1]"}
+            ],
+        },
+        context=context,
+    )
+
+    assert params["reference_images"] == ["/generated/uploads/style.png"]
+
+
 def test_compile_v2_lite_image_task_params_edit_compiles_base_and_delta():
     from app.tools.backend_tool import compile_v2_lite_image_task_params
 
@@ -1193,3 +1227,74 @@ def test_enforce_locked_field_defaults_respects_explicit_user_quality():
         user_message="这次用high生成",
     )
     assert locked["quality"] == "high"
+
+
+def test_custom_mode_default_does_not_override_model_true():
+    tool = ToolDescriptor(
+        toolCode="suno_music",
+        toolName="Suno Music",
+        autoCallable=True,
+        fields=[
+            {
+                "fieldKey": "customMode",
+                "fieldName": "创作模式",
+                "fieldType": "radio",
+                "defaultValue": "false",
+                "agentFillStrategy": "default",
+                "options": {"options": [{"label": "常规", "value": "false"}, {"label": "高级", "value": "true"}]},
+            }
+        ],
+    )
+
+    locked = enforce_locked_field_defaults(tool, {"customMode": True, "prompt": "lyrics"}, user_message="用自定义模式")
+
+    assert locked["customMode"] is True
+
+
+def test_music_prompt_over_500_switches_to_custom_mode_before_dispatch():
+    tool = ToolDescriptor(
+        toolCode="suno_music",
+        toolName="Suno Music",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string"},
+                "customMode": {"type": "boolean", "enum": [False, True], "default": False},
+            },
+        },
+        fields=[
+            {
+                "fieldKey": "customMode",
+                "fieldName": "创作模式",
+                "fieldType": "radio",
+                "defaultValue": "false",
+                "agentFillStrategy": "default",
+            }
+        ],
+    )
+    ctx = RunContext(runId=1, sessionId=1, userId=1, message="创作一首长歌词歌曲")
+
+    finalized = finalize_generation_arguments(ctx, tool, {"customMode": "false", "prompt": "日文歌词" * 200})
+
+    assert finalized["customMode"] is True
+
+
+def test_music_custom_mode_request_switches_to_custom_mode_even_for_short_prompt():
+    tool = ToolDescriptor(
+        toolCode="suno_music",
+        toolName="Suno Music",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string"},
+                "customMode": {"type": "boolean", "enum": [False, True], "default": False},
+            },
+        },
+    )
+    ctx = RunContext(runId=1, sessionId=1, userId=1, message="请用自定义模式生成这首歌")
+
+    finalized = finalize_generation_arguments(ctx, tool, {"customMode": "false", "prompt": "短歌词"})
+
+    assert finalized["customMode"] is True

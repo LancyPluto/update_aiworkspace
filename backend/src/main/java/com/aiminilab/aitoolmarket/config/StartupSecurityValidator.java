@@ -18,7 +18,7 @@ public class StartupSecurityValidator implements InitializingBean {
 
     @Override
     public void afterPropertiesSet() {
-        if (!appProperties.isProductionMode()) {
+        if (!appProperties.isProductionEnvironment()) {
             return;
         }
 
@@ -34,6 +34,9 @@ public class StartupSecurityValidator implements InitializingBean {
         }
         if (appProperties.getCors().getAllowedOrigins().stream().anyMatch("*"::equals)) {
             throw new IllegalStateException("Production mode does not allow wildcard CORS origins");
+        }
+        if ("redis".equalsIgnoreCase(appProperties.getTaskQueueBackend())) {
+            throw new IllegalStateException("Production mode requires RabbitMQ task queue backend");
         }
     }
 }

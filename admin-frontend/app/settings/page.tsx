@@ -175,7 +175,7 @@ export default function SettingsPage() {
     setError(null)
     setNotice(null)
     try {
-      const bundle = await exportConfigBundle(includeSecrets)
+      const bundle = await exportConfigBundle({ includeSecrets, includeMediaAssets: true })
       downloadConfigBundle(bundle)
       setExportDialogOpen(false)
     } catch (err) {

@@ -358,10 +358,12 @@ test("production source does not contain replacement or private-use mojibake cha
 test("production API barrel does not expose unconditional mock marketplace tools", async () => {
   const aiToolApi = await readSource("api/aiToolApi.ts")
   const apiIndex = await readSource("api/index.ts")
+  const aiToolMock = await readSource("api/aiToolMock.ts")
 
   assert.doesNotMatch(aiToolApi, /export async function fetchMarketplaceAITools/)
   assert.doesNotMatch(aiToolApi, /return mockFetchEnabledAITools\(\)/)
   assert.doesNotMatch(apiIndex, /fetchMarketplaceAITools/)
+  assert.match(aiToolMock, /VITE_AI_TOOL_MOCK === "1" && !import\.meta\.env\.PROD/)
 })
 
 test("unauthorized API responses redirect to the root login page before entering the qianduan app", async () => {
@@ -497,6 +499,16 @@ test("material picker modals paginate uploads and generated assets", async () =>
   assert.match(agentChatPane, /loadMorePickerUploads/)
   assert.match(agentChatPane, /loadMoreMaterialAssets/)
   assert.doesNotMatch(agentChatPane, /\.slice\(0,\s*60\)/)
+})
+
+test("suno custom mode remains visible in capability controls", async () => {
+  const capabilityControls = await readSource("pages/Chat/CapabilityControls.vue")
+
+  assert.match(capabilityControls, /const customModeField = computed/)
+  assert.match(capabilityControls, /const customModeOptions = computed/)
+  assert.match(capabilityControls, /setCustomModeValue/)
+  assert.match(capabilityControls, /customModeField\.fieldName \|\| "创作模式"/)
+  assert.match(capabilityControls, /@click="setCustomModeValue\(optionValue\(option\)\)"/)
 })
 
 test("agent tool picker exposes disable and whitelist controls", async () => {

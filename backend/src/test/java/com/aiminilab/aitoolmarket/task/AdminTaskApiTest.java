@@ -127,6 +127,40 @@ class AdminTaskApiTest {
                 .andExpect(jsonPath("$.code").value("ADMIN_FORBIDDEN"));
     }
 
+    @Test
+    void adminCanReconcileStaleQueuedTasksAndReleaseFrozenCredits() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long toolId = createTool(adminToken, "stale_task_tool", 4);
+        publishTool(adminToken, toolId);
+        String userToken = login("/api/v1/auth/login", "user1");
+        Long taskId = createTask(userToken, "stale_task_tool");
+        jdbcTemplate.update("""
+                UPDATE ai_tasks
+                SET updated_at = DATEADD('MINUTE', -180, CURRENT_TIMESTAMP),
+                    queued_at = DATEADD('MINUTE', -180, CURRENT_TIMESTAMP)
+                WHERE id = ?
+                """, taskId);
+
+        mockMvc.perform(post("/api/admin/v1/tasks/reconcile-stale")
+                        .param("staleMinutes", "120")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.timedOut").value(1))
+                .andExpect(jsonPath("$.data.taskIds[0]").value(taskId.intValue()));
+
+        mockMvc.perform(get("/api/admin/v1/tasks/{taskId}", taskId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("TIMEOUT"));
+
+        Integer releaseLogs = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM credit_logs WHERE task_id = ? AND log_type = 'RELEASE'",
+                Integer.class,
+                taskId
+        );
+        org.assertj.core.api.Assertions.assertThat(releaseLogs).isEqualTo(1);
+    }
+
     private String login(String path, String account) throws Exception {
         var result = mockMvc.perform(post(path)
                         .contentType(MediaType.APPLICATION_JSON)

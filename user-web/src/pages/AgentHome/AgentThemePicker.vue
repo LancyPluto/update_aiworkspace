@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from "vue"
+import { onMounted, onUnmounted, ref, watch, withDefaults } from "vue"
 import { Palette } from "lucide-vue-next"
 import {
   AGENT_AMBIENT_THEMES,
@@ -9,9 +9,12 @@ import {
   type AgentAmbientThemeId,
 } from "@/utils/agentTheme"
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   targetSelector?: string
-}>()
+  variant?: "icon" | "toolbar"
+}>(), {
+  variant: "icon",
+})
 
 const emit = defineEmits<{
   change: [id: AgentAmbientThemeId]
@@ -62,15 +65,17 @@ watch(
 </script>
 
 <template>
-  <div ref="rootRef" class="theme-picker">
+  <div ref="rootRef" class="theme-picker" :class="`theme-picker--${variant}`">
     <button
       type="button"
       class="theme-picker__toggle"
+      :class="{ 'theme-picker__toggle--open': open }"
       aria-label="氛围主题"
       title="氛围主题"
       @click="toggle"
     >
-      <Palette class="h-4 w-4" />
+      <Palette class="h-4 w-4 theme-picker__icon" />
+      <span v-if="variant === 'toolbar'" class="theme-picker__label">氛围</span>
     </button>
 
     <Transition name="theme-pop">
@@ -102,8 +107,6 @@ watch(
 }
 
 .theme-picker__toggle {
-  width: 40px;
-  height: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -115,10 +118,37 @@ watch(
   transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease;
 }
 
+.theme-picker--icon .theme-picker__toggle {
+  width: 40px;
+  height: 40px;
+}
+
+.theme-picker--toolbar .theme-picker__toggle {
+  gap: 5px;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
 .theme-picker__toggle:hover {
   background: rgb(255 255 255 / 0.08);
   color: rgb(255 255 255 / 0.90);
   transform: translateY(-1px);
+}
+
+.theme-picker--toolbar .theme-picker__toggle:hover,
+.theme-picker--toolbar .theme-picker__toggle--open {
+  background: transparent;
+  color: var(--agent-accent);
+  text-shadow: 0 0 12px var(--agent-accent-glow);
+  transform: none;
+}
+
+.theme-picker__icon {
+  stroke-width: 1.75;
+}
+
+.theme-picker__label {
+  line-height: 1;
 }
 
 .theme-picker__popover {
@@ -134,6 +164,14 @@ watch(
   border: 1px solid rgb(255 255 255 / 0.08);
   box-shadow: 0 20px 50px rgb(0 0 0 / 0.5);
   backdrop-filter: blur(12px);
+}
+
+.theme-picker--toolbar .theme-picker__popover {
+  left: 0;
+  right: auto;
+  top: auto;
+  bottom: calc(100% + 10px);
+  margin-top: 0;
 }
 
 .theme-picker__title {

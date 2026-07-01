@@ -42,7 +42,7 @@ function delay(ms = 200) {
 }
 
 export function isMockMode(): boolean {
-  return import.meta.env.VITE_AI_TOOL_MOCK === "1"
+  return import.meta.env.VITE_AI_TOOL_MOCK === "1" && !import.meta.env.PROD
 }
 
 /** 大模型页局部 Mock 使用的工具 id（仅 enabled 项） */

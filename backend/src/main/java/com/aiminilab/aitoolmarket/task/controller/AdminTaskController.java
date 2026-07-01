@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.task.controller;
 
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
+import com.aiminilab.aitoolmarket.task.dto.StaleTaskReconcileResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskDetailResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.service.TaskService;
@@ -45,5 +46,11 @@ public class AdminTaskController {
     @PostMapping("/{taskId}/cancel")
     public ApiResponse<TaskStatusResponse> cancel(@PathVariable Long taskId) {
         return ApiResponse.success(taskService.adminCancel(taskId));
+    }
+
+    @PostMapping("/reconcile-stale")
+    public ApiResponse<StaleTaskReconcileResponse> reconcileStale(@RequestParam(required = false) Integer staleMinutes,
+                                                                  @RequestParam(required = false) Integer limit) {
+        return ApiResponse.success(taskService.adminReconcileStaleTasks(staleMinutes, limit));
     }
 }

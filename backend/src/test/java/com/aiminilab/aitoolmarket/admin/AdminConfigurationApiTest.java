@@ -729,6 +729,124 @@ class AdminConfigurationApiTest {
                 .andExpect(jsonPath("$.data.list[0].estimatedCreditCost").value(2));
     }
 
+    @Test
+    void configBundleExportCanSelectToolsAndStripDisplayMediaUrls() throws Exception {
+        String adminToken = loginAdmin();
+
+        String categoryResponse = mockMvc.perform(post("/api/admin/v1/tool-categories")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "categoryCode": "selective_export_test",
+                                  "categoryName": "Selective Export Test",
+                                  "sortOrder": 1,
+                                  "status": "ACTIVE"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long categoryId = Long.parseLong(categoryResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        String doubaoModelResponse = mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "Doubao Video",
+                                  "configCode": "doubao_video_model",
+                                  "provider": "mock",
+                                  "modelName": "doubao-video",
+                                  "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+                                  "timeoutSeconds": 60,
+                                  "enabled": true,
+                                  "isDefault": false
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long doubaoModelId = Long.parseLong(doubaoModelResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "Other Image",
+                                  "configCode": "other_image_model",
+                                  "provider": "mock",
+                                  "modelName": "other-image",
+                                  "baseUrl": "https://example.test/api",
+                                  "timeoutSeconds": 60,
+                                  "enabled": true,
+                                  "isDefault": false
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/v1/tools")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "doubao_video_tool",
+                                  "toolName": "Doubao Video Tool",
+                                  "categoryId": %d,
+                                  "description": "Selected tool",
+                                  "coverUrl": "http://localhost:8080/generated/effects/doubao.png",
+                                  "toolType": "VIDEO_GENERATION",
+                                  "inputModality": "TEXT",
+                                  "outputModality": "VIDEO",
+                                  "configNote": "<!-- ai-tool-ui:{\\"mediaDisplayMode\\":\\"comparison\\",\\"modelIconUrl\\":\\"http://localhost/icon.png\\",\\"comparisonOriginalUrl\\":\\"http://localhost/origin.png\\",\\"comparisonEffectUrl\\":\\"http://localhost/effect.png\\",\\"audioPreviewUrl\\":\\"http://localhost/audio.mp3\\",\\"heroTitle\\":\\"Doubao\\",\\"demoThumbnails\\":[\\"http://localhost/demo.png\\"]} -->",
+                                  "estimatedCreditCost": 2,
+                                  "modelConfigId": %d,
+                                  "executionHandler": "VIDEO_GENERATION"
+                                }
+                                """.formatted(categoryId, doubaoModelId)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/v1/tools")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "other_image_tool",
+                                  "toolName": "Other Image Tool",
+                                  "categoryId": %d,
+                                  "description": "Unselected tool",
+                                  "toolType": "IMAGE_GENERATION",
+                                  "inputModality": "TEXT",
+                                  "outputModality": "IMAGE",
+                                  "estimatedCreditCost": 1,
+                                  "executionHandler": "IMAGE_GENERATION"
+                                }
+                                """.formatted(categoryId)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/admin/v1/config-bundles/export")
+                        .param("toolCodes", "doubao_video_tool")
+                        .param("includeMediaAssets", "false")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.exportScope").value("SELECTED_TOOLS"))
+                .andExpect(jsonPath("$.data.settings").isEmpty())
+                .andExpect(jsonPath("$.data.categories.length()").value(1))
+                .andExpect(jsonPath("$.data.modelConfigs.length()").value(1))
+                .andExpect(jsonPath("$.data.modelConfigs[0].configCode").value("doubao_video_model"))
+                .andExpect(jsonPath("$.data.modelConfigs[0].baseUrl").value("https://ark.cn-beijing.volces.com/api/v3"))
+                .andExpect(jsonPath("$.data.tools.length()").value(1))
+                .andExpect(jsonPath("$.data.tools[0].toolCode").value("doubao_video_tool"))
+                .andExpect(jsonPath("$.data.tools[0].coverUrl").value(""))
+                .andExpect(jsonPath("$.data.tools[0].configNote")
+                        .value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("http://localhost"))))
+                .andExpect(jsonPath("$.data.tools[0].configNote")
+                        .value(org.hamcrest.Matchers.containsString("\"modelIconUrl\":\"\"")));
+    }
+
     private String loginAdmin() throws Exception {
         String response = mockMvc.perform(post("/api/admin/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)

@@ -58,6 +58,32 @@ class StartupSecurityValidatorTest {
     }
 
     @Test
+    void appEnvProductionRejectsDefaultInternalToken() {
+        contextRunner("startup_security_app_env_production_test")
+                .withPropertyValues(
+                        "app.env=production",
+                        "app.production-mode=false",
+                        "app.jwt-secret=strong-jwt-secret-value-1234567890",
+                        "app.internal-api-token=local-internal-token",
+                        "app.cors.allowed-origins=http://localhost:5173"
+                )
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
+    void productionModeRejectsRedisTaskQueueBackend() {
+        contextRunner("startup_security_redis_queue_test")
+                .withPropertyValues(
+                        "app.production-mode=true",
+                        "app.jwt-secret=strong-jwt-secret-value-1234567890",
+                        "app.internal-api-token=strong-internal-token-value-123456",
+                        "app.cors.allowed-origins=http://localhost:5173",
+                        "app.task-queue-backend=redis"
+                )
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
     void developmentModeAllowsLocalDefaults() {
         contextRunner("startup_security_development_defaults_test")
                 .withPropertyValues(

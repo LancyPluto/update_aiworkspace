@@ -84,8 +84,12 @@ class RabbitMqConsumer:
         channel.basic_qos(prefetch_count=self.prefetch_count)
         executor = ThreadPoolExecutor(max_workers=self.concurrency, thread_name_prefix="task-worker")
         LOGGER.info(
-            "worker is listening rabbitmq queue=%s basic_qos prefetch_count=%s concurrency=%s",
+            "worker is listening rabbitmq queue=%s dead_queue=%s retry_prefix=%s retry_delays_ms=%s max_retries=%s basic_qos prefetch_count=%s concurrency=%s",
             self.queue_name,
+            self.dead_queue_name,
+            self.retry_queue_prefix,
+            self.retry_delays_ms,
+            self.max_retries,
             self.prefetch_count,
             self.concurrency,
         )
