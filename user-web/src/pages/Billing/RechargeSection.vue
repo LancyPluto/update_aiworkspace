@@ -149,6 +149,17 @@ function formatMoney(value: number | string | undefined | null) {
   return Number.isInteger(amount) ? String(amount) : amount.toFixed(2)
 }
 
+const GIFT_CARD_THEMES: Record<string, string> = {
+  blue: 'from-blue-600 to-blue-800 border-blue-400/30',
+  purple: 'from-purple-600 to-purple-800 border-purple-400/30',
+  gold: 'from-amber-600 to-yellow-800 border-amber-400/30',
+  dark: 'from-slate-800 to-slate-950 border-slate-600/30',
+}
+
+function giftCardThemeClass(theme: string | undefined | null) {
+  return GIFT_CARD_THEMES[theme || 'dark'] || GIFT_CARD_THEMES.dark
+}
+
 const PACKAGE_NAME_ZH: Record<string, string> = {
   "Starter credits": "入门套餐",
   "Growth credits": "成长套餐",
