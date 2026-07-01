@@ -80,7 +80,7 @@ jobs:
           cache: maven
       - name: Run tests
         working-directory: backend
-        run: mvn -B test -T 1C -Dsurefire.parallel=classes
+        run: mvn -B test
 
   agent-service-test:
     name: Agent Service (pytest)

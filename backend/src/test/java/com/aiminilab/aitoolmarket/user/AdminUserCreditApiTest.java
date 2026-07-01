@@ -42,9 +42,9 @@ class AdminUserCreditApiTest {
         mockMvc.perform(get("/api/v1/credits/account")
                         .header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.balance").value(100))
+                .andExpect(jsonPath("$.data.balance").value(200))
                 .andExpect(jsonPath("$.data.frozen").value(10))
-                .andExpect(jsonPath("$.data.available").value(90))
+                .andExpect(jsonPath("$.data.available").value(190))
                 .andExpect(jsonPath("$.data.totalConsumed").value(0));
 
         markProcessing(successTaskId);
@@ -65,9 +65,9 @@ class AdminUserCreditApiTest {
         mockMvc.perform(get("/api/v1/credits/account")
                         .header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.balance").value(90))
+                .andExpect(jsonPath("$.data.balance").value(190))
                 .andExpect(jsonPath("$.data.frozen").value(0))
-                .andExpect(jsonPath("$.data.available").value(90))
+                .andExpect(jsonPath("$.data.available").value(190))
                 .andExpect(jsonPath("$.data.totalConsumed").value(10));
 
         Long failedTaskId = createTask(userToken, "credit_lifecycle_tool", "credit-life-failed");
@@ -89,9 +89,9 @@ class AdminUserCreditApiTest {
         mockMvc.perform(get("/api/v1/credits/account")
                         .header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.balance").value(90))
+                .andExpect(jsonPath("$.data.balance").value(190))
                 .andExpect(jsonPath("$.data.frozen").value(0))
-                .andExpect(jsonPath("$.data.available").value(90));
+                .andExpect(jsonPath("$.data.available").value(190));
     }
 
     @Test
@@ -104,13 +104,13 @@ class AdminUserCreditApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1))
                 .andExpect(jsonPath("$.data.list[0].username").value("user1"))
-                .andExpect(jsonPath("$.data.list[0].creditAccount.balance").value(100));
+                .andExpect(jsonPath("$.data.list[0].creditAccount.balance").value(200));
 
         mockMvc.perform(get("/api/admin/v1/users/{userId}", 2)
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.username").value("user1"))
-                .andExpect(jsonPath("$.data.creditAccount.available").value(100));
+                .andExpect(jsonPath("$.data.creditAccount.available").value(200));
 
         mockMvc.perform(post("/api/admin/v1/users/{userId}/credits/manual-add", 2)
                         .header("Authorization", "Bearer " + adminToken)
@@ -122,8 +122,8 @@ class AdminUserCreditApiTest {
                                 }
                                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.balance").value(150))
-                .andExpect(jsonPath("$.data.totalGranted").value(150));
+                .andExpect(jsonPath("$.data.balance").value(250))
+                .andExpect(jsonPath("$.data.totalGranted").value(250));
 
         mockMvc.perform(post("/api/admin/v1/users/{userId}/credits/manual-deduct", 2)
                         .header("Authorization", "Bearer " + adminToken)
@@ -135,7 +135,7 @@ class AdminUserCreditApiTest {
                                 }
                                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.balance").value(130));
+                .andExpect(jsonPath("$.data.balance").value(230));
 
         mockMvc.perform(get("/api/admin/v1/users/{userId}/credits/logs", 2)
                         .param("logType", "MANUAL_ADD")
