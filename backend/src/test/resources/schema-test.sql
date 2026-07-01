@@ -190,6 +190,8 @@ CREATE TABLE credit_accounts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   user_id BIGINT NOT NULL UNIQUE,
   balance INT NOT NULL DEFAULT 0,
+  membership_balance INT NOT NULL DEFAULT 0,
+  gift_balance INT NOT NULL DEFAULT 0,
   frozen INT NOT NULL DEFAULT 0,
   total_granted INT NOT NULL DEFAULT 0,
   total_consumed INT NOT NULL DEFAULT 0,

@@ -71,10 +71,10 @@ public class GiftCardServiceImpl implements GiftCardService {
             throw new BusinessException(ErrorCode.NOT_FOUND, "礼品卡不存在");
         }
         if (!"UNUSED".equals(card.getStatus())) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "礼品卡已使用或已过期");
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "礼品卡已使用");
         }
 
-        creditService.rechargeAdd(userId, null, card.getCredits(), "礼品卡兑换 " + card.getCardCode());
+        creditService.giftRedeemAdd(userId, card.getId(), card.getCredits(), "礼品卡兑换 " + card.getCardCode());
 
         int updated = giftCardMapper.markRedeemed(card.getId(), userId, LocalDateTime.now());
         if (updated != 1) {
@@ -96,7 +96,7 @@ public class GiftCardServiceImpl implements GiftCardService {
             throw new BusinessException(ErrorCode.NOT_FOUND, "礼品卡不存在");
         }
         if (!"UNUSED".equals(card.getStatus())) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "礼品卡已使用或已过期，无法赠送");
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "礼品卡已使用，无法赠送");
         }
 
         User recipient = userMapper.findByUsernameOrPhone(recipientAccount.trim())

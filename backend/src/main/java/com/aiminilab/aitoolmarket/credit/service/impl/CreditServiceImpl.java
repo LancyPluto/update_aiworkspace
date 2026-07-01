@@ -266,6 +266,41 @@ public class CreditServiceImpl implements CreditService {
     }
 
     @Override
+    @Transactional
+    public CreditAccountResponse giftRedeemAdd(Long userId, Long giftCardId, int amount, String reason) {
+        if (amount <= 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "gift redeem amount must be positive");
+        }
+        if (giftCardId == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "gift card id is required");
+        }
+        String idempotencyKey = "GIFT_CARD_REDEEM:" + giftCardId;
+        CreditAccount before = creditMapper.getOrCreateAccount(userId);
+        try {
+            insertLog(
+                    before,
+                    null,
+                    null,
+                    CreditLogType.RECHARGE.name(),
+                    amount,
+                    0,
+                    before.getBalance() + amount,
+                    before.getFrozen(),
+                    "PAYMENT",
+                    null,
+                    normalizeReason(reason, "Gift card redeem"),
+                    idempotencyKey
+            );
+        } catch (DuplicateKeyException ignored) {
+            return account(userId);
+        }
+        if (!creditMapper.giftRedeemAdd(before.getId(), amount)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "credit account is unavailable");
+        }
+        return account(userId);
+    }
+
+    @Override
     public PageResponse<CreditLogResponse> logs(Long userId, String logType, Integer pageNo, Integer pageSize) {
         return logs(userId, logType, pageNo, pageSize, false);
     }

@@ -9,6 +9,8 @@ public class CreditAccount {
     private Long id;
     private Long userId;
     private Integer balance;
+    private Integer membershipBalance;
+    private Integer giftBalance;
     private Integer frozen;
     private Integer totalGranted;
     private Integer totalConsumed;
@@ -36,6 +38,22 @@ public class CreditAccount {
 
     public void setBalance(Integer balance) {
         this.balance = balance;
+    }
+
+    public Integer getMembershipBalance() {
+        return membershipBalance;
+    }
+
+    public void setMembershipBalance(Integer membershipBalance) {
+        this.membershipBalance = membershipBalance;
+    }
+
+    public Integer getGiftBalance() {
+        return giftBalance;
+    }
+
+    public void setGiftBalance(Integer giftBalance) {
+        this.giftBalance = giftBalance;
     }
 
     public Integer getFrozen() {
