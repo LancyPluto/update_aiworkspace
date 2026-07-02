@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils"
+import { CREDIT_POWER_ICON_URL } from "@/lib/public-assets"
 
 type CreditPowerIconProps = {
   className?: string
@@ -13,7 +14,7 @@ export function CreditPowerIcon({ className, size }: CreditPowerIconProps) {
 
   return (
     <img
-      src="/assets/credit-power-icon.png"
+      src={CREDIT_POWER_ICON_URL}
       alt=""
       aria-hidden
       className={cn("inline-block shrink-0 object-contain", className)}
