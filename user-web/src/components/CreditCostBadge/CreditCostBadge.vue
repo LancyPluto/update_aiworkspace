@@ -30,7 +30,7 @@ const label = computed(() => {
 <template>
   <span
     v-if="visible"
-    class="inline-flex items-center gap-1 text-warning"
+    class="inline-flex items-center gap-1 text-sky-400"
     :class="size === 'md' ? 'text-sm' : 'text-xs'"
     :title="variable ? '按每次实际调用的模型成本 ×1.2 扣减算力' : undefined"
   >

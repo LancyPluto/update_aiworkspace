@@ -4,12 +4,10 @@ import type { Component } from "vue"
 import {
   Bot,
   Compass,
-  Gift,
   Home,
   Lightbulb,
   Package,
   UserRound,
-  Wallet,
   WandSparkles,
   Wrench,
   FolderHeart,
@@ -28,6 +26,7 @@ import {
   Palette,
   Check,
 } from "lucide-vue-next"
+import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import { ref, onMounted, onUnmounted, computed, watch } from "vue"
 import { useGlobalSearch, type GlobalSearchResultItem, type GlobalSearchScope } from "@/composables/useGlobalSearch"
 import { fetchCreditAccount } from "@/api/creditApi"
@@ -156,7 +155,7 @@ const navSections: NavSection[] = [
 ]
 
 const accountNav: NavLink[] = [
-  { type: "link", href: "/billing", label: "会员与算力", icon: Wallet },
+  { type: "link", href: "/billing", label: "会员与算力", icon: CreditPowerIcon },
   { type: "link", href: "/profile", label: "个人资料", icon: UserRound },
 ]
 
@@ -444,7 +443,7 @@ watch(
           type="button"
           class="group relative mb-3 flex h-11 w-full items-center gap-2.5 overflow-hidden rounded-lg border border-white/[0.055] bg-white/[0.025] px-3 text-left text-sm font-medium text-white/76 transition hover:border-[var(--brand-border)] hover:bg-white/[0.045] hover:text-white"
         >
-          <Gift class="h-[17px] w-[17px] shrink-0 text-white/58 transition group-hover:text-[var(--brand-active-text)]" aria-hidden="true" />
+          <CreditPowerIcon :size="17" class="shrink-0 opacity-[0.58] transition group-hover:opacity-100" />
           <span class="min-w-0 flex-1">
             <span class="block truncate">推荐有礼</span>
           </span>
@@ -497,28 +496,30 @@ watch(
 
     <div class="flex h-full min-h-0 min-w-0 flex-1 flex-col">
       <header
-        class="app-shell-header z-30 flex h-20 shrink-0 items-center gap-4 border-b border-white/8 bg-[#151515]/95 px-5 backdrop-blur-xl"
+        class="app-shell-header z-30 grid h-20 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-4 border-b border-white/8 bg-[#151515]/95 px-5 backdrop-blur-xl"
         :class="{ 'app-shell-header--agent': isAgentRoute }"
       >
-        <button
-          type="button"
-          class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white lg:hidden"
-          aria-label="菜单"
-        >
-          <Menu class="h-5 w-5" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          class="h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/60 hover:bg-white/10 hover:text-white"
-          :class="sidebarOpen ? 'hidden' : 'hidden lg:inline-flex'"
-          :aria-label="sidebarOpen ? '隐藏侧栏' : '显示侧栏'"
-          :aria-expanded="sidebarOpen"
-          @click="toggleSidebar"
-        >
-          <PanelLeftClose v-if="sidebarOpen" class="h-4 w-4" aria-hidden="true" />
-          <PanelLeft v-else class="h-4 w-4" aria-hidden="true" />
-        </button>
-        <div ref="searchRootRef" class="relative hidden min-w-0 flex-1 lg:block lg:max-w-[520px] xl:max-w-[620px]">
+        <div class="flex min-w-0 items-center gap-3">
+          <button
+            type="button"
+            class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white lg:hidden"
+            aria-label="菜单"
+          >
+            <Menu class="h-5 w-5" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/60 hover:bg-white/10 hover:text-white"
+            :class="sidebarOpen ? 'hidden' : 'hidden lg:inline-flex'"
+            :aria-label="sidebarOpen ? '隐藏侧栏' : '显示侧栏'"
+            :aria-expanded="sidebarOpen"
+            @click="toggleSidebar"
+          >
+            <PanelLeftClose v-if="sidebarOpen" class="h-4 w-4" aria-hidden="true" />
+            <PanelLeft v-else class="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+        <div ref="searchRootRef" class="relative hidden w-full min-w-0 lg:block lg:w-[min(100%,520px)] xl:w-[min(100%,620px)]">
           <form
             class="flex h-12 items-center rounded-full bg-white/[0.07] px-4 ring-1 ring-white/8 transition focus-within:ring-primary/35"
             @submit.prevent="submitSearch"
@@ -604,88 +605,90 @@ watch(
             </ul>
           </div>
         </div>
-        <RouterLink
-          v-if="!isAgentRoute"
-          :to="userRoutes.toolList"
-          class="app-shell-create-button hidden h-11 items-center gap-2 rounded-full px-5 text-sm font-semibold text-white transition hover:brightness-110 md:inline-flex"
-        >
-          <Plus class="h-4 w-4" />
-          创建
-        </RouterLink>
-        <div v-if="!isAgentRoute" ref="brandAccentRootRef" class="relative hidden md:block">
-          <button
-            type="button"
-            class="app-shell-accent-trigger"
-            aria-label="切换品牌配色"
-            :aria-expanded="brandAccentMenuOpen"
-            @click="brandAccentMenuOpen = !brandAccentMenuOpen"
+        <div class="flex min-w-0 items-center justify-end gap-3 md:gap-4">
+          <RouterLink
+            v-if="!isAgentRoute"
+            :to="userRoutes.toolList"
+            class="app-shell-create-button hidden h-11 items-center gap-2 rounded-full px-5 text-sm font-semibold text-white transition hover:brightness-110 md:inline-flex"
           >
-            <Palette class="h-[18px] w-[18px]" aria-hidden="true" />
-          </button>
-          <Transition name="app-shell-accent-pop">
-            <div v-if="brandAccentMenuOpen" class="app-shell-accent-menu">
-              <p class="app-shell-accent-title">全局品牌色</p>
-              <button
-                v-for="option in BRAND_ACCENT_OPTIONS"
-                :key="option.id"
-                type="button"
-                class="app-shell-accent-option"
-                :class="{ 'app-shell-accent-option--active': brandAccent === option.id }"
-                @click="selectBrandAccent(option.id)"
-              >
-                <span class="app-shell-accent-swatch" :style="{ background: option.swatch }" />
-                <span class="min-w-0 flex-1">
-                  <span class="block text-sm font-semibold text-white">{{ option.label }}</span>
-                  <span class="mt-0.5 block truncate text-[11px] text-white/42">{{ option.description }}</span>
-                </span>
-                <Check v-if="brandAccent === option.id" class="h-4 w-4 text-[var(--brand-active-text)]" aria-hidden="true" />
-              </button>
-            </div>
-          </Transition>
-        </div>
-        <button
-          type="button"
-          class="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full text-white/55 hover:bg-white/8 hover:text-white md:inline-flex"
-          aria-label="通知"
-        >
-          <Bell class="h-5 w-5" />
-        </button>
-        <button
-          v-if="customerService.enabled"
-          type="button"
-          class="hidden h-10 shrink-0 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-white/70 transition-colors hover:bg-white/10 hover:text-white md:inline-flex"
-          @click="customerServiceOpen = true"
-        >
-          <Headphones class="h-4 w-4" aria-hidden="true" />
-          联系客服
-        </button>
-        <div class="flex items-center gap-3">
-          <template v-if="auth.isLoggedIn">
-            <RouterLink
-              :to="userRoutes.profile"
-              class="flex items-center gap-2 rounded-full px-2 py-1 transition hover:bg-white/8"
-              title="我的资料"
-            >
-              <MemberBadge :available="availableCredits" />
-              <UserAvatar :src="auth.user?.avatarUrl" :name="safeUserName" size="sm" />
-              <span class="hidden max-w-[140px] truncate text-xs text-white/60 sm:inline">{{ safeUserName }}</span>
-            </RouterLink>
+            <Plus class="h-4 w-4" />
+            创建
+          </RouterLink>
+          <div v-if="!isAgentRoute" ref="brandAccentRootRef" class="relative hidden md:block">
             <button
               type="button"
-              class="text-xs text-white/45 hover:text-white"
-              @click="auth.logout()"
+              class="app-shell-accent-trigger"
+              aria-label="切换品牌配色"
+              :aria-expanded="brandAccentMenuOpen"
+              @click="brandAccentMenuOpen = !brandAccentMenuOpen"
             >
-              退出
+              <Palette class="h-[18px] w-[18px]" aria-hidden="true" />
             </button>
-          </template>
-          <template v-else>
-            <RouterLink
-              :to="'/'"
-              class="text-xs text-primary hover:text-white"
-            >
-              登录
-            </RouterLink>
-          </template>
+            <Transition name="app-shell-accent-pop">
+              <div v-if="brandAccentMenuOpen" class="app-shell-accent-menu">
+                <p class="app-shell-accent-title">全局品牌色</p>
+                <button
+                  v-for="option in BRAND_ACCENT_OPTIONS"
+                  :key="option.id"
+                  type="button"
+                  class="app-shell-accent-option"
+                  :class="{ 'app-shell-accent-option--active': brandAccent === option.id }"
+                  @click="selectBrandAccent(option.id)"
+                >
+                  <span class="app-shell-accent-swatch" :style="{ background: option.swatch }" />
+                  <span class="min-w-0 flex-1">
+                    <span class="block text-sm font-semibold text-white">{{ option.label }}</span>
+                    <span class="mt-0.5 block truncate text-[11px] text-white/42">{{ option.description }}</span>
+                  </span>
+                  <Check v-if="brandAccent === option.id" class="h-4 w-4 text-[var(--brand-active-text)]" aria-hidden="true" />
+                </button>
+              </div>
+            </Transition>
+          </div>
+          <button
+            type="button"
+            class="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full text-white/55 hover:bg-white/8 hover:text-white md:inline-flex"
+            aria-label="通知"
+          >
+            <Bell class="h-5 w-5" />
+          </button>
+          <button
+            v-if="customerService.enabled"
+            type="button"
+            class="hidden h-10 shrink-0 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-white/70 transition-colors hover:bg-white/10 hover:text-white md:inline-flex"
+            @click="customerServiceOpen = true"
+          >
+            <Headphones class="h-4 w-4" aria-hidden="true" />
+            联系客服
+          </button>
+          <div class="flex items-center gap-3">
+            <template v-if="auth.isLoggedIn">
+              <RouterLink
+                :to="userRoutes.profile"
+                class="flex items-center gap-2 rounded-full px-2 py-1 transition hover:bg-white/8"
+                title="我的资料"
+              >
+                <MemberBadge :available="availableCredits" />
+                <UserAvatar :src="auth.user?.avatarUrl" :name="safeUserName" size="sm" />
+                <span class="hidden max-w-[140px] truncate text-xs text-white/60 sm:inline">{{ safeUserName }}</span>
+              </RouterLink>
+              <button
+                type="button"
+                class="text-xs text-white/45 hover:text-white"
+                @click="auth.logout()"
+              >
+                退出
+              </button>
+            </template>
+            <template v-else>
+              <RouterLink
+                :to="'/'"
+                class="text-xs text-primary hover:text-white"
+              >
+                登录
+              </RouterLink>
+            </template>
+          </div>
         </div>
       </header>
       <main

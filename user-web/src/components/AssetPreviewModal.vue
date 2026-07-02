@@ -15,7 +15,6 @@ import {
   Video,
   WandSparkles,
   X,
-  Zap,
 } from "lucide-vue-next"
 import { getApiOrigin } from "@/api/client"
 import { reportCommunityPost } from "@/api/communityApi"
@@ -389,7 +388,7 @@ function sanitizeDownloadName(value: string) {
                     class="absolute bottom-0 right-0 inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-white/72 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.06)] transition hover:border-primary/35 hover:bg-primary/12 hover:text-white"
                     @click="copyPrompt"
                   >
-                    <Check v-if="copyHint" class="h-3.5 w-3.5 text-emerald-300" />
+                    <Check v-if="copyHint" class="h-3.5 w-3.5 text-sky-300" />
                     <Copy v-else class="h-3.5 w-3.5" />
                     {{ copyHint || "复制" }}
                   </button>

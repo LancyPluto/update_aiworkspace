@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
 import {
   ChevronDown,
-  Coins,
   FileText,
   Images,
   LayoutDashboard,
@@ -15,8 +14,9 @@ import {
   SlidersHorizontal,
   Users,
   Wrench,
-  type LucideIcon,
 } from "lucide-react"
+import { CreditPowerIcon } from "@/components/admin/credit-power-icon"
+import type { ComponentType } from "react"
 import {
   Collapsible,
   CollapsibleContent,
@@ -28,14 +28,14 @@ type NavLink = {
   type: "link"
   name: string
   href: string
-  icon: LucideIcon
+  icon: ComponentType<{ className?: string }>
 }
 
 type NavGroup = {
   type: "group"
   id: string
   name: string
-  icon: LucideIcon
+  icon: ComponentType<{ className?: string }>
   children: { name: string; href: string }[]
 }
 
@@ -57,7 +57,7 @@ const navigation: (NavLink | NavGroup)[] = [
   { type: "link", name: "社区作品", href: "/community-posts", icon: Images },
   { type: "link", name: "计费日志", href: "/billing", icon: ReceiptText },
   { type: "link", name: "定价配置", href: "/pricing", icon: SlidersHorizontal },
-  { type: "link", name: "会员算力", href: "/credits", icon: Coins },
+  { type: "link", name: "会员算力", href: "/credits", icon: CreditPowerIcon },
   { type: "link", name: "系统配置", href: "/settings", icon: Settings },
 ]
 

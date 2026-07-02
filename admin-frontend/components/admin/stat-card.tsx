@@ -1,12 +1,12 @@
 import { cn } from "@/lib/utils"
-import type { LucideIcon } from "lucide-react"
+import type { ComponentType } from "react"
 
 interface StatCardProps {
   title: string
   value: string
   change?: string
   changeType?: "positive" | "negative" | "neutral"
-  icon: LucideIcon
+  icon: ComponentType<{ className?: string }>
   iconColor?: string
 }
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from "vue"
 import { RouterLink, useRoute, useRouter } from "vue-router"
-import { ArrowLeft, ChevronRight, Info, Loader2, Sparkles, Zap } from "lucide-vue-next"
+import { ArrowLeft, ChevronRight, Info, Loader2, Sparkles } from "lucide-vue-next"
 import DynamicForm from "@/components/DynamicForm/DynamicForm.vue"
 import TaskStatusTag from "@/components/TaskStatusTag/TaskStatusTag.vue"
 import { getApiOrigin } from "@/api/client"
@@ -250,10 +250,7 @@ async function handleCreateTask() {
 
               <h3 class="text-sm font-semibold mb-3">算力消耗预估</h3>
               <div class="mt-3 flex items-center justify-between rounded-lg bg-primary/5 p-3 border border-primary/20">
-                <div class="flex items-center gap-1.5">
-                  <Zap class="h-4 w-4 text-warning" />
-                  <span class="text-sm font-medium">{{ tool.variableCreditPricing ? "预计消耗" : "本次共消耗" }}</span>
-                </div>
+                <span class="text-sm font-medium">{{ tool.variableCreditPricing ? "预计消耗" : "本次共消耗" }}</span>
                 <span class="text-lg font-semibold" :class="creditInsufficient ? 'text-destructive' : 'text-primary'">{{ creditLabel }}</span>
               </div>
               <p v-if="creditInsufficient" class="mt-2 text-xs text-destructive leading-relaxed">

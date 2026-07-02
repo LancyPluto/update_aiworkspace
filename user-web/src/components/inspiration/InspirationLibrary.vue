@@ -36,7 +36,7 @@ import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
 import { openCreateWithAssetRecommendation } from "@/utils/assetReplay"
-import { communityDisplayTitle } from "@/utils/communityDisplay"
+import { communityDisplayTitle, displayCollectionName } from "@/utils/communityDisplay"
 import { resolveCommunityAuthorName, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
 
 type SortKey = "collected_newest" | "collected_oldest" | "usage_most" | "usage_least"
@@ -260,7 +260,7 @@ async function deleteCollection(collection: CommunityCollection) {
   const confirmed = await confirmDelete({
     title: "删除收藏夹",
     itemName: collection.name,
-    description: `确定要删除收藏夹「${collection.name}」吗？其中的作品引用也会被移除。`,
+    description: `确定要删除收藏夹「${displayCollectionName(collection.name, collection.defaultCollection)}」吗？其中的作品引用也会被移除。`,
     confirmLabel: "确认删除",
   })
   if (!confirmed) return
@@ -301,7 +301,7 @@ async function movePosts(posts: CommunityPost[], targetCollectionId: number) {
   const target = collections.value.find((item) => item.id === targetCollectionId)
   const confirmed = await confirmDelete({
     title: "确认移动",
-    description: `将 ${posts.length} 个作品移动到「${target?.name || "目标收藏夹"}」？`,
+    description: `将 ${posts.length} 个作品移动到「${displayCollectionName(target?.name, target?.defaultCollection) || "目标收藏夹"}」？`,
     warning: "",
     confirmLabel: "确认移动",
   })
@@ -442,7 +442,7 @@ onUnmounted(() => {
             :class="{ active: activeCollection?.id === collection.id }"
           >
             <button type="button" class="collection-btn" @click="selectCollection(collection.id)">
-              <span class="collection-name">{{ collection.name }}</span>
+              <span class="collection-name">{{ displayCollectionName(collection.name, collection.defaultCollection) }}</span>
               <span class="collection-count">({{ collection.itemCount }})</span>
             </button>
             <div class="collection-actions">
@@ -473,7 +473,7 @@ onUnmounted(() => {
             <Menu class="h-5 w-5" />
           </button>
           <div>
-            <h1>{{ activeCollection?.name || "灵感收藏夹" }}</h1>
+            <h1>{{ displayCollectionName(activeCollection?.name, activeCollection?.defaultCollection) || "灵感收藏夹" }}</h1>
           </div>
         </div>
 
@@ -693,7 +693,7 @@ onUnmounted(() => {
               :disabled="acting"
               @click="movePosts(moveTargets, collection.id)"
             >
-              {{ collection.name }}
+              {{ displayCollectionName(collection.name, collection.defaultCollection) }}
               <span>({{ collection.itemCount }})</span>
             </button>
           </div>

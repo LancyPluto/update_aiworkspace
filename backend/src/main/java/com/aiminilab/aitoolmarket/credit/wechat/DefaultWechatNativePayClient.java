@@ -24,6 +24,7 @@ import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.Signature;
 import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.PKCS1EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -231,11 +232,30 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
     private PrivateKey loadPrivateKey(String keyPath) {
         try {
             String pem = Files.readString(Path.of(keyPath), StandardCharsets.UTF_8);
-            String content = pem.replace("-----BEGIN PRIVATE KEY-----", "")
-                    .replace("-----END PRIVATE KEY-----", "")
-                    .replaceAll("\\s", "");
-            byte[] bytes = Base64.getDecoder().decode(content);
-            return KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(bytes));
+            KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+
+            // WeChat 商户私钥常见两种 PEM 头：
+            // 1) BEGIN PRIVATE KEY   -> PKCS#8
+            // 2) BEGIN RSA PRIVATE KEY -> PKCS#1
+            if (pem.contains("-----BEGIN PRIVATE KEY-----")) {
+                String content = pem
+                        .replace("-----BEGIN PRIVATE KEY-----", "")
+                        .replace("-----END PRIVATE KEY-----", "")
+                        .replaceAll("\\s", "");
+                byte[] bytes = Base64.getDecoder().decode(content);
+                return keyFactory.generatePrivate(new PKCS8EncodedKeySpec(bytes));
+            }
+
+            if (pem.contains("-----BEGIN RSA PRIVATE KEY-----")) {
+                String content = pem
+                        .replace("-----BEGIN RSA PRIVATE KEY-----", "")
+                        .replace("-----END RSA PRIVATE KEY-----", "")
+                        .replaceAll("\\s", "");
+                byte[] bytes = Base64.getDecoder().decode(content);
+                return keyFactory.generatePrivate(new PKCS1EncodedKeySpec(bytes));
+            }
+
+            throw new IllegalArgumentException("Unsupported WeChat merchant private key PEM header");
         } catch (Exception exception) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat merchant private key cannot be loaded");
         }

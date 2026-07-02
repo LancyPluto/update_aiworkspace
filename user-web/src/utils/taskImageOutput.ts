@@ -52,6 +52,17 @@ export function inferSerialActiveSlot(percent: number, count: number): number {
   return Math.min(count - 1, Math.floor((safePercent / 100) * count))
 }
 
+export function inferParallelSlotPercent(basePercent: number, slotIndex: number, totalSlots: number): number {
+  if (totalSlots <= 1) return Math.max(0, Math.min(100, Math.round(basePercent)))
+  if (basePercent >= 100) return 100
+
+  const spread = Math.max(8, Math.floor(32 / totalSlots))
+  const leadBoost = Math.floor(spread * 0.8)
+  const staggered = basePercent + leadBoost - slotIndex * spread
+  const converged = basePercent >= 85 ? basePercent : staggered
+  return Math.max(0, Math.min(99, Math.round(converged)))
+}
+
 export interface TaskImageOutputPlan {
   count: number
   layout: ImageOutputLayout

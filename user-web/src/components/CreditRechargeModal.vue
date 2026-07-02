@@ -334,7 +334,7 @@ onUnmounted(clearPolling)
           </p>
         </template>
         <div v-else-if="paymentResult === 'success'" class="credit-pay-result">
-          <Check class="h-10 w-10 text-emerald-400" />
+          <Check class="h-10 w-10 text-sky-400" />
           <p>支付成功，算力已到账</p>
           <button type="button" class="credit-modal-buy" @click="closeAll">继续 Agent 会话</button>
         </div>

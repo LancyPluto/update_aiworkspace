@@ -122,6 +122,13 @@ export function communityCardDescription(input: {
   return ""
 }
 
+export function displayCollectionName(name?: string | null, defaultCollection?: boolean | null): string {
+  const raw = normalize(name)
+  if (!raw) return defaultCollection ? "默认收藏夹" : "未命名收藏夹"
+  if (raw === "Default inspiration" || raw === "default inspiration") return "默认收藏夹"
+  return raw
+}
+
 export function enrichCommunityAsset(asset: AssetPreviewItem): AssetPreviewItem {
   if (asset.source !== "community") return asset
   return {

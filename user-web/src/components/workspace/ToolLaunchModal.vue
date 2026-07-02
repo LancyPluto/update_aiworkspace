@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
 import { RouterLink, useRouter } from "vue-router"
-import { ExternalLink, Loader2, Sparkles, X, Zap } from "lucide-vue-next"
+import { ExternalLink, Loader2, Sparkles, X } from "lucide-vue-next"
 import DynamicForm from "@/components/DynamicForm/DynamicForm.vue"
 import { ApiBusinessError, createTask, fetchToolByCode } from "@/api"
 import { getApiOrigin } from "@/api/client"
@@ -187,9 +187,7 @@ async function handleGenerate() {
 
           <footer class="border-t border-border px-6 py-4">
             <div class="mb-3 flex items-center justify-between text-sm">
-              <span class="flex items-center gap-1.5 text-muted-foreground">
-                <Zap class="h-4 w-4 text-warning" />所需额度
-              </span>
+              <span class="text-muted-foreground">所需额度</span>
               <span class="text-base font-semibold text-primary">{{ creditLabel }}</span>
             </div>
             <p v-if="tool?.variableCreditPricing" class="mb-3 text-xs text-muted-foreground leading-relaxed">

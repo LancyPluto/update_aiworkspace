@@ -2,6 +2,7 @@ import test from "node:test"
 import assert from "node:assert/strict"
 import {
   buildTaskImageOutputPlan,
+  inferParallelSlotPercent,
   inferSerialActiveSlot,
   inferTaskImageOutputLayout,
   resolveTaskImageOutputCount,
@@ -43,4 +44,13 @@ test("buildTaskImageOutputPlan enables multi preview for parallel multi-count im
 test("inferSerialActiveSlot advances with percent", () => {
   assert.equal(inferSerialActiveSlot(10, 3), 0)
   assert.equal(inferSerialActiveSlot(70, 3), 2)
+})
+
+test("inferParallelSlotPercent staggers progress across parallel slots", () => {
+  const first = inferParallelSlotPercent(13, 0, 3)
+  const second = inferParallelSlotPercent(13, 1, 3)
+  const third = inferParallelSlotPercent(13, 2, 3)
+  assert.ok(first > second)
+  assert.ok(second > third)
+  assert.equal(inferParallelSlotPercent(100, 2, 3), 100)
 })

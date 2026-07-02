@@ -29,7 +29,6 @@ import {
   WandSparkles,
   Workflow,
   X,
-  Zap,
 } from "lucide-vue-next"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import GenerationLoadingPreview from "@/components/GenerationLoadingPreview.vue"
@@ -643,6 +642,12 @@ function openPrimaryReferencePicker() {
 }
 
 function removePrimaryReferenceAt(index: number, event: MouseEvent) {
+  event.stopPropagation()
+  capabilityRef.value?.removePrimaryReferenceMaterialAt(index)
+}
+
+function handlePrimaryReferenceImageError(index: number, event: Event) {
+  // 参考图预览 url 可能是视频/文件 url 或失效 url，避免一直显示破裂图片
   event.stopPropagation()
   capabilityRef.value?.removePrimaryReferenceMaterialAt(index)
 }
@@ -2332,9 +2337,6 @@ onUnmounted(() => {
                   >
                     <header class="flex flex-wrap items-start justify-between gap-4">
                       <div class="flex min-w-0 items-center gap-3">
-                        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-emerald-400/20 bg-[#12241d] text-sm font-black text-emerald-300 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.08)]">
-                          P
-                        </span>
                         <div class="min-w-0">
                           <div class="flex flex-wrap items-center gap-2">
                             <strong class="text-base font-semibold text-white">科创点AI</strong>
@@ -2855,15 +2857,19 @@ onUnmounted(() => {
                     :key="`${url}-${index}`"
                     class="dashboard-pollo-upload-slot dashboard-pollo-upload-slot--filled group"
                   >
-                    <img :src="url" alt="参考素材" class="dashboard-pollo-upload-slot__media" />
+                    <img
+                      :src="url"
+                      alt="参考素材"
+                      class="dashboard-pollo-upload-slot__media"
+                      @error="handlePrimaryReferenceImageError(index, $event)"
+                    />
                     <button
-                      v-if="primaryReferenceInfo.count > primaryReferenceInfo.previewUrls.length"
                       type="button"
                       class="dashboard-pollo-upload-slot__remove"
                       aria-label="移除参考图"
                       @click="removePrimaryReferenceAt(index, $event)"
                     >
-                      +{{ primaryReferenceInfo.count - primaryReferenceInfo.previewUrls.length }}
+                      <X class="h-3 w-3" />
                     </button>
                   </div>
                   <button
@@ -3027,6 +3033,8 @@ onUnmounted(() => {
                   :capabilities="selectedChatTool.capabilities || []"
                   :fields="selectedChatTool.fields || []"
                   :core-field-key="coreField?.fieldKey"
+                  :output-modality="selectedTool?.outputModality"
+                  :input-modality="selectedTool?.inputModality"
                   :tool-id="selectedChatTool.id"
                   :initial-params="replayParams"
                   class="min-w-0 shrink"
@@ -3044,7 +3052,6 @@ onUnmounted(() => {
                 >
                   <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />
                   <template v-else>
-                    <Zap v-if="composerGenerateCost != null" class="h-4 w-4 shrink-0 text-amber-200/90" />
                     <span v-if="composerGenerateCost != null" class="tabular-nums">{{ composerGenerateCost }}</span>
                   </template>
                   {{ submitting ? "生成中..." : "生成" }}
@@ -3054,7 +3061,7 @@ onUnmounted(() => {
               <p v-if="submitError" class="mt-3 rounded-2xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-200">
                 {{ submitError }}
               </p>
-              <p v-if="submitNotice" class="mt-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+              <p v-if="submitNotice" class="mt-3 rounded-2xl border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-xs text-sky-200">
                 {{ submitNotice }}
               </p>
             </div>
@@ -3622,22 +3629,24 @@ onUnmounted(() => {
   justify-content: center;
   gap: 8px;
   border-radius: 12px;
-  background: rgb(255 255 255 / 0.92);
+  background: var(--brand-gradient);
   padding: 0 18px;
   font-size: 14px;
   font-weight: 600;
-  color: #14151a;
+  color: #fff;
+  box-shadow: var(--brand-button-shadow);
   transition: filter 160ms ease, opacity 160ms ease;
 }
 
 .dashboard-pollo-generate:hover:not(:disabled) {
-  filter: brightness(1.04);
+  filter: brightness(1.08);
 }
 
 .dashboard-pollo-generate:disabled {
   cursor: not-allowed;
   background: rgb(255 255 255 / 0.12);
   color: rgb(255 255 255 / 0.35);
+  box-shadow: none;
 }
 
 .dashboard-pollo-generate--insufficient:not(:disabled) {

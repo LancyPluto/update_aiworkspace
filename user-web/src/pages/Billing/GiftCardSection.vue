@@ -4,13 +4,13 @@ import {
   CreditCard,
   Crown,
   Diamond,
-  Flame,
   Gift,
   Minus,
   Plus,
   ShoppingCart,
   Sparkles,
 } from "lucide-vue-next"
+import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import BillingCycleSwitcher from "@/components/BillingCycleSwitcher.vue"
 import type { GiftCardPackage, RechargePackage } from "@/api/types"
 import { BILLING_CYCLES, cycleMonthDivisor, type BillingCycle } from "@/utils/billingCycleConfig"
@@ -163,11 +163,11 @@ function tierBadge(tierKey: string) {
           :key="step.title"
           class="flex items-start gap-3"
         >
-          <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/20">
+          <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-500/15 text-sky-400 ring-1 ring-sky-500/20">
             <component :is="step.icon" class="h-4 w-4" aria-hidden="true" />
           </div>
           <div>
-            <p class="text-xs font-medium text-emerald-400/90">第 {{ index + 1 }} 步</p>
+            <p class="text-xs font-medium text-sky-400/90">第 {{ index + 1 }} 步</p>
             <p class="mt-0.5 text-sm font-semibold text-slate-100">{{ step.title }}</p>
             <p class="mt-1 text-xs text-slate-500">{{ step.desc }}</p>
           </div>
@@ -177,7 +177,7 @@ function tierBadge(tierKey: string) {
 
     <section class="space-y-6">
       <div>
-        <h2 class="text-lg font-semibold text-emerald-400">会员礼品卡</h2>
+        <h2 class="text-lg font-semibold text-sky-400">会员礼品卡</h2>
         <p class="mt-1 text-xs text-slate-500">四档会员礼遇，包年 / 包季 / 包月均可赠送</p>
       </div>
 
@@ -270,7 +270,7 @@ function tierBadge(tierKey: string) {
 
     <section class="space-y-5">
       <div>
-        <h2 class="text-lg font-semibold text-emerald-400">算力礼品卡</h2>
+        <h2 class="text-lg font-semibold text-sky-400">算力礼品卡</h2>
         <p class="mt-1 text-xs text-slate-500">固定面额，即买即送，无额外折扣</p>
       </div>
 
@@ -278,13 +278,13 @@ function tierBadge(tierKey: string) {
         <article
           v-for="pkg in sortedCreditPackages"
           :key="pkg.id"
-          class="credit-gift-card relative overflow-hidden rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/40 p-5 shadow-lg"
+          class="credit-gift-card relative overflow-hidden rounded-2xl border border-sky-500/25 bg-gradient-to-br from-slate-900 via-slate-900 to-sky-950/40 p-5 shadow-lg"
         >
-          <Flame class="pointer-events-none absolute -right-3 -top-3 h-28 w-28 text-emerald-500/12" aria-hidden="true" />
+          <CreditPowerIcon class="pointer-events-none absolute -right-3 -top-3 h-28 w-28 opacity-[0.12]" aria-hidden="true" />
 
           <div class="relative flex items-center gap-2.5">
-            <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/15 ring-1 ring-emerald-500/25">
-              <Flame class="h-5 w-5 text-emerald-400" aria-hidden="true" />
+            <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-500/15 ring-1 ring-sky-500/25">
+              <CreditPowerIcon class="h-5 w-5" aria-hidden="true" />
             </div>
             <span class="text-3xl font-bold tracking-tight text-white">{{ pkg.credits.toLocaleString() }}</span>
           </div>
@@ -328,11 +328,11 @@ function tierBadge(tierKey: string) {
         <div class="text-sm text-slate-300">
           已选 <span class="font-semibold text-white">{{ cartSummary.count }}</span> 件
           <span class="mx-2 text-slate-600">·</span>
-          合计 <span class="text-lg font-bold text-emerald-400">¥{{ formatMoney(cartSummary.amount) }}</span>
+          合计 <span class="text-lg font-bold text-sky-400">¥{{ formatMoney(cartSummary.amount) }}</span>
         </div>
         <button
           type="button"
-          class="rounded-full bg-gradient-to-r from-emerald-400 to-teal-400 px-6 py-2.5 text-sm font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:brightness-105 disabled:opacity-60"
+          class="rounded-full bg-gradient-to-r from-sky-400 to-blue-500 px-6 py-2.5 text-sm font-semibold text-slate-950 shadow-lg shadow-sky-500/20 transition hover:brightness-105 disabled:opacity-60"
           :disabled="ordering"
           @click="checkout"
         >
@@ -361,8 +361,8 @@ function tierBadge(tierKey: string) {
 }
 
 .member-gift-badge--teal {
-  background: linear-gradient(135deg, #14b8a6, #0891b2);
-  color: #ecfeff;
+  background: linear-gradient(135deg, #38bdf8, #2563eb);
+  color: #eff6ff;
 }
 
 .member-gift-badge--muted {

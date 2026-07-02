@@ -853,14 +853,21 @@ public class CommunityServiceImpl implements CommunityService {
                 && (post.getAuditStatus() == null || "APPROVED".equals(post.getAuditStatus()));
     }
 
+    private static final String DEFAULT_COLLECTION_NAME = "默认收藏夹";
+    private static final String LEGACY_DEFAULT_COLLECTION_NAME = "Default inspiration";
+
     private CommunityCollection ensureDefaultCollection(Long userId) {
         CommunityCollection existing = collectionMapper.findDefault(userId);
         if (existing != null) {
+            if (LEGACY_DEFAULT_COLLECTION_NAME.equals(existing.getName())) {
+                existing.setName(DEFAULT_COLLECTION_NAME);
+                collectionMapper.updateById(existing);
+            }
             return existing;
         }
         CommunityCollection collection = new CommunityCollection();
         collection.setUserId(userId);
-        collection.setName("Default inspiration");
+        collection.setName(DEFAULT_COLLECTION_NAME);
         collection.setDefaultCollection(true);
         collection.setItemCount(0L);
         collectionMapper.insertAndReturnId(collection);

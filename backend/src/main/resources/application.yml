@@ -90,10 +90,6 @@ app:
       bmob-rest-api-key: ${BMOB_REST_API_KEY:}
       bmob-base-url: ${BMOB_BASE_URL:https://api.bmob.cn}
       bmob-template: ${BMOB_SMS_TEMPLATE:}
-      ihuyi-api-id: ${IHUYI_API_ID:}
-      ihuyi-api-key: ${IHUYI_API_KEY:}
-      ihuyi-base-url: ${IHUYI_BASE_URL:https://api.ihuyi.com/sms/Submit.json}
-      ihuyi-template-id: ${IHUYI_TEMPLATE_ID:1}
       aliyun-access-key-id: ${ALIYUN_SMS_ACCESS_KEY_ID:${ALIYUN_CAPTCHA_ACCESS_KEY_ID:${ALIYUN_ACCESS_KEY_ID:}}}
       aliyun-access-key-secret: ${ALIYUN_SMS_ACCESS_KEY_SECRET:${ALIYUN_CAPTCHA_ACCESS_KEY_SECRET:${ALIYUN_ACCESS_KEY_SECRET:}}}
       aliyun-endpoint: ${ALIYUN_SMS_ENDPOINT:dysmsapi.aliyuncs.com}
