@@ -98,6 +98,25 @@ export interface PrimaryReferenceMaterialInfo {
   error?: string
 }
 
+export type ComposerMediaSlotPresentation = "image_thumb" | "media_card" | "frame_card"
+
+export interface ComposerMediaSlot {
+  fieldKey: string
+  fieldName: string
+  kind: MaterialKind
+  presentation: ComposerMediaSlotPresentation
+  label: string
+  value: string
+  previewUrl: string
+  hasValue: boolean
+  uploading: boolean
+  error?: string
+  canAdd: boolean
+  previewUrls: string[]
+  count: number
+  maxCount: number
+}
+
 const props = defineProps<{
   capabilities: Capability[]
   fields?: ToolField[]
@@ -111,6 +130,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   "primary-reference-change": [info: PrimaryReferenceMaterialInfo]
+  "composer-media-slots-change": [slots: ComposerMediaSlot[]]
   "params-change": [params: Record<string, unknown>]
 }>()
 
@@ -239,6 +259,13 @@ const codeCapability = computed(() => props.capabilities.find((c) => c.type === 
 const voiceCapability = computed(() => props.capabilities.find((c) => c.type === "voiceInput"))
 const activeMaterialKind = computed(() => (materialPickerField.value ? materialKindForField(materialPickerField.value) : "file"))
 const activeUploadKind = computed(() => (uploadHistoryField.value ? materialKindForField(uploadHistoryField.value) : "file"))
+const referenceUploadHint = computed(() => {
+  const kind = activeUploadKind.value
+  if (kind === "video") return "上传或拖拽视频"
+  if (kind === "audio") return "上传或拖拽音频"
+  if (kind === "image") return "上传或拖拽图片"
+  return "上传或拖拽文件"
+})
 const ratioField = computed(() => (props.fields || []).find(isAspectRatioField))
 const hasAspectRatioControl = computed(() => Boolean(imageCapability.value || ratioField.value))
 
@@ -283,7 +310,8 @@ function isComposerImageReferenceField(field: ToolField): boolean {
 
 function shouldShowComposerReferenceUpload(field: ToolField): boolean {
   if (!isFieldVisible(field, state.value.fields)) return false
-  // dashboard 的参考图上传区只支持图片预览，所以这里直接过滤非图片字段。
+  if (isComposerFrameField(field)) return false
+  // dashboard 的加号参考区只支持图片预览。
   if (!isComposerImageReferenceField(field)) return false
   // 多参考图场景：即便是可选字段，也需要有入口
   if (isMultiImageField(field)) return true
@@ -294,6 +322,99 @@ function shouldShowComposerReferenceUpload(field: ToolField): boolean {
   if (output === "VIDEO" || output.includes("VIDEO")) return true
   // 图片生成工具：仅当字段被标记为必填/显式 reference 才展示入口
   return false
+}
+
+function isComposerFrameField(field: ToolField): boolean {
+  const meta = parseFieldMeta(field)
+  const role = (meta.uiRole || "").toLowerCase()
+  if (role === "first_frame" || role === "last_frame") return true
+  const key = field.fieldKey.toLowerCase()
+  const name = field.fieldName || ""
+  if (key === "imagetail" || key === "image_tail" || key === "tailimageurl" || key === "lastframeurl") return true
+  if (/尾帧|末帧/.test(name)) return true
+  if (key === "firstframeimage" || key === "first_frame_image" || key === "firstframeurl") return true
+  if (/首帧/.test(name) && (key === "imageurl" || key === "image_url")) return true
+  return false
+}
+
+function isComposerLastFrameField(field: ToolField): boolean {
+  const key = field.fieldKey.toLowerCase()
+  const name = field.fieldName || ""
+  return key === "imagetail" || key === "image_tail" || key === "tailimageurl" || key === "lastframeurl" || /尾帧|末帧/.test(name)
+}
+
+function composerFrameLabel(field: ToolField): string {
+  return isComposerLastFrameField(field) ? "尾帧" : "首帧"
+}
+
+function resolveComposerSlotPresentation(field: ToolField, kind: MaterialKind): ComposerMediaSlotPresentation | null {
+  if (isComposerFrameField(field)) return "frame_card"
+  if (kind === "video" || kind === "audio") return "media_card"
+  if (kind === "image" && isComposerImageReferenceField(field)) return "image_thumb"
+  return null
+}
+
+function shouldShowComposerMediaSlot(field: ToolField): boolean {
+  if (!isFieldVisible(field, state.value.fields)) return false
+  const kind = materialKindForField(field)
+  const presentation = resolveComposerSlotPresentation(field, kind)
+  if (!presentation) return false
+  if (presentation === "frame_card") return true
+  if (presentation === "media_card") {
+    if (field.fieldType === "video_upload") return true
+    const role = (parseFieldMeta(field).uiRole || "").toLowerCase()
+    if (role === "motion_video") return true
+    if (field.required || field.executionRequired || field.userRequired) return true
+    if (isExplicitComposerReferenceField(field)) return true
+    if (kind === "audio") return field.required || field.executionRequired || field.userRequired
+    return false
+  }
+  return shouldShowComposerReferenceUpload(field)
+}
+
+function composerSlotSortOrder(field: ToolField): number {
+  const meta = parseFieldMeta(field)
+  if (typeof meta.uiOrder === "number" && Number.isFinite(meta.uiOrder)) return meta.uiOrder
+  return field.sortOrder ?? 999
+}
+
+function composerSlotLabel(field: ToolField, kind: MaterialKind, presentation: ComposerMediaSlotPresentation): string {
+  if (presentation === "frame_card") return composerFrameLabel(field)
+  if (presentation === "media_card" && kind === "audio") return "音频"
+  return ""
+}
+
+function buildComposerMediaSlot(field: ToolField): ComposerMediaSlot {
+  const kind = materialKindForField(field)
+  const presentation = resolveComposerSlotPresentation(field, kind)!
+  const upload = uploadState(field.fieldKey)
+  const isMulti = presentation === "image_thumb" && isMultiImageField(field)
+  const values = isMulti ? multiImageValues(field) : strField(field.fieldKey) ? [strField(field.fieldKey)] : []
+  const previewUrls = values
+    .map((url) => normalizeMediaUrl(url))
+    .filter((url) => {
+      if (kind === "image") return isValidImagePreviewUrl(url)
+      return Boolean(url)
+    })
+  const maxCount = isMulti ? multiImageLimit(field) : 1
+  const count = isMulti ? previewUrls.length : previewUrls.length > 0 ? 1 : 0
+  const hasValue = count > 0
+  return {
+    fieldKey: field.fieldKey,
+    fieldName: field.fieldName,
+    kind,
+    presentation,
+    label: composerSlotLabel(field, kind, presentation),
+    value: values[0] || "",
+    previewUrl: previewUrls[0] || "",
+    hasValue,
+    uploading: upload.uploading === true,
+    error: upload.error,
+    canAdd: isMulti ? count < maxCount : !hasValue,
+    previewUrls,
+    count,
+    maxCount,
+  }
 }
 
 function referenceFieldScore(field: ToolField): number {
@@ -309,15 +430,28 @@ function referenceFieldScore(field: ToolField): number {
 
 const primaryReferenceField = computed(() => {
   const fields = props.fields || []
-  const candidates = fields.filter((field) => isReferenceComposerField(field) && isComposerImageReferenceField(field))
+  const candidates = fields.filter(
+    (field) => isReferenceComposerField(field) && isComposerImageReferenceField(field) && !isComposerFrameField(field),
+  )
   if (candidates.length === 0) return null
   return [...candidates].sort((a, b) => referenceFieldScore(b) - referenceFieldScore(a))[0] || null
 })
+
+const composerMediaSlots = computed<ComposerMediaSlot[]>(() => {
+  if (!isComposerLayout.value) return []
+  return (props.fields || [])
+    .filter((field) => shouldShowComposerMediaSlot(field))
+    .sort((a, b) => composerSlotSortOrder(a) - composerSlotSortOrder(b))
+    .map((field) => buildComposerMediaSlot(field))
+})
+
+const composerSlotFieldKeys = computed(() => new Set(composerMediaSlots.value.map((slot) => slot.fieldKey)))
 
 const configuredFields = computed(() =>
   (props.fields || [])
     .filter((field) => !(field.fieldKey === props.coreFieldKey || parseFieldMeta(field).core))
     .filter((field) => field !== primaryReferenceField.value)
+    .filter((field) => !composerSlotFieldKeys.value.has(field.fieldKey))
     .filter((field) => !isAspectRatioField(field))
     .filter((field) => isFieldVisible(field, state.value.fields)),
 )
@@ -618,8 +752,8 @@ function imagePreviewUrl(field: ToolField): string {
 }
 
 function materialKindForField(field: ToolField): MaterialKind {
-  if (field.fieldType === "multi_video" || field.fieldType === "omni_video_list") return "video"
-  if (field.fieldType === "image" || field.fieldType === "multi_image") return "image"
+  if (field.fieldType === "video_upload" || field.fieldType === "multi_video" || field.fieldType === "omni_video_list") return "video"
+  if (field.fieldType === "image" || field.fieldType === "image_upload" || field.fieldType === "multi_image") return "image"
   const text = `${field.fieldKey} ${field.fieldName} ${field.placeholder || ""}`.toLowerCase()
   if (/image|img|picture|photo|frame|cover|avatar|poster|图片|图像|照片|帧|封面|首图/.test(text)) return "image"
   if (/audio|voice|sound|speech|music|音频|语音|声音|音乐/.test(text)) return "audio"
@@ -643,7 +777,12 @@ function materialKindLabel(kind: MaterialKind): string {
 }
 
 function isReferenceMediaField(field: ToolField): boolean {
-  return field.fieldType === "image" || isMediaListField(field) || isOmniVideoListField(field) || field.fieldType === "file" || field.fieldType === "image_upload"
+  return field.fieldType === "image"
+    || field.fieldType === "image_upload"
+    || field.fieldType === "video_upload"
+    || isMediaListField(field)
+    || isOmniVideoListField(field)
+    || field.fieldType === "file"
 }
 
 function isAdvancedOnlyField(field: ToolField): boolean {
@@ -712,6 +851,7 @@ const primaryReferenceInfo = computed<PrimaryReferenceMaterialInfo>(() => {
 })
 
 watch(primaryReferenceInfo, (info) => emit("primary-reference-change", info), { immediate: true, deep: true })
+watch(composerMediaSlots, (slots) => emit("composer-media-slots-change", slots), { immediate: true, deep: true })
 
 watch(
   () => [state.value, props.fields, props.coreFieldKey],
@@ -961,8 +1101,12 @@ function openUploadHistoryPicker(field: ToolField) {
   void loadUploadHistory()
 }
 
-function openReferenceMaterialPicker(tab: "upload" | "material" = "upload") {
-  const field = primaryReferenceField.value
+function openReferenceMaterialPicker(tab: "upload" | "material" = "upload", fieldKey?: string) {
+  const field = fieldKey
+    ? (props.fields || []).find((item) => item.fieldKey === fieldKey) || null
+    : primaryReferenceField.value || composerMediaSlots.value[0]
+      ? (props.fields || []).find((item) => item.fieldKey === composerMediaSlots.value[0]?.fieldKey) || null
+      : null
   if (!field) return
   referencePickerTab.value = tab
   referencePickerOpen.value = true
@@ -1292,8 +1436,17 @@ function clearPrimaryReferenceMaterial() {
   if (field) clearUploadedField(field)
 }
 
-function removePrimaryReferenceMaterialAt(index: number) {
-  const field = primaryReferenceField.value
+function openComposerSlotPicker(fieldKey: string) {
+  openReferenceMaterialPicker("upload", fieldKey)
+}
+
+function clearComposerSlot(fieldKey: string) {
+  const field = (props.fields || []).find((item) => item.fieldKey === fieldKey)
+  if (field) clearUploadedField(field)
+}
+
+function removeComposerSlotAt(fieldKey: string, index = 0) {
+  const field = (props.fields || []).find((item) => item.fieldKey === fieldKey)
   if (!field) return
   if (isMultiImageField(field)) {
     const next = multiImageValues(field).filter((_, itemIndex) => itemIndex !== index)
@@ -1305,6 +1458,12 @@ function removePrimaryReferenceMaterialAt(index: number) {
     return
   }
   clearUploadedField(field)
+}
+
+function removePrimaryReferenceMaterialAt(index: number) {
+  const field = primaryReferenceField.value
+  if (!field) return
+  removeComposerSlotAt(field.fieldKey, index)
 }
 
 function sliderConfig(field: ToolField) {
@@ -1473,9 +1632,13 @@ defineExpose({
   hasOpenOverlay,
   closeComposerPopovers,
   openReferenceMaterialPicker,
+  openComposerSlotPicker,
   clearPrimaryReferenceMaterial,
+  clearComposerSlot,
   removePrimaryReferenceMaterialAt,
+  removeComposerSlotAt,
   primaryReferenceInfo,
+  composerMediaSlots,
 })
 </script>
 
@@ -2161,7 +2324,7 @@ defineExpose({
               @drop.prevent="uploadHistoryField && handleUploadHistoryFile(($event as DragEvent).dataTransfer?.files || null)"
             >
               <UploadCloud class="h-8 w-8 text-white/70" />
-              <span class="text-base font-semibold">{{ uploadHistoryUploading ? "上传中..." : "上传或拖拽图片/文件" }}</span>
+              <span class="text-base font-semibold">{{ uploadHistoryUploading ? "上传中..." : referenceUploadHint }}</span>
               <input
                 type="file"
                 class="hidden"

@@ -71,3 +71,4 @@ ai-tool-market-config-*.json
 # deploy/scripts：以下划线开头的临时诊断/修生产脚本，仅本地使用，不纳入版本库
 # CI/CD 与文档引用的核心脚本（无前缀或见 deploy/CI_CD.md）仍应提交
 deploy/scripts/_*
+.cursor/

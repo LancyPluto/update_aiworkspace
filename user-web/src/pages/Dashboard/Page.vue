@@ -34,7 +34,7 @@ import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import GenerationLoadingPreview from "@/components/GenerationLoadingPreview.vue"
 import ImageStackPreview from "@/components/ImageStackPreview.vue"
 import CapabilityControls from "@/pages/Chat/CapabilityControls.vue"
-import type { PrimaryReferenceMaterialInfo } from "@/pages/Chat/CapabilityControls.vue"
+import type { ComposerMediaSlot, PrimaryReferenceMaterialInfo } from "@/pages/Chat/CapabilityControls.vue"
 import DashboardModalityDock from "./DashboardModalityDock.vue"
 import { fetchCreditAccount } from "@/api/creditApi"
 import { ApiBusinessError } from "@/api/client"
@@ -110,6 +110,7 @@ const primaryReferenceInfo = ref<PrimaryReferenceMaterialInfo>({
   previewUrls: [],
   uploading: false,
 })
+const composerMediaSlots = ref<ComposerMediaSlot[]>([])
 const composerRootRef = ref<HTMLElement | null>(null)
 const composerOpen = ref(false)
 const composerManuallyClosed = ref(false)
@@ -252,6 +253,8 @@ const coreFieldPlaceholder = computed(() => {
 const canAddPrimaryReference = computed(
   () => primaryReferenceInfo.value.available && primaryReferenceInfo.value.count < primaryReferenceInfo.value.maxCount,
 )
+
+const hasComposerMediaSlots = computed(() => composerMediaSlots.value.length > 0)
 
 const estimateInput = computed<UseTaskEstimateInput | null>(() => {
   const tool = selectedTool.value
@@ -632,8 +635,21 @@ function updatePrimaryReferenceInfo(info: PrimaryReferenceMaterialInfo) {
   primaryReferenceInfo.value = info
 }
 
+function updateComposerMediaSlots(slots: ComposerMediaSlot[]) {
+  composerMediaSlots.value = slots
+}
+
 function onCapabilityParamsChange(params: Record<string, unknown>) {
   capabilityParams.value = params
+}
+
+function openComposerSlotPicker(fieldKey: string) {
+  capabilityRef.value?.openComposerSlotPicker(fieldKey)
+  expandComposer()
+}
+
+function removeComposerSlot(fieldKey: string, index = 0) {
+  capabilityRef.value?.removeComposerSlotAt(fieldKey, index)
 }
 
 function openPrimaryReferencePicker() {
@@ -2848,7 +2864,95 @@ onUnmounted(() => {
 
               <div class="dashboard-pollo-composer__input-row">
                 <div
-                  v-if="primaryReferenceInfo.available"
+                  v-if="hasComposerMediaSlots"
+                  class="dashboard-pollo-upload-row"
+                >
+                  <template v-for="slot in composerMediaSlots" :key="slot.fieldKey">
+                    <template v-if="slot.presentation === 'image_thumb'">
+                      <div
+                        v-for="(url, index) in slot.previewUrls"
+                        :key="`${slot.fieldKey}-${url}-${index}`"
+                        class="dashboard-pollo-upload-slot dashboard-pollo-upload-slot--filled group"
+                        :title="slot.fieldName"
+                      >
+                        <img
+                          :src="url"
+                          alt="参考图片"
+                          class="dashboard-pollo-upload-slot__media"
+                          @error="removeComposerSlot(slot.fieldKey, index)"
+                        />
+                        <button
+                          type="button"
+                          class="dashboard-pollo-upload-slot__remove"
+                          aria-label="移除参考图"
+                          @click="removeComposerSlot(slot.fieldKey, index)"
+                        >
+                          <X class="h-3 w-3" />
+                        </button>
+                      </div>
+                      <button
+                        v-if="slot.canAdd"
+                        type="button"
+                        class="dashboard-pollo-upload-slot dashboard-pollo-upload-slot--empty"
+                        :title="slot.fieldName || '上传图片'"
+                        @click="openComposerSlotPicker(slot.fieldKey)"
+                      >
+                        <Loader2 v-if="slot.uploading" class="h-5 w-5 animate-spin text-primary" />
+                        <Plus v-else class="h-5 w-5" />
+                      </button>
+                    </template>
+
+                    <div
+                      v-else
+                      class="dashboard-pollo-media-slot"
+                      :title="slot.fieldName"
+                    >
+                      <button
+                        v-if="!slot.hasValue"
+                        type="button"
+                        class="dashboard-pollo-media-slot__box"
+                        @click="openComposerSlotPicker(slot.fieldKey)"
+                      >
+                        <Loader2 v-if="slot.uploading" class="h-5 w-5 animate-spin text-primary" />
+                        <Video v-else-if="slot.kind === 'video'" class="h-5 w-5" />
+                        <Music v-else-if="slot.kind === 'audio'" class="h-5 w-5" />
+                        <Plus v-else class="h-5 w-5" />
+                      </button>
+                      <div
+                        v-else
+                        class="dashboard-pollo-media-slot__box dashboard-pollo-media-slot__box--filled group"
+                      >
+                        <video
+                          v-if="slot.kind === 'video'"
+                          :src="slot.previewUrl"
+                          class="dashboard-pollo-media-slot__media"
+                          muted
+                          playsinline
+                          preload="metadata"
+                        />
+                        <img
+                          v-else-if="slot.kind === 'image'"
+                          :src="slot.previewUrl"
+                          alt=""
+                          class="dashboard-pollo-media-slot__media"
+                        />
+                        <Music v-else class="h-5 w-5 text-white/70" />
+                        <button
+                          type="button"
+                          class="dashboard-pollo-upload-slot__remove"
+                          :aria-label="`移除${slot.label || slot.fieldName}`"
+                          @click="removeComposerSlot(slot.fieldKey)"
+                        >
+                          <X class="h-3 w-3" />
+                        </button>
+                      </div>
+                      <span v-if="slot.label" class="dashboard-pollo-media-slot__label">{{ slot.label }}</span>
+                    </div>
+                  </template>
+                </div>
+
+                <div
+                  v-else-if="primaryReferenceInfo.available"
                   class="dashboard-pollo-upload-row"
                   :title="primaryReferenceInfo.fieldName || '上传参考素材'"
                 >
@@ -2876,7 +2980,7 @@ onUnmounted(() => {
                     v-if="canAddPrimaryReference"
                     type="button"
                     class="dashboard-pollo-upload-slot dashboard-pollo-upload-slot--empty"
-                    :title="primaryReferenceInfo.fieldName || '上传参考素材'"
+                    :title="primaryReferenceInfo.fieldName || '上传图片'"
                     @click="openPrimaryReferencePicker"
                   >
                     <Loader2 v-if="primaryReferenceInfo.uploading" class="h-5 w-5 animate-spin text-primary" />
@@ -3039,6 +3143,7 @@ onUnmounted(() => {
                   :initial-params="replayParams"
                   class="min-w-0 shrink"
                   @primary-reference-change="updatePrimaryReferenceInfo"
+                  @composer-media-slots-change="updateComposerMediaSlots"
                   @params-change="onCapabilityParamsChange"
                 />
 
@@ -3572,6 +3677,53 @@ onUnmounted(() => {
 
 .dashboard-pollo-upload-slot__remove:hover {
   background: rgb(220 38 38 / 0.92);
+}
+
+.dashboard-pollo-media-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.dashboard-pollo-media-slot__box {
+  display: flex;
+  width: 44px;
+  height: 54px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px dashed rgb(255 255 255 / 0.22);
+  background: rgb(255 255 255 / 0.03);
+  color: rgb(255 255 255 / 0.42);
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.dashboard-pollo-media-slot__box:hover {
+  border-color: rgb(176 92 255 / 0.45);
+  background: rgb(176 92 255 / 0.08);
+  color: white;
+}
+
+.dashboard-pollo-media-slot__box--filled {
+  position: relative;
+  overflow: hidden;
+  border-style: solid;
+  border-color: rgb(255 255 255 / 0.16);
+  background: rgb(255 255 255 / 0.04);
+}
+
+.dashboard-pollo-media-slot__media {
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+}
+
+.dashboard-pollo-media-slot__label {
+  font-size: 10px;
+  line-height: 1.2;
+  color: rgb(255 255 255 / 0.42);
 }
 
 .dashboard-pollo-textarea {
