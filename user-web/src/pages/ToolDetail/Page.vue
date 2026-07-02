@@ -20,7 +20,6 @@ import {
   ExternalLink,
 } from "lucide-vue-next"
 import { computed, ref, onMounted, watch } from "vue"
-import AppShell from "@/components/AppShell.vue"
 import MediaComparisonSlider from "@/components/MediaComparisonSlider.vue"
 import { fetchToolByCode } from "@/api/toolApi"
 import { createTask } from "@/api/taskApi"
@@ -462,7 +461,6 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppShell title="工具详情" :description="title">
     <div class="px-6 py-6 max-w-6xl mx-auto space-y-6">
       <!-- 面包屑 -->
       <nav class="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap">
@@ -1044,7 +1042,6 @@ onMounted(async () => {
         </div>
       </template>
     </div>
-  </AppShell>
 
   <Teleport to="body">
     <Transition

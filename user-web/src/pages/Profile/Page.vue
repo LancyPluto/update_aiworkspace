@@ -2,7 +2,6 @@
 import { computed, onMounted, ref } from "vue"
 import { useRouter } from "vue-router"
 import { Camera, Check, ClipboardCopy, ExternalLink, Gift, Loader2, Shield, Sparkles, ToggleLeft, Trash2, Wallet, X } from "lucide-vue-next"
-import AppShell from "@/components/AppShell.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import { fetchCreditAccount, fetchMyGiftCards, redeemGiftCard, redeemGiftCardByCode } from "@/api/creditApi"
 import { fetchTasks } from "@/api/taskApi"
@@ -300,7 +299,6 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppShell title="我的资料" description="社区系统的个人身份底座">
     <div class="profile-page">
       <section class="profile-hero">
         <div class="hero-copy">
@@ -622,7 +620,6 @@ onMounted(async () => {
         </section>
       </div>
     </div>
-  </AppShell>
 </template>
 
 <style scoped>

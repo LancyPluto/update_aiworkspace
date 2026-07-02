@@ -3,6 +3,7 @@ import { useAuthStore } from "@/store/authStore"
 
 import LoginPage from "@/pages/Login/Page.vue"
 
+const AppLayout = () => import("@/layouts/AppLayout.vue")
 const HomePage = () => import("@/pages/Home/Page.vue")
 const DashboardPage = () => import("@/pages/Dashboard/Page.vue")
 const AgentHomePage = () => import("@/pages/AgentHome/Page.vue")
@@ -29,35 +30,118 @@ const router = createRouter({
       redirect: (to) => ({ path: "/", query: to.query }),
     },
     {
-      path: "/home",
-      name: "Home",
-      meta: { requiresAuth: true },
-      component: HomePage,
-    },
-    {
-      path: "/dashboard",
-      name: "Dashboard",
-      meta: { requiresAuth: true },
-      component: DashboardPage,
-    },
-    {
-      path: "/agent",
-      name: "AgentHome",
-      meta: { requiresAuth: true },
-      component: AgentHomePage,
-    },
-    {
-      path: "/marketplace",
-      name: "ToolList",
-      meta: { requiresAuth: false },
-      component: ToolListPage,
-    },
-    {
-      path: "/agents",
-      name: "AgentTools",
-      meta: { requiresAuth: false },
-      component: ToolListPage,
-      props: { mode: "agents" },
+      path: "/",
+      component: AppLayout,
+      children: [
+        {
+          path: "home",
+          name: "Home",
+          meta: { requiresAuth: true },
+          component: HomePage,
+        },
+        {
+          path: "dashboard",
+          name: "Dashboard",
+          meta: { requiresAuth: true },
+          component: DashboardPage,
+        },
+        {
+          path: "agent",
+          name: "AgentHome",
+          meta: { requiresAuth: true },
+          component: AgentHomePage,
+        },
+        {
+          path: "marketplace",
+          name: "ToolList",
+          meta: { requiresAuth: false },
+          component: ToolListPage,
+        },
+        {
+          path: "agents",
+          name: "AgentTools",
+          meta: { requiresAuth: false },
+          component: ToolListPage,
+          props: { mode: "agents" },
+        },
+        {
+          path: "tools/:id",
+          name: "ToolDetail",
+          meta: { requiresAuth: false },
+          component: () => import("@/pages/ToolDetail/Page.vue"),
+          props: true,
+        },
+        {
+          path: "tools/:id/use",
+          name: "ToolUse",
+          meta: { requiresAuth: true },
+          component: () => import("@/pages/ToolUse/Page.vue"),
+          props: true,
+        },
+        {
+          path: "tasks",
+          name: "MyTasks",
+          meta: { requiresAuth: true },
+          component: MyTasksPage,
+        },
+        {
+          path: "library",
+          name: "MaterialLibrary",
+          meta: { requiresAuth: true },
+          component: MaterialLibraryPage,
+        },
+        {
+          path: "library/subjects",
+          name: "SubjectLibrary",
+          meta: { requiresAuth: true },
+          component: MaterialLibraryPage,
+        },
+        {
+          path: "profile",
+          name: "Profile",
+          meta: { requiresAuth: true },
+          component: ProfilePage,
+        },
+        {
+          path: "community",
+          name: "CommunityDiscover",
+          meta: { requiresAuth: false },
+          component: CommunityDiscoverPage,
+        },
+        {
+          path: "community/inspirations",
+          name: "InspirationCollections",
+          meta: { requiresAuth: true },
+          component: InspirationCollectionsPage,
+        },
+        {
+          path: "billing",
+          name: "Billing",
+          meta: { requiresAuth: true },
+          component: BillingPage,
+        },
+        {
+          path: "tasks/:taskId/status",
+          name: "TaskStatus",
+          meta: { requiresAuth: true },
+          component: () => import("@/pages/TaskStatus/Page.vue"),
+          props: true,
+        },
+        {
+          path: "tasks/:taskId/result",
+          name: "TaskResult",
+          meta: { requiresAuth: true },
+          component: () => import("@/pages/TaskResult/Page.vue"),
+          props: true,
+        },
+        {
+          path: "workflow/studio/:taskId",
+          name: "WorkflowStudio",
+          meta: { requiresAuth: true },
+          component: () => import("@/pages/WorkflowStudio/Page.vue"),
+          props: true,
+        },
+      ],
     },
     {
       path: "/chat/:toolId",
@@ -69,58 +153,8 @@ const router = createRouter({
       }),
     },
     {
-      path: "/tools/:id",
-      name: "ToolDetail",
-      meta: { requiresAuth: false },
-      component: () => import("@/pages/ToolDetail/Page.vue"),
-      props: true,
-    },
-    {
-      path: "/tools/:id/use",
-      name: "ToolUse",
-      meta: { requiresAuth: true },
-      component: () => import("@/pages/ToolUse/Page.vue"),
-      props: true,
-    },
-    {
-      path: "/tasks",
-      name: "MyTasks",
-      meta: { requiresAuth: true },
-      component: MyTasksPage,
-    },
-    {
-      path: "/library",
-      name: "MaterialLibrary",
-      meta: { requiresAuth: true },
-      component: MaterialLibraryPage,
-    },
-    {
-      path: "/library/subjects",
-      name: "SubjectLibrary",
-      meta: { requiresAuth: true },
-      component: MaterialLibraryPage,
-    },
-    {
       path: "/subjects",
       redirect: "/library/subjects",
-    },
-    {
-      path: "/profile",
-      name: "Profile",
-      meta: { requiresAuth: true },
-      component: ProfilePage,
-    },
-    {
-      path: "/community",
-      name: "CommunityDiscover",
-      meta: { requiresAuth: false },
-      component: CommunityDiscoverPage,
-    },
-    {
-      path: "/community/inspirations",
-      name: "InspirationCollections",
-      meta: { requiresAuth: true },
-      component: InspirationCollectionsPage,
     },
     {
       path: "/u/:userId",
@@ -133,33 +167,6 @@ const router = createRouter({
       name: "CommunityPost",
       meta: { requiresAuth: false },
       component: () => import("@/pages/CommunityPost/Page.vue"),
-      props: true,
-    },
-    {
-      path: "/billing",
-      name: "Billing",
-      meta: { requiresAuth: true },
-      component: BillingPage,
-    },
-    {
-      path: "/tasks/:taskId/status",
-      name: "TaskStatus",
-      meta: { requiresAuth: true },
-      component: () => import("@/pages/TaskStatus/Page.vue"),
-      props: true,
-    },
-    {
-      path: "/tasks/:taskId/result",
-      name: "TaskResult",
-      meta: { requiresAuth: true },
-      component: () => import("@/pages/TaskResult/Page.vue"),
-      props: true,
-    },
-    {
-      path: "/workflow/studio/:taskId",
-      name: "WorkflowStudio",
-      meta: { requiresAuth: true },
-      component: () => import("@/pages/WorkflowStudio/Page.vue"),
       props: true,
     },
   ],

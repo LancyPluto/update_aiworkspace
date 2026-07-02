@@ -2,7 +2,6 @@
   import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
   import { useRoute, useRouter } from "vue-router"
   import { ChevronDown, ChevronLeft, ChevronRight, Loader2, MessageCircle, Pin, Plus, Sparkles, Trash2 } from "lucide-vue-next"
-  import AppShell from "@/components/AppShell.vue"
   import AgentChatPane from "./AgentChatPane.vue"
   import { confirmDelete } from "@/composables/useConfirmDelete"
   import { useAuthStore } from "@/store/authStore"
@@ -346,7 +345,6 @@
 </script>
 
 <template>
-  <AppShell title="智能对话" description="用自然语言让系统推荐、确认并调用工具">
     <div class="agent-page" :class="{ 'agent-page--session-collapsed': !sessionSidebarOpen }">
       <button class="sidebar-toggle-btn" type="button" @click="toggleSessionSidebar">
         <ChevronRight v-if="!sessionSidebarOpen" class="h-4 w-4" />
@@ -442,7 +440,6 @@
         </div>
       </section>
     </div>
-  </AppShell>
 </template>
 
 <style scoped>

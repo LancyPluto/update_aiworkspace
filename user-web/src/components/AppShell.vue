@@ -47,14 +47,6 @@ import {
   type BrandAccent,
 } from "@/utils/theme"
 
-withDefaults(
-  defineProps<{
-    title?: string
-    description?: string
-  }>(),
-  {},
-)
-
 type NavLink = {
   type: "link"
   href: string
@@ -526,17 +518,6 @@ watch(
           <PanelLeftClose v-if="sidebarOpen" class="h-4 w-4" aria-hidden="true" />
           <PanelLeft v-else class="h-4 w-4" aria-hidden="true" />
         </button>
-        <div class="app-shell-title-block min-w-0 flex-1 lg:max-w-[360px]">
-          <span class="min-w-0">
-            <h1
-              v-if="title"
-              class="truncate text-base font-bold text-white"
-            >
-              {{ title }}
-            </h1>
-            <p v-if="description" class="text-xs text-white/45 truncate">{{ description }}</p>
-          </span>
-        </div>
         <div ref="searchRootRef" class="relative hidden min-w-0 flex-1 lg:block lg:max-w-[520px] xl:max-w-[620px]">
           <form
             class="flex h-12 items-center rounded-full bg-white/[0.07] px-4 ring-1 ring-white/8 transition focus-within:ring-primary/35"
@@ -766,12 +747,6 @@ watch(
     radial-gradient(circle at 18% 0%, var(--agent-accent-soft, rgb(176 92 255 / 0.12)), transparent 32%),
     linear-gradient(180deg, rgb(35 38 47 / 0.94), rgb(26 28 35 / 0.92));
   box-shadow: 0 1px 0 rgb(255 255 255 / 0.035), 0 18px 60px rgb(0 0 0 / 0.26);
-}
-
-.app-shell-title-block {
-  display: flex;
-  align-items: center;
-  gap: 12px;
 }
 
 .app-shell-header--agent :deep(form) {

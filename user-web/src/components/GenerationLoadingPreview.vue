@@ -2,26 +2,89 @@
 import { computed } from "vue"
 import { AlertCircle } from "lucide-vue-next"
 import { clampAspectRatio } from "@/utils/taskAspectRatio"
+import {
+  buildTaskImageOutputPlan,
+  inferSerialActiveSlot,
+  type ImageOutputLayout,
+} from "@/utils/taskImageOutput"
+import type { TaskDetail } from "@/api/types"
 
 const props = withDefaults(
   defineProps<{
     aspectRatio?: number
     caption: string
     percentLabel?: string
+    percent?: number
     failed?: boolean
+    outputCount?: number
+    layout?: ImageOutputLayout
+    task?: Pick<TaskDetail, "params" | "outputModality" | "toolType"> | null
   }>(),
   {
     aspectRatio: 1,
     percentLabel: "",
+    percent: 0,
     failed: false,
+    outputCount: 1,
+    layout: "parallel",
+    task: null,
   },
 )
 
 const displayRatio = computed(() => clampAspectRatio(props.aspectRatio))
+
+const outputPlan = computed(() => {
+  if (props.task) return buildTaskImageOutputPlan(props.task)
+  return {
+    count: Math.max(1, Math.min(4, props.outputCount || 1)),
+    layout: props.layout,
+    showMultiPreview: props.layout === "parallel" && (props.outputCount || 1) > 1,
+  }
+})
+
+const parallelSlots = computed(() => {
+  if (!outputPlan.value.showMultiPreview) return []
+  return Array.from({ length: outputPlan.value.count }, (_, index) => index)
+})
+
+const serialSlot = computed(() => inferSerialActiveSlot(props.percent, outputPlan.value.count))
+
+const serialCaption = computed(() => {
+  if (outputPlan.value.layout !== "serial" || outputPlan.value.count <= 1) return props.caption
+  return `${props.caption}（${serialSlot.value + 1}/${outputPlan.value.count}）`
+})
 </script>
 
 <template>
+  <div v-if="outputPlan.showMultiPreview" class="generation-preview-group">
+    <div
+      v-for="slot in parallelSlots"
+      :key="`slot-${slot}`"
+      class="generation-preview-slot"
+      :class="{ 'generation-preview-slot--failed': failed }"
+      :style="{ aspectRatio: displayRatio }"
+    >
+      <div class="generation-preview-slot__content">
+        <div v-if="failed" class="generation-preview-slot__failed" aria-hidden="true">
+          <AlertCircle class="h-6 w-6" />
+        </div>
+        <div v-else class="generation-preview-slot__bars" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
+        <p class="generation-preview-slot__index">{{ slot + 1 }}</p>
+      </div>
+      <div v-if="!failed" class="generation-preview-slot__progress" aria-hidden="true">
+        <span class="generation-preview-slot__progress-bar" :style="{ width: `${Math.max(0, Math.min(100, percent))}%` }" />
+      </div>
+    </div>
+    <p class="generation-preview-group__caption">{{ caption }}</p>
+    <p v-if="percentLabel && !failed" class="generation-preview-group__percent">{{ percentLabel }}</p>
+  </div>
+
   <div
+    v-else
     class="generation-loading-preview"
     :class="{ 'generation-loading-preview--failed': failed }"
     :style="{ aspectRatio: displayRatio }"
@@ -35,14 +98,143 @@ const displayRatio = computed(() => clampAspectRatio(props.aspectRatio))
         <span />
         <span />
       </div>
-      <p class="generation-loading-preview__caption">{{ caption }}</p>
+      <p class="generation-loading-preview__caption">{{ serialCaption }}</p>
       <p v-if="percentLabel && !failed" class="generation-loading-preview__percent">{{ percentLabel }}</p>
+    </div>
+    <div v-if="!failed" class="generation-loading-preview__progress" aria-hidden="true">
+      <span class="generation-loading-preview__progress-bar" :style="{ width: `${Math.max(0, Math.min(100, percent))}%` }" />
     </div>
   </div>
 </template>
 
 <style scoped>
+.generation-preview-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  width: min(100%, 720px);
+}
+
+.generation-preview-group__caption,
+.generation-preview-group__percent {
+  width: 100%;
+  margin: 0;
+  text-align: center;
+}
+
+.generation-preview-group__caption {
+  color: rgb(255 255 255 / 0.58);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.generation-preview-group__percent {
+  margin-top: -4px;
+  color: rgb(255 255 255 / 0.34);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.generation-preview-slot {
+  position: relative;
+  flex: 1 1 140px;
+  min-width: 120px;
+  max-width: 220px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 50% 0%, rgb(255 255 255 / 0.05), transparent 42%),
+    linear-gradient(180deg, rgb(42 42 48), rgb(22 22 28));
+  overflow: hidden;
+}
+
+.generation-preview-slot--failed {
+  border-color: rgb(248 113 113 / 0.28);
+  background:
+    radial-gradient(circle at 50% 0%, rgb(248 113 113 / 0.12), transparent 42%),
+    linear-gradient(180deg, rgb(48 32 32), rgb(24 18 18));
+}
+
+.generation-preview-slot__content {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px 12px 18px;
+  text-align: center;
+}
+
+.generation-preview-slot__bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+}
+
+.generation-preview-slot__bars span {
+  width: 7px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ff7eb3, #d946ef);
+  box-shadow: 0 0 14px rgb(217 70 239 / 0.35);
+  animation: generation-bar-pulse 1.05s ease-in-out infinite;
+}
+
+.generation-preview-slot__bars span:nth-child(1) {
+  height: 14px;
+  animation-delay: 0s;
+}
+
+.generation-preview-slot__bars span:nth-child(2) {
+  height: 24px;
+  animation-delay: 0.14s;
+}
+
+.generation-preview-slot__bars span:nth-child(3) {
+  height: 18px;
+  animation-delay: 0.28s;
+}
+
+.generation-preview-slot__failed {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  color: rgb(254 202 202);
+  background: rgb(248 113 113 / 0.12);
+}
+
+.generation-preview-slot__index {
+  margin: 0;
+  color: rgb(255 255 255 / 0.34);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.generation-preview-slot__progress,
+.generation-loading-preview__progress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: rgb(255 255 255 / 0.06);
+}
+
+.generation-preview-slot__progress-bar,
+.generation-loading-preview__progress-bar {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff7eb3, #d946ef);
+  transition: width 320ms ease;
+}
+
 .generation-loading-preview {
+  position: relative;
   width: min(100%, 640px);
   max-height: min(72vh, 520px);
   border: 1px solid rgb(255 255 255 / 0.08);

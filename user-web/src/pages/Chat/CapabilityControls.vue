@@ -661,7 +661,7 @@ const primaryReferenceInfo = computed<PrimaryReferenceMaterialInfo>(() => {
     kind: materialKindForField(field),
     count: urls.length,
     maxCount: isMultiImageField(field) ? multiImageLimit(field) : 1,
-    previewUrls: urls.slice(0, 3).map((url) => normalizeMediaUrl(url)),
+    previewUrls: urls.map((url) => normalizeMediaUrl(url)),
     uploading: upload.uploading === true,
     error: upload.error,
   }
@@ -1408,7 +1408,14 @@ function markUploadError(localId: string, message: string) {
 }
 
 function hasOpenOverlay(): boolean {
-  return referencePickerOpen.value || uploadHistoryOpen.value || materialPickerOpen.value
+  return (
+    referencePickerOpen.value ||
+    uploadHistoryOpen.value ||
+    materialPickerOpen.value ||
+    quickParamsOpen.value ||
+    advancedOpen.value ||
+    openSelectKey.value !== null
+  )
 }
 
 defineExpose({
@@ -1420,6 +1427,7 @@ defineExpose({
   markUploadError,
   hasPendingUploads,
   hasOpenOverlay,
+  closeComposerPopovers,
   openReferenceMaterialPicker,
   clearPrimaryReferenceMaterial,
   removePrimaryReferenceMaterialAt,

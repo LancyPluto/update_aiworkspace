@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
 import { ReceiptText } from "lucide-vue-next"
-import AppShell from "@/components/AppShell.vue"
 import RechargeSection from "@/pages/Billing/RechargeSection.vue"
 import { fetchCreditAccount, fetchCreditLogs, fetchCreditUsageLogs } from "@/api/creditApi"
 import type { BillingUsageLog, CreditAccount, CreditLog, PageResult } from "@/api/types"
@@ -146,7 +145,6 @@ onMounted(loadBilling)
 </script>
 
 <template>
-  <AppShell title="会员与算力" description="充值套餐、算力账户与流水">
     <div class="space-y-6 px-6 py-6">
       <div v-if="error" class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
         {{ error }}
@@ -226,5 +224,4 @@ onMounted(loadBilling)
         </details>
       </section>
     </div>
-  </AppShell>
 </template>

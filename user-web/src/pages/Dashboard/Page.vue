@@ -31,7 +31,6 @@ import {
   X,
   Zap,
 } from "lucide-vue-next"
-import AppShell from "@/components/AppShell.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import GenerationLoadingPreview from "@/components/GenerationLoadingPreview.vue"
 import ImageStackPreview from "@/components/ImageStackPreview.vue"
@@ -175,13 +174,6 @@ const modalityLabels: Record<string, string> = {
   TEXT: "文本",
 }
 
-const composerModeLabels: Record<string, string> = {
-  IMAGE: "文/图生图",
-  VIDEO: "文/图生视频",
-  AUDIO: "文生音乐",
-  TEXT: "文本生成",
-}
-
 const modalityDescriptions: Record<string, string> = {
   IMAGE: "海报、商品图、场景图",
   VIDEO: "短片、运镜、动态素材",
@@ -251,7 +243,9 @@ const coreFieldPlaceholder = computed(() => {
   return field.placeholder
 })
 
-const composerModeLabel = computed(() => composerModeLabels[selectedModality.value] || modalityLabel(selectedModality.value))
+const canAddPrimaryReference = computed(
+  () => primaryReferenceInfo.value.available && primaryReferenceInfo.value.count < primaryReferenceInfo.value.maxCount,
+)
 
 const estimateInput = computed<UseTaskEstimateInput | null>(() => {
   const tool = selectedTool.value
@@ -651,6 +645,7 @@ function collapseComposerForPreview(manual = true) {
   if (manual) composerManuallyClosed.value = true
   composerOpen.value = false
   modelPickerOpen.value = false
+  capabilityRef.value?.closeComposerPopovers?.()
 }
 
 function autoExpandComposerAtFeedBottom() {
@@ -660,11 +655,12 @@ function autoExpandComposerAtFeedBottom() {
 
 function handleDashboardPointerDown(event: PointerEvent) {
   if (!composerOpen.value || submitting.value) return
+  if (modelPickerOpen.value) return
   if (capabilityRef.value?.hasOpenOverlay?.()) return
   const root = composerRootRef.value
   const target = event.target
   if (!root || !(target instanceof Node) || root.contains(target)) return
-  if (target instanceof Element && target.closest("[data-capability-overlay]")) return
+  if (target instanceof Element && target.closest("[data-capability-overlay], [data-capability-composer-popover]")) return
   collapseComposerForPreview()
 }
 
@@ -1737,8 +1733,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <AppShell title="工作台" description="像 SeaArt 一样选择模态、模型，然后开始创作">
-    <div class="flex h-full min-h-0 bg-black text-white">
+  <div class="flex h-full min-h-0 bg-black text-white">
       <DashboardModalityDock
         v-model:open="modalityDockOpen"
         :tabs="modalityTabs"
@@ -2386,9 +2381,11 @@ onUnmounted(() => {
                     <section class="mt-5">
                       <GenerationLoadingPreview
                         v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')"
+                        :task="item.task"
                         :aspect-ratio="inferTaskAspectRatio(item.task)"
                         :caption="taskProgressView(item.task).caption || taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? '任务生成失败，可以复用本次参数重试。' : '任务正在生成，完成后会追加到信息流底部。')"
                         :percent-label="taskProgressView(item.task).percentLabel"
+                        :percent="taskProgressView(item.task).percent"
                         :failed="canRetryTask(item.task.status)"
                       />
 
@@ -2551,9 +2548,11 @@ onUnmounted(() => {
                             </div>
                           </div>
                           <GenerationLoadingPreview
+                            :task="item.task"
                             :aspect-ratio="inferTaskAspectRatio(item.task)"
                             :caption="taskProgressView(item.task).caption || taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? '任务生成失败，可以复用本次参数重试。' : '任务正在生成，完成后结果会自动出现在这里。')"
                             :percent-label="taskProgressView(item.task).percentLabel"
+                            :percent="taskProgressView(item.task).percent"
                             :failed="canRetryTask(item.task.status)"
                           />
                         </div>
@@ -2839,23 +2838,37 @@ onUnmounted(() => {
               </button>
 
               <div class="dashboard-pollo-composer__input-row">
-                <button
+                <div
                   v-if="primaryReferenceInfo.available"
-                  type="button"
-                  class="dashboard-pollo-upload"
-                  :class="primaryReferenceInfo.count > 0 ? 'dashboard-pollo-upload--filled' : ''"
+                  class="dashboard-pollo-upload-row"
                   :title="primaryReferenceInfo.fieldName || '上传参考素材'"
-                  @click="openPrimaryReferencePicker"
                 >
-                  <Loader2 v-if="primaryReferenceInfo.uploading" class="h-5 w-5 animate-spin text-primary" />
-                  <img
-                    v-else-if="primaryReferenceInfo.previewUrls[0]"
-                    :src="primaryReferenceInfo.previewUrls[0]"
-                    alt="参考素材"
-                    class="h-full w-full rounded-[10px] object-cover"
-                  />
-                  <Plus v-else class="h-5 w-5" />
-                </button>
+                  <div
+                    v-for="(url, index) in primaryReferenceInfo.previewUrls"
+                    :key="`${url}-${index}`"
+                    class="dashboard-pollo-upload-slot dashboard-pollo-upload-slot--filled group"
+                  >
+                    <img :src="url" alt="参考素材" class="dashboard-pollo-upload-slot__media" />
+                    <button
+                      type="button"
+                      class="dashboard-pollo-upload-slot__remove"
+                      aria-label="移除参考图"
+                      @click="removePrimaryReferenceAt(index, $event)"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <button
+                    v-if="canAddPrimaryReference"
+                    type="button"
+                    class="dashboard-pollo-upload-slot dashboard-pollo-upload-slot--empty"
+                    :title="primaryReferenceInfo.fieldName || '上传参考素材'"
+                    @click="openPrimaryReferencePicker"
+                  >
+                    <Loader2 v-if="primaryReferenceInfo.uploading" class="h-5 w-5 animate-spin text-primary" />
+                    <Plus v-else class="h-5 w-5" />
+                  </button>
+                </div>
 
                 <div class="dashboard-pollo-composer__prompt min-w-0 flex-1">
                   <textarea
@@ -2865,34 +2878,6 @@ onUnmounted(() => {
                     :placeholder="coreFieldPlaceholder"
                     @focus="expandComposer"
                   />
-                  <div
-                    v-if="primaryReferenceInfo.previewUrls.length > 1"
-                    class="mt-2 flex flex-wrap gap-2"
-                  >
-                    <div
-                      v-for="(url, index) in primaryReferenceInfo.previewUrls.slice(1)"
-                      :key="`${url}-${index}`"
-                      class="group relative h-12 w-12 overflow-visible"
-                    >
-                      <img :src="url" alt="参考图" class="h-12 w-12 rounded-lg border border-white/10 object-cover" />
-                      <button
-                        type="button"
-                        class="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/80 text-[10px] text-white opacity-0 transition-colors hover:bg-red-500 group-hover:opacity-100"
-                        aria-label="移除参考图"
-                        @click="removePrimaryReferenceAt(index + 1, $event)"
-                      >
-                        ×
-                      </button>
-                    </div>
-                    <button
-                      v-if="primaryReferenceInfo.count > primaryReferenceInfo.previewUrls.length"
-                      type="button"
-                      class="flex h-12 min-w-12 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] px-2 text-xs font-medium text-white/45 transition hover:border-primary/40 hover:text-white"
-                      @click="openPrimaryReferencePicker"
-                    >
-                      +{{ primaryReferenceInfo.count - primaryReferenceInfo.previewUrls.length }}
-                    </button>
-                  </div>
                 </div>
               </div>
 
@@ -2905,16 +2890,6 @@ onUnmounted(() => {
               </div>
 
               <div v-else class="dashboard-pollo-composer__toolbar">
-                <button
-                  type="button"
-                  class="dashboard-pollo-chip dashboard-pollo-chip--mode"
-                  @click="modelPickerOpen = !modelPickerOpen"
-                >
-                  <component :is="modalityIcons[selectedModality as keyof typeof modalityIcons] || Sparkles" class="h-4 w-4 shrink-0 text-white/55" />
-                  <span class="truncate">{{ composerModeLabel }}</span>
-                  <ChevronDown class="h-3.5 w-3.5 shrink-0 text-white/35" />
-                </button>
-
                 <div class="relative min-w-0">
                   <button
                     type="button"
@@ -3088,7 +3063,6 @@ onUnmounted(() => {
         @unpublish="unpublishPreviewAsset"
       />
     </div>
-  </AppShell>
 </template>
 
 <style scoped>
@@ -3509,35 +3483,80 @@ onUnmounted(() => {
 
 .dashboard-pollo-composer__input-row {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   padding-right: 36px;
 }
 
-.dashboard-pollo-upload {
+.dashboard-pollo-upload-row {
   display: flex;
-  height: 64px;
-  width: 64px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.dashboard-pollo-upload-slot {
+  position: relative;
+  display: flex;
+  width: 56px;
+  height: 74px;
   shrink: 0;
   align-items: center;
   justify-content: center;
-  border-radius: 12px;
-  border: 1px dashed rgb(255 255 255 / 0.18);
-  background: rgb(255 255 255 / 0.03);
-  color: rgb(255 255 255 / 0.42);
+  border-radius: 10px;
+  overflow: hidden;
   transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
 }
 
-.dashboard-pollo-upload:hover {
+.dashboard-pollo-upload-slot--empty {
+  border: 1px dashed rgb(255 255 255 / 0.22);
+  background: rgb(255 255 255 / 0.03);
+  color: rgb(255 255 255 / 0.42);
+}
+
+.dashboard-pollo-upload-slot--empty:hover {
   border-color: rgb(176 92 255 / 0.45);
   background: rgb(176 92 255 / 0.08);
   color: white;
 }
 
-.dashboard-pollo-upload--filled {
-  border-style: solid;
-  border-color: rgb(176 92 255 / 0.28);
-  padding: 3px;
+.dashboard-pollo-upload-slot--filled {
+  border: 1px solid rgb(255 255 255 / 0.16);
+  background: rgb(255 255 255 / 0.04);
+}
+
+.dashboard-pollo-upload-slot__media {
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+}
+
+.dashboard-pollo-upload-slot__remove {
+  position: absolute;
+  right: -4px;
+  top: -4px;
+  display: flex;
+  height: 16px;
+  width: 16px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.82);
+  font-size: 10px;
+  line-height: 1;
+  color: white;
+  opacity: 0;
+  transition: opacity 160ms ease, background-color 160ms ease;
+}
+
+.dashboard-pollo-upload-slot--filled:hover .dashboard-pollo-upload-slot__remove,
+.dashboard-pollo-upload-slot__remove:focus-visible {
+  opacity: 1;
+}
+
+.dashboard-pollo-upload-slot__remove:hover {
+  background: rgb(220 38 38 / 0.92);
 }
 
 .dashboard-pollo-textarea {
@@ -3585,10 +3604,6 @@ onUnmounted(() => {
 .dashboard-pollo-chip:hover {
   background: rgb(255 255 255 / 0.1);
   color: white;
-}
-
-.dashboard-pollo-chip--mode {
-  max-width: min(180px, 34vw);
 }
 
 .dashboard-pollo-generate {
