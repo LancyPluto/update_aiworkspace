@@ -5,7 +5,6 @@ import {
   ArrowRight,
   Pencil,
   Star,
-  Zap,
   CheckCircle2,
   ChevronRight,
   Heart,
@@ -20,7 +19,6 @@ import {
   ExternalLink,
 } from "lucide-vue-next"
 import { computed, ref, onMounted, watch } from "vue"
-import AppShell from "@/components/AppShell.vue"
 import MediaComparisonSlider from "@/components/MediaComparisonSlider.vue"
 import { fetchToolByCode } from "@/api/toolApi"
 import { createTask } from "@/api/taskApi"
@@ -462,7 +460,6 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppShell title="工具详情" :description="title">
     <div class="px-6 py-6 max-w-6xl mx-auto space-y-6">
       <!-- 面包屑 -->
       <nav class="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap">
@@ -519,8 +516,8 @@ onMounted(async () => {
                     立即使用
                     <ArrowRight class="ml-1.5 h-4 w-4" />
                   </button>
-                  <span class="inline-flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
-                    <Zap class="h-3.5 w-3.5 text-warning" /> {{ formatToolCreditLabel(tool) }} / 次
+                  <span class="inline-flex items-center rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
+                    {{ formatToolCreditLabel(tool) }} / 次
                   </span>
                 </div>
               </div>
@@ -555,8 +552,8 @@ onMounted(async () => {
                     {{ imageField?.fieldName || "上传需要处理的原图" }}
                   </p>
                 </div>
-                <span class="inline-flex items-center gap-1 text-xs text-warning">
-                  <Zap class="h-3.5 w-3.5" /> {{ formatToolCreditLabel(tool) }}
+                <span class="inline-flex items-center text-xs text-sky-400">
+                  {{ formatToolCreditLabel(tool) }}
                 </span>
               </div>
 
@@ -712,8 +709,8 @@ onMounted(async () => {
                     立即使用
                     <ArrowRight class="ml-1.5 h-4 w-4" />
                   </button>
-                  <span class="inline-flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
-                    <Zap class="h-3.5 w-3.5 text-warning" /> {{ formatToolCreditLabel(tool) }} / 次
+                  <span class="inline-flex items-center rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
+                    {{ formatToolCreditLabel(tool) }} / 次
                   </span>
                 </div>
               </div>
@@ -738,8 +735,8 @@ onMounted(async () => {
                     {{ mediaField?.fieldName || "上传需要处理的原始素材" }}
                   </p>
                 </div>
-                <span class="inline-flex items-center gap-1 text-xs text-warning">
-                  <Zap class="h-3.5 w-3.5" /> {{ formatToolCreditLabel(tool) }}
+                <span class="inline-flex items-center text-xs text-sky-400">
+                  {{ formatToolCreditLabel(tool) }}
                 </span>
               </div>
 
@@ -903,9 +900,8 @@ onMounted(async () => {
               </div>
             </div>
             <div class="flex flex-col items-stretch md:items-end gap-2 shrink-0">
-              <div class="flex items-center gap-2 text-sm">
-                <Zap class="h-4 w-4 text-warning" />
-                <span class="text-2xl font-semibold">{{ usesVariableWorkflowCredits(tool) ? "不详" : (tool.estimatedCreditCost ?? 0) }}</span>
+              <div class="flex items-center gap-2 text-sm text-sky-400">
+                <span class="text-2xl font-semibold text-foreground">{{ usesVariableWorkflowCredits(tool) ? "不详" : (tool.estimatedCreditCost ?? 0) }}</span>
                 <span class="text-xs text-muted-foreground">算力 / 次</span>
               </div>
               <RouterLink
@@ -1044,7 +1040,6 @@ onMounted(async () => {
         </div>
       </template>
     </div>
-  </AppShell>
 
   <Teleport to="body">
     <Transition
@@ -1129,9 +1124,7 @@ onMounted(async () => {
 
               <div class="border-t border-white/10 bg-white/[0.03] p-5">
                 <div class="mb-4 flex items-center justify-between text-sm">
-                  <span class="inline-flex items-center gap-2 text-zinc-300">
-                    <Zap class="h-4 w-4 text-primary" /> 所需额度
-                  </span>
+                  <span class="text-zinc-300">所需额度</span>
                   <span class="font-medium text-white">{{ usesVariableWorkflowCredits(tool) ? "按实际用量结算" : `${tool.estimatedCreditCost ?? 0} 额度` }}</span>
                 </div>
                 <button

@@ -28,8 +28,12 @@ for cmd in cmds:
     out = stdout.read().decode()
     err = stderr.read().decode()
     if out:
-        print(out, end="" if out.endswith("\n") else "\n")
+        sys.stdout.buffer.write(out.encode("utf-8", errors="replace"))
+        if not out.endswith("\n"):
+            sys.stdout.write("\n")
     if err:
-        print(err, file=sys.stderr, end="" if err.endswith("\n") else "\n")
+        sys.stderr.buffer.write(err.encode("utf-8", errors="replace"))
+        if not err.endswith("\n"):
+            sys.stderr.write("\n")
 
 ssh.close()

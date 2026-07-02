@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { ChevronDown, Clock, Sparkles, Zap } from "lucide-vue-next"
+import { ChevronDown, Clock, Sparkles } from "lucide-vue-next"
 
 defineProps<{
   open: boolean
@@ -59,7 +59,6 @@ const emit = defineEmits<{
       </div>
       <div class="space-y-3 border-t border-white/8 px-3 py-5 text-center text-[11px] text-white/45">
         <div>
-          <Zap class="mx-auto mb-1 h-4 w-4 text-amber-300" />
           {{ availableCredits ?? "--" }}
         </div>
         <div>

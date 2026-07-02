@@ -886,9 +886,11 @@ onBeforeUnmount(() => {
             </div>
             <div v-else class="workspace-create-result-pending">
               <GenerationLoadingPreview
+                :task="item.task"
                 :aspect-ratio="inferTaskAspectRatio(item.task)"
                 :caption="progressView(item).caption || statusLabel(item)"
                 :percent-label="progressView(item).percentLabel"
+                :percent="progressView(item).percent"
                 :failed="taskStatusViewKind(item.task.status) === 'failed'"
               />
             </div>

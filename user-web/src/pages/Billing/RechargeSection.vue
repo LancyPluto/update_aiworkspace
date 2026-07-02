@@ -499,7 +499,7 @@ onUnmounted(clearPolling)
         >
           <div
             v-if="isFeaturedCard(pkg)"
-            class="absolute -top-px left-0 right-0 rounded-t-2xl bg-gradient-to-r from-cyan-500 to-teal-400 px-4 py-1.5 text-center text-xs font-semibold text-slate-950"
+            class="absolute -top-px left-0 right-0 rounded-t-2xl bg-gradient-to-r from-cyan-500 to-blue-500 px-4 py-1.5 text-center text-xs font-semibold text-slate-950"
           >
             {{ activeTab === 'yearly' ? '特惠上新 · 比月卡立省 37%' : '🔥 推荐套餐' }}
           </div>
@@ -547,7 +547,7 @@ onUnmounted(clearPolling)
 
           <button
             type="button"
-            class="mt-5 w-full rounded-xl bg-gradient-to-r from-cyan-300 to-teal-300 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition-all hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+            class="mt-5 w-full rounded-xl bg-gradient-to-r from-sky-400 to-blue-500 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-sky-500/20 transition-all hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
             :disabled="ordering"
             @click.stop="openPaymentChoice(pkg)"
           >
@@ -697,7 +697,7 @@ onUnmounted(clearPolling)
           </template>
 
           <div v-else-if="paymentResult === 'success'" class="pt-4">
-            <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+            <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-sky-500/15 text-sky-500 dark:text-sky-400">
               <Check class="h-8 w-8" stroke-width="2.5" aria-hidden="true" />
             </div>
             <p class="mt-5 text-sm font-medium text-foreground">{{ successMessage }}</p>

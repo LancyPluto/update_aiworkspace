@@ -2,7 +2,6 @@
 import { computed, onMounted, ref } from "vue"
 import { RouterLink } from "vue-router"
 import { Ban, CheckCircle2, Clock, Eye, Filter, Loader2, RotateCw, Trash2, XCircle } from "lucide-vue-next"
-import AppShell from "@/components/AppShell.vue"
 import TaskStatusTag from "@/components/TaskStatusTag/TaskStatusTag.vue"
 import { cancelTask, deleteTask, fetchTasks, regenerateTask } from "@/api/taskApi"
 import type { ListTasksQuery, TaskDetail, TaskStatus } from "@/api/types"
@@ -233,7 +232,6 @@ onMounted(refreshPage)
 </script>
 
 <template>
-  <AppShell title="我的任务" description="查看所有 AI 生成任务的状态、结果与历史记录">
     <div class="space-y-5 px-6 py-6">
       <div v-if="error" class="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
         {{ error }}
@@ -338,5 +336,4 @@ onMounted(refreshPage)
         </div>
       </div>
     </div>
-  </AppShell>
 </template>

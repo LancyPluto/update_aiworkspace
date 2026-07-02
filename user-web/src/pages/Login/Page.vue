@@ -211,7 +211,7 @@
     return currentMode.value === 'passwordLogin' ? '密码登录' : '手机号登录';
   });
   const loginSubtitle = computed(() => {
-    if (currentMode.value === 'register') return '你所在地区仅支持手机号注册，只需一个未来云AI账号，即可访问未来云AI的所有服务。';
+    if (currentMode.value === 'register') return '你所在地区仅支持手机号注册，只需一个科创点AI账号，即可访问科创点AI的所有服务。';
     if (currentMode.value === 'forgotVerify') return '请输入你注册的手机号用于接收验证码，我们将为你重置密码。';
     if (currentMode.value === 'forgotReset') return '你正在重置 ' + (verifiedResetPhone.value || resetTargetLabel.value) + ' 的密码，请输入新密码。';
     return currentMode.value === 'passwordLogin' ? '' : '未注册手机号验证后将自动创建账号';

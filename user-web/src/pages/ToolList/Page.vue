@@ -2,7 +2,6 @@
 import { computed, onActivated, onMounted, ref, watch } from "vue"
 import { RouterLink, useRoute } from "vue-router"
 import { ExternalLink, Sparkles } from "lucide-vue-next"
-import AppShell from "@/components/AppShell.vue"
 import { fetchEnabledAITools } from "@/api/toolApi"
 import { fetchTasks } from "@/api/taskApi"
 import type { AITool } from "@/api/aiToolTypes"
@@ -230,7 +229,6 @@ watch(
 </script>
 
 <template>
-  <AppShell :title="pageTitle" :description="pageDescription">
     <div class="mx-auto w-full max-w-[1540px] px-5 py-7">
       <div
         v-if="offlineNotice"
@@ -496,7 +494,6 @@ watch(
         </RouterLink>
       </div>
     </div>
-  </AppShell>
 </template>
 
 <style scoped>

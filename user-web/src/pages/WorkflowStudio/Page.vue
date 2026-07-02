@@ -18,7 +18,6 @@ import {
   Workflow,
   X as XIcon,
 } from "lucide-vue-next"
-import AppShell from "@/components/AppShell.vue"
 import TaskStatusTag from "@/components/TaskStatusTag/TaskStatusTag.vue"
 import {
   fetchTaskById,
@@ -441,7 +440,6 @@ const playheadPosition = computed(() => {
 </script>
 
 <template>
-  <AppShell title="工作流工作室" :description="'AI漫剧工作流 · 任务 ' + taskId">
     <div class="flex min-h-screen flex-col bg-[#0a0a0f]">
       <!-- Top navigation -->
       <nav class="sticky top-0 z-30 border-b border-white/10 bg-[#0a0a0f]/95 backdrop-blur-sm px-6 py-3">
@@ -1020,5 +1018,4 @@ const playheadPosition = computed(() => {
         </div>
       </template>
     </div>
-  </AppShell>
 </template>

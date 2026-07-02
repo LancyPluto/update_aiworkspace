@@ -231,11 +231,30 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
     private PrivateKey loadPrivateKey(String keyPath) {
         try {
             String pem = Files.readString(Path.of(keyPath), StandardCharsets.UTF_8);
-            String content = pem.replace("-----BEGIN PRIVATE KEY-----", "")
-                    .replace("-----END PRIVATE KEY-----", "")
-                    .replaceAll("\\s", "");
-            byte[] bytes = Base64.getDecoder().decode(content);
-            return KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(bytes));
+            KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+
+            // WeChat 商户私钥常见两种 PEM 头：
+            // 1) BEGIN PRIVATE KEY   -> PKCS#8
+            // 2) BEGIN RSA PRIVATE KEY -> PKCS#1
+            if (pem.contains("-----BEGIN PRIVATE KEY-----")) {
+                String content = pem
+                        .replace("-----BEGIN PRIVATE KEY-----", "")
+                        .replace("-----END PRIVATE KEY-----", "")
+                        .replaceAll("\\s", "");
+                byte[] bytes = Base64.getDecoder().decode(content);
+                return keyFactory.generatePrivate(new PKCS8EncodedKeySpec(bytes));
+            }
+
+            if (pem.contains("-----BEGIN RSA PRIVATE KEY-----")) {
+                String content = pem
+                        .replace("-----BEGIN RSA PRIVATE KEY-----", "")
+                        .replace("-----END RSA PRIVATE KEY-----", "")
+                        .replaceAll("\\s", "");
+                byte[] bytes = Base64.getDecoder().decode(content);
+                return keyFactory.generatePrivate(new PKCS8EncodedKeySpec(rsaPkcs1ToPkcs8(bytes)));
+            }
+
+            throw new IllegalArgumentException("Unsupported WeChat merchant private key PEM header");
         } catch (Exception exception) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat merchant private key cannot be loaded");
         }
@@ -281,5 +300,70 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
 
     private boolean blank(String value) {
         return value == null || value.isBlank();
+    }
+
+    /**
+     * Wrap PKCS#1 RSA private key bytes in a PKCS#8 PrivateKeyInfo envelope.
+     * PKCS1EncodedKeySpec is only available from newer JDKs, so Java 17 needs this conversion.
+     */
+    private static byte[] rsaPkcs1ToPkcs8(byte[] pkcs1) {
+        byte[] version = new byte[] {0x02, 0x01, 0x00};
+        byte[] algorithmIdentifier = new byte[] {
+                0x30, 0x0d,
+                0x06, 0x09, 0x2a, (byte) 0x86, 0x48, (byte) 0x86, (byte) 0xf7, 0x0d, 0x01, 0x01, 0x01,
+                0x05, 0x00
+        };
+        byte[] privateKeyOctet = encodeDerOctetString(pkcs1);
+        return encodeDerSequence(concat(version, algorithmIdentifier, privateKeyOctet));
+    }
+
+    private static byte[] encodeDerSequence(byte[] content) {
+        return encodeDerTag((byte) 0x30, content);
+    }
+
+    private static byte[] encodeDerOctetString(byte[] content) {
+        return encodeDerTag((byte) 0x04, content);
+    }
+
+    private static byte[] encodeDerTag(byte tag, byte[] content) {
+        byte[] length = encodeDerLength(content.length);
+        byte[] encoded = new byte[1 + length.length + content.length];
+        encoded[0] = tag;
+        System.arraycopy(length, 0, encoded, 1, length.length);
+        System.arraycopy(content, 0, encoded, 1 + length.length, content.length);
+        return encoded;
+    }
+
+    private static byte[] encodeDerLength(int length) {
+        if (length < 0) {
+            throw new IllegalArgumentException("DER length cannot be negative");
+        }
+        if (length < 0x80) {
+            return new byte[] {(byte) length};
+        }
+        if (length <= 0xFF) {
+            return new byte[] {(byte) 0x81, (byte) length};
+        }
+        if (length <= 0xFFFF) {
+            return new byte[] {(byte) 0x82, (byte) (length >> 8), (byte) length};
+        }
+        if (length <= 0xFFFFFF) {
+            return new byte[] {(byte) 0x83, (byte) (length >> 16), (byte) (length >> 8), (byte) length};
+        }
+        throw new IllegalArgumentException("DER length too large");
+    }
+
+    private static byte[] concat(byte[]... parts) {
+        int total = 0;
+        for (byte[] part : parts) {
+            total += part.length;
+        }
+        byte[] merged = new byte[total];
+        int offset = 0;
+        for (byte[] part : parts) {
+            System.arraycopy(part, 0, merged, offset, part.length);
+            offset += part.length;
+        }
+        return merged;
     }
 }

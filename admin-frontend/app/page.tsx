@@ -11,9 +11,9 @@ import {
   Users,
   ListTodo,
   Wrench,
-  Zap,
   ArrowUpRight,
 } from "lucide-react"
+import { CreditPowerIcon } from "@/components/admin/credit-power-icon"
 import { fetchAdminUsers } from "@/lib/api/users"
 import { fetchAdminTools } from "@/lib/api/tools"
 import { fetchAdminTasks } from "@/lib/api/tasks"
@@ -206,7 +206,7 @@ export default function DashboardPage() {
             value={apiCreditValue}
             change={loading ? "正在加载..." : "累计任务算力消耗"}
             changeType="neutral"
-            icon={Zap}
+            icon={CreditPowerIcon}
             iconColor="bg-chart-5/10 text-chart-5"
           />
         </div>

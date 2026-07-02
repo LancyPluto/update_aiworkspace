@@ -9,7 +9,6 @@ import {
   Ticket,
   UserRound,
   Video,
-  Wallet,
   Wand2,
 } from "lucide-vue-next"
 import type { WorkspaceMediaItem, WorkspaceNavItem, WorkspaceStaticToolItem } from "@/types/workspace"
@@ -55,7 +54,7 @@ export const workspaceNavGroups: { label?: string; items: WorkspaceNavItem[] }[]
 ]
 
 export const workspaceBottomNav: WorkspaceNavItem[] = [
-  { label: "会员与算力", icon: Wallet, to: "/billing", match: ["/billing", "/pricing"] },
+  { label: "会员与算力", to: "/billing", match: ["/billing", "/pricing"] },
 ]
 
 export const workspaceShowcaseTools: WorkspaceStaticToolItem[] = [

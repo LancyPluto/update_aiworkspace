@@ -3,7 +3,6 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { RouterLink, useRouter } from "vue-router"
 import { ArrowLeft, CheckCircle2, ChevronRight, Loader2, Sparkles, Workflow, X as XIcon } from "lucide-vue-next"
-import AppShell from "@/components/AppShell.vue"
 import TaskStatusTag from "@/components/TaskStatusTag/TaskStatusTag.vue"
 import { fetchTaskById, fetchTaskStatus, streamTaskStatus, submitWorkflowFeedback } from "@/api/taskApi"
 import type { TaskDetail, TaskStatus, TaskStatusPayload, WorkflowStagePreview } from "@/api/types"
@@ -322,7 +321,6 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <AppShell title="任务状态" :description="'任务 ' + taskId + ' · 实时进度'">
     <div class="px-6 py-6 mx-auto max-w-6xl space-y-5">
       <nav class="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap">
         <RouterLink :to="userRoutes.dashboard" class="hover:text-foreground inline-flex items-center gap-1">
@@ -627,5 +625,4 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-  </AppShell>
 </template>

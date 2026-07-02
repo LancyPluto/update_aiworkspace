@@ -4,6 +4,8 @@
 #   or:  git diff --name-only HEAD~1 HEAD | bash detect_deploy_services.sh
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 if [ -n "${DEPLOY_SERVICES:-}" ]; then
   echo "$DEPLOY_SERVICES"
   exit 0
@@ -18,12 +20,17 @@ add() {
   fi
 }
 
+add_secret_bearing_services() {
+  add backend
+  add worker
+  add agent-service
+}
+
 services=()
 
 if [ "$#" -gt 0 ]; then
   files=("$@")
 else
-  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
   mapfile -t files < <(bash "$SCRIPT_DIR/detect_deploy_changes.sh" 2>/dev/null || true)
 fi
 
@@ -34,13 +41,20 @@ fi
 
 for f in "${files[@]}"; do
   case "$f" in
+    .env|deploy/.env)
+      add_secret_bearing_services
+      ;;
     backend/*) add backend ;;
     worker/*) add worker ;;
     agent-service/*) add agent-service ;;
     admin-frontend/*) add admin-frontend; add nginx ;;
     user-web/*) add user-web; add nginx ;;
     engines/banana-slides/*) add banana-slides ;;
-    deploy/nginx/*|deploy/docker-compose*|deploy/nginx/*) add nginx ;;
+    deploy/docker-compose*|deploy/docker-compose.*)
+      add_secret_bearing_services
+      add nginx
+      ;;
+    deploy/nginx/*) add nginx ;;
     deploy/*|.github/*|sql/*)
       add backend
       add worker

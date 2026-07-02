@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
 import { useRouter } from "vue-router"
-import { Camera, Check, ClipboardCopy, ExternalLink, Gift, Loader2, Shield, Sparkles, ToggleLeft, Trash2, Wallet, X } from "lucide-vue-next"
-import AppShell from "@/components/AppShell.vue"
+import { Camera, Check, ClipboardCopy, ExternalLink, Loader2, Shield, Sparkles, ToggleLeft, Trash2, X } from "lucide-vue-next"
+import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import { fetchCreditAccount, fetchMyGiftCards, redeemGiftCard, redeemGiftCardByCode } from "@/api/creditApi"
 import { fetchTasks } from "@/api/taskApi"
@@ -300,7 +300,6 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppShell title="我的资料" description="社区系统的个人身份底座">
     <div class="profile-page">
       <section class="profile-hero">
         <div class="hero-copy">
@@ -378,7 +377,6 @@ onMounted(async () => {
               <strong>{{ successTasks ?? "--" }}</strong>
             </div>
             <div>
-              <Wallet class="h-4 w-4" />
               <span>可用算力</span>
               <strong>{{ credit?.available ?? "--" }}</strong>
             </div>
@@ -423,7 +421,7 @@ onMounted(async () => {
             <p class="gift-card-subtitle">使用、赠送或输入兑换码领取算力</p>
           </div>
           <button type="button" class="gift-card-redeem-entry" @click="openRedeemCodeDialog">
-            <Gift class="h-4 w-4" aria-hidden="true" />
+            <CreditPowerIcon class="h-4 w-4" />
             兑换礼品卡
           </button>
         </div>
@@ -622,7 +620,6 @@ onMounted(async () => {
         </section>
       </div>
     </div>
-  </AppShell>
 </template>
 
 <style scoped>
@@ -1085,9 +1082,9 @@ onMounted(async () => {
 }
 
 .status-unused {
-  background: rgb(52 211 153 / 0.15);
-  color: rgb(167 243 208);
-  border: 1px solid rgb(52 211 153 / 0.24);
+  background: rgb(56 189 248 / 0.15);
+  color: rgb(186 230 253);
+  border: 1px solid rgb(56 189 248 / 0.24);
 }
 
 .status-used {

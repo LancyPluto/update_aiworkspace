@@ -15,8 +15,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
@@ -67,12 +65,6 @@ public class SmsCodeServiceImpl implements SmsCodeService {
             return new SmsCodeResponse((int) CODE_TTL.toSeconds(), (int) SEND_COOLDOWN.toSeconds(), null);
         }
 
-        if (useIhuyi()) {
-            requestIhuyiSmsCode(phone, code);
-            storeLocalCode(codeKey(phone, normalizedScene), cooldownKey, code);
-            return new SmsCodeResponse((int) CODE_TTL.toSeconds(), (int) SEND_COOLDOWN.toSeconds(), null);
-        }
-
         if (useBmob()) {
             requestBmobSmsCode(phone);
             storeCooldown(cooldownKey);
@@ -99,11 +91,6 @@ public class SmsCodeServiceImpl implements SmsCodeService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "验证码错误或已过期");
         }
         deleteCode(key);
-    }
-
-    private boolean useIhuyi() {
-        AppProperties.Sms sms = appProperties.getAuth().getSms();
-        return "ihuyi".equalsIgnoreCase(sms.getProvider()) && hasText(sms.getIhuyiApiId()) && hasText(sms.getIhuyiApiKey());
     }
 
     private boolean useBmob() {
@@ -167,42 +154,6 @@ public class SmsCodeServiceImpl implements SmsCodeService {
                 aliyunClient = new Client(config);
             }
             return aliyunClient;
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private void requestIhuyiSmsCode(String phone, String code) {
-        AppProperties.Sms sms = appProperties.getAuth().getSms();
-        MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
-        body.add("account", sms.getIhuyiApiId());
-        body.add("password", sms.getIhuyiApiKey());
-        body.add("mobile", phone);
-        body.add("templateid", sms.getIhuyiTemplateId());
-        body.add("content", code);
-        body.add("format", "json");
-
-        try {
-            Map<String, Object> response = restClient.post()
-                    .uri(sms.getIhuyiBaseUrl())
-                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                    .body(body)
-                    .retrieve()
-                    .body(Map.class);
-            Object codeValue = response == null ? null : response.get("code");
-            if (!"2".equals(String.valueOf(codeValue))) {
-                Object message = response == null ? null : response.get("msg");
-                log.warn("Ihuyi SMS request failed: response={}", response);
-                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "短信验证码发送失败：" + (message == null ? "平台返回异常" : message));
-            }
-            log.info("Ihuyi SMS code requested: phone={}", phone);
-        } catch (BusinessException exception) {
-            throw exception;
-        } catch (RestClientResponseException exception) {
-            log.warn("Ihuyi SMS request failed: status={}, body={}", exception.getStatusCode(), exception.getResponseBodyAsString());
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "短信验证码发送失败");
-        } catch (RuntimeException exception) {
-            log.warn("Ihuyi SMS request failed", exception);
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "短信验证码发送失败");
         }
     }
 
