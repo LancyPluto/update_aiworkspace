@@ -174,6 +174,13 @@ const modalityLabels: Record<string, string> = {
   TEXT: "文本",
 }
 
+const composerModeLabels: Record<string, string> = {
+  IMAGE: "文/图生图",
+  VIDEO: "文/图生视频",
+  AUDIO: "文生音乐",
+  TEXT: "文本生成",
+}
+
 const modalityDescriptions: Record<string, string> = {
   IMAGE: "海报、商品图、场景图",
   VIDEO: "短片、运镜、动态素材",
@@ -2850,12 +2857,13 @@ onUnmounted(() => {
                   >
                     <img :src="url" alt="参考素材" class="dashboard-pollo-upload-slot__media" />
                     <button
+                      v-if="primaryReferenceInfo.count > primaryReferenceInfo.previewUrls.length"
                       type="button"
                       class="dashboard-pollo-upload-slot__remove"
                       aria-label="移除参考图"
                       @click="removePrimaryReferenceAt(index, $event)"
                     >
-                      ×
+                      +{{ primaryReferenceInfo.count - primaryReferenceInfo.previewUrls.length }}
                     </button>
                   </div>
                   <button
