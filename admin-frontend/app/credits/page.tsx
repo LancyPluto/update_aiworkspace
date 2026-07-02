@@ -17,7 +17,8 @@ import {
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ArrowDownLeft, ArrowUpRight, Coins, Minus, Plus, Search, TrendingUp, Users, Zap } from "lucide-react"
+import { ArrowDownLeft, ArrowUpRight, Minus, Plus, Search, TrendingUp, Users } from "lucide-react"
+import { CreditPowerIcon } from "@/components/admin/credit-power-icon"
 import { cn } from "@/lib/utils"
 import {
   fetchAdminUsers,
@@ -180,8 +181,8 @@ export default function CreditsPage() {
   const paidUsers = users.filter((user) => user.credits > 0).length
 
   const stats = [
-    { label: "用户当前总余额", value: totalGranted.toLocaleString(), icon: Coins, color: "text-primary" },
-    { label: "已记录消耗", value: totalConsumed.toLocaleString(), icon: Zap, color: "text-accent" },
+    { label: "用户当前总余额", value: totalGranted.toLocaleString(), icon: CreditPowerIcon, color: "text-primary" },
+    { label: "已记录消耗", value: totalConsumed.toLocaleString(), icon: CreditPowerIcon, color: "text-accent" },
     { label: "流水记录数", value: records.length.toLocaleString(), icon: TrendingUp, color: "text-chart-5" },
     { label: "有余额用户", value: paidUsers.toLocaleString(), icon: Users, color: "text-chart-3" },
   ]

@@ -29,8 +29,8 @@
   --brand-primary-rgb: 34 211 238;
   --brand-secondary: #2563eb;
   --brand-secondary-rgb: 37 99 235;
-  --brand-tertiary: #34d399;
-  --brand-tertiary-rgb: 52 211 153;
+  --brand-tertiary: #60a5fa;
+  --brand-tertiary-rgb: 96 165 250;
   --brand-accent: #7dd3fc;
   --brand-soft: rgb(var(--brand-primary-rgb) / 0.16);
   --brand-softer: rgb(var(--brand-primary-rgb) / 0.09);
@@ -38,7 +38,7 @@
   --brand-text: #a5f3fc;
   --brand-gradient: linear-gradient(135deg, #22d3ee 0%, #2563eb 100%);
   --brand-gradient-soft: linear-gradient(135deg, rgb(34 211 238 / 0.22), rgb(37 99 235 / 0.20));
-  --brand-progress-gradient: linear-gradient(90deg, #22d3ee, #34d399, #7dd3fc);
+  --brand-progress-gradient: linear-gradient(90deg, #22d3ee, #3b82f6, #7dd3fc);
   --brand-button-shadow: 0 14px 34px rgb(34 211 238 / 0.24), inset 0 1px 0 rgb(255 255 255 / 0.22);
   --brand-glow: rgb(34 211 238 / 0.24);
   --brand-glow-strong: rgb(34 211 238 / 0.38);
@@ -46,7 +46,7 @@
   --brand-active-text: #67e8f9;
   --brand-ambient-body-1: rgb(34 211 238 / 0.18);
   --brand-ambient-body-2: rgb(37 99 235 / 0.14);
-  --brand-ambient-body-3: rgb(52 211 153 / 0.12);
+  --brand-ambient-body-3: rgb(59 130 246 / 0.12);
 }
 
 html[data-theme="dark"] {

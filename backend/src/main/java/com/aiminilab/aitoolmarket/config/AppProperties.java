@@ -424,10 +424,6 @@ public class AppProperties {
         private String bmobRestApiKey;
         private String bmobBaseUrl = "https://api.bmob.cn";
         private String bmobTemplate;
-        private String ihuyiApiId = "";
-        private String ihuyiApiKey;
-        private String ihuyiBaseUrl = "https://api.ihuyi.com/sms/Submit.json";
-        private String ihuyiTemplateId = "1";
         private String aliyunAccessKeyId = "";
         private String aliyunAccessKeySecret = "";
         private String aliyunEndpoint = "dysmsapi.aliyuncs.com";
@@ -473,40 +469,6 @@ public class AppProperties {
 
         public void setBmobTemplate(String bmobTemplate) {
             this.bmobTemplate = bmobTemplate;
-        }
-
-        public String getIhuyiApiId() {
-            return ihuyiApiId;
-        }
-
-        public void setIhuyiApiId(String ihuyiApiId) {
-            this.ihuyiApiId = ihuyiApiId;
-        }
-
-        public String getIhuyiApiKey() {
-            return ihuyiApiKey;
-        }
-
-        public void setIhuyiApiKey(String ihuyiApiKey) {
-            this.ihuyiApiKey = ihuyiApiKey;
-        }
-
-        public String getIhuyiBaseUrl() {
-            return ihuyiBaseUrl;
-        }
-
-        public void setIhuyiBaseUrl(String ihuyiBaseUrl) {
-            this.ihuyiBaseUrl = ihuyiBaseUrl == null || ihuyiBaseUrl.isBlank()
-                    ? "https://api.ihuyi.com/sms/Submit.json"
-                    : ihuyiBaseUrl;
-        }
-
-        public String getIhuyiTemplateId() {
-            return ihuyiTemplateId;
-        }
-
-        public void setIhuyiTemplateId(String ihuyiTemplateId) {
-            this.ihuyiTemplateId = ihuyiTemplateId == null || ihuyiTemplateId.isBlank() ? "1" : ihuyiTemplateId;
         }
 
         public String getAliyunAccessKeyId() {

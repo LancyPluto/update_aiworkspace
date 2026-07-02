@@ -4,6 +4,7 @@ import { AlertCircle } from "lucide-vue-next"
 import { clampAspectRatio } from "@/utils/taskAspectRatio"
 import {
   buildTaskImageOutputPlan,
+  inferParallelSlotPercent,
   inferSerialActiveSlot,
   type ImageOutputLayout,
 } from "@/utils/taskImageOutput"
@@ -53,6 +54,17 @@ const serialCaption = computed(() => {
   if (outputPlan.value.layout !== "serial" || outputPlan.value.count <= 1) return props.caption
   return `${props.caption}（${serialSlot.value + 1}/${outputPlan.value.count}）`
 })
+
+const estimatedProgress = computed(() => props.percentLabel.includes("预计"))
+
+function parallelSlotPercent(slotIndex: number): number {
+  return inferParallelSlotPercent(props.percent, slotIndex, outputPlan.value.count)
+}
+
+function parallelSlotPercentLabel(slotIndex: number): string {
+  const value = parallelSlotPercent(slotIndex)
+  return `${estimatedProgress.value ? "预计 " : ""}${value}%`
+}
 </script>
 
 <template>
@@ -74,13 +86,12 @@ const serialCaption = computed(() => {
           <span />
         </div>
         <p class="generation-preview-slot__index">{{ slot + 1 }}</p>
+        <p v-if="!failed" class="generation-preview-slot__percent">{{ parallelSlotPercentLabel(slot) }}</p>
       </div>
       <div v-if="!failed" class="generation-preview-slot__progress" aria-hidden="true">
-        <span class="generation-preview-slot__progress-bar" :style="{ width: `${Math.max(0, Math.min(100, percent))}%` }" />
+        <span class="generation-preview-slot__progress-bar" :style="{ width: `${parallelSlotPercent(slot)}%` }" />
       </div>
     </div>
-    <p class="generation-preview-group__caption">{{ caption }}</p>
-    <p v-if="percentLabel && !failed" class="generation-preview-group__percent">{{ percentLabel }}</p>
   </div>
 
   <div
@@ -113,26 +124,6 @@ const serialCaption = computed(() => {
   flex-wrap: wrap;
   gap: 10px;
   width: min(100%, 720px);
-}
-
-.generation-preview-group__caption,
-.generation-preview-group__percent {
-  width: 100%;
-  margin: 0;
-  text-align: center;
-}
-
-.generation-preview-group__caption {
-  color: rgb(255 255 255 / 0.58);
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.generation-preview-group__percent {
-  margin-top: -4px;
-  color: rgb(255 255 255 / 0.34);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
 }
 
 .generation-preview-slot {
@@ -210,6 +201,13 @@ const serialCaption = computed(() => {
 .generation-preview-slot__index {
   margin: 0;
   color: rgb(255 255 255 / 0.34);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.generation-preview-slot__percent {
+  margin: 0;
+  color: rgb(255 255 255 / 0.46);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }

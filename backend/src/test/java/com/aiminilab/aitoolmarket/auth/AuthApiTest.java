@@ -34,8 +34,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.sql.init.mode=always",
         "spring.sql.init.schema-locations=classpath:schema-test.sql",
         "app.auth.sms.provider=local",
-        "app.auth.sms.ihuyi-api-id=",
-        "app.auth.sms.ihuyi-api-key=",
         "app.auth.sms.bmob-application-id=",
         "app.auth.sms.bmob-rest-api-key=",
         "app.generated-media-dir=target/test-generated-media"

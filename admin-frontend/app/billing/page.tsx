@@ -12,7 +12,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ApiError } from "@/lib/api/http"
 import { fetchBillingOverview, fetchBillingUsageLogs, type BillingQuery } from "@/lib/api/billing"
 import type { BillingModelCostPoint, BillingOverview, BillingUsageLog } from "@/lib/api/types"
-import { Check, ChevronDown, ChevronRight, Coins, DollarSign, Gauge, Search, Sigma, WalletCards } from "lucide-react"
+import { Check, ChevronDown, ChevronRight, DollarSign, Gauge, Search, Sigma, WalletCards } from "lucide-react"
+import { CreditPowerIcon } from "@/components/admin/credit-power-icon"
 
 type ModelSortMode = "tokens_desc" | "tokens_asc" | "cost_desc" | "cost_asc"
 type FilterOption = {
@@ -680,7 +681,7 @@ export default function BillingPage() {
   const stats = useMemo(
     () => [
       { label: "范围 Token", value: number(overview?.todayTotalTokens), icon: Sigma },
-      { label: "范围消耗算力", value: number(overview?.todayChargedCredits), icon: Coins },
+      { label: "范围消耗算力", value: number(overview?.todayChargedCredits), icon: CreditPowerIcon },
       { label: "范围模型成本", value: money(overview?.todayCostAmount), icon: DollarSign },
       { label: "范围计费记录", value: number(overview?.todayUsageCount), icon: Gauge },
     ],

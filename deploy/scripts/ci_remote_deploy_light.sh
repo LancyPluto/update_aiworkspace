@@ -75,6 +75,30 @@ REMOTE_DIR="$REMOTE_DIR"
 DEPLOY_SERVICES="$DEPLOY_SERVICES"
 GITHUB_SHA="${GITHUB_SHA:-unknown}"
 
+read_secret_snapshot() {
+  python3 - <<'PY'
+from pathlib import Path
+
+SECRET_KEYS = ("JWT_SECRET", "INTERNAL_API_TOKEN")
+root = Path("/root/ai_tool_market")
+merged: dict[str, str] = {}
+for rel in (".env", "deploy/.env"):
+    path = root / rel
+    if not path.exists():
+        continue
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "=" not in line or line.strip().startswith("#"):
+            continue
+        key, value = line.split("=", 1)
+        key, value = key.strip(), value.strip()
+        if key in SECRET_KEYS and value:
+            merged[key] = value
+print("|".join(f"{key}={merged[key]}" for key in SECRET_KEYS if key in merged))
+PY
+}
+
+SECRET_SNAPSHOT_BEFORE="\$(read_secret_snapshot)"
+
 python3 - <<'PY'
 from pathlib import Path
 
@@ -255,6 +279,28 @@ if (not model_key or model_key.startswith("replace-with-")) and silicon_key and 
     deploy.write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
 
+SECRET_SNAPSHOT_AFTER="\$(read_secret_snapshot)"
+LAST_SECRET_FILE="\$REMOTE_DIR/deploy/logs/last-secret-keys.snapshot"
+LAST_SECRET_SNAPSHOT=""
+if [ -f "\$LAST_SECRET_FILE" ]; then
+  LAST_SECRET_SNAPSHOT="\$(cat "\$LAST_SECRET_FILE")"
+fi
+
+force_secret_services=false
+if [ -n "\$SECRET_SNAPSHOT_AFTER" ]; then
+  if [ "\$SECRET_SNAPSHOT_BEFORE" != "\$SECRET_SNAPSHOT_AFTER" ]; then
+    echo "Secret keys changed during deploy env patch; forcing backend worker agent-service recreate"
+    force_secret_services=true
+  elif [ "\$SECRET_SNAPSHOT_AFTER" != "\$LAST_SECRET_SNAPSHOT" ]; then
+    echo "Secret keys differ from last successful deploy; forcing backend worker agent-service recreate"
+    force_secret_services=true
+  fi
+fi
+
+if [ "\$force_secret_services" = true ]; then
+  DEPLOY_SERVICES="\$(bash "\$REMOTE_DIR/deploy/scripts/merge_deploy_services.sh" "\$DEPLOY_SERVICES" backend worker agent-service)"
+fi
+
 if [ -f "\$REMOTE_DIR/deploy/logs/last-deploy.json" ]; then
   echo "--- last deploy manifest ---"
   cat "\$REMOTE_DIR/deploy/logs/last-deploy.json"
@@ -328,6 +374,11 @@ if echo "\$DEPLOY_SERVICES" | grep -qw user-web; then
   echo "user-web bundle: \${js_bundle:-unknown}"
 fi
 docker compose "\${COMPOSE_ARGS[@]}" ps
+
+if [ -n "\${SECRET_SNAPSHOT_AFTER:-}" ]; then
+  mkdir -p "\$REMOTE_DIR/deploy/logs"
+  printf '%s' "\$SECRET_SNAPSHOT_AFTER" > "\$LAST_SECRET_FILE"
+fi
 REMOTE
 
 echo "Light deploy finished (mode=$DEPLOY_SYNC_MODE)."

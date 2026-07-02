@@ -11,6 +11,10 @@ export function findAspectRatioText(value: unknown): string {
   }
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
     const normalizedKey = key.toLowerCase()
+    // 兼容 { aspectRatio: { label: "9:16", value: "9:16" } } 这类结构：即便 key 不是 ratio，也直接识别出形如 9:16 的值
+    if (typeof raw === "string" && raw.match(/\d+(?:\.\d+)?\s*[:/]\s*\d+(?:\.\d+)?/)) {
+      return raw
+    }
     if (
       typeof raw === "string" &&
       (normalizedKey.includes("aspect") || normalizedKey.includes("ratio") || normalizedKey.includes("比例"))
@@ -34,6 +38,9 @@ export function findSizeText(value: unknown): string {
   }
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
     const normalizedKey = key.toLowerCase()
+    if (typeof raw === "string" && raw.match(/\d{2,5}\s*[x×]\s*\d{2,5}/i)) {
+      return raw
+    }
     if (typeof raw === "string" && (normalizedKey.includes("size") || normalizedKey.includes("resolution"))) {
       return raw
     }

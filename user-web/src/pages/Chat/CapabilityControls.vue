@@ -4,7 +4,7 @@ import type { Capability } from "@/api/aiToolTypes"
 import type { TaskDetail, ToolField, UserUploadAsset } from "@/api/types"
 import { deleteUploadAsset, uploadToolFile } from "@/api/toolApi"
 import { resolveCommunityDerivativeUrl } from "@/utils/communityPostMedia"
-import { normalizeMediaFieldValue, normalizeMediaUrl } from "@/utils/toolCoverMedia"
+import { normalizeMediaFieldValue, normalizeMediaUrl, isValidImagePreviewUrl } from "@/utils/toolCoverMedia"
 import { useAuthStore } from "@/store/authStore"
 import { buildTaskResultBlocks, resolveAudioTracks } from "@/utils/taskResultBlocks"
 import { useGeneratedMaterialList, useUploadHistoryList } from "@/composables/useMaterialPickerLists"
@@ -105,6 +105,8 @@ const props = defineProps<{
   toolId?: string | null
   initialParams?: Record<string, unknown> | null
   layout?: "default" | "composer"
+  outputModality?: string | null
+  inputModality?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -240,14 +242,11 @@ const activeUploadKind = computed(() => (uploadHistoryField.value ? materialKind
 const ratioField = computed(() => (props.fields || []).find(isAspectRatioField))
 const hasAspectRatioControl = computed(() => Boolean(imageCapability.value || ratioField.value))
 
-function isReferenceComposerField(field: ToolField): boolean {
-  if (!isReferenceMediaField(field)) return false
+function isExplicitComposerReferenceField(field: ToolField): boolean {
   const meta = parseFieldMeta(field)
-  const key = field.fieldKey.toLowerCase()
-  const text = `${field.fieldKey} ${field.fieldName} ${field.placeholder || ""}`.toLowerCase()
   const role = (meta.uiRole || "").toLowerCase()
   const placement = (meta.placement || "").toLowerCase()
-  const markedForComposer =
+  return (
     meta.core === true ||
     role === "reference" ||
     role === "reference_material" ||
@@ -255,24 +254,65 @@ function isReferenceComposerField(field: ToolField): boolean {
     role === "composer_reference" ||
     placement === "composer" ||
     placement === "prompt_left"
-  const looksLikeReference =
-    /reference|refimage|ref_images|sourceimage|source_image|inputimage|input_image|material|asset|参考|素材|参考图|多参考图/.test(text)
-  if (field.fieldType === "multi_image") return true
-  return (
-    markedForComposer ||
-    looksLikeReference ||
-    key.includes("reference") ||
-    key.includes("ref") ||
-    key.includes("source") ||
-    key.includes("input") ||
-    key.includes("material") ||
-    key.includes("asset")
   )
 }
 
-const primaryReferenceField = computed(() =>
-  (props.fields || []).find((field) => field.fieldKey !== props.coreFieldKey && isReferenceComposerField(field)) || null,
-)
+function isReferenceComposerField(field: ToolField): boolean {
+  if (!isReferenceMediaField(field)) return false
+  if (field.fieldType === "multi_image" || isOmniVideoListField(field)) return true
+  if (isExplicitComposerReferenceField(field)) return true
+  const text = `${field.fieldKey} ${field.fieldName} ${field.placeholder || ""}`.toLowerCase()
+  const key = field.fieldKey.toLowerCase()
+  const looksLikeReference =
+    /reference|refimage|ref_images|sourceimage|source_image|inputimage|input_image|参考图|多参考图|参考图片|参考素材/.test(text)
+  return (
+    looksLikeReference ||
+    key.includes("reference") ||
+    key.includes("refimage") ||
+    key.includes("ref_image") ||
+    key.includes("sourceimage") ||
+    key.includes("source_image") ||
+    key.includes("inputimage") ||
+    key.includes("input_image")
+  )
+}
+
+function isComposerImageReferenceField(field: ToolField): boolean {
+  return field.fieldType === "image" || field.fieldType === "image_upload" || field.fieldType === "multi_image"
+}
+
+function shouldShowComposerReferenceUpload(field: ToolField): boolean {
+  if (!isFieldVisible(field, state.value.fields)) return false
+  // dashboard 的参考图上传区只支持图片预览，所以这里直接过滤非图片字段。
+  if (!isComposerImageReferenceField(field)) return false
+  // 多参考图场景：即便是可选字段，也需要有入口
+  if (isMultiImageField(field)) return true
+  if (field.required || field.executionRequired || field.userRequired) return true
+  if (isExplicitComposerReferenceField(field)) return true
+  const output = (props.outputModality || "").trim().toUpperCase()
+  // 视频生成工具：允许可选参考图
+  if (output === "VIDEO" || output.includes("VIDEO")) return true
+  // 图片生成工具：仅当字段被标记为必填/显式 reference 才展示入口
+  return false
+}
+
+function referenceFieldScore(field: ToolField): number {
+  let score = 0
+  if (field.required || field.executionRequired || field.userRequired) score += 100
+  if (isExplicitComposerReferenceField(field)) score += 70
+  if (isMultiImageField(field)) score += 40
+  if (field.fieldType === "image_upload") score += 25
+  const text = `${field.fieldKey} ${field.fieldName} ${field.placeholder || ""}`.toLowerCase()
+  if (/firstframe|首帧|lastframe|末帧|reference|refimage|sourceimage|inputimage|参考图|参考图片|多参考图|参考素材/.test(text)) score += 15
+  return score
+}
+
+const primaryReferenceField = computed(() => {
+  const fields = props.fields || []
+  const candidates = fields.filter((field) => isReferenceComposerField(field) && isComposerImageReferenceField(field))
+  if (candidates.length === 0) return null
+  return [...candidates].sort((a, b) => referenceFieldScore(b) - referenceFieldScore(a))[0] || null
+})
 
 const configuredFields = computed(() =>
   (props.fields || [])
@@ -654,14 +694,18 @@ const primaryReferenceInfo = computed<PrimaryReferenceMaterialInfo>(() => {
     }
   }
   const urls = isMultiImageField(field) ? multiImageValues(field) : strField(field.fieldKey) ? [strField(field.fieldKey)] : []
+  const previewUrls = urls
+    .map((url) => normalizeMediaUrl(url))
+    .filter((url) => isValidImagePreviewUrl(url))
   const upload = uploadState(field.fieldKey)
   return {
-    available: true,
+    available: shouldShowComposerReferenceUpload(field),
     fieldName: field.fieldName,
     kind: materialKindForField(field),
-    count: urls.length,
+    // count 需要和 previewUrls 保持一致：避免出现“有破裂图片但 count > 0”的情况。
+    count: previewUrls.length,
     maxCount: isMultiImageField(field) ? multiImageLimit(field) : 1,
-    previewUrls: urls.map((url) => normalizeMediaUrl(url)),
+    previewUrls,
     uploading: upload.uploading === true,
     error: upload.error,
   }

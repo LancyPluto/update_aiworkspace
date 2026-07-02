@@ -11,7 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ApiError } from "@/lib/api/http"
 import { fetchAdminUsers, manualAddCredits, memberAccountBalance, updateUserStatus } from "@/lib/api/users"
 import type { AdminMember } from "@/lib/api/types"
-import { Ban, Coins, Eye, Filter, Search, Undo2 } from "lucide-react"
+import { Ban, Eye, Filter, Search, Undo2 } from "lucide-react"
+import { CreditPowerIcon } from "@/components/admin/credit-power-icon"
 
 interface UserRow {
   id: string
@@ -163,7 +164,7 @@ export default function UsersPage() {
             </DialogContent>
           </Dialog>
           <Button variant="ghost" size="icon" className="h-8 w-8" disabled={actionId === item.rawId} onClick={() => handleCredits(item)}>
-            <Coins className="h-4 w-4" />
+            <CreditPowerIcon className="h-4 w-4" />
           </Button>
           <Button variant="ghost" size="icon" className="h-8 w-8" disabled={actionId === item.rawId} onClick={() => handleStatus(item)}>
             {item.status === "active" ? <Ban className="h-4 w-4" /> : <Undo2 className="h-4 w-4" />}

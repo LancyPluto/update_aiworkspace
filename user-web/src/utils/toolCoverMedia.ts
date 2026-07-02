@@ -40,6 +40,21 @@ export function normalizeMediaUrl(value?: string | null): string {
   return toBrowserMediaPath(path)
 }
 
+export function isValidImagePreviewUrl(value?: string | null): boolean {
+  const raw = value?.trim()
+  if (!raw) return false
+  if (raw.startsWith("data:image/")) return true
+  if (/^https?:\/\//i.test(raw)) return true
+  if (raw.startsWith("/")) {
+    return (
+      /\.(png|jpe?g|webp|gif|avif|bmp|svg)(\?|#|$)/i.test(raw)
+      || raw.includes("/uploads/")
+      || raw.includes("/generated/")
+    )
+  }
+  return false
+}
+
 export function normalizeMediaFieldValue(value: unknown): unknown {
   if (typeof value === "string") return normalizeMediaUrl(value)
   if (Array.isArray(value)) {

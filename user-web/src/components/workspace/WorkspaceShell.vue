@@ -3,7 +3,6 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { RouterLink, useRoute, useRouter } from "vue-router"
 import {
   Bell,
-  Gift,
   Headphones,
   LogOut,
   Menu,
@@ -13,9 +12,9 @@ import {
   Search,
   Sun,
   UserRound,
-  WalletCards,
   X,
 } from "lucide-vue-next"
+import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import { fetchCreditAccount } from "@/api/creditApi"
 import { fetchCustomerServiceSettings, type CustomerServiceSettings } from "@/api/settingsApi"
 import type { CreditAccount } from "@/api/types"
@@ -210,7 +209,7 @@ onUnmounted(() => {
 
         <div class="workspace-top-actions">
           <template v-if="auth.isLoggedIn">
-            <RouterLink to="/billing" class="workspace-credit"><WalletCards :size="15" />{{ creditLabel }}</RouterLink>
+            <RouterLink to="/billing" class="workspace-credit">{{ creditLabel }}</RouterLink>
             <button v-if="customerService.enabled" class="workspace-customer-button" type="button" @click="customerServiceOpen = true">
               <Headphones :size="15" />客服
             </button>
@@ -291,7 +290,7 @@ onUnmounted(() => {
             </RouterLink>
             <RouterLink to="/billing" class="workspace-referral" @click="closeMobileNav">
               <span class="workspace-new-badge">最新</span>
-              <strong><Gift :size="16" />推荐有礼</strong>
+              <strong><CreditPowerIcon :size="16" class="inline-block align-[-2px]" />推荐有礼</strong>
               <small>获取更多算力</small>
             </RouterLink>
             <RouterLink v-if="auth.isLoggedIn" to="/billing" class="workspace-credit-panel" @click="closeMobileNav">
