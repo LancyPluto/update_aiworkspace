@@ -24,7 +24,6 @@ import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.Signature;
 import java.security.spec.PKCS8EncodedKeySpec;
-import java.security.spec.PKCS1EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -252,7 +251,7 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
                         .replace("-----END RSA PRIVATE KEY-----", "")
                         .replaceAll("\\s", "");
                 byte[] bytes = Base64.getDecoder().decode(content);
-                return keyFactory.generatePrivate(new PKCS1EncodedKeySpec(bytes));
+                return keyFactory.generatePrivate(new PKCS8EncodedKeySpec(rsaPkcs1ToPkcs8(bytes)));
             }
 
             throw new IllegalArgumentException("Unsupported WeChat merchant private key PEM header");
@@ -301,5 +300,70 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
 
     private boolean blank(String value) {
         return value == null || value.isBlank();
+    }
+
+    /**
+     * Wrap PKCS#1 RSA private key bytes in a PKCS#8 PrivateKeyInfo envelope.
+     * PKCS1EncodedKeySpec is only available from newer JDKs, so Java 17 needs this conversion.
+     */
+    private static byte[] rsaPkcs1ToPkcs8(byte[] pkcs1) {
+        byte[] version = new byte[] {0x02, 0x01, 0x00};
+        byte[] algorithmIdentifier = new byte[] {
+                0x30, 0x0d,
+                0x06, 0x09, 0x2a, (byte) 0x86, 0x48, (byte) 0x86, (byte) 0xf7, 0x0d, 0x01, 0x01, 0x01,
+                0x05, 0x00
+        };
+        byte[] privateKeyOctet = encodeDerOctetString(pkcs1);
+        return encodeDerSequence(concat(version, algorithmIdentifier, privateKeyOctet));
+    }
+
+    private static byte[] encodeDerSequence(byte[] content) {
+        return encodeDerTag((byte) 0x30, content);
+    }
+
+    private static byte[] encodeDerOctetString(byte[] content) {
+        return encodeDerTag((byte) 0x04, content);
+    }
+
+    private static byte[] encodeDerTag(byte tag, byte[] content) {
+        byte[] length = encodeDerLength(content.length);
+        byte[] encoded = new byte[1 + length.length + content.length];
+        encoded[0] = tag;
+        System.arraycopy(length, 0, encoded, 1, length.length);
+        System.arraycopy(content, 0, encoded, 1 + length.length, content.length);
+        return encoded;
+    }
+
+    private static byte[] encodeDerLength(int length) {
+        if (length < 0) {
+            throw new IllegalArgumentException("DER length cannot be negative");
+        }
+        if (length < 0x80) {
+            return new byte[] {(byte) length};
+        }
+        if (length <= 0xFF) {
+            return new byte[] {(byte) 0x81, (byte) length};
+        }
+        if (length <= 0xFFFF) {
+            return new byte[] {(byte) 0x82, (byte) (length >> 8), (byte) length};
+        }
+        if (length <= 0xFFFFFF) {
+            return new byte[] {(byte) 0x83, (byte) (length >> 16), (byte) (length >> 8), (byte) length};
+        }
+        throw new IllegalArgumentException("DER length too large");
+    }
+
+    private static byte[] concat(byte[]... parts) {
+        int total = 0;
+        for (byte[] part : parts) {
+            total += part.length;
+        }
+        byte[] merged = new byte[total];
+        int offset = 0;
+        for (byte[] part : parts) {
+            System.arraycopy(part, 0, merged, offset, part.length);
+            offset += part.length;
+        }
+        return merged;
     }
 }
