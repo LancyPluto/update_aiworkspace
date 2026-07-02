@@ -46,7 +46,7 @@ electron_mirror=https://npmmirror.com/mirrors/electron/
 puppeteer_download_host=https://npmmirror.com/mirrors
 EOF
 
-echo "==> Maven settings for Docker backend"
+echo "==> Maven settings (official Central; use mihomo/HTTP_PROXY during docker build)"
 mkdir -p /root/.m2
 cp "${CONFIG_DIR}/maven-settings-china.xml" /root/.m2/settings.xml
 
