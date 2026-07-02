@@ -2,7 +2,7 @@ import type { Component } from "vue"
 
 export type WorkspaceNavItem = {
   label: string
-  icon: Component
+  icon?: Component
   to: string
   match?: string[]
 }

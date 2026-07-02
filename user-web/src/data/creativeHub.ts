@@ -11,7 +11,6 @@ import {
   Video,
   Wand2,
 } from "lucide-vue-next"
-import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import type { WorkspaceMediaItem, WorkspaceNavItem, WorkspaceStaticToolItem } from "@/types/workspace"
 
 export const workspaceMedia = {
@@ -55,7 +54,7 @@ export const workspaceNavGroups: { label?: string; items: WorkspaceNavItem[] }[]
 ]
 
 export const workspaceBottomNav: WorkspaceNavItem[] = [
-  { label: "会员与算力", icon: CreditPowerIcon, to: "/billing", match: ["/billing", "/pricing"] },
+  { label: "会员与算力", to: "/billing", match: ["/billing", "/pricing"] },
 ]
 
 export const workspaceShowcaseTools: WorkspaceStaticToolItem[] = [
