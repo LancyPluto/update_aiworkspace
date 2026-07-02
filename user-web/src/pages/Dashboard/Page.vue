@@ -73,6 +73,7 @@ import {
 import { buildDashboardTaskParams, buildOptimisticDashboardTask } from "./dashboardTaskFactory"
 import { normalizeMediaUrl, resolveSummaryToolCoverUrl } from "@/utils/toolCoverMedia"
 import { resolveCommunityDerivativeUrl, resolveOssVideoPosterUrl } from "@/utils/communityPostMedia"
+import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import { forceDownload } from "@/utils/download"
 import { isWorkflowToolCode } from "@/adapters/toolPresentationAdapter"
 import { taskFailureHint, taskProgressMessage } from "@/utils/taskStatusLabels"
@@ -3156,10 +3157,13 @@ onUnmounted(() => {
                   @click.stop="createWithSelectedTool"
                 >
                   <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />
-                  <template v-else>
-                    <span v-if="composerGenerateCost != null" class="tabular-nums">{{ composerGenerateCost }}</span>
-                  </template>
-                  {{ submitting ? "生成中..." : "生成" }}
+                  <span v-else class="dashboard-pollo-generate__content">
+                    <CreditPowerIcon :size="16" class="dashboard-pollo-generate__icon" aria-hidden="true" />
+                    <span class="dashboard-pollo-generate__text">
+                      <span v-if="composerGenerateCost != null" class="tabular-nums">{{ composerGenerateCost }}</span>
+                      <span>{{ submitting ? "生成中..." : "生成" }}</span>
+                    </span>
+                  </span>
                 </button>
               </div>
 
@@ -3689,8 +3693,8 @@ onUnmounted(() => {
 
 .dashboard-pollo-media-slot__box {
   display: flex;
-  width: 44px;
-  height: 54px;
+  width: 56px;
+  height: 74px;
   align-items: center;
   justify-content: center;
   border-radius: 10px;
@@ -3781,13 +3785,33 @@ onUnmounted(() => {
   justify-content: center;
   gap: 8px;
   border-radius: 12px;
-  background: var(--brand-gradient);
+  background: rgb(37 99 235);
   padding: 0 18px;
   font-size: 14px;
   font-weight: 600;
   color: #fff;
-  box-shadow: var(--brand-button-shadow);
+  box-shadow: 0 14px 32px rgb(37 99 235 / 0.28);
   transition: filter 160ms ease, opacity 160ms ease;
+}
+
+.dashboard-pollo-generate__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  line-height: 1.1;
+}
+
+.dashboard-pollo-generate__icon {
+  opacity: 0.95;
+  filter: drop-shadow(0 6px 14px rgb(0 0 0 / 0.22));
+}
+
+.dashboard-pollo-generate__text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
 }
 
 .dashboard-pollo-generate:hover:not(:disabled) {

@@ -4,6 +4,7 @@ import { RouterLink, useRoute, useRouter } from "vue-router"
 import {
   Bell,
   Headphones,
+  Gift,
   LogOut,
   Menu,
   Moon,
@@ -289,7 +290,7 @@ onUnmounted(() => {
             </RouterLink>
             <RouterLink to="/billing" class="workspace-referral" @click="closeMobileNav">
               <span class="workspace-new-badge">最新</span>
-              <strong>推荐有礼</strong>
+              <strong><Gift :size="16" class="inline-block align-[-2px]" />推荐有礼</strong>
               <small>获取更多算力</small>
             </RouterLink>
             <RouterLink v-if="auth.isLoggedIn" to="/billing" class="workspace-credit-panel" @click="closeMobileNav">
