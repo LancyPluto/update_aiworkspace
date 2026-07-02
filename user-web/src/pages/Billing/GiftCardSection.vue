@@ -11,6 +11,7 @@ import {
   Sparkles,
 } from "lucide-vue-next"
 import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
+import CreditPowerIconWatermark from "@/components/CreditPowerIcon/CreditPowerIconWatermark.vue"
 import BillingCycleSwitcher from "@/components/BillingCycleSwitcher.vue"
 import type { GiftCardPackage, RechargePackage } from "@/api/types"
 import { BILLING_CYCLES, cycleMonthDivisor, type BillingCycle } from "@/utils/billingCycleConfig"
@@ -278,23 +279,33 @@ function tierBadge(tierKey: string) {
         <article
           v-for="pkg in sortedCreditPackages"
           :key="pkg.id"
-          class="credit-gift-card relative overflow-hidden rounded-2xl border border-sky-500/25 bg-gradient-to-br from-slate-900 via-slate-900 to-sky-950/40 p-5 shadow-lg"
+          class="credit-gift-card"
         >
-          <CreditPowerIcon class="pointer-events-none absolute -right-3 -top-3 h-28 w-28 opacity-[0.12]" aria-hidden="true" />
+          <div class="credit-gift-card__body">
+            <CreditPowerIconWatermark class="credit-gift-card__watermark" :size="128" />
 
-          <div class="relative flex items-center gap-2.5">
-            <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-500/15 ring-1 ring-sky-500/25">
-              <CreditPowerIcon class="h-5 w-5" aria-hidden="true" />
+            <div class="credit-gift-card__head">
+              <CreditPowerIcon :size="34" class="credit-gift-card__icon" aria-hidden="true" />
+              <span class="credit-gift-card__credits">{{ pkg.credits.toLocaleString() }}</span>
             </div>
-            <span class="text-3xl font-bold tracking-tight text-white">{{ pkg.credits.toLocaleString() }}</span>
+
+            <div class="credit-gift-card__meta">
+              <p>
+                <span class="credit-gift-card__meta-label">使用期限：</span>
+                <span class="credit-gift-card__meta-value">不限时使用</span>
+              </p>
+              <p>
+                <span class="credit-gift-card__meta-label">扣减规则：</span>
+                <span class="credit-gift-card__meta-value">兑换后优先扣减会员套餐算力，用尽后再扣礼品卡余额</span>
+              </p>
+            </div>
           </div>
 
-          <p class="relative mt-3 text-[11px] leading-relaxed text-slate-500">
-            不限时使用；兑换后优先扣减会员套餐算力，用尽后再扣礼品卡余额
-          </p>
-
-          <div class="relative mt-5 flex items-center justify-between gap-3 border-t border-slate-800/80 pt-4">
-            <div class="text-2xl font-bold text-white">¥{{ formatMoney(pkg.priceAmount) }}</div>
+          <div class="credit-gift-card__footer">
+            <div class="credit-gift-card__price">
+              <span class="credit-gift-card__price-symbol">¥</span>
+              <span>{{ formatMoney(pkg.priceAmount) }}</span>
+            </div>
 
             <div class="qty-control">
               <button
@@ -373,22 +384,22 @@ function tierBadge(tierKey: string) {
 .qty-control {
   display: inline-flex;
   align-items: center;
-  border: 1px solid rgb(255 255 255 / 0.1);
+  border: 1px solid rgb(255 255 255 / 0.08);
   border-radius: 999px;
-  background: rgb(0 0 0 / 0.28);
+  background: rgb(255 255 255 / 0.04);
   padding: 2px;
 }
 
 .qty-btn {
   display: flex;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   align-items: center;
   justify-content: center;
   border: 0;
   border-radius: 999px;
   background: transparent;
-  color: rgb(255 255 255 / 0.72);
+  color: rgb(255 255 255 / 0.78);
   transition: background 0.15s ease, color 0.15s ease;
 }
 
@@ -403,10 +414,109 @@ function tierBadge(tierKey: string) {
 }
 
 .qty-value {
-  width: 24px;
+  min-width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #000;
+  padding: 0 4px;
   text-align: center;
   font-size: 14px;
   font-weight: 600;
   color: #fff;
+}
+
+.credit-gift-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid rgb(255 255 255 / 0.06);
+  background: #121317;
+  box-shadow: 0 18px 40px rgb(0 0 0 / 0.28);
+}
+
+.credit-gift-card__body {
+  position: relative;
+  min-height: 148px;
+  padding: 18px 18px 16px;
+  overflow: hidden;
+}
+
+.credit-gift-card__watermark {
+  position: absolute;
+  right: -18px;
+  top: 50%;
+  opacity: 0.92;
+  transform: translateY(-52%);
+}
+
+.credit-gift-card__head {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.credit-gift-card__icon {
+  filter: drop-shadow(0 8px 18px rgb(37 99 235 / 0.28));
+}
+
+.credit-gift-card__credits {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: #fff;
+}
+
+.credit-gift-card__meta {
+  position: relative;
+  z-index: 1;
+  margin-top: 14px;
+  display: grid;
+  gap: 6px;
+  padding-right: 72px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: rgb(148 163 184 / 0.92);
+}
+
+.credit-gift-card__meta-label {
+  color: rgb(148 163 184 / 0.88);
+}
+
+.credit-gift-card__meta-value {
+  color: rgb(255 255 255 / 0.92);
+  font-weight: 600;
+}
+
+.credit-gift-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid rgb(255 255 255 / 0.05);
+  background: rgb(255 255 255 / 0.03);
+  padding: 14px 16px;
+}
+
+.credit-gift-card__price {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+}
+
+.credit-gift-card__price-symbol {
+  font-size: 18px;
+  font-weight: 600;
+  color: rgb(255 255 255 / 0.88);
 }
 </style>
