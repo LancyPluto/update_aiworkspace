@@ -26,7 +26,6 @@ import {
   Palette,
   Check,
 } from "lucide-vue-next"
-import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import { ref, onMounted, onUnmounted, computed, watch } from "vue"
 import { useGlobalSearch, type GlobalSearchResultItem, type GlobalSearchScope } from "@/composables/useGlobalSearch"
 import { fetchCreditAccount } from "@/api/creditApi"
@@ -50,7 +49,7 @@ type NavLink = {
   type: "link"
   href: string
   label: string
-  icon: Component
+  icon?: Component
   active?: (path: string, fullPath: string) => boolean
 }
 
@@ -155,7 +154,7 @@ const navSections: NavSection[] = [
 ]
 
 const accountNav: NavLink[] = [
-  { type: "link", href: "/billing", label: "会员与算力", icon: CreditPowerIcon },
+  { type: "link", href: "/billing", label: "会员与算力" },
   { type: "link", href: "/profile", label: "个人资料", icon: UserRound },
 ]
 
@@ -389,6 +388,7 @@ watch(
               :class="isActive(item) ? 'sidebar-nav-link--active' : 'sidebar-nav-link--idle'"
             >
               <component
+                v-if="item.icon"
                 :is="item.icon"
                 class="h-[18px] w-[18px] shrink-0 transition-colors"
                 :class="isActive(item) ? '' : 'text-white/72'"
@@ -412,6 +412,7 @@ watch(
                 :class="isActive(item) ? 'sidebar-nav-link--active' : 'sidebar-nav-link--idle'"
               >
                 <component
+                  v-if="item.icon"
                   :is="item.icon"
                   class="h-[18px] w-[18px] shrink-0 transition-colors"
                   :class="isActive(item) ? '' : 'text-white/72'"
@@ -432,6 +433,7 @@ watch(
           :class="isActive(item) ? 'sidebar-nav-link--active' : 'sidebar-nav-link--idle'"
         >
           <component
+            v-if="item.icon"
             :is="item.icon"
             class="h-[18px] w-[18px] shrink-0 transition-colors"
             :class="isActive(item) ? '' : 'text-white/72'"
@@ -443,7 +445,6 @@ watch(
           type="button"
           class="group relative mb-3 flex h-11 w-full items-center gap-2.5 overflow-hidden rounded-lg border border-white/[0.055] bg-white/[0.025] px-3 text-left text-sm font-medium text-white/76 transition hover:border-[var(--brand-border)] hover:bg-white/[0.045] hover:text-white"
         >
-          <CreditPowerIcon :size="17" class="shrink-0 opacity-[0.58] transition group-hover:opacity-100" />
           <span class="min-w-0 flex-1">
             <span class="block truncate">推荐有礼</span>
           </span>
@@ -477,6 +478,7 @@ watch(
           :class="isActive(item) ? 'sidebar-nav-link--active' : 'sidebar-nav-link--idle'"
         >
           <component
+            v-if="item.icon"
             :is="item.icon"
             class="h-[18px] w-[18px] shrink-0 transition-colors"
             :class="isActive(item) ? '' : 'text-white/72'"

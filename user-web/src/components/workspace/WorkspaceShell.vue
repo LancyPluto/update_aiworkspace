@@ -14,7 +14,6 @@ import {
   UserRound,
   X,
 } from "lucide-vue-next"
-import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import { fetchCreditAccount } from "@/api/creditApi"
 import { fetchCustomerServiceSettings, type CustomerServiceSettings } from "@/api/settingsApi"
 import type { CreditAccount } from "@/api/types"
@@ -270,7 +269,7 @@ onUnmounted(() => {
                 :class="{ active: isActive(item) }"
                 @click="closeMobileNav"
               >
-                <component :is="item.icon" :size="16" />
+                <component v-if="item.icon" :is="item.icon" :size="16" />
                 <span>{{ item.label }}</span>
               </RouterLink>
             </section>
@@ -285,12 +284,12 @@ onUnmounted(() => {
               :class="{ active: isActive(item) }"
               @click="closeMobileNav"
             >
-              <component :is="item.icon" :size="16" />
+                <component v-if="item.icon" :is="item.icon" :size="16" />
               <span>{{ item.label }}</span>
             </RouterLink>
             <RouterLink to="/billing" class="workspace-referral" @click="closeMobileNav">
               <span class="workspace-new-badge">最新</span>
-              <strong><CreditPowerIcon :size="16" class="inline-block align-[-2px]" />推荐有礼</strong>
+              <strong>推荐有礼</strong>
               <small>获取更多算力</small>
             </RouterLink>
             <RouterLink v-if="auth.isLoggedIn" to="/billing" class="workspace-credit-panel" @click="closeMobileNav">
