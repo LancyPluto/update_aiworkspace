@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { Bot } from "lucide-vue-next"
-import AppShell from "@/components/AppShell.vue"
 </script>
 
 <template>
-  <AppShell title="智能体" description="智能体能力开发中，敬请期待">
-    <div class="flex flex-col items-center justify-center px-6 py-24 text-center">
+  <div class="flex flex-col items-center justify-center px-6 py-24 text-center">
       <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
         <Bot class="h-8 w-8 text-primary" />
       </div>
@@ -14,5 +12,4 @@ import AppShell from "@/components/AppShell.vue"
         我们正在筹备智能体相关能力，后续将在此提供智能体浏览与使用入口。
       </p>
     </div>
-  </AppShell>
 </template>

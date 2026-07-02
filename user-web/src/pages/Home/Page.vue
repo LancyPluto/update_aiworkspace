@@ -15,7 +15,6 @@ import {
   WandSparkles,
   X,
 } from "lucide-vue-next"
-import AppShell from "@/components/AppShell.vue"
 import { searchCommunityPosts } from "@/api/communityApi"
 import { fetchTools } from "@/api/toolApi"
 import { fetchTasks } from "@/api/taskApi"
@@ -331,7 +330,6 @@ watch(
 </script>
 
 <template>
-  <AppShell title="首页" description="科创点AI 创作启动台">
     <main class="home-page">
       <section class="home-hero">
         <div class="hero-glow hero-glow--pink" />
@@ -608,7 +606,6 @@ watch(
         </div>
       </Teleport>
     </main>
-  </AppShell>
 </template>
 
 <style scoped>

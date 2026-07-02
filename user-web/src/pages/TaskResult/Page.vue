@@ -2,7 +2,6 @@
 import { onMounted, ref } from "vue"
 import { RouterLink } from "vue-router"
 import { ArrowLeft, ChevronRight } from "lucide-vue-next"
-import AppShell from "@/components/AppShell.vue"
 import ResultRenderer from "@/components/ResultRenderer/ResultRenderer.vue"
 import { fetchTaskById } from "@/api/taskApi"
 import type { TaskDetail } from "@/api/types"
@@ -35,7 +34,6 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppShell title="任务结果" :description="'任务 ' + (task?.taskNo ?? taskId) + ' · 生成输出'">
     <div class="mx-auto max-w-4xl space-y-6 px-6 py-6">
       <nav class="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
         <RouterLink :to="userRoutes.dashboard" class="inline-flex items-center gap-1 hover:text-foreground">
@@ -66,5 +64,4 @@ onMounted(async () => {
         </RouterLink>
       </div>
     </div>
-  </AppShell>
 </template>

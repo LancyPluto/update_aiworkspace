@@ -2,7 +2,6 @@
 import { ref, onMounted, computed, watch } from "vue"
 import { RouterLink, useRoute, useRouter } from "vue-router"
 import { ArrowLeft, ChevronRight, Info, Loader2, Sparkles, Zap } from "lucide-vue-next"
-import AppShell from "@/components/AppShell.vue"
 import DynamicForm from "@/components/DynamicForm/DynamicForm.vue"
 import TaskStatusTag from "@/components/TaskStatusTag/TaskStatusTag.vue"
 import { getApiOrigin } from "@/api/client"
@@ -159,7 +158,6 @@ async function handleCreateTask() {
 </script>
 
 <template>
-  <AppShell :title="title" description="填写参数，AI 将为你生成候选结果">
     <div class="px-6 py-6 max-w-7xl mx-auto space-y-5">
       <nav class="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap">
         <RouterLink :to="userRoutes.toolList" class="hover:text-foreground inline-flex items-center gap-1">
@@ -285,5 +283,4 @@ async function handleCreateTask() {
         </div>
       </template>
     </div>
-  </AppShell>
 </template>

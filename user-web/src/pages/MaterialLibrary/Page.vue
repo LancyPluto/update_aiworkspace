@@ -11,7 +11,6 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-vue-next"
-import AppShell from "@/components/AppShell.vue"
 import AssetCard from "@/components/AssetCard.vue"
 import MasonryLayout from "@/components/MasonryLayout.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
@@ -405,10 +404,6 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <AppShell
-    title="资产"
-    description="管理 AI 生成作品与可复用的 Omni 视频主体"
-  >
     <div class="mx-auto h-full w-full max-w-[1540px] px-5 py-7">
       <div class="mb-7 flex rounded-2xl border border-white/10 bg-black/20 p-1">
         <RouterLink
@@ -617,7 +612,6 @@ onUnmounted(() => {
       @close="closePublishModal"
       @confirm="confirmPublishMaterial"
     />
-  </AppShell>
 </template>
 
 <style scoped>
