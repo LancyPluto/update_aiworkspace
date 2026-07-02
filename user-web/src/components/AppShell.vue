@@ -12,6 +12,7 @@ import {
   Wrench,
   FolderHeart,
   Images,
+  Ticket,
   ChevronDown,
   PanelLeft,
   PanelLeftClose,
@@ -25,6 +26,7 @@ import {
   Loader2,
   Palette,
   Check,
+  Gift,
 } from "lucide-vue-next"
 import { ref, onMounted, onUnmounted, computed, watch } from "vue"
 import { useGlobalSearch, type GlobalSearchResultItem, type GlobalSearchScope } from "@/composables/useGlobalSearch"
@@ -154,7 +156,7 @@ const navSections: NavSection[] = [
 ]
 
 const accountNav: NavLink[] = [
-  { type: "link", href: "/billing", label: "会员与算力" },
+  { type: "link", href: "/billing", label: "会员与算力", icon: Ticket },
   { type: "link", href: "/profile", label: "个人资料", icon: UserRound },
 ]
 
@@ -445,6 +447,7 @@ watch(
           type="button"
           class="group relative mb-3 flex h-11 w-full items-center gap-2.5 overflow-hidden rounded-lg border border-white/[0.055] bg-white/[0.025] px-3 text-left text-sm font-medium text-white/76 transition hover:border-[var(--brand-border)] hover:bg-white/[0.045] hover:text-white"
         >
+          <Gift class="h-[18px] w-[18px] shrink-0 text-white/60 transition group-hover:text-white/90" aria-hidden="true" />
           <span class="min-w-0 flex-1">
             <span class="block truncate">推荐有礼</span>
           </span>

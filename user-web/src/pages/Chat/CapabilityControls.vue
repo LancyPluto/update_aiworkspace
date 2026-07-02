@@ -344,7 +344,9 @@ function isComposerLastFrameField(field: ToolField): boolean {
 }
 
 function composerFrameLabel(field: ToolField): string {
-  return isComposerLastFrameField(field) ? "尾帧" : "首帧"
+  const label = isComposerLastFrameField(field) ? "尾帧" : "首帧"
+  const optional = !(field.required || field.executionRequired || field.userRequired)
+  return optional ? `${label}(可选)` : label
 }
 
 function resolveComposerSlotPresentation(field: ToolField, kind: MaterialKind): ComposerMediaSlotPresentation | null {
@@ -374,8 +376,17 @@ function shouldShowComposerMediaSlot(field: ToolField): boolean {
 
 function composerSlotSortOrder(field: ToolField): number {
   const meta = parseFieldMeta(field)
-  if (typeof meta.uiOrder === "number" && Number.isFinite(meta.uiOrder)) return meta.uiOrder
-  return field.sortOrder ?? 999
+  const kind = materialKindForField(field)
+  const presentation = resolveComposerSlotPresentation(field, kind)
+  // Keep image slots together (even when reference video/audio exists).
+  // Order: image thumbs -> media cards (video/audio) -> frame cards.
+  const group =
+    presentation === "image_thumb" ? 0 : presentation === "media_card" ? 1 : presentation === "frame_card" ? 2 : 9
+
+  const order =
+    typeof meta.uiOrder === "number" && Number.isFinite(meta.uiOrder) ? meta.uiOrder : (field.sortOrder ?? 999)
+
+  return group * 10_000 + order
 }
 
 function composerSlotLabel(field: ToolField, kind: MaterialKind, presentation: ComposerMediaSlotPresentation): string {
