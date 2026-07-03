@@ -227,7 +227,7 @@ onUnmounted(() => {
               <Moon v-else :size="17" />
             </button>
             <RouterLink to="/profile" class="workspace-project" title="我的资料">
-              <MemberBadge :available="availableCredits" />
+              <MemberBadge :available="availableCredits" :membership-plan="auth.user?.membershipPlan ?? null" />
               <UserAvatar :src="auth.user?.avatarUrl" :name="userName" size="sm" />
               <span class="workspace-project-name">{{ userName }}</span>
             </RouterLink>

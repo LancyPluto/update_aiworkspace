@@ -609,7 +609,7 @@ async function publishPreviewAsset(asset: AssetPreviewItem, payload?: CommunityP
     const post = await publishAssetToCommunity(asset, {
       token: auth.token,
       payload,
-      defaultPromptVisible: false,
+      defaultPromptVisible: auth.user?.promptPublicByDefault ?? false,
     })
     updateTaskCommunityState(asset.taskId, post.id, post.promptVisible)
     previewAsset.value = { ...asset, communityPostId: post.id, promptVisible: post.promptVisible, title: post.title }

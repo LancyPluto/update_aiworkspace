@@ -1,11 +1,28 @@
 <script setup lang="ts">
 import { computed } from "vue"
+import type { UserProfile } from "@/api/types"
 
 const props = defineProps<{
   available?: number | null
+  membershipPlan?: string | null
 }>()
 
+// 套餐代码到会员版本的映射
+const getMembershipLabel = (packageCode: string | null | undefined): string => {
+  if (!packageCode) return "体验版"
+  
+  // 提取套餐类型（starter/growth/pro/flagship）
+  const code = packageCode.toLowerCase()
+  if (code.includes("starter")) return "标准版"
+  if (code.includes("growth")) return "高级版"
+  if (code.includes("pro")) return "进阶版"
+  if (code.includes("flagship")) return "豪华版"
+  
+  return "体验版"
+}
+
 const isMember = computed(() => props.available != null && props.available > 0)
+const membershipLabel = computed(() => getMembershipLabel(props.membershipPlan))
 
 const balanceLabel = computed(() => {
   if (props.available == null) return "算力余额：---点"
@@ -16,10 +33,35 @@ const balanceLabel = computed(() => {
 <template>
   <span
     v-if="isMember"
-    class="member-badge group relative inline-flex shrink-0 cursor-default items-center"
+    class="member-badge group relative inline-flex shrink-0 cursor-default items-center gap-1.5"
     role="img"
-    aria-label="会员"
+    :aria-label="`会员-${membershipLabel}`"
   >
+    <!-- 书签图标 -->
+    <svg
+      class="member-badge__bookmark"
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M5 3V21L12 17L19 21V3H5Z"
+        stroke="#F5D061"
+        stroke-width="2"
+        stroke-linejoin="round"
+        fill="#FFF8DC"
+      />
+    </svg>
+
+    <!-- 会员版本标签 -->
+    <span class="member-badge__label text-xs font-semibold text-amber-600">
+      {{ membershipLabel }}
+    </span>
+
+    <!-- 皇冠图标 -->
     <svg
       class="member-badge__icon"
       viewBox="0 0 24 24"
@@ -65,6 +107,25 @@ const balanceLabel = computed(() => {
 </template>
 
 <style scoped>
+.member-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.member-badge__bookmark {
+  display: block;
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.08));
+}
+
+.member-badge__label {
+  display: inline-block;
+  padding: 0.125rem 0.375rem;
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  border-radius: 0.25rem;
+  border: 1px solid rgba(245, 208, 97, 0.4);
+}
+
 .member-badge__icon {
   display: block;
   filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.12));

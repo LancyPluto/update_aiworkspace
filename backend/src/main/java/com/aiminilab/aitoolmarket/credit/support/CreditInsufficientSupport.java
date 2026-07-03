@@ -16,11 +16,26 @@ public final class CreditInsufficientSupport {
                                        int requiredCredits,
                                        ErrorCode errorCode,
                                        String toolCode) {
+        ensureAvailable(creditService, userId, requiredCredits, errorCode, toolCode, 0);
+    }
+
+    /**
+     * 检查用户可用算力是否充足，可排除当前 Agent 运行实例已冻结的额度。
+     *
+     * @param excludeFrozen 需要排除的冻结算力（如当前 Agent run 的 creditBudget），
+     *                      会加回到 available 上，避免自身冻结阻塞工具调用。
+     */
+    public static void ensureAvailable(CreditService creditService,
+                                       Long userId,
+                                       int requiredCredits,
+                                       ErrorCode errorCode,
+                                       String toolCode,
+                                       int excludeFrozen) {
         if (requiredCredits <= 0) {
             return;
         }
         CreditAccountResponse account = creditService.account(userId);
-        int available = account.available();
+        int available = account.available() + Math.max(0, excludeFrozen);
         if (available >= requiredCredits) {
             return;
         }

@@ -104,4 +104,16 @@ public interface CreditRechargeOrderMapper extends BaseMapper<CreditRechargeOrde
                           @Param("status") String status,
                           @Param("reason") String reason,
                           @Param("eventAt") LocalDateTime eventAt);
+
+    @Select("""
+            SELECT crp.package_code
+            FROM credit_recharge_orders cro
+            INNER JOIN credit_recharge_packages crp ON cro.package_id = crp.id
+            WHERE cro.user_id = #{userId}
+              AND cro.status = 'CREDITED'
+              AND crp.status = 'ACTIVE'
+            ORDER BY cro.credited_at DESC, cro.id DESC
+            LIMIT 1
+            """)
+    String findCurrentPackageCodeByUserId(@Param("userId") Long userId);
 }
