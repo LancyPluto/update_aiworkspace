@@ -20,11 +20,12 @@ export async function publishAssetToCommunity(
   }
 
   const customTitle = options.payload?.title?.trim()
+  // Prefer the user's current "prompt public by default" setting over the asset's
+  // historical value so that re-publishing an existing post also respects the
+  // latest preference.  If neither is true, fall back to false.
   const promptVisible =
     options.payload?.promptVisible ??
-    asset.promptVisible ??
-    options.defaultPromptVisible ??
-    false
+    (options.defaultPromptVisible || asset.promptVisible || false)
 
   return publishCommunityPost(
     {

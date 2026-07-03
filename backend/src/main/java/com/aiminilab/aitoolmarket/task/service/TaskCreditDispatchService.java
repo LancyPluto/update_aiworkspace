@@ -25,6 +25,14 @@ public class TaskCreditDispatchService {
     }
 
     public void ensureDispatchAllowed(Long userId, AiTool tool, AgentModelConfig modelConfig) {
+        ensureDispatchAllowed(userId, tool, modelConfig, 0);
+    }
+
+    /**
+     * Agent 工具调用时使用，excludeFrozen 为当前 Agent run 冻结的额度，
+     * 检查时加回以避免自身冻结阻塞工具调用。
+     */
+    public void ensureDispatchAllowed(Long userId, AiTool tool, AgentModelConfig modelConfig, int excludeFrozen) {
         int requiredCredits;
         if (tool != null && workflowExecutionService.shouldUseWorkflow(tool)) {
             requiredCredits = WORKFLOW_MIN_DISPATCH_CREDITS;
@@ -38,6 +46,7 @@ public class TaskCreditDispatchService {
                 userId,
                 requiredCredits,
                 ErrorCode.CREDIT_NOT_ENOUGH,
-                tool == null ? null : tool.getToolCode());
+                tool == null ? null : tool.getToolCode(),
+                excludeFrozen);
     }
 }

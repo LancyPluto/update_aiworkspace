@@ -14,6 +14,8 @@ public interface TaskService {
 
     TaskStatusResponse createForAgentTool(Long userId, CreateTaskRequest request);
 
+    TaskStatusResponse createForAgentTool(Long userId, CreateTaskRequest request, int excludeFrozen);
+
     TaskEstimateResponse estimate(Long userId, EstimateTaskRequest request);
 
     TaskStatusResponse status(Long userId, Long taskId);

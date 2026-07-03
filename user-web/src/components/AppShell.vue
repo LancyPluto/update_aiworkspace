@@ -674,7 +674,7 @@ watch(
                 class="flex items-center gap-2 rounded-full px-2 py-1 transition hover:bg-white/8"
                 title="我的资料"
               >
-                <MemberBadge :available="availableCredits" />
+                <MemberBadge :available="availableCredits" :membership-plan="auth.user?.membershipPlan ?? null" />
                 <UserAvatar :src="auth.user?.avatarUrl" :name="safeUserName" size="sm" />
                 <span class="hidden max-w-[140px] truncate text-xs text-white/60 sm:inline">{{ safeUserName }}</span>
               </RouterLink>

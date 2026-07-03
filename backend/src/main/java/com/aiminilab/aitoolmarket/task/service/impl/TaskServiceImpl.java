@@ -135,13 +135,19 @@ public class TaskServiceImpl implements TaskService {
     @Override
     @Transactional
     public TaskStatusResponse createForAgentTool(Long userId, CreateTaskRequest request) {
+        return createForAgentTool(userId, request, 0);
+    }
+
+    @Override
+    @Transactional
+    public TaskStatusResponse createForAgentTool(Long userId, CreateTaskRequest request, int excludeFrozen) {
         return taskMapper.findByUserIdAndIdempotencyKey(userId, request.clientRequestId())
                 .map(TaskStatusResponse::from)
                 .orElseGet(() -> {
                     AiTool tool = toolMapper.findOnlineByCode(request.toolCode())
                             .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
                     AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool, request.modelConfigId());
-                    taskCreditDispatchService.ensureDispatchAllowed(userId, tool, modelConfig);
+                    taskCreditDispatchService.ensureDispatchAllowed(userId, tool, modelConfig, excludeFrozen);
                     return createNewTask(
                             userId,
                             request.toolCode(),

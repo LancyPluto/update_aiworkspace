@@ -12,6 +12,7 @@ import com.aiminilab.aitoolmarket.user.dto.UpdateUserProfileRequest;
 import com.aiminilab.aitoolmarket.user.dto.UserAvatarUploadResponse;
 import com.aiminilab.aitoolmarket.user.dto.UserProfileResponse;
 import com.aiminilab.aitoolmarket.user.entity.User;
+import com.aiminilab.aitoolmarket.community.mapper.CommunityPostMapper;
 import com.aiminilab.aitoolmarket.user.mapper.AccountDataCleanupMapper;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
 import com.aiminilab.aitoolmarket.user.service.UserProfileService;
@@ -43,15 +44,18 @@ public class UserProfileServiceImpl implements UserProfileService {
     private final AssetStorageService assetStorageService;
     private final SmsCodeService smsCodeService;
     private final AccountDataCleanupMapper accountDataCleanupMapper;
+    private final CommunityPostMapper communityPostMapper;
 
     public UserProfileServiceImpl(UserMapper userMapper,
                                   AssetStorageService assetStorageService,
                                   SmsCodeService smsCodeService,
-                                  AccountDataCleanupMapper accountDataCleanupMapper) {
+                                  AccountDataCleanupMapper accountDataCleanupMapper,
+                                  CommunityPostMapper communityPostMapper) {
         this.userMapper = userMapper;
         this.assetStorageService = assetStorageService;
         this.smsCodeService = smsCodeService;
         this.accountDataCleanupMapper = accountDataCleanupMapper;
+        this.communityPostMapper = communityPostMapper;
     }
 
     @Override
@@ -93,6 +97,7 @@ public class UserProfileServiceImpl implements UserProfileService {
     }
 
     @Override
+    @Transactional
     public UserProfileResponse updateCommunitySettings(Long userId, CommunitySettingsRequest request) {
         User existing = requireUser(userId);
         String bio = normalizeBio(request == null ? null : request.bio(), existing.getBio());
@@ -102,7 +107,13 @@ public class UserProfileServiceImpl implements UserProfileService {
         boolean promptPublicByDefault = request == null || request.promptPublicByDefault() == null
                 ? Boolean.TRUE.equals(existing.getPromptPublicByDefault())
                 : Boolean.TRUE.equals(request.promptPublicByDefault());
+        boolean wasPublicByDefault = Boolean.TRUE.equals(existing.getPromptPublicByDefault());
         userMapper.updateCommunitySettings(userId, bio, autoPublishAssets, promptPublicByDefault);
+        // When the user enables "prompt public by default", retroactively make all existing
+        // published community posts' prompts visible so they show up in the community feed.
+        if (promptPublicByDefault && !wasPublicByDefault) {
+            communityPostMapper.updatePromptVisibleByUserId(userId, true);
+        }
         return UserProfileResponse.from(requireUser(userId));
     }
 
