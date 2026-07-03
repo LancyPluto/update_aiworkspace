@@ -3158,11 +3158,11 @@ onUnmounted(() => {
                 >
                   <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />
                   <span v-else class="dashboard-pollo-generate__content">
-                    <CreditPowerIcon :size="16" class="dashboard-pollo-generate__icon" aria-hidden="true" />
-                    <span class="dashboard-pollo-generate__text">
-                      <span v-if="composerGenerateCost != null" class="tabular-nums">{{ composerGenerateCost }}</span>
-                      <span>{{ submitting ? "生成中..." : "生成" }}</span>
+                    <span v-if="composerGenerateCost != null" class="dashboard-pollo-generate__cost">
+                      <CreditPowerIcon :size="15" class="dashboard-pollo-generate__icon" aria-hidden="true" />
+                      <span class="tabular-nums">{{ composerGenerateCost }}</span>
                     </span>
+                    <span class="dashboard-pollo-generate__label">{{ submitting ? "生成中..." : "生成" }}</span>
                   </span>
                 </button>
               </div>
@@ -3785,33 +3785,36 @@ onUnmounted(() => {
   justify-content: center;
   gap: 8px;
   border-radius: 12px;
-  background: rgb(37 99 235);
+  background: linear-gradient(135deg, rgb(124 58 237), rgb(147 51 234));
   padding: 0 18px;
   font-size: 14px;
   font-weight: 600;
   color: #fff;
-  box-shadow: 0 14px 32px rgb(37 99 235 / 0.28);
+  box-shadow: 0 14px 32px rgb(124 58 237 / 0.32);
   transition: filter 160ms ease, opacity 160ms ease;
 }
 
 .dashboard-pollo-generate__content {
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
+  gap: 8px;
+  line-height: 1;
+}
+
+.dashboard-pollo-generate__cost {
+  display: inline-flex;
+  align-items: center;
   gap: 4px;
-  line-height: 1.1;
 }
 
 .dashboard-pollo-generate__icon {
-  opacity: 0.95;
-  filter: drop-shadow(0 6px 14px rgb(0 0 0 / 0.22));
+  opacity: 0.98;
 }
 
-.dashboard-pollo-generate__text {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
+.dashboard-pollo-generate__label {
+  white-space: nowrap;
 }
 
 .dashboard-pollo-generate:hover:not(:disabled) {
