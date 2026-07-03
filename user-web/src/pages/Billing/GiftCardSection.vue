@@ -103,7 +103,9 @@ function adjustCreditQty(packageId: number, delta: number) {
 }
 
 const sortedCreditPackages = computed(() =>
-  [...props.giftCardPackages].sort((a, b) => a.credits - b.credits),
+  [...props.giftCardPackages]
+    .filter(pkg => pkg.priceAmount > 0) // 过滤掉价格为0的套餐（如管理员专用套餐）
+    .sort((a, b) => a.credits - b.credits),
 )
 
 const cartSummary = computed(() => {
@@ -129,23 +131,45 @@ const cartSummary = computed(() => {
   return { count, amount }
 })
 
-function checkout() {
+async function checkout() {
+  // 收集所有需要结算的礼品卡
+  const memberPurchases: Array<{ pkg: RechargePackage; qty: number }> = []
+  const creditPurchases: Array<{ pkg: GiftCardPackage; qty: number }> = []
+
   for (const tier of MEMBER_GIFT_TIERS) {
     const qty = memberQty.value[memberCartKey(tier.key, activeGiftCycle.value)] ?? 0
     if (qty <= 0) continue
     const pkg = tierPackage(tier.key, activeGiftCycle.value)
     if (!pkg) continue
-    emit("buyMemberPackage", pkg)
-    memberQty.value = { ...memberQty.value, [memberCartKey(tier.key, activeGiftCycle.value)]: 0 }
-    return
+    memberPurchases.push({ pkg, qty })
   }
 
   for (const pkg of sortedCreditPackages.value) {
     const qty = creditQty.value[pkg.id] ?? 0
     if (qty <= 0) continue
-    emit("buyCreditGift", pkg, qty)
-    creditQty.value = { ...creditQty.value, [pkg.id]: 0 }
+    creditPurchases.push({ pkg, qty })
+  }
+
+  // 如果有会员套餐，先结算会员套餐（一次只能买一个）
+  if (memberPurchases.length > 0) {
+    emit("buyMemberPackage", memberPurchases[0].pkg)
+    // 清空所有数量
+    for (const { pkg } of memberPurchases) {
+      const tierKey = MEMBER_GIFT_TIERS.find(t => tierPackage(t.key, activeGiftCycle.value)?.id === pkg.id)?.key || ''
+      memberQty.value = { ...memberQty.value, [memberCartKey(tierKey, activeGiftCycle.value)]: 0 }
+    }
     return
+  }
+
+  // 否则结算算力礼品卡（按顺序处理，每次创建一个订单）
+  if (creditPurchases.length > 0) {
+    // 从第一个开始处理
+    const firstPurchase = creditPurchases[0]
+    emit("buyCreditGift", firstPurchase.pkg, firstPurchase.qty)
+    creditQty.value = { ...creditQty.value, [firstPurchase.pkg.id]: 0 }
+    
+    // 注意：由于后端API不支持批量订单，用户需要多次点击"去结算"来完成所有购买
+    // cartSummary 会显示剩余未结算的商品总价
   }
 }
 
