@@ -38,6 +38,7 @@ import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import MemberBadge from "@/components/MemberBadge/MemberBadge.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
+import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import {
   applyAppTheme,
   applyBrandAccent,
@@ -458,8 +459,8 @@ watch(
           to="/billing"
           class="mb-2 block rounded-lg border border-white/[0.055] bg-white/[0.025] p-3 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.02)] transition hover:border-[var(--brand-border)] hover:bg-white/[0.04]"
         >
-          <p class="text-xs font-medium text-white/40">可用算力</p>
-          <p class="mt-2 font-mono text-[12px] font-semibold tabular-nums text-white/88">
+          <p class="mt-2 flex items-center gap-2 font-mono text-[12px] font-semibold tabular-nums text-white/88">
+            <CreditPowerIcon :size="16" />
             {{ credit ? credit.available.toLocaleString() : '---' }}
             <span class="ml-1 font-normal text-white/28">
               / {{ credit ? credit.totalGranted.toLocaleString() : '---' }}
