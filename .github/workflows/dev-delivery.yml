@@ -80,7 +80,8 @@ jobs:
           cache: maven
       - name: Run tests
         working-directory: backend
-        run: mvn -B test -T 1C -Dsurefire.parallel=classes
+        # surefire 并行已在 pom.xml 中配置，避免在 CI 命令行追加属性导致参数解析差异
+        run: mvn -B test -T 1C
 
   agent-service-test:
     name: Agent Service (pytest)
@@ -155,7 +156,14 @@ jobs:
   # ── Python import/syntax validation ─────────────────────────────
   python-import-check:
     name: Python Import Validation
-    needs: [backend-test, agent-service-test, worker-test]
+    needs: [changes, backend-test, agent-service-test, worker-test]
+    if: |
+      always() &&
+      !cancelled() &&
+      (needs.changes.outputs.agent == 'true' || needs.changes.outputs.worker == 'true' || needs.changes.outputs.shared == 'true') &&
+      (needs.backend-test.result == 'success' || needs.backend-test.result == 'skipped') &&
+      (needs.agent-service-test.result == 'success' || needs.agent-service-test.result == 'skipped') &&
+      (needs.worker-test.result == 'success' || needs.worker-test.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -181,7 +189,14 @@ jobs:
   # ── Dependency security audit ───────────────────────────────────
   security-audit:
     name: Dependency Security Audit
-    needs: [backend-test, agent-service-test, worker-test]
+    needs: [changes, backend-test, agent-service-test, worker-test]
+    if: |
+      always() &&
+      !cancelled() &&
+      (needs.changes.outputs.agent == 'true' || needs.changes.outputs.worker == 'true' || needs.changes.outputs.shared == 'true') &&
+      (needs.backend-test.result == 'success' || needs.backend-test.result == 'skipped') &&
+      (needs.agent-service-test.result == 'success' || needs.agent-service-test.result == 'skipped') &&
+      (needs.worker-test.result == 'success' || needs.worker-test.result == 'skipped')
     continue-on-error: true
     runs-on: ubuntu-latest
     steps:
@@ -207,6 +222,12 @@ jobs:
     needs: [changes, backend-test, agent-service-test, worker-test, frontend-build, python-import-check]
     # 至少一个模块有变更，且事件为 push 到 dev 或手动触发时才部署
     if: |
+      always() &&
+      (needs.backend-test.result == 'success' || needs.backend-test.result == 'skipped') &&
+      (needs.agent-service-test.result == 'success' || needs.agent-service-test.result == 'skipped') &&
+      (needs.worker-test.result == 'success' || needs.worker-test.result == 'skipped') &&
+      (needs.frontend-build.result == 'success' || needs.frontend-build.result == 'skipped') &&
+      (needs.python-import-check.result == 'success' || needs.python-import-check.result == 'skipped') &&
       (needs.changes.outputs.backend == 'true' || needs.changes.outputs.agent == 'true' || needs.changes.outputs.worker == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.shared == 'true') &&
       ((github.event_name == 'push' && github.ref == 'refs/heads/dev') || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
