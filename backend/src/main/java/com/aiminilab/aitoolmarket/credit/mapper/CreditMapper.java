@@ -98,7 +98,6 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
     @Update("""
             UPDATE credit_accounts
             SET balance = balance + #{amount},
-                membership_balance = membership_balance + #{amount},
                 total_granted = total_granted + #{amount},
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{accountId} AND status = 'ACTIVE'
