@@ -462,7 +462,7 @@ function tierBadge(tierKey: string) {
 }
 
 .credit-gift-card__icon {
-  filter: drop-shadow(0 8px 18px rgb(37 99 235 / 0.28));
+  filter: drop-shadow(0 8px 18px rgb(10 118 253 / 0.35));
 }
 
 .credit-gift-card__credits {
