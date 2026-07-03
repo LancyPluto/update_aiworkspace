@@ -36,7 +36,6 @@ import type { CustomerServiceSettings } from "@/api/settingsApi"
 import type { CreditAccount } from "@/api/types"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
-import MemberBadge from "@/components/MemberBadge/MemberBadge.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import {
@@ -202,10 +201,10 @@ function isActive(item: NavLink) {
 
 const creditPercent = computed(() => {
   if (!credit.value) return 0
-  return Math.round((credit.value.available / (credit.value.totalGranted || 1)) * 100)
+  // 使用 balance 而不是 available，因为 available = balance - frozen
+  // 冻结算力不应该影响进度条显示
+  return Math.round((credit.value.balance / (credit.value.totalGranted || 1)) * 100)
 })
-
-const availableCredits = computed(() => credit.value?.available ?? null)
 
 // 套餐代码到会员版本的映射
 const getMembershipLabel = (packageCode: string | null | undefined): string => {
@@ -475,12 +474,18 @@ watch(
           to="/billing"
           class="relative mb-2 block rounded-lg border border-white/[0.055] bg-white/[0.025] p-3 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.02)] transition hover:border-[var(--brand-border)] hover:bg-white/[0.04]"
         >
-          <!-- 会员版本标签 - 蓝色横向书签样式，左侧内凹型三角缺口 -->
+          <!-- 会员版本标签 - 蓝色横向书签样式，左侧内凹弧形缺口 -->
           <div class="absolute right-0 top-0 z-10">
             <div class="relative flex items-center rounded-bl-md rounded-tr-md bg-gradient-to-b from-blue-500 to-blue-700 px-3 py-1 text-xs font-bold text-white shadow-lg">
-              <!-- 左侧内凹型三角缺口 -->
-              <svg class="absolute left-0 h-full w-2 -translate-x-[98%]" viewBox="0 0 8 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path d="M0 0L8 16L0 32V0Z" fill="#1e293b" />
+              <!-- 左侧内凹弧形缺口 -->
+              <svg class="absolute left-0 h-full w-2 -translate-x-[98%]" viewBox="0 0 12 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M12 0C4 8 4 24 12 32V0Z" fill="url(#blue-gradient)" />
+                <defs>
+                  <linearGradient id="blue-gradient" x1="6" y1="0" x2="6" y2="32" gradientUnits="userSpaceOnUse">
+                    <stop stop-color="#3B82F6" />
+                    <stop offset="1" stop-color="#1D4ED8" />
+                  </linearGradient>
+                </defs>
               </svg>
               <span>{{ membershipLabel }}</span>
             </div>
@@ -488,7 +493,7 @@ watch(
 
           <p class="mt-2 flex items-center gap-2 font-mono text-[12px] font-semibold tabular-nums text-white/88">
             <CreditPowerIcon :size="16" />
-            {{ credit ? credit.available.toLocaleString() : '---' }}
+            {{ credit ? credit.balance.toLocaleString() : '---' }}
             <span class="ml-1 font-normal text-white/28">
               / {{ credit ? credit.totalGranted.toLocaleString() : '---' }}
             </span>

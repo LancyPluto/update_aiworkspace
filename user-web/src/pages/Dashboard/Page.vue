@@ -1769,7 +1769,7 @@ onUnmounted(() => {
         :selected-modality="selectedModality"
         :selected-label="modalityLabel(selectedModality)"
         :selected-icon="modalityIcons[selectedModality as keyof typeof modalityIcons] || Sparkles"
-        :available-credits="credit?.available"
+        :available-credits="credit?.balance"
         :running-count="runningCount"
         @select="selectModality"
       />
@@ -1811,7 +1811,7 @@ onUnmounted(() => {
                     <p class="text-xs font-medium uppercase tracking-[0.18em] text-white/32">HISTORY</p>
                     <h2 class="mt-1 text-xl font-semibold text-white">工作历史</h2>
                     <p class="mt-1 hidden font-mono text-[12px] leading-5 text-white/36 sm:block">
-                      {{ currentTools.length }} 个可用模型 · 可用算力 {{ credit?.available ?? "--" }} · 进行中 {{ runningCount }}
+                      {{ currentTools.length }} 个可用模型 · 可用算力 {{ credit?.balance ?? "--" }} · 进行中 {{ runningCount }}
                     </p>
                   </template>
                   <div v-else class="flex min-w-0 flex-col">
@@ -1828,7 +1828,7 @@ onUnmounted(() => {
                     v-if="activePanel !== 'tasks'"
                     class="hidden text-right font-mono text-[12px] leading-5 text-white/36 sm:block"
                   >
-                    <p>{{ currentTools.length }} 个可用模型 · 可用算力 {{ credit?.available ?? "--" }} · 进行中 {{ runningCount }}</p>
+                    <p>{{ currentTools.length }} 个可用模型 · 可用算力 {{ credit?.balance ?? "--" }} · 进行中 {{ runningCount }}</p>
                   </div>
                   <div
                     v-if="activePanel === 'tasks'"

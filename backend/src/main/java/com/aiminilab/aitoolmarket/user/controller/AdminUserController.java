@@ -9,6 +9,7 @@ import com.aiminilab.aitoolmarket.credit.dto.ManualCreditRequest;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.user.dto.AdminUserResponse;
 import com.aiminilab.aitoolmarket.user.dto.UpdateUserStatusRequest;
+import com.aiminilab.aitoolmarket.user.service.AdminUserService;
 import com.aiminilab.aitoolmarket.user.service.UserAdminService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,10 +27,14 @@ public class AdminUserController {
 
     private final UserAdminService userAdminService;
     private final CreditService creditService;
+    private final AdminUserService adminUserService;
 
-    public AdminUserController(UserAdminService userAdminService, CreditService creditService) {
+    public AdminUserController(UserAdminService userAdminService,
+                               CreditService creditService,
+                               AdminUserService adminUserService) {
         this.userAdminService = userAdminService;
         this.creditService = creditService;
+        this.adminUserService = adminUserService;
     }
 
     @GetMapping
@@ -68,12 +73,15 @@ public class AdminUserController {
     @PostMapping("/{userId}/credits/manual-add")
     public ApiResponse<CreditAccountResponse> manualAdd(@PathVariable Long userId,
                                                         @Valid @RequestBody ManualCreditRequest request) {
-        return ApiResponse.success(creditService.manualAdd(
+        // 使用 AdminUserService 的手动添加方法，该方法会创建礼品卡而不是直接加余额
+        adminUserService.manualAddCredits(
                 userId,
                 request.amount(),
                 request.reason(),
                 AuthContext.get().userId()
-        ));
+        );
+        // 返回更新后的账户信息
+        return ApiResponse.success(creditService.account(userId));
     }
 
     @PostMapping("/{userId}/credits/manual-deduct")

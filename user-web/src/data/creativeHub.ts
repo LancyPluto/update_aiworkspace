@@ -60,7 +60,7 @@ export const workspaceBottomNav: WorkspaceNavItem[] = [
 export const workspaceShowcaseTools: WorkspaceStaticToolItem[] = [
   { title: "视频升级器", description: "提升分辨率、细节和清晰度。", image: workspaceMedia.style, tag: "画质", icon: Video, to: "/tool" },
   { title: "视频增强器", description: "修复低光、噪点和模糊画面。", image: workspaceMedia.video, tag: "增强", icon: Sparkles, to: "/tool" },
-  { title: "图像生成视频", description: "上传图片并生成镜头运动。", image: workspaceMedia.image, tag: "图生视频", icon: to: "/video" },
+  { title: "图像生成视频", description: "上传图片并生成镜头运动。", image: workspaceMedia.image, tag: "图生视频", icon: Video, to: "/video" },
   { title: "AI 图像生成器", description: "生成海报、商品图和角色图。", image: workspaceMedia.image, tag: "图片", icon: ImageIcon, to: "/image" },
   { title: "智能体工作流", description: "串联脚本、素材、模型和导出。", image: workspaceMedia.agent, tag: "智能体", icon: Bot, to: "/agent" },
   { title: "营销素材生成", description: "面向投放和商品场景的创意工具。", image: workspaceMedia.product, tag: "营销", icon: Sparkles, to: "/tool" },
