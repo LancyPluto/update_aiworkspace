@@ -295,6 +295,7 @@ onUnmounted(() => {
               <small>获取更多算力</small>
             </RouterLink>
             <RouterLink v-if="auth.isLoggedIn" to="/billing" class="workspace-credit-panel" @click="closeMobileNav">
+              <span>可用算力</span>
               <strong class="flex items-center gap-2">
                 <CreditPowerIcon :size="14" />
                 {{ creditLabel }} <small>/ {{ creditTotalLabel }}</small>

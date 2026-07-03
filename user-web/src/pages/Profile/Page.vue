@@ -377,8 +377,11 @@ onMounted(async () => {
               <strong>{{ successTasks ?? "--" }}</strong>
             </div>
             <div>
-              <CreditPowerIcon :size="14" />
-              <strong>{{ credit?.available ?? "--" }}</strong>
+              <span>可用算力</span>
+              <strong class="flex items-center gap-2">
+                <CreditPowerIcon :size="14" />
+                {{ credit?.available ?? "--" }}
+              </strong>
             </div>
           </div>
           <div class="community-settings">
