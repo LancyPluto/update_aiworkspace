@@ -20,6 +20,7 @@ import { fetchCustomerServiceSettings, type CustomerServiceSettings } from "@/ap
 import type { CreditAccount } from "@/api/types"
 import MemberBadge from "@/components/MemberBadge/MemberBadge.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
+import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import { workspaceBottomNav, workspaceNavGroups } from "@/data/creativeHub"
 import { useAuthStore } from "@/store/authStore"
 import type { WorkspaceNavItem } from "@/types/workspace"
@@ -294,8 +295,10 @@ onUnmounted(() => {
               <small>获取更多算力</small>
             </RouterLink>
             <RouterLink v-if="auth.isLoggedIn" to="/billing" class="workspace-credit-panel" @click="closeMobileNav">
-              <span>可用算力</span>
-              <strong>{{ creditLabel }} <small>/ {{ creditTotalLabel }}</small></strong>
+              <strong class="flex items-center gap-2">
+                <CreditPowerIcon :size="14" />
+                {{ creditLabel }} <small>/ {{ creditTotalLabel }}</small>
+              </strong>
               <em><i :style="{ width: creditPercent + '%' }" /></em>
             </RouterLink>
             <RouterLink v-if="auth.isLoggedIn" to="/profile" class="workspace-nav-link" @click="closeMobileNav">
