@@ -20,7 +20,6 @@ import { fetchCustomerServiceSettings, type CustomerServiceSettings } from "@/ap
 import type { CreditAccount } from "@/api/types"
 import MemberBadge from "@/components/MemberBadge/MemberBadge.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
-import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import { workspaceBottomNav, workspaceNavGroups } from "@/data/creativeHub"
 import { useAuthStore } from "@/store/authStore"
 import type { WorkspaceNavItem } from "@/types/workspace"
@@ -71,12 +70,6 @@ const userName = computed(() => {
   if (username) return username
   const readablePrefix = nickname.match(/^[\w\s.-]{2,}/)?.[0]?.trim()
   return readablePrefix || "User"
-})
-const creditLabel = computed(() => (credit.value ? credit.value.available.toLocaleString() : "---"))
-const creditTotalLabel = computed(() => (credit.value ? credit.value.totalGranted.toLocaleString() : "---"))
-const creditPercent = computed(() => {
-  if (!credit.value) return 0
-  return Math.max(0, Math.min(100, Math.round((credit.value.available / (credit.value.totalGranted || 1)) * 100)))
 })
 const availableCredits = computed(() => credit.value?.available ?? null)
 const customerServiceQrSrc = computed(() => customerService.value.qrCodeUrl?.trim() || DEFAULT_CUSTOMER_SERVICE_QR)
@@ -210,7 +203,6 @@ onUnmounted(() => {
 
         <div class="workspace-top-actions">
           <template v-if="auth.isLoggedIn">
-            <RouterLink to="/billing" class="workspace-credit">{{ creditLabel }}</RouterLink>
             <button v-if="customerService.enabled" class="workspace-customer-button" type="button" @click="customerServiceOpen = true">
               <Headphones :size="15" />客服
             </button>
@@ -293,14 +285,6 @@ onUnmounted(() => {
               <span class="workspace-new-badge">最新</span>
               <strong><Gift :size="16" class="inline-block align-[-2px]" />推荐有礼</strong>
               <small>获取更多算力</small>
-            </RouterLink>
-            <RouterLink v-if="auth.isLoggedIn" to="/billing" class="workspace-credit-panel" @click="closeMobileNav">
-              <span>可用算力</span>
-              <strong class="flex items-center gap-2">
-                <CreditPowerIcon :size="14" />
-                {{ creditLabel }} <small>/ {{ creditTotalLabel }}</small>
-              </strong>
-              <em><i :style="{ width: creditPercent + '%' }" /></em>
             </RouterLink>
             <RouterLink v-if="auth.isLoggedIn" to="/profile" class="workspace-nav-link" @click="closeMobileNav">
               <UserRound :size="16" />
