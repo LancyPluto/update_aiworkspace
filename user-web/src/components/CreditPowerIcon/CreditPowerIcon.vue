@@ -1,11 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue"
 
-import {
-  CREDIT_POWER_ICON_COLOR,
-  CREDIT_POWER_ICON_PATH,
-  CREDIT_POWER_ICON_VIEWBOX,
-} from "./creditPowerIconSvg"
+import creditPowerIconUrl from "@/assets/credit-power-icon.png"
 
 const props = withDefaults(
   defineProps<{
@@ -23,27 +19,13 @@ const style = computed(() => {
 </script>
 
 <template>
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    :viewBox="CREDIT_POWER_ICON_VIEWBOX"
-    fill="none"
-    preserveAspectRatio="xMidYMid meet"
-    class="credit-power-icon inline-block shrink-0"
+  <img
+    :src="creditPowerIconUrl"
+    alt=""
+    aria-hidden="true"
+    class="credit-power-icon inline-block shrink-0 object-contain"
     :class="props.class"
     :style="style"
-    aria-hidden="true"
-  >
-    <path
-      :fill="CREDIT_POWER_ICON_COLOR"
-      fill-rule="evenodd"
-      clip-rule="evenodd"
-      :d="CREDIT_POWER_ICON_PATH"
-    />
-  </svg>
+    draggable="false"
+  />
 </template>
-
-<style scoped>
-.credit-power-icon {
-  color: transparent;
-}
-</style>

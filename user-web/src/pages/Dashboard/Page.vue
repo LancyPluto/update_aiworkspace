@@ -3153,7 +3153,6 @@ onUnmounted(() => {
                   class="dashboard-pollo-generate ml-auto shrink-0"
                   :class="{ 'dashboard-pollo-generate--insufficient': creditInsufficient }"
                   :disabled="!selectedTool || submitting || selectedToolDetailLoading"
-                  :title="liveCreditView.hint"
                   @click.stop="createWithSelectedTool"
                 >
                   <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />
