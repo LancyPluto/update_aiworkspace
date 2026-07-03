@@ -339,7 +339,8 @@ for pid in "\${pids[@]}"; do
   wait "\$pid" || failed=1
 done
 if [ "\$failed" -ne 0 ]; then
-  echo "::warning::One or more builds failed, continuing with recreate..."
+  echo "::error::One or more builds failed; aborting deploy before force-recreate." >&2
+  exit 1
 fi
 
 echo "Force-recreating containers: \$DEPLOY_SERVICES"
