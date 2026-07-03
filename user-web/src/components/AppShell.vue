@@ -475,18 +475,12 @@ watch(
           to="/billing"
           class="relative mb-2 block rounded-lg border border-white/[0.055] bg-white/[0.025] p-3 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.02)] transition hover:border-[var(--brand-border)] hover:bg-white/[0.04]"
         >
-          <!-- 会员版本标签 - 蓝色横向书签样式 -->
+          <!-- 会员版本标签 - 蓝色横向书签样式，左侧内凹型三角缺口 -->
           <div class="absolute right-0 top-0 z-10">
             <div class="relative flex items-center rounded-bl-md rounded-tr-md bg-gradient-to-b from-blue-500 to-blue-700 px-3 py-1 text-xs font-bold text-white shadow-lg">
-              <!-- 左侧箭头缺口 -->
+              <!-- 左侧内凹型三角缺口 -->
               <svg class="absolute left-0 h-full w-2 -translate-x-[98%]" viewBox="0 0 8 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path d="M8 0L0 16L8 32V0Z" fill="url(#blue-gradient)" />
-                <defs>
-                  <linearGradient id="blue-gradient" x1="4" y1="0" x2="4" y2="32" gradientUnits="userSpaceOnUse">
-                    <stop stop-color="#3B82F6" />
-                    <stop offset="1" stop-color="#1D4ED8" />
-                  </linearGradient>
-                </defs>
+                <path d="M0 0L8 16L0 32V0Z" fill="#1e293b" />
               </svg>
               <span>{{ membershipLabel }}</span>
             </div>
