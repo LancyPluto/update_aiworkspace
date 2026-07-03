@@ -479,7 +479,7 @@ watch(
             <div class="relative flex items-center rounded-bl-md rounded-tr-md bg-gradient-to-b from-blue-500 to-blue-700 px-3 py-1 text-xs font-bold text-white shadow-lg">
               <!-- 左侧内凹弧形缺口 -->
               <svg class="absolute left-0 h-full w-2 -translate-x-[98%]" viewBox="0 0 12 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path d="M12 0C4 8 4 24 12 32V0Z" fill="url(#blue-gradient)" />
+                <path d="M12 0L0 16L12 32V0Z" fill="url(#blue-gradient)" />
                 <defs>
                   <linearGradient id="blue-gradient" x1="6" y1="0" x2="6" y2="32" gradientUnits="userSpaceOnUse">
                     <stop stop-color="#3B82F6" />
