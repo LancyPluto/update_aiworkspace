@@ -34,9 +34,11 @@ public class InternalTaskController {
 
     @PostMapping
     public ApiResponse<TaskStatusResponse> createForAgent(@Valid @RequestBody InternalCreateTaskRequest request) {
+        int excludeFrozen = request.excludeFrozen() == null ? 0 : Math.max(0, request.excludeFrozen());
         return ApiResponse.success(taskService.createForAgentTool(
                 request.userId(),
-                new CreateTaskRequest(request.toolCode(), request.params(), request.clientRequestId(), null, request.modelConfigId())
+                new CreateTaskRequest(request.toolCode(), request.params(), request.clientRequestId(), null, request.modelConfigId()),
+                excludeFrozen
         ));
     }
 

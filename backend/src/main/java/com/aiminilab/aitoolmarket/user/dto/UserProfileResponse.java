@@ -13,9 +13,14 @@ public record UserProfileResponse(
         String userType,
         String status,
         String phone,
-        String email
+        String email,
+        String membershipPlan
 ) {
     public static UserProfileResponse from(User user) {
+        return from(user, null);
+    }
+
+    public static UserProfileResponse from(User user, String membershipPlan) {
         return new UserProfileResponse(
                 user.getId(),
                 user.getUsername(),
@@ -27,7 +32,8 @@ public record UserProfileResponse(
                 user.getUserType(),
                 user.getStatus(),
                 user.getPhone(),
-                user.getEmail()
+                user.getEmail(),
+                membershipPlan
         );
     }
 }

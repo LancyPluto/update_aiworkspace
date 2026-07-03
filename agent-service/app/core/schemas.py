@@ -419,6 +419,7 @@ class TaskCreate(BaseModel):
     toolCode: str
     params: dict[str, Any] = Field(default_factory=dict)
     clientRequestId: str | None = None
+    excludeFrozen: int | None = None
 
 
 class TaskStatusResponse(BaseModel):

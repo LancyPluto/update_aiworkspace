@@ -145,6 +145,7 @@ export interface UserProfile {
   phone?: string | null
   email?: string | null
   status: UserAccountStatus
+  membershipPlan?: string | null
 }
 
 export interface UpdateUserProfileRequest {

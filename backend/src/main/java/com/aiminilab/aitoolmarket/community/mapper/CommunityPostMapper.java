@@ -339,6 +339,17 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
 
     @Update("""
             UPDATE community_posts
+            SET prompt_visible = #{promptVisible},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = #{userId}
+              AND status = 'PUBLISHED'
+              AND (audit_status IS NULL OR audit_status = 'APPROVED')
+            """)
+    int updatePromptVisibleByUserId(@Param("userId") Long userId,
+                                    @Param("promptVisible") boolean promptVisible);
+
+    @Update("""
+            UPDATE community_posts
             SET status = #{status},
                 audit_status = #{auditStatus},
                 audit_reason = #{reason},

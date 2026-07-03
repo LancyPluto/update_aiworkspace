@@ -1072,8 +1072,9 @@ CREATE TABLE IF NOT EXISTS gift_cards (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-INSERT INTO gift_card_packages (package_code, package_name, credits, price_amount, card_theme, sort_order) VALUES
-('gift_200', '200算力礼品卡', 200, 19.00, 'blue', 1),
-('gift_500', '500算力礼品卡', 500, 45.00, 'purple', 2),
-('gift_1000', '1000算力礼品卡', 1000, 88.00, 'gold', 3),
-('gift_3000', '3000算力礼品卡', 3000, 249.00, 'dark', 4);
+INSERT INTO gift_card_packages (package_code, package_name, credits, price_amount, card_theme, status, sort_order) VALUES
+('gift_200', '200算力礼品卡', 200, 4.00, 'blue', 'ACTIVE', 1),
+('gift_500', '500算力礼品卡', 500, 9.90, 'purple', 'ACTIVE', 2),
+('gift_1000', '1000算力礼品卡', 1000, 19.60, 'gold', 'ACTIVE', 3),
+('gift_3000', '3000算力礼品卡', 3000, 58.50, 'dark', 'ACTIVE', 4),
+('admin_default', '管理员赠送礼品卡', 0, 0.00, 'green', 'ACTIVE', 999);

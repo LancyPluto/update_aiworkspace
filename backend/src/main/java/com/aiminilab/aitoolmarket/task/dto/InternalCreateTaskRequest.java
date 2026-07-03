@@ -9,6 +9,7 @@ public record InternalCreateTaskRequest(
         @NotBlank String toolCode,
         @NotNull JsonNode params,
         String clientRequestId,
-        Long modelConfigId
+        Long modelConfigId,
+        Integer excludeFrozen
 ) {
 }

@@ -12,6 +12,8 @@ import com.aiminilab.aitoolmarket.user.dto.UpdateUserProfileRequest;
 import com.aiminilab.aitoolmarket.user.dto.UserAvatarUploadResponse;
 import com.aiminilab.aitoolmarket.user.dto.UserProfileResponse;
 import com.aiminilab.aitoolmarket.user.entity.User;
+import com.aiminilab.aitoolmarket.community.mapper.CommunityPostMapper;
+import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderMapper;
 import com.aiminilab.aitoolmarket.user.mapper.AccountDataCleanupMapper;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
 import com.aiminilab.aitoolmarket.user.service.UserProfileService;
@@ -43,15 +45,25 @@ public class UserProfileServiceImpl implements UserProfileService {
     private final AssetStorageService assetStorageService;
     private final SmsCodeService smsCodeService;
     private final AccountDataCleanupMapper accountDataCleanupMapper;
+    private final CommunityPostMapper communityPostMapper;
+    private final CreditRechargeOrderMapper creditRechargeOrderMapper;
 
     public UserProfileServiceImpl(UserMapper userMapper,
                                   AssetStorageService assetStorageService,
                                   SmsCodeService smsCodeService,
-                                  AccountDataCleanupMapper accountDataCleanupMapper) {
+                                  AccountDataCleanupMapper accountDataCleanupMapper,
+                                  CommunityPostMapper communityPostMapper,
+                                  CreditRechargeOrderMapper creditRechargeOrderMapper) {
         this.userMapper = userMapper;
         this.assetStorageService = assetStorageService;
         this.smsCodeService = smsCodeService;
         this.accountDataCleanupMapper = accountDataCleanupMapper;
+        this.communityPostMapper = communityPostMapper;
+        this.creditRechargeOrderMapper = creditRechargeOrderMapper;
+    }
+
+    private String resolveMembershipPlan(Long userId) {
+        return creditRechargeOrderMapper.findCurrentPackageCodeByUserId(userId);
     }
 
     @Override
@@ -60,7 +72,7 @@ public class UserProfileServiceImpl implements UserProfileService {
         String nickname = normalizeNickname(request == null ? null : request.nickname(), existing.getNickname(), existing.getUsername());
         String avatarUrl = normalizeAvatarUrl(request == null ? null : request.avatarUrl(), existing.getAvatarUrl());
         userMapper.updateProfile(userId, nickname, avatarUrl);
-        return UserProfileResponse.from(requireUser(userId));
+        return UserProfileResponse.from(requireUser(userId), resolveMembershipPlan(userId));
     }
 
     @Override
@@ -88,11 +100,12 @@ public class UserProfileServiceImpl implements UserProfileService {
         StoredAsset stored = assetStorageService.storeMultipartPublic("avatars/" + userId + "/" + filename, file);
         String avatarUrl = stored.publicUrl();
         userMapper.updateAvatarUrl(userId, avatarUrl);
-        UserProfileResponse user = UserProfileResponse.from(requireUser(userId));
+        UserProfileResponse user = UserProfileResponse.from(requireUser(userId), resolveMembershipPlan(userId));
         return new UserAvatarUploadResponse(avatarUrl, user);
     }
 
     @Override
+    @Transactional
     public UserProfileResponse updateCommunitySettings(Long userId, CommunitySettingsRequest request) {
         User existing = requireUser(userId);
         String bio = normalizeBio(request == null ? null : request.bio(), existing.getBio());
@@ -102,8 +115,14 @@ public class UserProfileServiceImpl implements UserProfileService {
         boolean promptPublicByDefault = request == null || request.promptPublicByDefault() == null
                 ? Boolean.TRUE.equals(existing.getPromptPublicByDefault())
                 : Boolean.TRUE.equals(request.promptPublicByDefault());
+        boolean wasPublicByDefault = Boolean.TRUE.equals(existing.getPromptPublicByDefault());
         userMapper.updateCommunitySettings(userId, bio, autoPublishAssets, promptPublicByDefault);
-        return UserProfileResponse.from(requireUser(userId));
+        // When the user enables "prompt public by default", retroactively make all existing
+        // published community posts' prompts visible so they show up in the community feed.
+        if (promptPublicByDefault && !wasPublicByDefault) {
+            communityPostMapper.updatePromptVisibleByUserId(userId, true);
+        }
+        return UserProfileResponse.from(requireUser(userId), resolveMembershipPlan(userId));
     }
 
     @Override

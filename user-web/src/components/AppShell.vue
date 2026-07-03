@@ -36,8 +36,8 @@ import type { CustomerServiceSettings } from "@/api/settingsApi"
 import type { CreditAccount } from "@/api/types"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
-import MemberBadge from "@/components/MemberBadge/MemberBadge.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
+import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import {
   applyAppTheme,
   applyBrandAccent,
@@ -201,10 +201,26 @@ function isActive(item: NavLink) {
 
 const creditPercent = computed(() => {
   if (!credit.value) return 0
-  return Math.round((credit.value.available / (credit.value.totalGranted || 1)) * 100)
+  // 使用 balance 而不是 available，因为 available = balance - frozen
+  // 冻结算力不应该影响进度条显示
+  return Math.round((credit.value.balance / (credit.value.totalGranted || 1)) * 100)
 })
 
-const availableCredits = computed(() => credit.value?.available ?? null)
+// 套餐代码到会员版本的映射
+const getMembershipLabel = (packageCode: string | null | undefined): string => {
+  if (!packageCode) return "体验版"
+  
+  // 提取套餐类型（starter/growth/pro/flagship）
+  const code = packageCode.toLowerCase()
+  if (code.includes("starter")) return "标准版"
+  if (code.includes("growth")) return "高级版"
+  if (code.includes("pro")) return "进阶版"
+  if (code.includes("flagship")) return "豪华版"
+  
+  return "体验版"
+}
+
+const membershipLabel = computed(() => getMembershipLabel(auth.user?.membershipPlan))
 const isAgentRoute = computed(() => route.path === "/agent" || route.path.startsWith("/agent/"))
 const safeUserName = computed(() => {
   const nickname = auth.user?.nickname?.trim() || ""
@@ -456,11 +472,28 @@ watch(
 
         <RouterLink
           to="/billing"
-          class="mb-2 block rounded-lg border border-white/[0.055] bg-white/[0.025] p-3 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.02)] transition hover:border-[var(--brand-border)] hover:bg-white/[0.04]"
+          class="relative mb-2 block rounded-lg border border-white/[0.055] bg-white/[0.025] p-3 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.02)] transition hover:border-[var(--brand-border)] hover:bg-white/[0.04]"
         >
-          <p class="text-xs font-medium text-white/40">可用算力</p>
-          <p class="mt-2 font-mono text-[12px] font-semibold tabular-nums text-white/88">
-            {{ credit ? credit.available.toLocaleString() : '---' }}
+          <!-- 会员版本标签 - 蓝色横向书签样式，左侧内凹弧形缺口 -->
+          <div class="absolute right-0 top-0 z-10">
+            <div class="relative flex items-center rounded-bl-md rounded-tr-md bg-gradient-to-b from-blue-500 to-blue-700 px-3 py-1 text-xs font-bold text-white shadow-lg">
+              <!-- 左侧内凹弧形缺口 -->
+              <svg class="absolute left-0 h-full w-2 -translate-x-[98%]" viewBox="0 0 12 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M12 0L0 16L12 32V0Z" fill="url(#blue-gradient)" />
+                <defs>
+                  <linearGradient id="blue-gradient" x1="6" y1="0" x2="6" y2="32" gradientUnits="userSpaceOnUse">
+                    <stop stop-color="#3B82F6" />
+                    <stop offset="1" stop-color="#1D4ED8" />
+                  </linearGradient>
+                </defs>
+              </svg>
+              <span>{{ membershipLabel }}</span>
+            </div>
+          </div>
+
+          <p class="mt-2 flex items-center gap-2 font-mono text-[12px] font-semibold tabular-nums text-white/88">
+            <CreditPowerIcon :size="16" />
+            {{ credit ? credit.balance.toLocaleString() : '---' }}
             <span class="ml-1 font-normal text-white/28">
               / {{ credit ? credit.totalGranted.toLocaleString() : '---' }}
             </span>
@@ -673,7 +706,6 @@ watch(
                 class="flex items-center gap-2 rounded-full px-2 py-1 transition hover:bg-white/8"
                 title="我的资料"
               >
-                <MemberBadge :available="availableCredits" />
                 <UserAvatar :src="auth.user?.avatarUrl" :name="safeUserName" size="sm" />
                 <span class="hidden max-w-[140px] truncate text-xs text-white/60 sm:inline">{{ safeUserName }}</span>
               </RouterLink>
@@ -834,7 +866,7 @@ watch(
 .sidebar-nav-link--active {
   background: var(--brand-active-bg);
   color: var(--brand-active-text);
-  font-weight: 520;
+  font-weight: 500;
 }
 
 .sidebar-nav-link--active :deep(svg) {

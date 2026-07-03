@@ -16,6 +16,7 @@ import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.UserStatus;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderMapper;
 import com.aiminilab.aitoolmarket.user.dto.UserProfileResponse;
 import com.aiminilab.aitoolmarket.user.entity.User;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
@@ -31,17 +32,20 @@ public class AuthServiceImpl implements AuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final SmsCodeService smsCodeService;
     private final HumanCaptchaService humanCaptchaService;
+    private final CreditRechargeOrderMapper creditRechargeOrderMapper;
 
     public AuthServiceImpl(UserMapper userMapper,
                            PasswordEncoder passwordEncoder,
                            JwtTokenProvider jwtTokenProvider,
                            SmsCodeService smsCodeService,
-                           HumanCaptchaService humanCaptchaService) {
+                           HumanCaptchaService humanCaptchaService,
+                           CreditRechargeOrderMapper creditRechargeOrderMapper) {
         this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
         this.smsCodeService = smsCodeService;
         this.humanCaptchaService = humanCaptchaService;
+        this.creditRechargeOrderMapper = creditRechargeOrderMapper;
     }
 
     @Override
@@ -188,12 +192,41 @@ public class AuthServiceImpl implements AuthService {
     public UserProfileResponse currentUser(Long userId) {
         User user = userMapper.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "用户不存在"));
-        return UserProfileResponse.from(user);
+        String packageCode = creditRechargeOrderMapper.findCurrentPackageCodeByUserId(userId);
+        return new UserProfileResponse(
+                user.getId(),
+                user.getUsername(),
+                user.getNickname(),
+                user.getAvatarUrl(),
+                user.getBio(),
+                user.getAutoPublishAssets(),
+                user.getPromptPublicByDefault(),
+                user.getUserType(),
+                user.getStatus(),
+                user.getPhone(),
+                user.getEmail(),
+                packageCode
+        );
     }
 
     private AuthenticatedSession buildLoginResponse(User user) {
         String token = jwtTokenProvider.createToken(new AuthUser(user.getId(), user.getUsername(), user.getUserType()));
-        return new AuthenticatedSession(token, new LoginResponse(token, UserProfileResponse.from(user)));
+        String packageCode = creditRechargeOrderMapper.findCurrentPackageCodeByUserId(user.getId());
+        UserProfileResponse profile = new UserProfileResponse(
+                user.getId(),
+                user.getUsername(),
+                user.getNickname(),
+                user.getAvatarUrl(),
+                user.getBio(),
+                user.getAutoPublishAssets(),
+                user.getPromptPublicByDefault(),
+                user.getUserType(),
+                user.getStatus(),
+                user.getPhone(),
+                user.getEmail(),
+                packageCode
+        );
+        return new AuthenticatedSession(token, new LoginResponse(token, profile));
     }
 
     private Long insertUser(User user) {

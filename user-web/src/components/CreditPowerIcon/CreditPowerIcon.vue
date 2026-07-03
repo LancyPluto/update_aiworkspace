@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue"
 
-import { CREDIT_POWER_ICON_URL } from "@/constants/publicAssets"
+import creditPowerIconUrl from "@/assets/credit-power-icon.png"
 
 const props = withDefaults(
   defineProps<{
@@ -20,11 +20,12 @@ const style = computed(() => {
 
 <template>
   <img
-    :src="CREDIT_POWER_ICON_URL"
+    :src="creditPowerIconUrl"
     alt=""
     aria-hidden="true"
-    class="inline-block shrink-0 object-contain"
+    class="credit-power-icon inline-block shrink-0 object-contain"
     :class="props.class"
     :style="style"
+    draggable="false"
   />
 </template>

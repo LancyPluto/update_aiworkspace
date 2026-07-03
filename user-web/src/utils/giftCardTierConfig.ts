@@ -1,66 +1,104 @@
-import type { BillingCycle } from "@/utils/billingCycleConfig"
-
 export type GiftBadgeVariant = "orange" | "teal" | "muted"
+
+// 会员等级配置（按从低到高排序）
+export const MEMBER_TIERS = [
+  { key: "starter", label: "标准版", minPricePerCredit: 0.015 },
+  { key: "growth", label: "高级版", minPricePerCredit: 0.015 },
+  { key: "pro", label: "进阶版", minPricePerCredit: 0.015 },
+  { key: "flagship", label: "豪华版", minPricePerCredit: 0.015 },
+] as const
+
+// 算力礼品卡的列表价（每算力的原价，用于计算折扣）
+export const GIFT_CARD_LIST_PRICE_PER_CREDIT = 0.020
+
+// 算力礼品卡最优折扣下限（不能比标准版会员礼品卡98折更好）
+export const GIFT_CARD_MIN_DISCOUNT = 0.98
+
+/**
+ * 根据用户的 membershipPlan（套餐代码）判断会员等级索引
+ * @param membershipPlan 用户当前会员套餐代码，如 "monthly_starter"、"yearly_pro"
+ * @returns 0-3 表示等级索引，-1 表示未开通会员
+ */
+export function getUserMemberLevel(membershipPlan: string | null | undefined): number {
+  if (!membershipPlan) return -1
+  const code = membershipPlan.toLowerCase()
+  // 从高到低检查，返回最高匹配等级
+  for (let i = MEMBER_TIERS.length - 1; i >= 0; i--) {
+    if (code.includes(MEMBER_TIERS[i].key)) {
+      return i
+    }
+  }
+  return -1 // 未开通会员
+}
+
+// 判断用户是否可以购买某个等级的礼品卡
+export function canBuyGiftCard(userLevel: number, targetTierIndex: number): boolean {
+  // 只能购买等于或低于自己等级的礼品卡
+  return userLevel >= targetTierIndex && userLevel >= 0
+}
 
 export interface MemberGiftTierConfig {
   key: string
   label: string
   subtitle: string
-  /** 相对月卡×周期原价的礼品卡展示折扣（仅影响划线价，实际成交价仍取套餐接口） */
-  giftDiscountByCycle: Record<BillingCycle, number | null>
-  badgeByCycle: Record<BillingCycle, { text: string; variant: GiftBadgeVariant }>
+  /** 礼品卡折扣（基于会员套餐原价） */
+  giftDiscount: number
+  badge?: { text: string; variant: GiftBadgeVariant }
 }
 
 export const MEMBER_GIFT_TIERS: MemberGiftTierConfig[] = [
   {
-    key: "flagship",
-    label: "黑金会员",
-    subtitle: "旗舰尊享 · 年卡最划算",
-    giftDiscountByCycle: { yearly: 0.63, quarterly: 0.88, monthly: 0.95 },
-    badgeByCycle: {
-      yearly: { text: "限时37折", variant: "orange" },
-      quarterly: { text: "立省12%", variant: "teal" },
-      monthly: { text: "黑金95折", variant: "muted" },
-    },
-  },
-  {
-    key: "pro",
-    label: "钻石会员",
-    subtitle: "专业团队 · 季卡优选",
-    giftDiscountByCycle: { yearly: 0.65, quarterly: 0.9, monthly: 0.97 },
-    badgeByCycle: {
-      yearly: { text: "年卡65折", variant: "orange" },
-      quarterly: { text: "季卡9折", variant: "teal" },
-      monthly: { text: "钻石97折", variant: "muted" },
-    },
+    key: "starter",
+    label: "标准版",
+    subtitle: "适合轻度创作者",
+    giftDiscount: 0.98, // 98折
+    badge: { text: "限时", variant: "muted" },
   },
   {
     key: "growth",
-    label: "铂金会员",
-    subtitle: "日常创作 · 均衡之选",
-    giftDiscountByCycle: { yearly: 0.68, quarterly: 0.91, monthly: null },
-    badgeByCycle: {
-      yearly: { text: "年卡68折", variant: "orange" },
-      quarterly: { text: "季卡91折", variant: "teal" },
-      monthly: { text: "灵活月付", variant: "muted" },
-    },
+    label: "高级版",
+    subtitle: "适合日常创作",
+    giftDiscount: 0.96, // 96折
+    badge: { text: "人气推荐", variant: "teal" },
   },
   {
-    key: "starter",
-    label: "黄金会员",
-    subtitle: "轻度创作 · 入门优选",
-    giftDiscountByCycle: { yearly: 0.7, quarterly: 0.92, monthly: null },
-    badgeByCycle: {
-      yearly: { text: "年卡7折", variant: "orange" },
-      quarterly: { text: "季卡92折", variant: "teal" },
-      monthly: { text: "灵活月付", variant: "muted" },
-    },
+    key: "pro",
+    label: "进阶版",
+    subtitle: "适合专业团队",
+    giftDiscount: 0.94, // 94折
+    badge: { text: "专业之选", variant: "teal" },
+  },
+  {
+    key: "flagship",
+    label: "豪华版",
+    subtitle: "旗舰尊享",
+    giftDiscount: 0.92, // 92折
+    badge: { text: "至尊特权", variant: "orange" },
   },
 ]
 
-export function memberGiftOriginalPrice(price: number, cycle: BillingCycle, tierKey: string) {
-  const tier = MEMBER_GIFT_TIERS.find((item) => item.key === tierKey)
-  const rate = tier?.giftDiscountByCycle[cycle]
-  if (!rate || rate >= 1) return null
-  return price / rate
+/**
+ * 计算礼品卡原价（基于会员套餐价格）
+ * @param memberPackagePrice 会员套餐价格
+ * @param discount 礼品卡折扣
+ */
+export function memberGiftOriginalPrice(memberPackagePrice: number, discount: number): number | null {
+  if (!discount || discount >= 1) return null
+  return memberPackagePrice / discount
+}
+
+/**
+ * 计算算力礼品卡的折扣率（基于固定列表价）
+ * 折扣 = 实际单价 / 列表价单价
+ * 最低不低于 GIFT_CARD_MIN_DISCOUNT（即不能比标准版会员礼品卡98折更好）
+ *
+ * @param priceAmount 礼品卡售价
+ * @param credits 礼品卡算力数
+ * @returns 折扣率（1.0 = 原价，0.98 = 98折）
+ */
+export function getCreditCardDiscount(priceAmount: number, credits: number): number {
+  if (!credits) return 1.0
+  const currentPricePerCredit = priceAmount / credits
+  const discount = currentPricePerCredit / GIFT_CARD_LIST_PRICE_PER_CREDIT
+  return Math.max(discount, GIFT_CARD_MIN_DISCOUNT)
 }

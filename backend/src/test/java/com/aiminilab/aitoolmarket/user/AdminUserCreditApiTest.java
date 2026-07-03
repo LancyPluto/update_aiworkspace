@@ -121,9 +121,10 @@ class AdminUserCreditApiTest {
                                   "reason": "test grant"
                                 }
                                 """))
+                // 管理员手动加算力走礼品卡流程，余额不直接变化
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.balance").value(250))
-                .andExpect(jsonPath("$.data.totalGranted").value(250));
+                .andExpect(jsonPath("$.data.balance").value(200))
+                .andExpect(jsonPath("$.data.totalGranted").value(200));
 
         mockMvc.perform(post("/api/admin/v1/users/{userId}/credits/manual-deduct", 2)
                         .header("Authorization", "Bearer " + adminToken)
@@ -135,14 +136,15 @@ class AdminUserCreditApiTest {
                                 }
                                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.balance").value(230));
+                .andExpect(jsonPath("$.data.balance").value(180));
 
+        // 手动加算力走礼品卡流程不产生 MANUAL_ADD 日志，检查 MANUAL_DEDUCT 日志
         mockMvc.perform(get("/api/admin/v1/users/{userId}/credits/logs", 2)
-                        .param("logType", "MANUAL_ADD")
+                        .param("logType", "MANUAL_DEDUCT")
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1))
-                .andExpect(jsonPath("$.data.list[0].reason").value("test grant"));
+                .andExpect(jsonPath("$.data.list[0].reason").value("test adjust"));
 
         mockMvc.perform(patch("/api/admin/v1/users/{userId}/status", 2)
                         .header("Authorization", "Bearer " + adminToken)

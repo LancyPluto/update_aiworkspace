@@ -258,6 +258,7 @@ class BackendToolBridge:
                     toolCode=tool.toolCode,
                     params=task_params,
                     clientRequestId=f"agent-run-{context.runId}-tool-call-{call.id}",
+                    excludeFrozen=context.creditBudget,
                 )
             )
             task_id = task.taskId

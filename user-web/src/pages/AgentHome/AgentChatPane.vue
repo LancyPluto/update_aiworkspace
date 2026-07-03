@@ -31,7 +31,6 @@ import RunTimeline from "./RunTimeline.vue"
 import { filterUserFacingRunEvents } from "./runTimelineEvents"
 import AgentToolConfirmationList from "./AgentToolConfirmationList.vue"
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
-import CreditRechargeModal from "@/components/CreditRechargeModal.vue"
 import { formatAgentRunFailure } from "@/api/errorMapping"
 import { isCreditInsufficient } from "@/utils/creditInsufficient"
 import {
@@ -194,7 +193,7 @@ const sending = ref(false)
 const uploading = ref(false)
 const removingFileId = ref<number | null>(null)
 const agentError = ref<string | null>(null)
-const creditModalOpen = ref(false)
+
 const rememberTool = ref(true)
 const AGENT_REFERENCE_ATTACHMENT_LIMIT = 8
 
@@ -2222,8 +2221,7 @@ function applyAgentFailure(
     options?.errorMessage ??
     (error instanceof ApiBusinessError ? error.message : error instanceof Error ? error.message : undefined)
   if (isCreditInsufficient(error, errorCode, errorMessage)) {
-    agentError.value = null
-    creditModalOpen.value = true
+    agentError.value = "算力不足，请充值后继续"
     return
   }
   if (error instanceof ApiBusinessError) {
@@ -2498,6 +2496,8 @@ async function settleTerminalRun(runId: number, run: AgentRun) {
   clearStreamingAssistantMessage(runId, { preserveReadableText: true })
   if (run.status === "SUCCESS") {
     animateCompletedAssistantMessage(runId)
+    // 任务成功完成时，触发 credits:updated 事件以更新全局算力显示
+    window.dispatchEvent(new CustomEvent("credits:updated"))
   }
   stopRunStatusWatchdog()
   await scrollBottom()
@@ -3207,11 +3207,7 @@ defineExpose({
           </div>
         </article>
 
-        <CreditRechargeModal
-          v-if="creditModalOpen"
-          @close="creditModalOpen = false"
-          @credits-updated="creditModalOpen = false"
-        />
+
 
         <article v-if="agentError" class="agent-error-card">
           <div class="card-icon error"><AlertTriangle class="h-4 w-4" /></div>

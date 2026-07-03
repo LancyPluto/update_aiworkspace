@@ -17,13 +17,13 @@ import {
   type RechargePaymentChannel,
 } from "@/utils/rechargePayment"
 import GiftCardSection from "@/pages/Billing/GiftCardSection.vue"
-import BillingCycleSwitcher from "@/components/BillingCycleSwitcher.vue"
 import {
   BILLING_CYCLES,
   cycleMonthDivisor,
   cyclePeriodLabel,
   type BillingCycle,
 } from "@/utils/billingCycleConfig"
+import { getUserMemberLevel } from "@/utils/giftCardTierConfig"
 
 const props = defineProps<{
   account: CreditAccount | null
@@ -56,6 +56,10 @@ const mode = ref<'credits' | 'giftcard'>('credits')
 const giftCardPackages = ref<GiftCardPackage[]>([])
 const loadingGiftCards = ref(false)
 const pendingGiftCardPackage = ref<GiftCardPackage | null>(null)
+
+// 用户当前会员等级（0-3），-1表示未开通会员
+// 基于后端返回的 membershipPlan（用户最近一次CREDITED订单的套餐代码）
+const userMemberLevel = computed(() => getUserMemberLevel(auth.user?.membershipPlan))
 
 const TRIAL_PLAN_NAME = "体验版"
 const TRIAL_GRANTED_CREDITS = 200
@@ -464,9 +468,6 @@ onUnmounted(clearPolling)
     </div>
 
     <div v-if="mode === 'credits'" class="space-y-8">
-      <!-- 包年 / 包季 / 包月 切换（即梦风格圆角分段） -->
-      <BillingCycleSwitcher :model-value="activeTab" @update:model-value="onBillingCycleChange" />
-
       <div v-if="loadingPackages" class="rounded-2xl border border-border bg-card px-5 py-12 text-center text-sm text-muted-foreground">
         正在加载套餐...
       </div>
@@ -574,6 +575,7 @@ onUnmounted(clearPolling)
       :gift-card-packages="giftCardPackages"
       :loading="loadingGiftCards || loadingPackages"
       :ordering="ordering"
+      :user-member-level="userMemberLevel"
       @buy-member-package="openPaymentChoice"
       @buy-credit-gift="openGiftCardPayment"
     />
@@ -822,3 +824,5 @@ onUnmounted(clearPolling)
   }
 }
 </style>
+
+
