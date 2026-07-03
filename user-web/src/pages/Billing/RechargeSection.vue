@@ -467,6 +467,26 @@ onUnmounted(clearPolling)
       </button>
     </div>
 
+    <!-- 计费周期切换：按年/按季/按月（仅会员计划） -->
+    <div v-if="mode === 'credits'" class="billing-cycle-tabs" role="tablist" aria-label="订阅周期">
+      <button
+        v-for="tab in BILLING_CYCLES"
+        :key="tab.value"
+        type="button"
+        role="tab"
+        class="billing-cycle-tab"
+        :class="{ 'billing-cycle-tab--active': activeTab === tab.value }"
+        :aria-selected="activeTab === tab.value"
+        @click="onBillingCycleChange(tab.value)"
+      >
+        <span>{{ tab.label }}</span>
+        <span v-if="tab.badge" class="billing-cycle-badge" :class="`billing-cycle-badge--${tab.badgeVariant}`">
+          {{ tab.badge }}
+        </span>
+        <span v-if="tab.hint" class="billing-cycle-hint">{{ tab.hint }}</span>
+      </button>
+    </div>
+
     <div v-if="mode === 'credits'" class="space-y-8">
       <div v-if="loadingPackages" class="rounded-2xl border border-border bg-card px-5 py-12 text-center text-sm text-muted-foreground">
         正在加载套餐...
@@ -812,6 +832,71 @@ onUnmounted(clearPolling)
   height: 3px;
   border-radius: 999px 999px 0 0;
   background: #fff;
+}
+
+/* 计费周期切换标签 */
+.billing-cycle-tabs {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.04);
+  border: 1px solid rgb(255 255 255 / 0.06);
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.billing-cycle-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  padding: 8px 12px;
+  border-radius: 10px;
+  color: rgb(255 255 255 / 0.48);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.billing-cycle-tab:hover {
+  color: rgb(255 255 255 / 0.75);
+  background: rgb(255 255 255 / 0.04);
+}
+
+.billing-cycle-tab--active {
+  background: rgb(255 255 255 / 0.09);
+  color: #fff;
+  font-weight: 600;
+}
+
+.billing-cycle-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+
+.billing-cycle-badge--orange {
+  background: linear-gradient(135deg, #f97316, #ea580c);
+  color: #fff7ed;
+}
+
+.billing-cycle-badge--teal {
+  background: linear-gradient(135deg, #38bdf8, #2563eb);
+  color: #eff6ff;
+}
+
+.billing-cycle-hint {
+  font-size: 10px;
+  color: rgb(255 255 255 / 0.35);
 }
 
 @media (max-width: 560px) {
