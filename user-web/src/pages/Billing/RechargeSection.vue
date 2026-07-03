@@ -17,7 +17,6 @@ import {
   type RechargePaymentChannel,
 } from "@/utils/rechargePayment"
 import GiftCardSection from "@/pages/Billing/GiftCardSection.vue"
-import BillingCycleSwitcher from "@/components/BillingCycleSwitcher.vue"
 import {
   BILLING_CYCLES,
   cycleMonthDivisor,
@@ -469,9 +468,6 @@ onUnmounted(clearPolling)
     </div>
 
     <div v-if="mode === 'credits'" class="space-y-8">
-      <!-- 包年 / 包季 / 包月 切换（即梦风格圆角分段） -->
-      <BillingCycleSwitcher :model-value="activeTab" @update:model-value="onBillingCycleChange" />
-
       <div v-if="loadingPackages" class="rounded-2xl border border-border bg-card px-5 py-12 text-center text-sm text-muted-foreground">
         正在加载套餐...
       </div>
@@ -828,3 +824,5 @@ onUnmounted(clearPolling)
   }
 }
 </style>
+
+

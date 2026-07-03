@@ -3,8 +3,8 @@ export type GiftBadgeVariant = "orange" | "teal" | "muted"
 // 会员等级配置（按从低到高排序）
 export const MEMBER_TIERS = [
   { key: "starter", label: "标准版", minPricePerCredit: 0.015 },
-  { key: "growth", label: "进阶版", minPricePerCredit: 0.015 },
-  { key: "pro", label: "高级版", minPricePerCredit: 0.015 },
+  { key: "growth", label: "高级版", minPricePerCredit: 0.015 },
+  { key: "pro", label: "进阶版", minPricePerCredit: 0.015 },
   { key: "flagship", label: "豪华版", minPricePerCredit: 0.015 },
 ] as const
 
@@ -52,18 +52,18 @@ export const MEMBER_GIFT_TIERS: MemberGiftTierConfig[] = [
     label: "标准版",
     subtitle: "适合轻度创作者",
     giftDiscount: 0.98, // 98折
-    badge: { text: "入门首选", variant: "muted" },
+    badge: { text: "限时", variant: "muted" },
   },
   {
     key: "growth",
-    label: "进阶版",
+    label: "高级版",
     subtitle: "适合日常创作",
     giftDiscount: 0.96, // 96折
     badge: { text: "人气推荐", variant: "teal" },
   },
   {
     key: "pro",
-    label: "高级版",
+    label: "进阶版",
     subtitle: "适合专业团队",
     giftDiscount: 0.94, // 94折
     badge: { text: "专业之选", variant: "teal" },

@@ -262,6 +262,26 @@ function canBuyTier(tierIndex: number): boolean {
             <p class="mt-4 text-xs text-slate-500">
               含 {{ tierPackage(tier.key)!.credits.toLocaleString() }} 算力
             </p>
+            <div class="mt-2 space-y-1 text-[11px] leading-relaxed text-slate-400">
+              <p>
+                <span class="text-slate-500">使用期限：</span>
+                <span class="font-medium text-white/85">不限时使用</span>
+              </p>
+              <p>
+                <span class="text-slate-500">扣减规则：</span>
+                <span class="font-medium text-white/85">兑换后优先消耗会员套餐算力，用尽后再扣礼品卡余额</span>
+              </p>
+            </div>
+            <div class="mt-2 space-y-1 text-[11px] leading-relaxed text-slate-400">
+              <p>
+                <span class="text-slate-500">使用期限：</span>
+                <span class="font-medium text-white/85">不限时使用</span>
+              </p>
+              <p>
+                <span class="text-slate-500">扣减规则：</span>
+                <span class="font-medium text-white/85">兑换后优先消耗会员套餐算力，用尽后再扣礼品卡余额</span>
+              </p>
+            </div>
 
             <div class="mt-5 flex items-end justify-between gap-3 border-t border-white/8 pt-4">
               <div>
