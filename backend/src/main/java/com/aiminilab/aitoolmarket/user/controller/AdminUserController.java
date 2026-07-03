@@ -73,14 +73,13 @@ public class AdminUserController {
     @PostMapping("/{userId}/credits/manual-add")
     public ApiResponse<CreditAccountResponse> manualAdd(@PathVariable Long userId,
                                                         @Valid @RequestBody ManualCreditRequest request) {
-        // 使用 AdminUserService 的手动添加方法，该方法会创建礼品卡而不是直接加余额
+        // 管理员手动加算力：创建礼品卡（UNUSED），用户需手动兑换后才到账
         adminUserService.manualAddCredits(
                 userId,
                 request.amount(),
                 request.reason(),
                 AuthContext.get().userId()
         );
-        // 返回更新后的账户信息
         return ApiResponse.success(creditService.account(userId));
     }
 
