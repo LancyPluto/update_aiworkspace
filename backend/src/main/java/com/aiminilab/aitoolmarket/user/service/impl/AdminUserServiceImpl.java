@@ -15,6 +15,7 @@ import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
 import com.aiminilab.aitoolmarket.user.service.AdminUserService;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -80,7 +81,7 @@ public class AdminUserServiceImpl implements AdminUserService {
      * 查找或创建管理员专用的默认礼品卡套餐
      */
     private GiftCardPackage findOrCreateAdminGiftPackage(int credits) {
-        // 尝试查找已有的 admin_default 套餐
+        // 尝试查找已有的 admin_default 套餐（用于任意金额的管理员赠送）
         List<GiftCardPackage> packages = giftCardPackageMapper.findActive();
         for (GiftCardPackage pkg : packages) {
             if ("admin_default".equals(pkg.getPackageCode())) {
@@ -89,10 +90,20 @@ public class AdminUserServiceImpl implements AdminUserService {
         }
         
         // 如果不存在，创建一个新的默认套餐
-        // 注意：这里需要手动插入，因为 Mapper 没有 create 方法
-        // 实际生产环境应该在数据库初始化时就创建好这个套餐
-        throw new BusinessException(ErrorCode.PARAM_ERROR, 
-                "未找到管理员默认礼品卡套餐，请先在数据库中创建 package_code='admin_default' 的礼品卡套餐");
+        // 这个套餐的 credits 和 price 都是0，实际金额由 createGiftCardFromOrder 的参数决定
+        GiftCardPackage defaultPackage = new GiftCardPackage();
+        defaultPackage.setPackageCode("admin_default");
+        defaultPackage.setPackageName("管理员赠送礼品卡");
+        defaultPackage.setCredits(credits); // 设置为当前要赠送的金额
+        defaultPackage.setPriceAmount(BigDecimal.ZERO); // 价格为0，因为是管理员赠送
+        defaultPackage.setCurrency("CNY");
+        defaultPackage.setCardTheme("green");
+        defaultPackage.setStatus("ACTIVE");
+        defaultPackage.setSortOrder(999);
+        
+        giftCardPackageMapper.insert(defaultPackage);
+        
+        return defaultPackage;
     }
 
     private AdminUserSummaryResponse toSummary(User user) {

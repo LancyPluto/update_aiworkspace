@@ -17,6 +17,10 @@ public record UserProfileResponse(
         String membershipPlan
 ) {
     public static UserProfileResponse from(User user) {
+        return from(user, null);
+    }
+
+    public static UserProfileResponse from(User user, String membershipPlan) {
         return new UserProfileResponse(
                 user.getId(),
                 user.getUsername(),
@@ -29,7 +33,7 @@ public record UserProfileResponse(
                 user.getStatus(),
                 user.getPhone(),
                 user.getEmail(),
-                null // membershipPlan will be set by service layer
+                membershipPlan
         );
     }
 }

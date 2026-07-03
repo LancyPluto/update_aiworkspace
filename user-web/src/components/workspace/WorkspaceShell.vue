@@ -71,7 +71,7 @@ const userName = computed(() => {
   const readablePrefix = nickname.match(/^[\w\s.-]{2,}/)?.[0]?.trim()
   return readablePrefix || "User"
 })
-const availableCredits = computed(() => credit.value?.available ?? null)
+const availableCredits = computed(() => credit.value?.balance ?? null)
 const customerServiceQrSrc = computed(() => customerService.value.qrCodeUrl?.trim() || DEFAULT_CUSTOMER_SERVICE_QR)
 
 async function loadCreditAccount() {

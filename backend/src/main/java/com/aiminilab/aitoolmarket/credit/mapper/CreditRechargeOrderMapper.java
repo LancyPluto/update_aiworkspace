@@ -112,6 +112,7 @@ public interface CreditRechargeOrderMapper extends BaseMapper<CreditRechargeOrde
             WHERE cro.user_id = #{userId}
               AND cro.status = 'CREDITED'
               AND crp.status = 'ACTIVE'
+              AND (cro.order_type IS NULL OR cro.order_type = 'CREDITS')
             ORDER BY cro.credited_at DESC, cro.id DESC
             LIMIT 1
             """)

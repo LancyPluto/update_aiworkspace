@@ -21,7 +21,9 @@ public record RechargeOrderResponse(
         LocalDateTime creditedAt,
         LocalDateTime closedAt,
         LocalDateTime expiresAt,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        String orderType,
+        Long giftCardPackageId
 ) {
     public static RechargeOrderResponse from(CreditRechargeOrder order) {
         return new RechargeOrderResponse(
@@ -40,7 +42,9 @@ public record RechargeOrderResponse(
                 order.getCreditedAt(),
                 order.getClosedAt(),
                 order.getExpiresAt(),
-                order.getCreatedAt()
+                order.getCreatedAt(),
+                order.getOrderType(),
+                order.getGiftCardPackageId()
         );
     }
 }
