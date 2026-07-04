@@ -583,14 +583,60 @@ def _user_explicit_override_for_locked_field(field, user_message: str | None) ->
     if not user_message or not (field.fieldKey or "").strip():
         return None
     key = field.fieldKey.lower()
-    if "quality" not in key:
+    if "quality" in key:
+        explicit = _explicit_quality_preference_from_message(user_message)
+        if explicit is None:
+            return None
+        if _field_accepts_value(field, explicit):
+            return explicit
         return None
-    explicit = _explicit_quality_preference_from_message(user_message)
-    if explicit is None:
+    if _is_count_field(field):
+        explicit_count = _explicit_image_count_from_message(user_message)
+        if explicit_count is not None and _field_accepts_value(field, str(explicit_count)):
+            return explicit_count
         return None
-    if _field_accepts_value(field, explicit):
-        return explicit
+    if _is_aspect_ratio_field(field):
+        explicit_ratio = _explicit_aspect_ratio_from_message(user_message)
+        if explicit_ratio and _field_accepts_value(field, explicit_ratio):
+            return explicit_ratio
     return None
+
+
+def _is_count_field(field) -> bool:
+    text = f"{getattr(field, 'fieldKey', '')} {getattr(field, 'fieldName', '')}".lower()
+    return "negative" not in text and any(token in text for token in ("count", "num", "number", "张数", "数量"))
+
+
+def _is_aspect_ratio_field(field) -> bool:
+    text = f"{getattr(field, 'fieldKey', '')} {getattr(field, 'fieldName', '')}".lower()
+    return any(token in text for token in ("aspect", "ratio", "比例", "画幅"))
+
+
+def _explicit_image_count_from_message(message: str) -> int | None:
+    compact = (message or "").translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+    match = re.search(r"(?<![\d:：])(\d{1,2})\s*(?:张|幅|个)(?:图|图片|影像|作品)?", compact)
+    if match:
+        return max(1, int(match.group(1)))
+    chinese_match = re.search(r"([一二两三四五六七八九十])\s*(?:张|幅|个)(?:图|图片|影像|作品)?", compact)
+    if chinese_match:
+        values = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+        return values.get(chinese_match.group(1))
+    english_match = re.search(r"\b(\d{1,2})\s*(?:images?|pictures?|photos?)\b", compact, flags=re.IGNORECASE)
+    if english_match:
+        return max(1, int(english_match.group(1)))
+    return None
+
+
+def _explicit_aspect_ratio_from_message(message: str) -> str | None:
+    compact = (message or "").translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+    match = re.search(r"(?<!\d)(\d{1,2})\s*[:：]\s*(\d{1,2})(?!\d)", compact)
+    if not match:
+        return None
+    width = int(match.group(1))
+    height = int(match.group(2))
+    if width <= 0 or height <= 0:
+        return None
+    return f"{width}:{height}"
 
 
 def _explicit_quality_preference_from_message(message: str) -> str | None:

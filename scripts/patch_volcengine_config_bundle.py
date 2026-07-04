@@ -655,28 +655,6 @@ def _image_fields() -> list[dict]:
     order += 1
     fields.append(
         _radio_field(
-            "outputFormat",
-            "输出格式",
-            [{"label": "PNG", "value": "png"}, {"label": "JPEG", "value": "jpeg"}],
-            order,
-            default="jpeg",
-            ui_tier="advanced",
-        )
-    )
-    order += 1
-    fields.append(
-        _radio_field(
-            "responseFormat",
-            "返回格式",
-            [{"label": "URL", "value": "url"}, {"label": "Base64", "value": "b64_json"}],
-            order,
-            default="url",
-            ui_tier="advanced",
-        )
-    )
-    order += 1
-    fields.append(
-        _radio_field(
             "watermark",
             "水印",
             [{"label": "关闭", "value": "false"}, {"label": "开启", "value": "true"}],

@@ -62,6 +62,7 @@ import { buildTaskResultBlocks, formatAudioDuration, resolveAudioTracks } from "
 import { isCoreField } from "@/utils/fieldUiMeta"
 import { consumeDashboardPendingAsset } from "@/utils/assetReplay"
 import { cleanToolDisplayText, toolDisplayDescription } from "@/utils/toolDisplayText"
+import { recommendToolsForAsset as recommendAssetTools } from "@/utils/assetToolRecommendations"
 import { formatLiveCreditEstimate, formatMarketplaceCostLabel, usesVariableWorkflowCredits } from "@/utils/toolCreditLabel"
 import { useTaskEstimate, type UseTaskEstimateInput } from "@/composables/useTaskEstimate"
 import { randomUUID } from "@/utils/randomUUID"
@@ -113,6 +114,7 @@ const primaryReferenceInfo = ref<PrimaryReferenceMaterialInfo>({
 })
 const composerMediaSlots = ref<ComposerMediaSlot[]>([])
 const composerRootRef = ref<HTMLElement | null>(null)
+const promptTextareaRef = ref<HTMLTextAreaElement | null>(null)
 const composerOpen = ref(false)
 const composerManuallyClosed = ref(false)
 const replayParams = ref<Record<string, unknown> | null>(null)
@@ -402,6 +404,14 @@ watch(
   },
 )
 
+watch(composerOpen, async () => {
+  await nextTick()
+  resizePromptTextarea()
+  updateComposerClearance()
+  queueComposerBottomStick()
+  updateHistoryScrollBottomVisibility()
+})
+
 const primaryAudioStatusItem = computed(() => audioStatusMaterials.value.find((item) => isTaskRunning(item.task.status)) || audioStatusMaterials.value[0] || null)
 const audioRows = computed<DashboardAudioTrack[]>(() =>
   audioTaskMaterials.value.flatMap((item) => {
@@ -457,9 +467,16 @@ watch(
   () => route.query.prompt,
   (value) => {
     const raw = Array.isArray(value) ? value[0] : value
-    if (typeof raw === "string") promptText.value = raw
+    if (typeof raw === "string") {
+      promptText.value = raw
+      void syncPromptTextareaSize()
+    }
   },
 )
+
+watch(promptText, () => {
+  void syncPromptTextareaSize()
+})
 
 watch(
   () => route.query.sourcePost,
@@ -589,6 +606,23 @@ function selectToolByCode(toolCode: string, openComposer = false) {
 function expandComposer() {
   composerManuallyClosed.value = false
   composerOpen.value = true
+  void nextTick(() => resizePromptTextarea())
+}
+
+function resizePromptTextarea() {
+  const textarea = promptTextareaRef.value
+  if (!textarea) return
+  const maxHeight = 260
+  textarea.style.height = "auto"
+  const nextHeight = Math.min(textarea.scrollHeight, maxHeight)
+  textarea.style.height = `${nextHeight}px`
+  textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden"
+  updateComposerDockInset()
+}
+
+async function syncPromptTextareaSize() {
+  await nextTick()
+  resizePromptTextarea()
 }
 
 function updateComposerDockInset() {
@@ -1248,6 +1282,16 @@ function historyBottomDistance(container = resolveHistoryScrollContainer()) {
   return Math.max(0, container.scrollHeight - container.scrollTop - container.clientHeight)
 }
 
+function scrollHistoryToBottom(behavior: ScrollBehavior = "auto") {
+  const container = resolveHistoryScrollContainer()
+  if (container) {
+    container.scrollTo({ top: container.scrollHeight, behavior })
+  } else {
+    historyFeedEndRef.value?.scrollIntoView({ behavior, block: "end" })
+  }
+  showHistoryScrollBottom.value = false
+}
+
 function updateHistoryScrollBottomVisibility() {
   showHistoryScrollBottom.value = isHistoryFeedView.value && historyBottomDistance() > 300
 }
@@ -1520,17 +1564,10 @@ function openAssetPreview(item: { task: TaskDetail; blocks: ResultBlock[]; modal
 }
 
 function recommendToolsForAsset(asset: AssetPreviewItem): AssetPreviewRecommendation[] {
-  const target = asset.kind === "image" ? "IMAGE" : asset.kind === "video" ? "VIDEO" : asset.kind === "audio" ? "AUDIO" : ""
-  const keyword = asset.kind === "image" ? /图|图片|影像|photo|image|img|改图|参考/i : asset.kind === "video" ? /视频|短片|video|clip|movie/i : /音频|音乐|audio|voice|tts/i
-  const matches = tools.value.filter((tool) => {
-    const input = normalizeModality(tool.inputModality)
-    const text = `${tool.toolName} ${tool.description || ""} ${cleanToolDisplayText(tool.configNote)} ${tool.toolCode}`
-    return (
-      (target && (input.includes(target) || input.includes("MULTIMODAL") || input.includes("FILE"))) ||
-      keyword.test(text)
-    )
+  return recommendAssetTools(asset, tools.value, {
+    tasks: tasks.value,
+    fallbackTools: currentTools.value,
   })
-  return (matches.length ? matches : currentTools.value.length ? currentTools.value : tools.value).slice(0, 8)
 }
 
 function useAssetWithTool(tool: AssetPreviewRecommendation, asset: AssetPreviewItem) {
@@ -1740,11 +1777,13 @@ watch(
 onMounted(async () => {
   window.addEventListener("scroll", handleDashboardScroll, true)
   window.addEventListener("pointerdown", handleDashboardPointerDown, true)
+  window.addEventListener("resize", resizePromptTextarea)
   const savedHistoryView = localStorage.getItem(HISTORY_VIEW_KEY)
   if (savedHistoryView === "cards" || savedHistoryView === "feed") historyView.value = savedHistoryView
   await loadDashboard()
   setupHistoryObserver()
   await nextTick()
+  resizePromptTextarea()
   setupComposerResizeObserver()
   if (isHistoryFeedView.value) scrollHistoryFeedToBottom("auto")
 })
@@ -1752,8 +1791,11 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener("scroll", handleDashboardScroll, true)
   window.removeEventListener("pointerdown", handleDashboardPointerDown, true)
+  window.removeEventListener("resize", resizePromptTextarea)
   teardownComposerResizeObserver()
   historyObserver?.disconnect()
+  composerResizeObserver?.disconnect()
+  composerResizeObserver = null
   for (const timer of taskPollTimers.values()) window.clearInterval(timer)
   taskPollTimers.clear()
   stopProgressClock()
@@ -2438,8 +2480,8 @@ onUnmounted(() => {
                         :poster="resolveOssVideoPosterUrl(videoUrlForBlocks(item.blocks))"
                         controls
                         playsinline
-                        preload="none"
-                        class="max-h-[420px] w-full rounded-2xl bg-black object-contain"
+                        preload="metadata"
+                        class="dashboard-feed-video"
                         @loadedmetadata="handleHistoryFeedMediaLoaded"
                       />
 
@@ -2991,11 +3033,13 @@ onUnmounted(() => {
 
                 <div class="dashboard-pollo-composer__prompt min-w-0 flex-1">
                   <textarea
+                    ref="promptTextareaRef"
                     v-model="promptText"
                     rows="2"
                     class="dashboard-pollo-textarea"
                     :placeholder="coreFieldPlaceholder"
                     @focus="expandComposer"
+                    @input="resizePromptTextarea"
                   />
                 </div>
               </div>
@@ -3190,6 +3234,11 @@ onUnmounted(() => {
 
 <style scoped>
 /* dashboard 局部样式 */
+.dashboard-main {
+  padding-bottom: max(10rem, var(--dashboard-composer-clearance, 10rem));
+  scroll-padding-bottom: max(10rem, var(--dashboard-composer-clearance, 10rem));
+}
+
 .dashboard-credit-estimate {
   display: inline-flex;
   align-items: center;
@@ -3212,6 +3261,275 @@ onUnmounted(() => {
 .audio-wave-hit {
   min-height: 32px;
   cursor: pointer;
+}
+
+.dashboard-progress-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.dashboard-progress-stack--feed {
+  width: 100%;
+  max-width: 100%;
+  align-items: start;
+  grid-template-columns: 1fr;
+}
+
+.dashboard-progress-stack--feed.dashboard-progress-stack--multi {
+  width: min(100%, 100%);
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+}
+
+.dashboard-progress-stack--card {
+  width: 100%;
+  grid-template-columns: 1fr;
+}
+
+.dashboard-progress-stack--card.dashboard-progress-stack--multi {
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  padding: 8px;
+}
+
+.dashboard-progress-stack--card.dashboard-progress-stack--multi .dashboard-progress-preview--card {
+  min-height: 150px;
+  border: 1px solid rgb(255 255 255 / 0.075);
+  border-radius: 14px;
+}
+
+.dashboard-progress-stack--multi :deep(.generation-loading-preview) {
+  width: 100%;
+  max-height: none;
+}
+
+.dashboard-progress-stack--card.dashboard-progress-stack--multi :deep(.generation-loading-preview) {
+  min-height: 150px;
+  border-radius: 14px;
+}
+
+.dashboard-progress-preview {
+  --dashboard-loader-primary-rgb: var(--brand-primary-rgb);
+  --dashboard-loader-secondary-rgb: var(--brand-secondary-rgb);
+  --dashboard-loader-tertiary-rgb: var(--brand-tertiary-rgb);
+  position: relative;
+  display: flex;
+  overflow: hidden;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 0.075);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 46% 42%, rgb(var(--dashboard-loader-primary-rgb) / 0.18), transparent 32%),
+    radial-gradient(circle at 62% 54%, rgb(var(--dashboard-loader-secondary-rgb) / 0.12), transparent 34%),
+    linear-gradient(145deg, #23232a, #141419);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.045),
+    inset 0 0 56px rgb(var(--dashboard-loader-primary-rgb) / 0.055);
+}
+
+.dashboard-progress-preview::before {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.025), transparent 34%),
+    linear-gradient(0deg, rgb(0 0 0 / 0.24), transparent 54%);
+  content: "";
+}
+
+.dashboard-progress-preview.is-error {
+  border-color: rgb(248 113 113 / 0.22);
+  background:
+    radial-gradient(circle at 48% 42%, rgb(248 113 113 / 0.14), transparent 34%),
+    linear-gradient(145deg, #272126, #151417);
+}
+
+.dashboard-progress-preview--feed {
+  min-width: 0;
+  margin-top: 2px;
+}
+
+.dashboard-progress-preview--card {
+  width: 100%;
+  min-height: 180px;
+  border-radius: 0;
+  border-width: 0;
+}
+
+.dashboard-progress-top {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dashboard-progress-status,
+.dashboard-progress-cancel {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dashboard-progress-status {
+  color: var(--brand-active-text);
+  background: var(--brand-softer);
+  box-shadow: inset 0 0 0 1px var(--brand-border);
+}
+
+.dashboard-progress-status.is-error {
+  color: rgb(254 202 202);
+  background: rgb(239 68 68 / 0.14);
+  box-shadow: inset 0 0 0 1px rgb(248 113 113 / 0.22);
+}
+
+.dashboard-progress-cancel {
+  color: rgb(255 255 255 / 0.74);
+  background: rgb(255 255 255 / 0.09);
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.dashboard-progress-cancel:hover:not(:disabled) {
+  color: #fff;
+  background: rgb(255 255 255 / 0.15);
+}
+
+.dashboard-progress-cancel:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.dashboard-progress-ratio {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.34);
+  padding: 4px 8px;
+  color: rgb(255 255 255 / 0.46);
+  font-size: 11px;
+  font-weight: 600;
+  backdrop-filter: blur(12px);
+}
+
+.dashboard-progress-preview--card .dashboard-progress-ratio {
+  top: auto;
+  right: 14px;
+  bottom: 12px;
+}
+
+.dashboard-progress-center {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: min(72%, 280px);
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.dashboard-progress-loader {
+  display: inline-flex;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.dashboard-progress-loader i {
+  display: block;
+  width: 6px;
+  height: 22px;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    rgb(var(--dashboard-loader-primary-rgb) / 0.98),
+    rgb(var(--dashboard-loader-tertiary-rgb) / 0.82)
+  );
+  box-shadow: 0 0 16px rgb(var(--dashboard-loader-primary-rgb) / 0.34);
+  animation: dashboard-progress-pulse 850ms ease-in-out infinite;
+}
+
+.dashboard-progress-loader i:nth-child(2) {
+  background: linear-gradient(
+    180deg,
+    rgb(var(--dashboard-loader-secondary-rgb) / 0.96),
+    rgb(var(--dashboard-loader-primary-rgb) / 0.86)
+  );
+  animation-delay: 110ms;
+}
+
+.dashboard-progress-loader i:nth-child(3) {
+  background: linear-gradient(
+    180deg,
+    rgb(var(--dashboard-loader-tertiary-rgb) / 0.96),
+    rgb(var(--dashboard-loader-secondary-rgb) / 0.82)
+  );
+  animation-delay: 220ms;
+}
+
+.dashboard-progress-preview.is-error .dashboard-progress-loader i {
+  background: linear-gradient(180deg, rgb(248 113 113 / 0.98), rgb(251 146 60 / 0.78));
+  box-shadow: 0 0 16px rgb(248 113 113 / 0.28);
+}
+
+.dashboard-progress-center p {
+  margin-top: 10px;
+  max-width: 100%;
+  color: rgb(255 255 255 / 0.86);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.dashboard-progress-center small {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 6px;
+  max-width: 100%;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: rgb(255 255 255 / 0.45);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.dashboard-progress-rail {
+  overflow: hidden;
+  width: min(132px, 100%);
+  height: 4px;
+  margin-top: 14px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.13);
+}
+
+.dashboard-progress-rail span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand-progress-gradient);
+  transition: width 240ms ease;
+}
+
+.dashboard-progress-rail span.is-error {
+  background: rgb(248 113 113);
+}
+
+.dashboard-progress-center em {
+  margin-top: 8px;
+  color: rgb(255 255 255 / 0.38);
+  font-size: 11px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
 }
 
 .dashboard-history-grid {
@@ -3302,6 +3620,20 @@ onUnmounted(() => {
   border-radius: 12px;
   background: #050507;
   box-shadow: 0 14px 36px rgb(0 0 0 / 0.18);
+}
+
+.dashboard-feed-video {
+  display: block;
+  width: min(620px, 100%);
+  max-height: min(360px, 54vh);
+  aspect-ratio: 16 / 9;
+  border: 1px solid rgb(255 255 255 / 0.06);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.055), rgb(255 255 255 / 0.025)),
+    #050507;
+  box-shadow: 0 14px 36px rgb(0 0 0 / 0.18);
+  object-fit: contain;
 }
 
 .dashboard-feed-action {
@@ -3473,6 +3805,19 @@ onUnmounted(() => {
 
 .dashboard-history-grid > .history-card-pending {
   min-height: 0;
+}
+
+@keyframes dashboard-progress-pulse {
+  0%,
+  100% {
+    height: 14px;
+    opacity: 0.64;
+  }
+
+  50% {
+    height: 26px;
+    opacity: 1;
+  }
 }
 
 @media (max-width: 1280px) {
@@ -3731,14 +4076,17 @@ onUnmounted(() => {
 
 .dashboard-pollo-textarea {
   min-height: 64px;
+  max-height: 260px;
   width: 100%;
   resize: none;
+  overflow-y: hidden;
   background: transparent;
   padding: 4px 0;
   font-size: 15px;
   line-height: 1.65;
   color: white;
   outline: none;
+  transition: height 120ms ease;
 }
 
 .dashboard-pollo-textarea::placeholder {

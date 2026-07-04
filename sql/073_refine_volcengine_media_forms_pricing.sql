@@ -211,18 +211,6 @@ FROM (
   FROM tool_field_schemas s JOIN ai_tools t ON t.id = s.tool_id
   WHERE t.tool_code = 'volcengine-image' AND s.schema_version = 'v1' AND s.status = 'ACTIVE'
   UNION ALL
-  SELECT s.id, 'outputFormat', '输出格式', 'radio', NULL,
-         JSON_OBJECT('uiTier','advanced','defaultValue','jpeg','options',JSON_ARRAY(JSON_OBJECT('label','PNG','value','png'),JSON_OBJECT('label','JPEG','value','jpeg'))),
-         NULL, 0, 0, 0, 'jpeg', 'default', 'LOW', 9
-  FROM tool_field_schemas s JOIN ai_tools t ON t.id = s.tool_id
-  WHERE t.tool_code = 'volcengine-image' AND s.schema_version = 'v1' AND s.status = 'ACTIVE'
-  UNION ALL
-  SELECT s.id, 'responseFormat', '返回格式', 'radio', NULL,
-         JSON_OBJECT('uiTier','advanced','defaultValue','url','options',JSON_ARRAY(JSON_OBJECT('label','URL','value','url'),JSON_OBJECT('label','Base64','value','b64_json'))),
-         NULL, 0, 0, 0, 'url', 'default', 'LOW', 10
-  FROM tool_field_schemas s JOIN ai_tools t ON t.id = s.tool_id
-  WHERE t.tool_code = 'volcengine-image' AND s.schema_version = 'v1' AND s.status = 'ACTIVE'
-  UNION ALL
   SELECT s.id, 'watermark', '水印', 'radio', NULL,
          JSON_OBJECT('uiTier','advanced','defaultValue','false','options',JSON_ARRAY(JSON_OBJECT('label','关闭','value','false'),JSON_OBJECT('label','开启','value','true'))),
          NULL, 0, 0, 0, 'false', 'default', 'LOW', 11
