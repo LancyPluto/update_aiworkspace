@@ -417,7 +417,7 @@ def test_openai_images_gateway_handler_reports_image_tokens() -> None:
     assert client.calls[0]["model"] == "openai/gpt-image-2"
     assert client.calls[0]["quality"] == "low", client.calls
     assert client.calls[0]["style"] == "natural", client.calls
-    assert client.calls[0]["output_format"] == "url", client.calls
+    assert "output_format" not in client.calls[0], client.calls
     assert "Style:" not in client.calls[0]["prompt"], client.calls
 
 
@@ -460,7 +460,7 @@ def test_openai_images_client_parses_url_and_usage() -> None:
     assert posted["json"]["model"] == "openai/gpt-image-2", posted
     assert posted["json"]["quality"] == "medium", posted
     assert posted["json"]["style"] == "natural", posted
-    assert posted["json"]["output_format"] == "url", posted
+    assert "output_format" not in posted["json"], posted
     assert posted["timeout"] == (10, 300), posted
     assert client.last_usage == {"promptTokens": 12, "completionTokens": 2048, "totalTokens": 2060}
 

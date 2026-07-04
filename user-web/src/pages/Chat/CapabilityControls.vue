@@ -235,6 +235,11 @@ function isAspectRatioField(field: ToolField): boolean {
   return field.fieldType === "aspect_ratio" || field.fieldKey === "aspectRatio" || field.fieldKey === "aspect_ratio" || field.fieldKey === "imageRatio"
 }
 
+function isTransportFormatField(field: ToolField): boolean {
+  const key = field.fieldKey.trim().toLowerCase()
+  return key === "outputformat" || key === "output_format" || key === "responseformat" || key === "response_format"
+}
+
 function normalizeAspectRatio(value: unknown): string {
   const normalized = String(value ?? "")
     .trim()
@@ -464,6 +469,7 @@ const configuredFields = computed(() =>
     .filter((field) => field !== primaryReferenceField.value)
     .filter((field) => !composerSlotFieldKeys.value.has(field.fieldKey))
     .filter((field) => !isAspectRatioField(field))
+    .filter((field) => !isTransportFormatField(field))
     .filter((field) => isFieldVisible(field, state.value.fields)),
 )
 

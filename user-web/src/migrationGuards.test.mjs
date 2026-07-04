@@ -515,6 +515,15 @@ test("suno custom mode remains visible in capability controls", async () => {
   assert.match(capabilityControls, /@click="setCustomModeValue\(optionValue\(option\)\)"/)
 })
 
+test("capability controls hide image transport format fields", async () => {
+  const capabilityControls = await readSource("pages/Chat/CapabilityControls.vue")
+
+  assert.match(capabilityControls, /function isTransportFormatField/)
+  assert.match(capabilityControls, /key === "outputformat"/)
+  assert.match(capabilityControls, /key === "responseformat"/)
+  assert.match(capabilityControls, /\.filter\(\(field\) => !isTransportFormatField\(field\)\)/)
+})
+
 test("agent tool picker exposes disable and whitelist controls", async () => {
   const agentApi = await readSource("api/agentApi.ts")
   const types = await readSource("api/types.ts")

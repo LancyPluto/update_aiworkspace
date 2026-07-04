@@ -114,6 +114,7 @@ const primaryReferenceInfo = ref<PrimaryReferenceMaterialInfo>({
 })
 const composerMediaSlots = ref<ComposerMediaSlot[]>([])
 const composerRootRef = ref<HTMLElement | null>(null)
+const promptTextareaRef = ref<HTMLTextAreaElement | null>(null)
 const composerOpen = ref(false)
 const composerManuallyClosed = ref(false)
 const replayParams = ref<Record<string, unknown> | null>(null)
@@ -405,6 +406,7 @@ watch(
 
 watch(composerOpen, async () => {
   await nextTick()
+  resizePromptTextarea()
   updateComposerClearance()
   queueComposerBottomStick()
   updateHistoryScrollBottomVisibility()
@@ -465,9 +467,16 @@ watch(
   () => route.query.prompt,
   (value) => {
     const raw = Array.isArray(value) ? value[0] : value
-    if (typeof raw === "string") promptText.value = raw
+    if (typeof raw === "string") {
+      promptText.value = raw
+      void syncPromptTextareaSize()
+    }
   },
 )
+
+watch(promptText, () => {
+  void syncPromptTextareaSize()
+})
 
 watch(
   () => route.query.sourcePost,
@@ -597,6 +606,23 @@ function selectToolByCode(toolCode: string, openComposer = false) {
 function expandComposer() {
   composerManuallyClosed.value = false
   composerOpen.value = true
+  void nextTick(() => resizePromptTextarea())
+}
+
+function resizePromptTextarea() {
+  const textarea = promptTextareaRef.value
+  if (!textarea) return
+  const maxHeight = 260
+  textarea.style.height = "auto"
+  const nextHeight = Math.min(textarea.scrollHeight, maxHeight)
+  textarea.style.height = `${nextHeight}px`
+  textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden"
+  updateComposerDockInset()
+}
+
+async function syncPromptTextareaSize() {
+  await nextTick()
+  resizePromptTextarea()
 }
 
 function updateComposerDockInset() {
@@ -1751,11 +1777,13 @@ watch(
 onMounted(async () => {
   window.addEventListener("scroll", handleDashboardScroll, true)
   window.addEventListener("pointerdown", handleDashboardPointerDown, true)
+  window.addEventListener("resize", resizePromptTextarea)
   const savedHistoryView = localStorage.getItem(HISTORY_VIEW_KEY)
   if (savedHistoryView === "cards" || savedHistoryView === "feed") historyView.value = savedHistoryView
   await loadDashboard()
   setupHistoryObserver()
   await nextTick()
+  resizePromptTextarea()
   setupComposerResizeObserver()
   if (isHistoryFeedView.value) scrollHistoryFeedToBottom("auto")
 })
@@ -1763,6 +1791,7 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener("scroll", handleDashboardScroll, true)
   window.removeEventListener("pointerdown", handleDashboardPointerDown, true)
+  window.removeEventListener("resize", resizePromptTextarea)
   teardownComposerResizeObserver()
   historyObserver?.disconnect()
   composerResizeObserver?.disconnect()
@@ -2451,8 +2480,8 @@ onUnmounted(() => {
                         :poster="resolveOssVideoPosterUrl(videoUrlForBlocks(item.blocks))"
                         controls
                         playsinline
-                        preload="none"
-                        class="max-h-[420px] w-full rounded-2xl bg-black object-contain"
+                        preload="metadata"
+                        class="dashboard-feed-video"
                         @loadedmetadata="handleHistoryFeedMediaLoaded"
                       />
 
@@ -3004,11 +3033,13 @@ onUnmounted(() => {
 
                 <div class="dashboard-pollo-composer__prompt min-w-0 flex-1">
                   <textarea
+                    ref="promptTextareaRef"
                     v-model="promptText"
                     rows="2"
                     class="dashboard-pollo-textarea"
                     :placeholder="coreFieldPlaceholder"
                     @focus="expandComposer"
+                    @input="resizePromptTextarea"
                   />
                 </div>
               </div>
@@ -3263,6 +3294,16 @@ onUnmounted(() => {
 .dashboard-progress-stack--card.dashboard-progress-stack--multi .dashboard-progress-preview--card {
   min-height: 150px;
   border: 1px solid rgb(255 255 255 / 0.075);
+  border-radius: 14px;
+}
+
+.dashboard-progress-stack--multi :deep(.generation-loading-preview) {
+  width: 100%;
+  max-height: none;
+}
+
+.dashboard-progress-stack--card.dashboard-progress-stack--multi :deep(.generation-loading-preview) {
+  min-height: 150px;
   border-radius: 14px;
 }
 
@@ -3579,6 +3620,20 @@ onUnmounted(() => {
   border-radius: 12px;
   background: #050507;
   box-shadow: 0 14px 36px rgb(0 0 0 / 0.18);
+}
+
+.dashboard-feed-video {
+  display: block;
+  width: min(620px, 100%);
+  max-height: min(360px, 54vh);
+  aspect-ratio: 16 / 9;
+  border: 1px solid rgb(255 255 255 / 0.06);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.055), rgb(255 255 255 / 0.025)),
+    #050507;
+  box-shadow: 0 14px 36px rgb(0 0 0 / 0.18);
+  object-fit: contain;
 }
 
 .dashboard-feed-action {
@@ -4021,14 +4076,17 @@ onUnmounted(() => {
 
 .dashboard-pollo-textarea {
   min-height: 64px;
+  max-height: 260px;
   width: 100%;
   resize: none;
+  overflow-y: hidden;
   background: transparent;
   padding: 4px 0;
   font-size: 15px;
   line-height: 1.65;
   color: white;
   outline: none;
+  transition: height 120ms ease;
 }
 
 .dashboard-pollo-textarea::placeholder {

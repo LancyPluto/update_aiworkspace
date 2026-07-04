@@ -542,6 +542,21 @@ def test_openai_images_force_quality_overrides_params() -> None:
     assert payload["quality"] == "low"
 
 
+def test_openai_images_gpt_image_2_ignores_output_format() -> None:
+    client = OpenAIImagesClient(base_url="https://api.ofox.ai/v1", api_key="fake-key")
+    payload = client._build_generation_payload(
+        prompt="test",
+        model="openai/gpt-image-2",
+        image_size="1024x1024",
+        batch_size=1,
+        quality=None,
+        style=None,
+        output_format="jpeg",
+        response_format=None,
+    )
+    assert "output_format" not in payload
+
+
 def test_volcengine_images_watermark_param_overrides_extra_auth() -> None:
     client = OpenAIImagesClient(
         base_url="https://ark.cn-beijing.volces.com/api/v3",

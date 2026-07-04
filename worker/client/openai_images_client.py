@@ -322,7 +322,7 @@ class OpenAIImagesClient:
         resolved_style = (style or self.extra_auth.get("style") or "").strip()
         if resolved_style:
             payload["style"] = resolved_style
-        resolved_output_format = (output_format or self.extra_auth.get("outputFormat") or "").strip()
+        resolved_output_format = self._resolve_output_format(output_format, model)
         if resolved_output_format:
             payload["output_format"] = resolved_output_format
         resolved_response_format = (response_format or self.extra_auth.get("responseFormat") or "").strip()
@@ -395,7 +395,7 @@ class OpenAIImagesClient:
             "size": self._resolve_edit_size(image_size),
             "quality": resolved_quality,
         }
-        resolved_output_format = (output_format or self.extra_auth.get("outputFormat") or "").strip()
+        resolved_output_format = self._resolve_output_format(output_format, model)
         if resolved_output_format:
             form_fields["output_format"] = resolved_output_format
         return form_fields, image_files
@@ -1099,6 +1099,21 @@ class OpenAIImagesClient:
                 return
         payload["response_format"] = response_format
 
+    def _resolve_output_format(self, output_format: str | None, model: str | None) -> str:
+        resolved = (output_format or self.extra_auth.get("outputFormat") or "").strip()
+        if not resolved:
+            return ""
+        if not self._supports_output_format(model):
+            LOGGER.info("ignore unsupported openai images output_format model=%s output_format=%s", model or "", resolved)
+            return ""
+        return resolved
+
+    def _supports_output_format(self, model: str | None) -> bool:
+        configured = self.extra_auth.get("supportsOutputFormat")
+        if configured is not None:
+            return _as_bool(configured, False)
+        return _normalized_model_name(model) not in {"gptimage2", "openaigptimage2"}
+
     def _uses_json_image_array_input(self) -> bool:
         mode = _normalized_option(self.extra_auth.get("imageInputMode"))
         if mode in {"multipart", "editmultipart", "openai"}:
@@ -1321,6 +1336,10 @@ def _as_bool(value: Any, fallback: bool) -> bool:
 
 def _normalized_option(value: Any) -> str:
     return str(value or "").strip().lower().replace("_", "").replace("-", "")
+
+
+def _normalized_model_name(value: Any) -> str:
+    return _normalized_option(str(value or "").rsplit("/", 1)[-1])
 
 
 def _response_format_for_log(payload: dict[str, Any]) -> str:

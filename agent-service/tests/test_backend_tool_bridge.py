@@ -1229,6 +1229,45 @@ def test_enforce_locked_field_defaults_respects_explicit_user_quality():
     assert locked["quality"] == "high"
 
 
+def test_enforce_locked_field_defaults_respects_explicit_image_count_and_ratio():
+    tool = ToolDescriptor(
+        toolCode="gpt_image2",
+        toolName="GPT-image2",
+        autoCallable=True,
+        fields=[
+            {
+                "fieldKey": "count",
+                "fieldName": "生成张数",
+                "fieldType": "integer",
+                "defaultValue": "1",
+                "agentFillStrategy": "default",
+            },
+            {
+                "fieldKey": "aspect_ratio",
+                "fieldName": "画面比例",
+                "fieldType": "select",
+                "defaultValue": "auto",
+                "agentFillStrategy": "default",
+                "options": {
+                    "options": [
+                        {"label": "自动", "value": "auto"},
+                        {"label": "横屏", "value": "16:9"},
+                    ]
+                },
+            },
+        ],
+    )
+    locked = enforce_locked_field_defaults(
+        tool,
+        {"count": 2, "aspect_ratio": "16:9", "prompt": "test"},
+        user_message="围绕斋藤飞鸟(asuka)生成2张强图形编辑感影像。16:9",
+    )
+
+    assert locked["count"] == 2
+    assert locked["aspect_ratio"] == "16:9"
+    assert locked["prompt"] == "test"
+
+
 def test_custom_mode_default_does_not_override_model_true():
     tool = ToolDescriptor(
         toolCode="suno_music",

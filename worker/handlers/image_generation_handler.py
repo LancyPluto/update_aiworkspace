@@ -194,8 +194,6 @@ class ImageGenerationHandler:
             if provider_protocol == "openai_images":
                 image_request["quality"] = _first_text(params, "quality", "imageQuality", "image_quality")
                 image_request["style"] = _first_text(params, "style", "imageStyle", "image_style")
-                image_request["output_format"] = _first_text(params, "outputFormat", "output_format")
-                image_request["response_format"] = _first_text(params, "responseFormat", "response_format")
                 image_request["sequential_image_generation"] = _first_text(
                     params,
                     "sequentialImageGeneration",
