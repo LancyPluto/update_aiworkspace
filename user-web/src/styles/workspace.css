@@ -735,12 +735,19 @@
   color: rgba(255, 255, 255, 0.35);
   transition:
     color 180ms ease,
-    opacity 180ms ease;
+    opacity 180ms ease,
+    width 220ms ease;
 }
 
 .workspace-upload.has-file {
   width: 102px;
   height: 78px;
+}
+
+.workspace-upload.has-file:hover,
+.workspace-upload.has-file:focus-within,
+.workspace-upload.has-file.dragging {
+  width: min(294px, 36vw);
 }
 
 .workspace-upload-empty,
@@ -829,6 +836,9 @@
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.34), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
   transform-origin: center;
   transition:
+    left 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    top 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 180ms ease,
     border-color 180ms ease,
     box-shadow 180ms ease,
     transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -847,6 +857,22 @@
   z-index: 1;
   opacity: 0.72;
   transform: rotate(8deg) scale(0.92);
+}
+
+.workspace-upload-preview.asset-2 {
+  left: 64px;
+  top: 14px;
+  z-index: 0;
+  opacity: 0.5;
+  transform: rotate(16deg) scale(0.84);
+}
+
+.workspace-upload-preview.asset-3 {
+  left: 94px;
+  top: 18px;
+  z-index: 0;
+  opacity: 0.36;
+  transform: rotate(22deg) scale(0.78);
 }
 
 .workspace-upload-preview img,
@@ -875,7 +901,28 @@
 .workspace-upload:hover .workspace-upload-preview.asset-1,
 .workspace-upload-preview.asset-1:focus-visible {
   opacity: 0.92;
-  transform: translateX(6px) rotate(8deg) scale(0.98);
+  left: 62px;
+  top: 6px;
+  z-index: 3;
+  transform: rotate(3deg) scale(1);
+}
+
+.workspace-upload:hover .workspace-upload-preview.asset-2,
+.workspace-upload-preview.asset-2:focus-visible {
+  opacity: 0.88;
+  left: 121px;
+  top: 6px;
+  z-index: 2;
+  transform: rotate(2deg) scale(1);
+}
+
+.workspace-upload:hover .workspace-upload-preview.asset-3,
+.workspace-upload-preview.asset-3:focus-visible {
+  opacity: 0.84;
+  left: 180px;
+  top: 6px;
+  z-index: 1;
+  transform: rotate(1deg) scale(1);
 }
 
 .workspace-upload-add-card {
@@ -902,6 +949,23 @@
   will-change: transform, opacity;
 }
 
+.workspace-upload-add-count {
+  position: absolute;
+  right: -6px;
+  top: -6px;
+  display: inline-flex;
+  min-width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #0b0d12;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 /* 悬停第一个框所在区域（或添加第二个素材后保持）：第二个框向右弹出，放大到与第一个框等大，白色虚线 */
 .workspace-upload.has-file:hover .workspace-upload-add-card,
 .workspace-upload.has-file:focus-within .workspace-upload-add-card,
@@ -916,6 +980,13 @@
   z-index: 5;
 }
 
+.workspace-upload.has-file:hover .workspace-upload-add-card,
+.workspace-upload.has-file:focus-within .workspace-upload-add-card,
+.workspace-upload.has-file.dragging .workspace-upload-add-card {
+  left: 238px;
+  transform: rotate(3deg) scale(1);
+}
+
 .workspace-upload.has-file .workspace-upload-add-card:hover,
 .workspace-upload.has-file .workspace-upload-add-card:focus-visible {
   border-color: rgba(255, 255, 255, 0.95);
@@ -923,6 +994,11 @@
   background: rgba(10, 10, 14, 0.34);
   transform: translateX(6px) rotate(8deg) scale(1.12);
   z-index: 5;
+}
+
+.workspace-upload.has-file:hover .workspace-upload-add-card:hover,
+.workspace-upload.has-file .workspace-upload-add-card:focus-visible {
+  transform: rotate(3deg) scale(1.08);
 }
 
 .workspace-upload-zoom,
@@ -986,6 +1062,70 @@
   background: var(--brand-primary);
 }
 
+/* 视频播放图标 */
+.workspace-upload-play-icon {
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  color: white;
+  background: rgba(8, 8, 11, 0.72);
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.82);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease,
+    background 160ms ease;
+}
+
+.workspace-upload-preview:hover .workspace-upload-play-icon,
+.workspace-upload-preview:focus-visible .workspace-upload-play-icon {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.workspace-upload-play-icon:hover {
+  background: var(--brand-primary);
+}
+
+/* 删除按钮（右上角） */
+.workspace-upload-close-btn {
+  position: absolute;
+  z-index: 5;
+  right: 6px;
+  top: 6px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 999px;
+  color: white;
+  background: rgba(8, 8, 11, 0.78);
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.82);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease,
+    background 160ms ease;
+}
+
+.workspace-upload-preview:hover .workspace-upload-close-btn,
+.workspace-upload-close-btn:focus-visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.workspace-upload-close-btn:hover {
+  background: var(--brand-primary);
+}
+
 .workspace-upload-status {
   margin: -8px 0 12px 76px;
   font-size: 12px;
@@ -994,6 +1134,43 @@
 
 .workspace-upload-status.error {
   color: #fca5a5;
+}
+
+.workspace-prompt-shell {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.workspace-prompt-shell textarea {
+  width: 100%;
+  min-height: 114px;
+  padding-right: 64px;
+}
+
+.workspace-prompt-actions {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+}
+
+.workspace-mention-pop {
+  right: 0;
+  bottom: 46px;
+  min-width: 128px;
+}
+
+.workspace-upload-hint {
+  margin: 8px 0 0 78px;
+  color: rgba(255, 255, 255, 0.34);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.workspace-upload-hint--warn {
+  color: rgba(251, 191, 36, 0.88);
 }
 
 .workspace-upload-lightbox {
@@ -2389,7 +2566,9 @@
   top: 2px;
 }
 
-.workspace-create-composer-dock.condensed .workspace-upload-preview.asset-1 {
+.workspace-create-composer-dock.condensed .workspace-upload-preview.asset-1,
+.workspace-create-composer-dock.condensed .workspace-upload-preview.asset-2,
+.workspace-create-composer-dock.condensed .workspace-upload-preview.asset-3 {
   display: none;
 }
 
@@ -2416,13 +2595,9 @@
   transform: translateX(3px) rotate(8deg) scale(1.08);
 }
 
-.workspace-create-composer-dock.condensed .workspace-upload-delete {
-  right: 18px;
-  top: -3px;
-}
-
-.workspace-create-composer-dock.condensed .workspace-upload-delete.asset-1 {
-  display: none;
+.workspace-create-composer-dock.condensed .workspace-upload-close-btn {
+  right: -4px;
+  top: -4px;
 }
 
 .workspace-create-composer-dock.condensed .workspace-composer textarea {

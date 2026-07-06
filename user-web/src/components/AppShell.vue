@@ -213,8 +213,8 @@ const getMembershipLabel = (packageCode: string | null | undefined): string => {
   // 提取套餐类型（starter/growth/pro/flagship）
   const code = packageCode.toLowerCase()
   if (code.includes("starter")) return "标准版"
-  if (code.includes("growth")) return "高级版"
-  if (code.includes("pro")) return "进阶版"
+  if (code.includes("growth")) return "进阶版"
+  if (code.includes("pro")) return "高级版"
   if (code.includes("flagship")) return "豪华版"
   
   return "体验版"
@@ -459,8 +459,8 @@ watch(
           <span>{{ item.label }}</span>
         </RouterLink>
 
-        <button
-          type="button"
+        <RouterLink
+          to="/referral"
           class="group relative mb-3 flex h-11 w-full items-center gap-2.5 overflow-hidden rounded-lg border border-white/[0.055] bg-white/[0.025] px-3 text-left text-sm font-medium text-white/76 transition hover:border-[var(--brand-border)] hover:bg-white/[0.045] hover:text-white"
         >
           <Gift class="h-[18px] w-[18px] shrink-0 text-white/60 transition group-hover:text-white/90" aria-hidden="true" />
@@ -468,7 +468,7 @@ watch(
             <span class="block truncate">推荐有礼</span>
           </span>
           <span class="rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[10px] font-medium text-[var(--brand-active-text)] ring-1 ring-white/[0.05]">最新</span>
-        </button>
+        </RouterLink>
 
         <RouterLink
           to="/billing"

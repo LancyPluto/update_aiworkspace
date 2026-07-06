@@ -281,7 +281,7 @@ onUnmounted(() => {
                 <component v-if="item.icon" :is="item.icon" :size="16" />
               <span>{{ item.label }}</span>
             </RouterLink>
-            <RouterLink to="/billing" class="workspace-referral" @click="closeMobileNav">
+            <RouterLink to="/referral" class="workspace-referral" @click="closeMobileNav">
               <span class="workspace-new-badge">最新</span>
               <strong><Gift :size="16" class="inline-block align-[-2px]" />推荐有礼</strong>
               <small>获取更多算力</small>

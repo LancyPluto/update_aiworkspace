@@ -50,6 +50,9 @@ export const userRoutes = {
   get billing() {
     return { name: "Billing" }
   },
+  get referral() {
+    return { name: "Referral" }
+  },
   taskStatus(taskId: string) {
     return { name: "TaskStatus", params: { taskId } }
   },

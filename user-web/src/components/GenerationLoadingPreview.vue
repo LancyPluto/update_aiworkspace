@@ -74,6 +74,7 @@ function parallelSlotPercentLabel(slotIndex: number): string {
       :key="`slot-${slot}`"
       class="generation-loading-preview generation-loading-preview--slot"
       :class="{ 'generation-loading-preview--failed': failed }"
+      :style="{ aspectRatio: displayRatio }"
     >
       <div class="generation-loading-preview__glow" aria-hidden="true" />
       <div class="generation-loading-preview__content">
@@ -134,7 +135,6 @@ function parallelSlotPercentLabel(slotIndex: number): string {
 
 .generation-loading-preview--slot {
   min-height: 180px;
-  aspect-ratio: 16 / 9;
 }
 
 .generation-loading-preview__progress {
