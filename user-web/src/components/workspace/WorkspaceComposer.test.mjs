@@ -94,7 +94,7 @@ test("upload dropzone validates dropped files and uses tilted plus affordance", 
   assert.match(component, /async function uploadFiles\(files: File\[\]\)/)
   assert.match(component, /function onUploadDrop\(event: DragEvent\)/)
   assert.match(component, /uploadError\.value = uploadRejectMessage\(\)/)
-  assert.match(component, /return ".*不支持/)
+  assert.match(component, /当前工具不支持该文件类型/)
   assert.match(component, /@dragover\.prevent="onUploadDragOver"/)
   assert.match(component, /@drop\.prevent="onUploadDrop"/)
   assert.match(component, /multiple/)
@@ -102,8 +102,12 @@ test("upload dropzone validates dropped files and uses tilted plus affordance", 
   assert.match(component, /workspace-upload-stack/)
   assert.match(component, /workspace-upload-preview/)
   assert.match(component, /workspace-upload-add-card/)
-  assert.match(component, /workspace-upload-delete/)
+  assert.match(component, /workspace-upload-close-btn/)
   assert.match(component, /workspace-upload-lightbox/)
+  assert.match(component, /const mentionOptions = computed/)
+  assert.match(component, /const requiresVideoInput = computed/)
+  assert.match(component, /@\(video\|视频\|素材视频\)/)
+  assert.match(component, /v-for="item in mentionOptions"/)
   assert.match(component, /<Plus :size="22" \/>/)
   assert.doesNotMatch(component, /已添加素材：/)
 
@@ -111,7 +115,7 @@ test("upload dropzone validates dropped files and uses tilted plus affordance", 
   assert.match(css, /\.workspace-upload-stack/)
   assert.match(css, /\.workspace-upload-preview/)
   assert.match(css, /\.workspace-upload-add-card/)
-  assert.match(css, /\.workspace-upload-delete/)
+  assert.match(css, /\.workspace-upload-close-btn/)
   assert.match(css, /\.workspace-upload-lightbox/)
   assert.match(css, /background:\s*transparent/)
   assert.match(css, /width:\s*52px/)
@@ -123,6 +127,8 @@ test("upload dropzone validates dropped files and uses tilted plus affordance", 
     css,
     /\.workspace-upload\.has-file \.workspace-upload-add-card:hover,\s*\.workspace-upload\.has-file \.workspace-upload-add-card:focus-visible\s*\{[\s\S]*?scale\(1\.12\)/,
   )
+  assert.match(css, /\.workspace-upload:hover \.workspace-upload-preview\.asset-2/)
+  assert.match(css, /\.workspace-upload:hover \.workspace-upload-preview\.asset-3/)
   assert.match(css, /\.workspace-upload\.dragging \.workspace-upload-card/)
 })
 

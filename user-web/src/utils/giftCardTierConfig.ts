@@ -3,16 +3,16 @@ export type GiftBadgeVariant = "orange" | "teal" | "muted"
 // 会员等级配置（按从低到高排序）
 export const MEMBER_TIERS = [
   { key: "starter", label: "标准版", minPricePerCredit: 0.015 },
-  { key: "growth", label: "高级版", minPricePerCredit: 0.015 },
-  { key: "pro", label: "进阶版", minPricePerCredit: 0.015 },
+  { key: "growth", label: "进阶版", minPricePerCredit: 0.015 },
+  { key: "pro", label: "高级版", minPricePerCredit: 0.015 },
   { key: "flagship", label: "豪华版", minPricePerCredit: 0.015 },
 ] as const
 
 // 算力礼品卡的列表价（每算力的原价，用于计算折扣）
 export const GIFT_CARD_LIST_PRICE_PER_CREDIT = 0.020
 
-// 算力礼品卡最优折扣下限（不能比标准版会员礼品卡98折更好）
-export const GIFT_CARD_MIN_DISCOUNT = 0.98
+// 算力礼品卡最优折扣下限（当前最低 9 折，用于避免异常价格显示成过深折扣）
+export const GIFT_CARD_MIN_DISCOUNT = 0.90
 
 /**
  * 根据用户的 membershipPlan（套餐代码）判断会员等级索引
@@ -56,23 +56,23 @@ export const MEMBER_GIFT_TIERS: MemberGiftTierConfig[] = [
   },
   {
     key: "growth",
-    label: "高级版",
+    label: "进阶版",
     subtitle: "适合日常创作",
-    giftDiscount: 0.96, // 96折
+    giftDiscount: 0.95, // 95折
     badge: { text: "人气推荐", variant: "teal" },
   },
   {
     key: "pro",
-    label: "进阶版",
+    label: "高级版",
     subtitle: "适合专业团队",
-    giftDiscount: 0.94, // 94折
+    giftDiscount: 0.92, // 92折
     badge: { text: "专业之选", variant: "teal" },
   },
   {
     key: "flagship",
     label: "豪华版",
     subtitle: "旗舰尊享",
-    giftDiscount: 0.92, // 92折
+    giftDiscount: 0.88, // 88折
     badge: { text: "至尊特权", variant: "orange" },
   },
 ]
@@ -90,7 +90,7 @@ export function memberGiftOriginalPrice(memberPackagePrice: number, discount: nu
 /**
  * 计算算力礼品卡的折扣率（基于固定列表价）
  * 折扣 = 实际单价 / 列表价单价
- * 最低不低于 GIFT_CARD_MIN_DISCOUNT（即不能比标准版会员礼品卡98折更好）
+ * 最低不低于 GIFT_CARD_MIN_DISCOUNT（当前最低按 9 折展示）
  *
  * @param priceAmount 礼品卡售价
  * @param credits 礼品卡算力数

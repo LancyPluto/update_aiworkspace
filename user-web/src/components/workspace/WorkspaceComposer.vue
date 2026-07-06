@@ -11,11 +11,13 @@ import {
   Monitor,
   Music2,
   Plus,
+  Play,
   RectangleHorizontal,
   RectangleVertical,
   Settings2,
   Sparkles,
   Square,
+  AtSign,
   Video,
   X,
   ZoomIn,
@@ -161,6 +163,7 @@ const uploadError = ref("")
 const uploading = ref(false)
 const dragActive = ref(false)
 const previewAsset = ref<UploadedComposerAsset | null>(null)
+const mentionMenuOpen = ref(false)
 
 const generationOptions = computed(() => {
   if (mode.value === "image") return ["文本/图像生成图片", "文生图像", "图生图像", "图片编辑"]
@@ -230,14 +233,63 @@ const imageQualityOptions = computed(() => configuredFormatOptions.value.quality
 const imageCountOptions = computed(() => configuredFormatOptions.value.count)
 const formatLabels = computed(() => configuredFormatOptions.value.labels)
 const hasComposerInput = computed(() => prompt.value.trim().length > 0 || uploadedAssets.value.length > 0)
+const hasVideoReference = computed(() =>
+  uploadedAssets.value.some((asset) => asset.kind === "video") ||
+  /(^|\s)@(video|视频|素材视频)(?=\s|$|[，,。.!！?？])/i.test(prompt.value),
+)
+const requiresVideoInput = computed(() =>
+  (props.toolDetail?.fields || []).some((field) => {
+    if (!field.required) return false
+    if (field.fieldType === "video_upload") return true
+    const text = `${field.fieldKey} ${field.fieldName} ${field.placeholder || ""}`.toLowerCase()
+    return /video|clip|movie|视频|短片|影片/.test(text)
+  }),
+)
+const uploadKinds = computed<UploadedComposerAssetKind[]>(() => {
+  const fields = props.toolDetail?.fields || []
+  const kinds = new Set<UploadedComposerAssetKind>()
+  for (const field of fields) {
+    if (field.fieldType === "image" || field.fieldType === "image_upload" || field.fieldType === "multi_image") kinds.add("image")
+    if (field.fieldType === "video_upload") kinds.add("video")
+    if (field.fieldType === "audio_upload") kinds.add("audio")
+    if (field.fieldType === "file") kinds.add("file")
+  }
+  if (kinds.size > 0) return [...kinds]
+  if (mode.value === "image") return ["image"]
+  if (mode.value === "audio") return ["audio"]
+  if (mode.value === "agent") return ["image", "video", "audio", "file"]
+  return ["image", "video"]
+})
+const uploadHint = computed(() => {
+  const labels: Record<UploadedComposerAssetKind, string> = {
+    image: "图片",
+    video: "视频",
+    audio: "音频",
+    file: "文件",
+  }
+  return `支持上传${uploadKinds.value.map((kind) => labels[kind]).join("、")}`
+})
+const mentionOptions = computed(() => {
+  const options: Array<{ kind: "image" | "video"; label: string }> = []
+  if (uploadKinds.value.includes("image")) options.push({ kind: "image", label: "@图片" })
+  if (uploadKinds.value.includes("video") || requiresVideoInput.value) options.push({ kind: "video", label: "@视频" })
+  return options
+})
+const videoInputHint = computed(() =>
+  requiresVideoInput.value && !hasVideoReference.value
+    ? "当前模型需要视频输入，请上传视频素材，或在提示词里输入 @视频。"
+    : "",
+)
 const canGenerate = computed(() =>
   hasComposerInput.value &&
   Boolean(selectedToolCode.value) &&
+  (!requiresVideoInput.value || hasVideoReference.value) &&
   !props.disabled &&
   !props.submitting &&
   !uploading.value,
 )
-const visibleUploadedAssets = computed(() => uploadedAssets.value.slice(0, 2))
+const visibleUploadedAssets = computed(() => uploadedAssets.value.slice(0, 4))
+const hiddenUploadedAssetCount = computed(() => Math.max(0, uploadedAssets.value.length - visibleUploadedAssets.value.length))
 /** 已添加第二个及以上素材后，加号框保持放大状态 */
 const addCardExpanded = computed(() => uploadedAssets.value.length >= 2)
 const uploadDisabled = computed(() => props.disabled || props.submitting || uploading.value)
@@ -576,10 +628,12 @@ function applyInitialUploadedAsset(url?: string | null, name = "") {
 }
 
 function uploadAccept(): string {
-  if (mode.value === "image") return "image/*"
-  if (mode.value === "audio") return "audio/*,.mp3,.wav,.m4a,.aac"
-  if (mode.value === "agent") return "image/*,video/*,audio/*,.pdf,.txt,.doc,.docx"
-  return "image/*,video/*"
+  const accept: string[] = []
+  if (uploadKinds.value.includes("image")) accept.push("image/*")
+  if (uploadKinds.value.includes("video")) accept.push("video/*")
+  if (uploadKinds.value.includes("audio")) accept.push("audio/*", ".mp3", ".wav", ".m4a", ".aac")
+  if (uploadKinds.value.includes("file")) accept.push(".pdf", ".txt", ".doc", ".docx")
+  return accept.join(",")
 }
 
 function hasFileExtension(file: File, pattern: RegExp): boolean {
@@ -592,18 +646,27 @@ function isFileAcceptedForMode(file: File, nextMode: CreatorMode = mode.value): 
   const isVideo = mime.startsWith("video/") || hasFileExtension(file, /\.(m4v|mov|mp4|mpeg|webm)$/i)
   const isAudio = mime.startsWith("audio/") || hasFileExtension(file, /\.(aac|m4a|mp3|wav)$/i)
   const isDocument = hasFileExtension(file, /\.(docx?|pdf|txt)$/i)
+  const allowedKinds =
+    nextMode === mode.value
+      ? uploadKinds.value
+      : nextMode === "image"
+        ? ["image"]
+        : nextMode === "audio"
+          ? ["audio"]
+          : nextMode === "agent"
+            ? ["image", "video", "audio", "file"]
+            : ["image", "video"]
 
-  if (nextMode === "image") return isImage
-  if (nextMode === "audio") return isAudio
-  if (nextMode === "agent") return isImage || isVideo || isAudio || isDocument
-  return isImage || isVideo
+  return (
+    (allowedKinds.includes("image") && isImage) ||
+    (allowedKinds.includes("video") && isVideo) ||
+    (allowedKinds.includes("audio") && isAudio) ||
+    (allowedKinds.includes("file") && isDocument)
+  )
 }
 
 function uploadRejectMessage(): string {
-  if (mode.value === "image") return "当前图片模式不支持该文件，请上传图片素材"
-  if (mode.value === "audio") return "当前音频模式不支持该文件，请上传音频素材"
-  if (mode.value === "agent") return "当前智能体模式不支持该文件，请上传图片、视频、音频或文档素材"
-  return "当前视频模式不支持该文件，请上传图片或视频素材"
+  return `当前工具不支持该文件类型，${uploadHint.value}`
 }
 
 function openUploadPicker() {
@@ -677,8 +740,24 @@ async function onUploadDrop(event: DragEvent) {
   await uploadFiles(files)
 }
 
+function toggleMentionMenu() {
+  mentionMenuOpen.value = !mentionMenuOpen.value
+}
+
+function insertReferenceMention(kind: "image" | "video") {
+  const token = kind === "video" ? "@视频 " : "@图片 "
+  if (!prompt.value.includes(token.trim())) {
+    prompt.value = `${prompt.value}${prompt.value && !prompt.value.endsWith(" ") ? " " : ""}${token}`
+  }
+  mentionMenuOpen.value = false
+}
+
 function submit() {
   if (!canGenerate.value) return
+  if (requiresVideoInput.value && !hasVideoReference.value) {
+    uploadError.value = "当前模型需要视频输入，请上传视频素材，或在提示词里用 @视频 引用已有视频。"
+    return
+  }
   emit("submit", currentState())
 }
 
@@ -864,9 +943,24 @@ const costInsufficient = computed(() => liveCreditView.value.insufficient)
                 <Music2 v-if="asset.kind === 'audio'" :size="22" />
                 <FileUp v-else :size="22" />
               </span>
-              <span class="workspace-upload-zoom" aria-hidden="true">
+              <!-- 视频播放图标 -->
+              <span v-if="asset.kind === 'video'" class="workspace-upload-play-icon" aria-hidden="true">
+                <Play :size="16" fill="currentColor" />
+              </span>
+              <!-- 放大预览图标（仅图片显示） -->
+              <span v-if="asset.kind === 'image'" class="workspace-upload-zoom" aria-hidden="true">
                 <ZoomIn :size="14" />
               </span>
+              <!-- 删除按钮（右上角） -->
+              <button
+                class="workspace-upload-close-btn"
+                type="button"
+                title="删除素材"
+                aria-label="删除素材"
+                @click.stop="removeUploadedAsset(asset.id)"
+              >
+                <X :size="12" />
+              </button>
             </button>
             <button
               class="workspace-upload-add-card"
@@ -878,19 +972,9 @@ const costInsufficient = computed(() => liveCreditView.value.insufficient)
               @click="openUploadPicker"
             >
               <Plus :size="20" />
+              <span v-if="hiddenUploadedAssetCount > 0" class="workspace-upload-add-count">+{{ hiddenUploadedAssetCount }}</span>
             </button>
-            <button
-              v-for="(asset, index) in visibleUploadedAssets"
-              :key="`delete:${asset.id}`"
-              class="workspace-upload-delete"
-              :class="`asset-${index}`"
-              type="button"
-              title="删除素材"
-              aria-label="删除素材"
-              @click="removeUploadedAsset(asset.id)"
-            >
-              <X :size="12" />
-            </button>
+
           </div>
         </div>
         <input
@@ -901,7 +985,32 @@ const costInsufficient = computed(() => liveCreditView.value.insufficient)
           :accept="uploadAccept()"
           @change="onFilePicked"
         />
-        <textarea v-model="prompt" name="prompt" aria-label="创作提示词" :placeholder="promptPlaceholder" />
+        <div class="workspace-prompt-shell">
+          <textarea v-model="prompt" name="prompt" aria-label="创作提示词" :placeholder="promptPlaceholder" />
+          <div class="workspace-prompt-actions">
+            <button
+              type="button"
+              class="workspace-icon-chip"
+              :class="{ active: mentionMenuOpen }"
+              aria-label="引用素材"
+              @click.stop="toggleMentionMenu"
+            >
+              <AtSign :size="16" />
+            </button>
+            <div v-if="mentionMenuOpen" class="workspace-menu-pop workspace-mention-pop">
+              <button
+                v-for="item in mentionOptions"
+                :key="item.kind"
+                type="button"
+                @click="insertReferenceMention(item.kind)"
+              >
+                {{ item.label }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <p class="workspace-upload-hint">{{ uploadHint }}</p>
+        <p v-if="videoInputHint" class="workspace-upload-hint workspace-upload-hint--warn">{{ videoInputHint }}</p>
       </div>
       <div v-if="uploading || uploadError" class="workspace-upload-status" :class="{ error: uploadError }">
         <span v-if="uploading">素材上传中...</span>
