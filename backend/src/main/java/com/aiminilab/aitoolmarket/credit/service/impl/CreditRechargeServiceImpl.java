@@ -14,8 +14,10 @@ import com.aiminilab.aitoolmarket.credit.dto.RechargeOrderResponse;
 import com.aiminilab.aitoolmarket.credit.dto.RechargePackageResponse;
 import com.aiminilab.aitoolmarket.credit.dto.RechargePaymentOptionsResponse;
 import com.aiminilab.aitoolmarket.credit.entity.CreditRechargeOrder;
+import com.aiminilab.aitoolmarket.credit.entity.CreditRechargeOrderItem;
 import com.aiminilab.aitoolmarket.credit.entity.CreditRechargePackage;
 import com.aiminilab.aitoolmarket.credit.entity.GiftCardPackage;
+import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderItemMapper;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderMapper;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargePackageMapper;
 import com.aiminilab.aitoolmarket.credit.mapper.GiftCardPackageMapper;
@@ -42,6 +44,8 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -55,6 +59,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
     private final CreditRechargePackageMapper packageMapper;
     private final GiftCardPackageMapper giftCardPackageMapper;
     private final CreditRechargeOrderMapper orderMapper;
+    private final CreditRechargeOrderItemMapper orderItemMapper;
     private final CreditService creditService;
     private final ObjectMapper objectMapper;
     private final WechatNativePayClient wechatNativePayClient;
@@ -69,6 +74,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
     public CreditRechargeServiceImpl(CreditRechargePackageMapper packageMapper,
                                      GiftCardPackageMapper giftCardPackageMapper,
                                      CreditRechargeOrderMapper orderMapper,
+                                     CreditRechargeOrderItemMapper orderItemMapper,
                                      CreditService creditService,
                                      ObjectMapper objectMapper,
                                      WechatNativePayClient wechatNativePayClient,
@@ -80,6 +86,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         this.packageMapper = packageMapper;
         this.giftCardPackageMapper = giftCardPackageMapper;
         this.orderMapper = orderMapper;
+        this.orderItemMapper = orderItemMapper;
         this.creditService = creditService;
         this.objectMapper = objectMapper;
         this.wechatNativePayClient = wechatNativePayClient;
@@ -147,19 +154,22 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         order.setQrCodeUrl(null);
 
         if (isGiftCard) {
-            GiftCardPackage giftPkg = giftCardPackageMapper.findActiveById(request.giftCardPackageId());
-            if (giftPkg == null) {
-                throw new BusinessException(ErrorCode.PARAM_ERROR, "gift card package not found");
-            }
+            List<GiftCardOrderLine> lines = resolveGiftCardOrderLines(request);
             order.setPackageId(null);
-            order.setCredits(giftPkg.getCredits());
-            order.setPriceAmount(giftPkg.getPriceAmount());
-            order.setCurrency(giftPkg.getCurrency());
+            order.setCredits(lines.stream().mapToInt(line -> line.pkg().getCredits() * line.quantity()).sum());
+            order.setPriceAmount(lines.stream()
+                    .map(line -> line.pkg().getPriceAmount().multiply(BigDecimal.valueOf(line.quantity())))
+                    .reduce(BigDecimal.ZERO, BigDecimal::add));
+            order.setCurrency(lines.get(0).pkg().getCurrency());
             order.setOrderType("GIFT_CARD");
-            order.setGiftCardPackageId(giftPkg.getId());
-            productDescription = "Gift card - " + giftPkg.getPackageName();
-            orderPriceAmount = giftPkg.getPriceAmount();
-            orderCurrency = giftPkg.getCurrency();
+            order.setGiftCardPackageId(lines.size() == 1 ? lines.get(0).pkg().getId() : null);
+            productDescription = lines.size() == 1
+                    ? "Gift card - " + lines.get(0).pkg().getPackageName()
+                    : "Gift cards x " + lines.stream().mapToInt(GiftCardOrderLine::quantity).sum();
+            orderPriceAmount = order.getPriceAmount();
+            orderCurrency = order.getCurrency();
+            orderMapper.insert(order);
+            insertGiftCardOrderItems(order.getId(), lines, now);
         } else {
             CreditRechargePackage rechargePackage = activePackageOrThrow(request.packageId());
             order.setPackageId(rechargePackage.getId());
@@ -171,8 +181,8 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
             productDescription = "AI Tool Market credits recharge - " + rechargePackage.getPackageName();
             orderPriceAmount = rechargePackage.getPriceAmount();
             orderCurrency = rechargePackage.getCurrency();
+            orderMapper.insert(order);
         }
-        orderMapper.insert(order);
         if ("WECHAT_NATIVE".equals(paymentChannel)) {
             try {
                 NativePrepayResponse prepay = wechatNativePayClient.createNativeOrder(new NativePrepayRequest(
@@ -504,6 +514,67 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         return rechargePackage;
     }
 
+    private List<GiftCardOrderLine> resolveGiftCardOrderLines(CreateRechargeOrderRequest request) {
+        Map<Long, Integer> quantities = new LinkedHashMap<>();
+        if (request.giftCardItems() != null && !request.giftCardItems().isEmpty()) {
+            for (CreateRechargeOrderRequest.GiftCardItemRequest item : request.giftCardItems()) {
+                if (item == null || item.giftCardPackageId() == null) {
+                    continue;
+                }
+                int quantity = normalizeQuantity(item.quantity());
+                quantities.merge(item.giftCardPackageId(), quantity, Integer::sum);
+            }
+        } else if (request.giftCardPackageId() != null) {
+            quantities.put(request.giftCardPackageId(), normalizeQuantity(request.quantity()));
+        }
+        if (quantities.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "gift card package not found");
+        }
+        int totalQuantity = quantities.values().stream().mapToInt(Integer::intValue).sum();
+        if (totalQuantity > 99 || quantities.values().stream().anyMatch(quantity -> quantity > 99)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "gift card quantity must be between 1 and 99");
+        }
+
+        List<GiftCardOrderLine> lines = new ArrayList<>();
+        String currency = null;
+        for (Map.Entry<Long, Integer> entry : quantities.entrySet()) {
+            GiftCardPackage giftPkg = giftCardPackageMapper.findActiveById(entry.getKey());
+            if (giftPkg == null) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "gift card package not found");
+            }
+            if (currency == null) {
+                currency = giftPkg.getCurrency();
+            } else if (!currency.equals(giftPkg.getCurrency())) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "gift card currency mismatch");
+            }
+            lines.add(new GiftCardOrderLine(giftPkg, entry.getValue()));
+        }
+        return lines;
+    }
+
+    private int normalizeQuantity(Integer quantity) {
+        int normalized = quantity == null ? 1 : quantity;
+        if (normalized <= 0 || normalized > 99) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "gift card quantity must be between 1 and 99");
+        }
+        return normalized;
+    }
+
+    private void insertGiftCardOrderItems(Long orderId, List<GiftCardOrderLine> lines, LocalDateTime now) {
+        for (GiftCardOrderLine line : lines) {
+            CreditRechargeOrderItem item = new CreditRechargeOrderItem();
+            item.setOrderId(orderId);
+            item.setGiftCardPackageId(line.pkg().getId());
+            item.setQuantity(line.quantity());
+            item.setCredits(line.pkg().getCredits());
+            item.setPriceAmount(line.pkg().getPriceAmount());
+            item.setItemType("GIFT_CARD");
+            item.setCreatedAt(now);
+            item.setUpdatedAt(now);
+            orderItemMapper.insert(item);
+        }
+    }
+
     private CreditRechargeOrder orderOrThrow(Long userId, Long orderId) {
         CreditRechargeOrder order = orderMapper.findByIdAndUserId(orderId, userId);
         if (order == null) {
@@ -618,5 +689,8 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
             order.setQrCodeUrl(qrCodeDataUriGenerator.generate(order.getPayUrl()));
         }
         return RechargeOrderResponse.from(order);
+    }
+
+    private record GiftCardOrderLine(GiftCardPackage pkg, int quantity) {
     }
 }

@@ -474,21 +474,8 @@ watch(
           to="/billing"
           class="relative mb-2 block rounded-lg border border-white/[0.055] bg-white/[0.025] p-3 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.02)] transition hover:border-[var(--brand-border)] hover:bg-white/[0.04]"
         >
-          <!-- 会员版本标签 - 蓝色横向书签样式，左侧内凹弧形缺口 -->
-          <div class="absolute right-0 top-0 z-10">
-            <div class="relative flex items-center rounded-bl-md rounded-tr-md bg-gradient-to-b from-blue-500 to-blue-700 px-3 py-1 text-xs font-bold text-white shadow-lg">
-              <!-- 左侧内凹弧形缺口 -->
-              <svg class="absolute left-0 h-full w-2 -translate-x-[98%]" viewBox="0 0 12 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path d="M12 0L0 16L12 32V0Z" fill="url(#blue-gradient)" />
-                <defs>
-                  <linearGradient id="blue-gradient" x1="6" y1="0" x2="6" y2="32" gradientUnits="userSpaceOnUse">
-                    <stop stop-color="#3B82F6" />
-                    <stop offset="1" stop-color="#1D4ED8" />
-                  </linearGradient>
-                </defs>
-              </svg>
-              <span>{{ membershipLabel }}</span>
-            </div>
+          <div class="app-shell-credit-ribbon" aria-label="当前会员等级">
+            <span>{{ membershipLabel }}</span>
           </div>
 
           <p class="mt-2 flex items-center gap-2 font-mono text-[12px] font-semibold tabular-nums text-white/88">
@@ -930,6 +917,53 @@ watch(
 
 .app-shell-credit-progress {
   background: var(--brand-progress-gradient);
+}
+
+.app-shell-credit-ribbon {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  z-index: 10;
+  display: inline-flex;
+  min-width: 68px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 11px 0 20px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+  background:
+    linear-gradient(135deg, rgb(96 178 255) 0%, rgb(36 110 239) 55%, rgb(25 77 202) 100%);
+  border-radius: 0 8px 0 7px;
+  clip-path: polygon(12px 0, 100% 0, 100% 100%, 12px 100%, 0 50%);
+  filter: drop-shadow(0 8px 14px rgb(18 98 255 / 0.34));
+}
+
+.app-shell-credit-ribbon::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: linear-gradient(180deg, transparent, rgb(255 255 255 / 0.28), transparent);
+}
+
+.app-shell-credit-ribbon::after {
+  content: "";
+  position: absolute;
+  inset: 1px 2px auto 16px;
+  height: 1px;
+  background: rgb(255 255 255 / 0.42);
+}
+
+.app-shell-credit-ribbon span {
+  position: relative;
+  z-index: 1;
+  white-space: nowrap;
 }
 
 .app-shell-accent-trigger {

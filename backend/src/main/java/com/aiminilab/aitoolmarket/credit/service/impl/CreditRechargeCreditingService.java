@@ -2,9 +2,12 @@ package com.aiminilab.aitoolmarket.credit.service.impl;
 
 import com.aiminilab.aitoolmarket.common.enums.RechargeOrderStatus;
 import com.aiminilab.aitoolmarket.credit.entity.CreditRechargeOrder;
+import com.aiminilab.aitoolmarket.credit.entity.CreditRechargeOrderItem;
+import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderItemMapper;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderMapper;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.credit.service.GiftCardService;
+import com.aiminilab.aitoolmarket.credit.service.ReferralService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,15 +19,21 @@ import org.springframework.transaction.annotation.Transactional;
 public class CreditRechargeCreditingService {
 
     private final CreditRechargeOrderMapper orderMapper;
+    private final CreditRechargeOrderItemMapper orderItemMapper;
     private final CreditService creditService;
     private final GiftCardService giftCardService;
+    private final ReferralService referralService;
 
     public CreditRechargeCreditingService(CreditRechargeOrderMapper orderMapper,
+                                          CreditRechargeOrderItemMapper orderItemMapper,
                                           CreditService creditService,
-                                          GiftCardService giftCardService) {
+                                          GiftCardService giftCardService,
+                                          ReferralService referralService) {
         this.orderMapper = orderMapper;
+        this.orderItemMapper = orderItemMapper;
         this.creditService = creditService;
         this.giftCardService = giftCardService;
+        this.referralService = referralService;
     }
 
     @Transactional
@@ -41,11 +50,17 @@ public class CreditRechargeCreditingService {
         }
 
         if ("GIFT_CARD".equals(order.getOrderType())) {
-            giftCardService.createGiftCardFromOrder(order.getUserId(), order.getId(),
-                    order.getGiftCardPackageId(), order.getCredits());
+            java.util.List<CreditRechargeOrderItem> items = orderItemMapper.findByOrderId(order.getId());
+            if (items.isEmpty()) {
+                giftCardService.createGiftCardFromOrder(order.getUserId(), order.getId(),
+                        order.getGiftCardPackageId(), order.getCredits());
+            } else {
+                giftCardService.createGiftCardsFromOrderItems(order.getUserId(), order.getId(), items);
+            }
         } else {
             creditService.rechargeAdd(order.getUserId(), order.getId(), order.getCredits(),
                     (reason == null || reason.isBlank() ? "Recharge order " + order.getOrderNo() : reason));
+            referralService.rewardRechargeIfNeeded(order);
         }
 
         // Optimistic transition (idempotent): if another thread already credited, transitOrCurrent logic handles it.

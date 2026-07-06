@@ -30,15 +30,15 @@ async function copyInviteLink() {
 }
 
 const rewardCards = [
-  { title: "好友注册", value: "+100", unit: "算力", icon: Users },
-  { title: "首次充值", value: "10%", unit: "返利", icon: Ticket },
-  { title: "连续邀请", value: "阶梯", unit: "加成", icon: Sparkles },
+  { title: "好友注册", value: "绑定", unit: "邀请关系", icon: Users },
+  { title: "好友充值", value: "10%", unit: "算力奖励", icon: Ticket },
+  { title: "自动到账", value: "幂等", unit: "防重复", icon: Sparkles },
 ]
 
 const steps = [
   "分享邀请链接给好友",
-  "好友注册并完成首次创作",
-  "奖励自动进入你的算力账户",
+  "好友通过链接注册并成功充值",
+  "奖励自动进入你的赠送算力账户",
 ]
 </script>
 
@@ -50,8 +50,8 @@ const steps = [
           <Gift class="h-4 w-4" aria-hidden="true" />
           推荐有礼
         </p>
-        <h1>邀请好友一起创作，双方都得算力奖励</h1>
-        <p class="referral-subtitle">把你的专属链接发给好友。好友完成注册和首次创作后，奖励会自动到账。</p>
+        <h1>邀请好友一起创作，好友充值你得算力奖励</h1>
+        <p class="referral-subtitle">把你的专属链接发给好友。好友通过链接注册并完成算力充值后，系统会按充值到账算力的 10% 自动发放邀请奖励。</p>
       </div>
 
       <div class="referral-link-card">
@@ -92,7 +92,7 @@ const steps = [
       <div class="referral-share-card">
         <Share2 class="h-6 w-6 text-cyan-300" aria-hidden="true" />
         <h2>活动说明</h2>
-        <p>奖励规则可以后续接入后台配置。当前页面先承载推广入口、邀请链接和规则展示，方便后续接统计和返利结算。</p>
+        <p>邀请关系在注册时绑定，普通算力充值成功入账后发放奖励；礼品卡订单不触发邀请奖励，重复支付回调不会重复发放。</p>
       </div>
     </section>
   </main>

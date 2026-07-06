@@ -112,6 +112,7 @@ export interface SmsAuthRequest {
   code: string
   nickname?: string
   password?: string
+  inviteCode?: string
 }
 
 export interface CancelAccountRequest {
@@ -130,6 +131,7 @@ export interface RegisterRequest {
   phone?: string
   email?: string
   nickname?: string
+  inviteCode?: string
 }
 
 /** GET /api/v1/users/me —— UserProfile */
@@ -647,7 +649,7 @@ export type RechargeOrderStatus = "WAITING_PAYMENT" | "PAID" | "CREDITED" | "CLO
 export interface RechargeOrder {
   id: number
   orderNo: string
-  packageId: number
+  packageId: number | null
   credits: number
   priceAmount: number
   currency: string

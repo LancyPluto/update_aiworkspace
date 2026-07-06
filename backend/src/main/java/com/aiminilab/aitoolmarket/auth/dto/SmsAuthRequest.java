@@ -6,6 +6,7 @@ public record SmsAuthRequest(
         @NotBlank String phone,
         @NotBlank String code,
         String nickname,
-        String password
+        String password,
+        String inviteCode
 ) {
 }
