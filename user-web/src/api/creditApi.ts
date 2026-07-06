@@ -32,7 +32,14 @@ export async function fetchRechargePackages(options?: { token?: string | null })
 }
 
 export async function createRechargeOrder(
-  body: { packageId: number; paymentChannel?: string; clientRequestId?: string; orderType?: string; giftCardPackageId?: number },
+  body: {
+    packageId?: number | null
+    paymentChannel?: string
+    clientRequestId?: string
+    orderType?: string
+    giftCardPackageId?: number
+    giftCardItems?: Array<{ giftCardPackageId: number; quantity: number }>
+  },
   options?: { token?: string | null },
 ): Promise<RechargeOrder> {
   return apiRequest<RechargeOrder>("POST", "/api/v1/credits/recharge-orders", {

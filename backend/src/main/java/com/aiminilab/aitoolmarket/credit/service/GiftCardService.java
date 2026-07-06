@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.credit.service;
 
 import com.aiminilab.aitoolmarket.credit.dto.GiftCardPackageResponse;
 import com.aiminilab.aitoolmarket.credit.dto.GiftCardResponse;
+import com.aiminilab.aitoolmarket.credit.entity.CreditRechargeOrderItem;
 
 import java.util.List;
 
@@ -18,4 +19,6 @@ public interface GiftCardService {
     GiftCardResponse transfer(Long userId, Long giftCardId, String recipientAccount);
 
     void createGiftCardFromOrder(Long userId, Long orderId, Long giftCardPackageId, int credits);
+
+    void createGiftCardsFromOrderItems(Long userId, Long orderId, List<CreditRechargeOrderItem> items);
 }

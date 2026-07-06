@@ -908,11 +908,56 @@ public class DataInitializer implements CommandLineRunner {
                 """);
         executeSqlIgnore("ALTER TABLE credit_recharge_orders MODIFY COLUMN pay_url TEXT NULL");
         executeSqlIgnore("ALTER TABLE credit_recharge_orders MODIFY COLUMN package_id BIGINT NULL");
+        ensureColumn("credit_recharge_orders", "order_type", "ALTER TABLE credit_recharge_orders ADD COLUMN order_type VARCHAR(32) NOT NULL DEFAULT 'CREDITS'");
+        ensureColumn("credit_recharge_orders", "gift_card_package_id", "ALTER TABLE credit_recharge_orders ADD COLUMN gift_card_package_id BIGINT NULL");
         ensureIndex(
                 "credit_recharge_orders",
                 "uk_recharge_user_idem",
                 "CREATE UNIQUE INDEX uk_recharge_user_idem ON credit_recharge_orders(user_id, idempotency_key)"
         );
+        ensureTable("credit_recharge_order_items", """
+                CREATE TABLE credit_recharge_order_items (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  order_id BIGINT NOT NULL,
+                  gift_card_package_id BIGINT NOT NULL,
+                  quantity INT NOT NULL,
+                  credits INT NOT NULL,
+                  price_amount DECIMAL(18,2) NOT NULL,
+                  item_type VARCHAR(32) NOT NULL DEFAULT 'GIFT_CARD',
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  KEY idx_recharge_order_items_order (order_id)
+                )
+                """);
+        ensureTable("user_referrals", """
+                CREATE TABLE user_referrals (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  inviter_user_id BIGINT NOT NULL,
+                  invitee_user_id BIGINT NOT NULL,
+                  invite_code VARCHAR(64) NULL,
+                  status VARCHAR(32) NOT NULL DEFAULT 'REGISTERED',
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_user_referrals_invitee (invitee_user_id),
+                  KEY idx_user_referrals_inviter (inviter_user_id, created_at)
+                )
+                """);
+        ensureTable("referral_rewards", """
+                CREATE TABLE referral_rewards (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  referral_id BIGINT NOT NULL,
+                  inviter_user_id BIGINT NOT NULL,
+                  invitee_user_id BIGINT NOT NULL,
+                  recharge_order_id BIGINT NOT NULL,
+                  reward_credits INT NOT NULL,
+                  reward_rate DECIMAL(10,4) NOT NULL DEFAULT 0.1000,
+                  status VARCHAR(32) NOT NULL DEFAULT 'CREDITED',
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_referral_rewards_order (recharge_order_id),
+                  KEY idx_referral_rewards_inviter (inviter_user_id, created_at)
+                )
+                """);
         executeSql("""
                 UPDATE credit_recharge_packages
                 SET status = 'INACTIVE', updated_at = NOW()

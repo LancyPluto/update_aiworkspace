@@ -26,7 +26,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   buyMemberPackage: [pkg: RechargePackage]
-  buyCreditGift: [pkg: GiftCardPackage, quantity: number]
+  buyCreditGift: [items: Array<{ pkg: GiftCardPackage; quantity: number }>]
 }>()
 
 const TIER_ICONS = {
@@ -163,15 +163,12 @@ async function checkout() {
     return
   }
 
-  // 否则结算算力礼品卡（按顺序处理，每次创建一个订单）
   if (creditPurchases.length > 0) {
-    // 从第一个开始处理
-    const firstPurchase = creditPurchases[0]
-    emit("buyCreditGift", firstPurchase.pkg, firstPurchase.qty)
-    creditQty.value = { ...creditQty.value, [firstPurchase.pkg.id]: 0 }
-    
-    // 注意：由于后端API不支持批量订单，用户需要多次点击“去结算”来完成所有购买
-    // cartSummary 会显示剩余未结算的商品总价
+    emit("buyCreditGift", creditPurchases.map(({ pkg, qty }) => ({ pkg, quantity: qty })))
+    creditQty.value = {
+      ...creditQty.value,
+      ...Object.fromEntries(creditPurchases.map(({ pkg }) => [pkg.id, 0])),
+    }
   }
 }
 

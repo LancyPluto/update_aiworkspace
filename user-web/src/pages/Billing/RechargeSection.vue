@@ -56,6 +56,7 @@ const mode = ref<'credits' | 'giftcard'>('credits')
 const giftCardPackages = ref<GiftCardPackage[]>([])
 const loadingGiftCards = ref(false)
 const pendingGiftCardPackage = ref<GiftCardPackage | null>(null)
+const pendingGiftCardItems = ref<Array<{ pkg: GiftCardPackage; quantity: number }>>([])
 
 // 用户当前会员等级（0-3），-1表示未开通会员
 // 基于后端返回的 membershipPlan（用户最近一次CREDITED订单的套餐代码）
@@ -116,11 +117,15 @@ const successMessage = computed(() =>
 )
 
 const pendingDisplay = computed(() => {
-  if (pendingGiftCardPackage.value) {
+  if (pendingGiftCardItems.value.length > 0) {
+    const itemCount = pendingGiftCardItems.value.reduce((sum, item) => sum + item.quantity, 0)
+    const skuCount = pendingGiftCardItems.value.length
     return {
-      name: pendingGiftCardPackage.value.packageName,
-      credits: pendingGiftCardPackage.value.credits,
-      price: pendingGiftCardPackage.value.priceAmount,
+      name: skuCount === 1
+        ? `${pendingGiftCardItems.value[0].pkg.packageName} x ${pendingGiftCardItems.value[0].quantity}`
+        : `算力礼品卡 ${itemCount} 张`,
+      credits: pendingGiftCardItems.value.reduce((sum, item) => sum + item.pkg.credits * item.quantity, 0),
+      price: pendingGiftCardItems.value.reduce((sum, item) => sum + item.pkg.priceAmount * item.quantity, 0),
     }
   }
   if (pendingPackage.value) {
@@ -271,6 +276,7 @@ function closeChannelModal() {
   showChannelModal.value = false
   pendingPackage.value = null
   pendingGiftCardPackage.value = null
+  pendingGiftCardItems.value = []
 }
 
 function closePayModal() {
@@ -383,24 +389,33 @@ async function loadGiftCardPackages() {
   }
 }
 
-function openGiftCardPayment(pkg: GiftCardPackage, _quantity = 1) {
-  pendingGiftCardPackage.value = pkg
+function openGiftCardPayment(items: Array<{ pkg: GiftCardPackage; quantity: number }>) {
+  const normalized = items.filter((item) => item.quantity > 0)
+  if (normalized.length === 0) return
+  pendingPackage.value = null
+  pendingGiftCardPackage.value = normalized[0].pkg
+  pendingGiftCardItems.value = normalized
   paymentResult.value = null
   error.value = ""
   showChannelModal.value = true
 }
 
-async function createGiftCardOrder(pkg: GiftCardPackage, channel: PaymentChannel) {
+async function createGiftCardOrder(items: Array<{ pkg: GiftCardPackage; quantity: number }>, channel: PaymentChannel) {
+  if (items.length === 0) return
   ordering.value = true
   error.value = ""
   try {
     const order = await createRechargeOrder(
       {
-        packageId: 0,
+        packageId: null,
         paymentChannel: channel,
-        clientRequestId: `giftcard-${pkg.id}-${channel}-${Date.now()}`,
+        clientRequestId: `giftcard-${items.map((item) => `${item.pkg.id}x${item.quantity}`).join("-")}-${channel}-${Date.now()}`,
         orderType: 'GIFT_CARD',
-        giftCardPackageId: pkg.id,
+        giftCardPackageId: items[0].pkg.id,
+        giftCardItems: items.map((item) => ({
+          giftCardPackageId: item.pkg.id,
+          quantity: item.quantity,
+        })),
       },
       { token: auth.token },
     )
@@ -633,7 +648,7 @@ onUnmounted(clearPolling)
               type="button"
               class="flex w-full items-center gap-4 rounded-xl border border-border bg-background px-4 py-3 text-left transition hover:border-primary/50 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60"
               :disabled="ordering || !pendingDisplay"
-              @click="pendingPackage ? createOrder(pendingPackage, option.channel) : pendingGiftCardPackage && createGiftCardOrder(pendingGiftCardPackage, option.channel)"
+              @click="pendingPackage ? createOrder(pendingPackage, option.channel) : createGiftCardOrder(pendingGiftCardItems, option.channel)"
             >
               <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
                 <component :is="option.icon" class="h-5 w-5" aria-hidden="true" />

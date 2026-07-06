@@ -64,6 +64,59 @@ class CreditRechargeApiTest {
     private AlipayPagePayClient alipayPagePayClient;
 
     @Test
+    void invitedUserRechargeGrantsReferralBonusOnce() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=referral"));
+        RegisteredUser inviter = registerUser("referral_inviter");
+        RegisteredUser invitee = registerUser("referral_invitee", "WLCLOUD%05d".formatted(inviter.userId()));
+
+        String orderResponse = mockMvc.perform(post("/api/v1/credits/recharge-orders")
+                        .header("Authorization", "Bearer " + invitee.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "packageId": 1,
+                                  "paymentChannel": "WECHAT_NATIVE",
+                                  "clientRequestId": "referral-recharge-001"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.credits").value(1000))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String orderNo = orderResponse.replaceAll("(?s).*\\\"orderNo\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
+
+        when(wechatNativePayClient.parseNotification(any(WechatPayCallbackHeaders.class), anyString()))
+                .thenReturn(new WechatPayNotification(
+                        "wx-test",
+                        "mch-test",
+                        orderNo,
+                        "4200000000000000777",
+                        "NATIVE",
+                        "SUCCESS",
+                        1000,
+                        "CNY"
+                ));
+        postWechatNotify();
+        postWechatNotify();
+
+        mockMvc.perform(get("/api/v1/credits/account")
+                        .header("Authorization", "Bearer " + inviter.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.balance").value(300))
+                .andExpect(jsonPath("$.data.totalGranted").value(300));
+
+        mockMvc.perform(get("/api/v1/credits/logs")
+                        .param("logType", "REFERRAL_BONUS")
+                        .header("Authorization", "Bearer " + inviter.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].amount").value(100))
+                .andExpect(jsonPath("$.data.list[0].reason").value(org.hamcrest.Matchers.containsString(orderNo)));
+    }
+
+    @Test
     void userCanCreateRechargeOrderAndGrantCreditsIdempotently() throws Exception {
         when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
                 .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=recharge-idem"));
@@ -263,6 +316,64 @@ class CreditRechargeApiTest {
     }
 
     @Test
+    void giftCardBatchOrderCreatesEverySelectedCardAfterPayment() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=giftcards"));
+        String userToken = register("gift_card_batch_user");
+
+        String orderResponse = mockMvc.perform(post("/api/v1/credits/recharge-orders")
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "packageId": null,
+                                  "paymentChannel": "WECHAT_NATIVE",
+                                  "clientRequestId": "gift-card-batch-001",
+                                  "orderType": "GIFT_CARD",
+                                  "giftCardPackageId": 1,
+                                  "giftCardItems": [
+                                    { "giftCardPackageId": 1, "quantity": 2 },
+                                    { "giftCardPackageId": 2, "quantity": 1 }
+                                  ]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.orderType").value("GIFT_CARD"))
+                .andExpect(jsonPath("$.data.credits").value(900))
+                .andExpect(jsonPath("$.data.priceAmount").value(17.90))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long orderId = Long.parseLong(orderResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+        String orderNo = orderResponse.replaceAll("(?s).*\\\"orderNo\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
+
+        when(wechatNativePayClient.parseNotification(any(WechatPayCallbackHeaders.class), anyString()))
+                .thenReturn(new WechatPayNotification(
+                        "wx-test",
+                        "mch-test",
+                        orderNo,
+                        "4200000000000000666",
+                        "NATIVE",
+                        "SUCCESS",
+                        1790,
+                        "CNY"
+                ));
+        postWechatNotify();
+        postWechatNotify();
+
+        mockMvc.perform(get("/api/v1/credits/recharge-orders/{orderId}", orderId)
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CREDITED"));
+
+        mockMvc.perform(get("/api/v1/credits/gift-cards")
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(3))
+                .andExpect(jsonPath("$.data[*].credits").value(org.hamcrest.Matchers.containsInAnyOrder(200, 200, 500)));
+    }
+
+    @Test
     void rechargePaymentOptionsExposeConfiguredChannels() throws Exception {
         String userToken = register("payment_options_user");
 
@@ -321,6 +432,15 @@ class CreditRechargeApiTest {
     }
 
     private String register(String username) throws Exception {
+        return registerUser(username).token();
+    }
+
+    private RegisteredUser registerUser(String username) throws Exception {
+        return registerUser(username, null);
+    }
+
+    private RegisteredUser registerUser(String username, String inviteCode) throws Exception {
+        String inviteField = inviteCode == null ? "" : ",\n                                  \"inviteCode\": \"%s\"".formatted(inviteCode);
         String response = mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -328,12 +448,18 @@ class CreditRechargeApiTest {
                                   "username": "%s",
                                   "password": "123456",
                                   "nickname": "%s"
+                                  %s
                                 }
-                                """.formatted(username, username)))
+                                """.formatted(username, username, inviteField)))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
-        return response.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
+        String token = response.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
+        Long userId = Long.parseLong(response.replaceAll("(?s).*\\\"user\\\"\\s*:\\s*\\{\\s*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+        return new RegisteredUser(token, userId);
+    }
+
+    private record RegisteredUser(String token, Long userId) {
     }
 }
