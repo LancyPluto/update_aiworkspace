@@ -305,6 +305,31 @@ async def test_model_client_inlines_private_qwen_image_urls(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_model_client_inlines_local_openai_compatible_image_urls(monkeypatch):
+    FakeAsyncHttpClient.requests = []
+    client = ModelClient(
+        Settings(
+            model_provider="openai_compatible",
+            model_api_base_url="https://ark.cn-beijing.volces.com/api/v3",
+            model_api_key="key",
+            model_name="doubao-seed-2.0-lite",
+            backend_internal_base_url="http://127.0.0.1:8080",
+        )
+    )
+    monkeypatch.setattr("app.clients.model_client.httpx.AsyncClient", FakeAsyncHttpClient)
+    content = [
+        {"type": "text", "text": "描述图片"},
+        {"type": "image_url", "image_url": {"url": "http://127.0.0.1:8080/generated/uploads/a.png"}},
+    ]
+
+    await client.chat([ChatMessage(role="user", content=content)])
+
+    post_request = [request for request in FakeAsyncHttpClient.requests if "json" in request][0]
+    sent_url = post_request["json"]["messages"][0]["content"][1]["image_url"]["url"]
+    assert sent_url == "data:image/png;base64,aW1hZ2UtYnl0ZXM="
+
+
+@pytest.mark.asyncio
 async def test_chat_turn_parses_langchain_tool_calls():
     langchain_model = FakeLangChainModel(
         FakeLangChainMessage(

@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.agent.dto;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
+import com.aiminilab.aitoolmarket.agent.support.AgentVisionInputSupport;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -47,7 +48,12 @@ public record InternalAgentModelConfigResponse(
                 config.getUnitPrice(),
                 config.getEnabled(),
                 config.getAgentEnabled(),
-                parseCapabilities(config.getCapabilities()),
+                AgentVisionInputSupport.withInferredVisionInput(
+                        config.getProvider(),
+                        config.getModelName(),
+                        config.getBaseUrl(),
+                        parseCapabilities(config.getCapabilities())
+                ),
                 proxyPolicy
         );
     }

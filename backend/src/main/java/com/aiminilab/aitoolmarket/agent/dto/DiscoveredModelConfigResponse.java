@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.agent.dto;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
+import com.aiminilab.aitoolmarket.agent.support.AgentVisionInputSupport;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 
 import java.util.List;
@@ -18,7 +19,12 @@ public record DiscoveredModelConfigResponse(
                 config.getConfigCode(),
                 config.getProvider(),
                 config.getModelName(),
-                codec.parse(config.getCapabilities())
+                AgentVisionInputSupport.withInferredVisionInput(
+                        config.getProvider(),
+                        config.getModelName(),
+                        config.getBaseUrl(),
+                        codec.parse(config.getCapabilities())
+                )
         );
     }
 }
