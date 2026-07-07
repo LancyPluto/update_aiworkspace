@@ -118,7 +118,8 @@ HTTP_PROXY=http://host.docker.internal:7890
 HTTPS_PROXY=http://host.docker.internal:7890
 CONTAINER_HTTP_PROXY=http://host.docker.internal:7890
 CONTAINER_HTTPS_PROXY=http://host.docker.internal:7890
-NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn
+NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat
+CONTAINER_NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat
 OSS_ENDPOINT=oss-cn-guangzhou.aliyuncs.com
 OSS_PUBLIC_BUCKET=wlcloudai-assets-public
 OSS_PRIVATE_BUCKET=wlcloudai-assets-private
@@ -369,6 +370,10 @@ done
 curl -sf -o /dev/null -w "root:%{http_code}\n" http://127.0.0.1/ || true
 curl -sf -o /dev/null -w "api:%{http_code}\n" http://127.0.0.1/api/health || true
 curl -sf -o /dev/null -w "admin:%{http_code}\n" -L http://127.0.0.1/admin || true
+if echo "\$DEPLOY_SERVICES" | grep -qw agent-service; then
+  echo "Checking agent-service outbound model connectivity ..."
+  python3 "\$REMOTE_DIR/deploy/scripts/check_outbound_proxy.py"
+fi
 if echo "\$DEPLOY_SERVICES" | grep -qw user-web; then
   echo "build-info:" && curl -sf http://127.0.0.1/build-info.json || echo "(build-info pending)"
   js_bundle="\$(docker exec ai-supermarket-nginx sh -c 'ls /usr/share/nginx/user-web/assets/index-*.js 2>/dev/null | head -1' || true)"
