@@ -1035,7 +1035,7 @@ onUnmounted(() => {
   width: 100%;
   align-items: center;
   border: 0;
-  border-radius: 10px;
+  border-radius: 2px;
   background: transparent;
   padding: 9px 10px;
   color: rgb(255 255 255 / 0.68);
@@ -1133,7 +1133,7 @@ onUnmounted(() => {
   position: relative;
   overflow: visible;
   border: 1px solid rgb(255 255 255 / 0.06);
-  border-radius: 10px;
+  border-radius: 2px;
   background: rgb(255 255 255 / 0.02);
   transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
   z-index: 1;
@@ -1152,7 +1152,7 @@ onUnmounted(() => {
 .card-main {
   position: relative;
   overflow: hidden;
-  border-radius: 10px 10px 0 0;
+  border-radius: 2px 2px 0 0;
 }
 
 .card-clickable {
@@ -1169,8 +1169,23 @@ onUnmounted(() => {
 .thumb {
   position: relative;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: 2px;
   background: rgb(255 255 255 / 0.03);
+}
+
+.thumb video {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+}
+
+.thumb video::-webkit-media-controls {
+  display: none !important;
+}
+
+.thumb video::-webkit-media-controls-enclosure {
+  display: none !important;
 }
 
 .thumb-media {
@@ -1403,20 +1418,32 @@ onUnmounted(() => {
 }
 
 .card-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
   overflow: hidden;
   max-height: 0;
-  border-radius: 0 0 10px 10px;
-  background: rgb(255 255 255 / 0.04);
-  transition: max-height 0.25s ease, padding 0.25s ease;
+  border-radius: 0 0 2px 2px;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  transition: max-height 0.25s ease, opacity 0.25s ease;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 10px;
+  opacity: 0;
+  transform: translateY(100%);
 }
 
 .post-card:hover .card-footer {
   max-height: 48px;
-  padding: 8px 10px;
+  opacity: 1;
+  transform: translateY(100%);
+}
+
+.video-play-indicator {
+  display: none;
 }
 
 .same-style-btn {
