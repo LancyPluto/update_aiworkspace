@@ -475,6 +475,19 @@ watch(
           class="relative mb-2 block rounded-lg border border-white/[0.055] bg-white/[0.025] p-3 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.02)] transition hover:border-[var(--brand-border)] hover:bg-white/[0.04]"
         >
           <div class="app-shell-credit-ribbon" aria-label="当前会员等级">
+            <svg class="app-shell-credit-ribbon__flag" viewBox="0 0 86 30" preserveAspectRatio="none" aria-hidden="true">
+              <defs>
+                <linearGradient id="app-shell-credit-ribbon-gradient" x1="0" y1="0" x2="86" y2="30" gradientUnits="userSpaceOnUse">
+                  <stop offset="0" stop-color="#7dd3fc" />
+                  <stop offset="0.42" stop-color="#2563eb" />
+                  <stop offset="1" stop-color="#1d4ed8" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M14 0H78C82.4183 0 86 3.58172 86 8V30H14L0 15L14 0Z"
+                fill="url(#app-shell-credit-ribbon-gradient)"
+              />
+            </svg>
             <span>{{ membershipLabel }}</span>
           </div>
 
@@ -925,39 +938,27 @@ watch(
   right: -1px;
   z-index: 10;
   display: inline-flex;
-  min-width: 68px;
-  height: 28px;
+  min-width: 76px;
+  height: 30px;
   align-items: center;
   justify-content: center;
-  padding: 0 12px 0 24px;
+  padding: 0 11px 0 24px;
   color: #fff;
   font-size: 11px;
   font-weight: 800;
   line-height: 1;
   letter-spacing: 0;
-  background:
-    linear-gradient(135deg, rgb(96 178 255) 0%, rgb(36 110 239) 55%, rgb(25 77 202) 100%);
-  border-radius: 0 8px 0 7px;
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 14px 50%);
-  filter: drop-shadow(0 8px 14px rgb(18 98 255 / 0.34));
+  filter:
+    drop-shadow(0 7px 13px rgb(29 78 216 / 0.34))
+    drop-shadow(0 1px 0 rgb(255 255 255 / 0.14));
 }
 
-.app-shell-credit-ribbon::before {
-  content: "";
+.app-shell-credit-ribbon__flag {
   position: absolute;
-  left: 11px;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: linear-gradient(180deg, transparent, rgb(255 255 255 / 0.28), transparent);
-}
-
-.app-shell-credit-ribbon::after {
-  content: "";
-  position: absolute;
-  inset: 1px 2px auto 20px;
-  height: 1px;
-  background: rgb(255 255 255 / 0.42);
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .app-shell-credit-ribbon span {

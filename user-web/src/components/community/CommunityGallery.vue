@@ -1133,7 +1133,7 @@ onUnmounted(() => {
   position: relative;
   overflow: visible;
   border: 1px solid rgb(255 255 255 / 0.06);
-  border-radius: 2px;
+  border-radius: 6px;
   background: rgb(255 255 255 / 0.02);
   transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
   z-index: 1;
@@ -1152,7 +1152,7 @@ onUnmounted(() => {
 .card-main {
   position: relative;
   overflow: hidden;
-  border-radius: 2px 2px 0 0;
+  border-radius: 6px;
 }
 
 .card-clickable {
@@ -1169,7 +1169,7 @@ onUnmounted(() => {
 .thumb {
   position: relative;
   overflow: hidden;
-  border-radius: 2px;
+  border-radius: 6px;
   background: rgb(255 255 255 / 0.03);
 }
 
@@ -1425,15 +1425,19 @@ onUnmounted(() => {
   z-index: 5;
   overflow: hidden;
   max-height: 0;
-  border-radius: 0 0 2px 2px;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(8px);
-  transition: max-height 0.25s ease, opacity 0.25s ease;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0 8px;
+  border-radius: 0 0 6px 6px;
+  background:
+    linear-gradient(180deg, rgb(18 18 18 / 0.82), rgb(10 10 10 / 0.92)),
+    rgb(20 20 20 / 0.9);
+  box-shadow: 0 10px 22px rgb(0 0 0 / 0.28);
+  backdrop-filter: blur(10px);
   opacity: 0;
   transform: translateY(100%);
+  transition: max-height 0.24s ease, opacity 0.22s ease;
 }
 
 .post-card:hover .card-footer {
@@ -1442,28 +1446,38 @@ onUnmounted(() => {
   transform: translateY(100%);
 }
 
-.video-play-indicator {
+.thumb :deep(.video-play-indicator) {
   display: none;
 }
 
 .same-style-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  padding: 7px 14px;
+  justify-content: center;
+  width: calc(100% - 2px);
+  min-height: 33px;
+  gap: 6px;
+  border: 1px solid rgb(255 255 255 / 0.06);
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, rgb(74 74 74 / 0.98) 0%, rgb(50 50 50 / 0.98) 56%, rgb(42 42 42 / 0.98) 100%),
+    rgb(50 50 50);
+  color: rgb(255 255 255 / 0.9);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    0 1px 0 rgb(0 0 0 / 0.25);
+  padding: 7px 12px;
   font-size: 12px;
   font-weight: 700;
+  line-height: 1;
   cursor: pointer;
-  transition: background 0.18s ease, transform 0.18s ease;
+  transition: filter 0.18s ease, transform 0.18s ease, border-color 0.18s ease;
 }
 
 .same-style-btn:hover:not(:disabled) {
-  filter: brightness(1.15);
-  transform: scale(1.03);
+  border-color: rgb(255 255 255 / 0.11);
+  filter: brightness(1.08);
+  transform: translateY(-1px);
 }
 
 .same-style-btn:disabled {
