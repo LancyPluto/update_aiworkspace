@@ -199,6 +199,21 @@ function audioMedia(post: CommunityPost) {
   }
 }
 
+function sameStylePreviewUrl(post: CommunityPost) {
+  const kind = postKind(post)
+  if (kind === "image") return activePostImageUrl(post)
+  if (kind === "audio") return audioMedia(post).coverUrl
+  return normalizeCommunityMediaUrl(post.coverUrl)
+}
+
+function sameStyleCardStyle(post: CommunityPost) {
+  const previewUrl = sameStylePreviewUrl(post)
+  if (!previewUrl) return {}
+  return {
+    "--same-style-preview": `url("${previewUrl.replace(/["\\]/g, "\\$&")}")`,
+  }
+}
+
 function galleryAudioProgressFor(postId: number) {
   if (playingPostId.value !== postId || !galleryAudioDuration.value) return 0
   return Math.min(100, Math.max(0, (galleryAudioCurrentTime.value / galleryAudioDuration.value) * 100))
@@ -700,7 +715,7 @@ onUnmounted(() => {
     <template v-else>
       <MasonryLayout :items="posts" :item-key="(post) => post.id" :gap="2" aria-label="社区作品">
         <template #default="{ item: post }">
-        <article class="post-card group">
+        <article class="post-card group" :style="sameStyleCardStyle(post)">
           <div class="card-main">
             <div class="thumb">
               <button
@@ -1153,6 +1168,7 @@ onUnmounted(() => {
   position: relative;
   overflow: hidden;
   border-radius: 6px;
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.035);
 }
 
 .card-clickable {
@@ -1424,26 +1440,54 @@ onUnmounted(() => {
   bottom: 0;
   z-index: 5;
   overflow: hidden;
-  max-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 8px;
+  height: 52px;
+  padding: 8px;
   border-radius: 0 0 6px 6px;
-  background:
-    linear-gradient(180deg, rgb(18 18 18 / 0.82), rgb(10 10 10 / 0.92)),
-    rgb(20 20 20 / 0.9);
-  box-shadow: 0 10px 22px rgb(0 0 0 / 0.28);
-  backdrop-filter: blur(10px);
+  background: rgb(14 14 16 / 0.46);
+  box-shadow:
+    0 14px 28px rgb(0 0 0 / 0.34),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
   opacity: 0;
-  transform: translateY(100%);
-  transition: max-height 0.24s ease, opacity 0.22s ease;
+  pointer-events: none;
+  transform: translateY(calc(100% - 10px)) scaleY(0.86);
+  transform-origin: top center;
+  transition:
+    opacity 0.22s ease,
+    transform 0.28s cubic-bezier(0.2, 0.85, 0.24, 1);
+  backdrop-filter: blur(18px) saturate(1.35);
+}
+
+.card-footer::before,
+.card-footer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.card-footer::before {
+  background-image: var(--same-style-preview);
+  background-position: center bottom;
+  background-size: cover;
+  filter: blur(16px) saturate(1.45) brightness(0.72);
+  opacity: 0.84;
+  transform: scale(1.22);
+}
+
+.card-footer::after {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.12), transparent 34%),
+    linear-gradient(180deg, rgb(10 10 12 / 0.16), rgb(8 8 10 / 0.50)),
+    radial-gradient(circle at 50% 0%, rgb(255 255 255 / 0.18), transparent 58%);
 }
 
 .post-card:hover .card-footer {
-  max-height: 48px;
   opacity: 1;
-  transform: translateY(100%);
+  pointer-events: auto;
+  transform: translateY(100%) scaleY(1);
 }
 
 .thumb :deep(.video-play-indicator) {
@@ -1451,33 +1495,83 @@ onUnmounted(() => {
 }
 
 .same-style-btn {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: calc(100% - 2px);
-  min-height: 33px;
+  width: calc(100% - 4px);
+  min-height: 34px;
   gap: 6px;
-  border: 1px solid rgb(255 255 255 / 0.06);
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.26);
   border-radius: 6px;
   background:
-    linear-gradient(180deg, rgb(74 74 74 / 0.98) 0%, rgb(50 50 50 / 0.98) 56%, rgb(42 42 42 / 0.98) 100%),
-    rgb(50 50 50);
-  color: rgb(255 255 255 / 0.9);
+    linear-gradient(180deg, rgb(255 255 255 / 0.34), rgb(255 255 255 / 0.10) 43%, rgb(255 255 255 / 0.055)),
+    linear-gradient(90deg, rgb(255 255 255 / 0.06), rgb(255 255 255 / 0.18) 50%, rgb(255 255 255 / 0.06));
+  color: rgb(255 255 255 / 0.94);
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.08),
-    0 1px 0 rgb(0 0 0 / 0.25);
+    inset 0 1px 0 rgb(255 255 255 / 0.42),
+    inset 0 -1px 0 rgb(255 255 255 / 0.10),
+    0 8px 18px rgb(0 0 0 / 0.22);
   padding: 7px 12px;
   font-size: 12px;
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
-  transition: filter 0.18s ease, transform 0.18s ease, border-color 0.18s ease;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.34);
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    filter 0.18s ease,
+    transform 0.18s ease;
+  backdrop-filter: blur(18px) saturate(1.55);
+}
+
+.same-style-btn::before {
+  content: "";
+  position: absolute;
+  inset: 1px 1px auto;
+  height: 44%;
+  border-radius: 5px 5px 9px 9px;
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.34), transparent);
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.same-style-btn::after {
+  content: "";
+  position: absolute;
+  top: -35%;
+  bottom: -35%;
+  left: -38%;
+  width: 34%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.28), transparent);
+  opacity: 0;
+  transform: rotate(18deg);
+  pointer-events: none;
+  transition: left 0.5s ease, opacity 0.24s ease;
+}
+
+.same-style-btn > * {
+  position: relative;
+  z-index: 1;
 }
 
 .same-style-btn:hover:not(:disabled) {
-  border-color: rgb(255 255 255 / 0.11);
-  filter: brightness(1.08);
+  border-color: rgb(255 255 255 / 0.42);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.54),
+    inset 0 -1px 0 rgb(255 255 255 / 0.14),
+    0 10px 22px rgb(0 0 0 / 0.25);
+  filter: brightness(1.08) saturate(1.12);
   transform: translateY(-1px);
+}
+
+.same-style-btn:hover:not(:disabled)::after {
+  left: 104%;
+  opacity: 1;
 }
 
 .same-style-btn:disabled {
