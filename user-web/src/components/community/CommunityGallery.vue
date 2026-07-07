@@ -677,6 +677,7 @@ onUnmounted(() => {
       v-if="loading"
       :items="skeletonItems"
       item-key="id"
+      :gap="12"
       :estimate-height="(item) => item.height"
       aria-busy="true"
       aria-label="加载中"
@@ -697,7 +698,7 @@ onUnmounted(() => {
     <div v-else-if="!posts.length" class="state-panel">暂时没有匹配的公开作品，换个筛选条件再试试。</div>
 
     <template v-else>
-      <MasonryLayout :items="posts" :item-key="(post) => post.id" aria-label="社区作品">
+      <MasonryLayout :items="posts" :item-key="(post) => post.id" :gap="12" aria-label="社区作品">
         <template #default="{ item: post }">
         <article class="post-card group">
           <div class="card-main">
@@ -1130,7 +1131,7 @@ onUnmounted(() => {
   position: relative;
   overflow: hidden;
   border: 1px solid rgb(255 255 255 / 0.06);
-  border-radius: 14px;
+  border-radius: 10px;
   background: rgb(255 255 255 / 0.02);
   transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
 }
@@ -1159,7 +1160,7 @@ onUnmounted(() => {
 .thumb {
   position: relative;
   overflow: hidden;
-  border-radius: 14px;
+  border-radius: 10px;
   background: rgb(255 255 255 / 0.03);
 }
 
@@ -1227,6 +1228,13 @@ onUnmounted(() => {
   gap: 10px;
   background: linear-gradient(180deg, transparent 0%, rgb(0 0 0 / 0.18) 38%, rgb(0 0 0 / 0.62) 100%);
   padding: 28px 10px 9px;
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+
+.post-card:hover .card-meta-bar,
+.card-meta-bar:focus-within {
+  opacity: 1;
 }
 
 .card-meta-bar > * {

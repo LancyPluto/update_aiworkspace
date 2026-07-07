@@ -725,452 +725,345 @@
   min-height: 150px;
 }
 
+/* ===== Upload Area (Jimeng-style) ===== */
+
 .workspace-upload {
-  position: relative;
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  width: 62px;
-  height: 64px;
-  color: rgba(255, 255, 255, 0.35);
-  transition:
-    color 180ms ease,
-    opacity 180ms ease,
-    width 220ms ease;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid transparent;
+  transition: all 200ms ease;
 }
 
-.workspace-upload.has-file {
-  width: 102px;
-  height: 78px;
-}
-
-.workspace-upload.has-file:hover,
-.workspace-upload.has-file:focus-within,
-.workspace-upload.has-file.dragging {
-  width: min(294px, 36vw);
-}
-
-.workspace-upload-empty,
-.workspace-upload-add-card,
-.workspace-upload-preview,
-.workspace-upload-delete,
-.workspace-upload-lightbox-close {
-  display: grid;
-  place-items: center;
-  border: 0;
-  background: transparent;
-  color: inherit;
-}
-
-.workspace-upload-empty {
-  width: 100%;
-  height: 100%;
-}
-
-.workspace-upload-card {
-  display: grid;
-  place-items: center;
-  width: 52px;
-  height: 58px;
-  border: 1px dashed rgba(255, 255, 255, 0.22);
-  border-radius: 5px;
-  background: rgba(10, 10, 14, 0.26);
-  color: rgba(255, 255, 255, 0.42);
-  transform: rotate(0deg);
-  transform-origin: center;
-  transition:
-    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    border-color 180ms ease,
-    background 180ms ease,
-    box-shadow 180ms ease,
-    color 180ms ease;
-}
-
-.workspace-upload:hover,
-.workspace-upload:focus-within,
 .workspace-upload.dragging {
-  color: rgba(255, 255, 255, 0.62);
-}
-
-.workspace-upload-empty:hover .workspace-upload-card,
-.workspace-upload-empty:focus-visible .workspace-upload-card {
-  border-color: rgba(255, 255, 255, 0.34);
-  color: rgba(255, 255, 255, 0.72);
-  transform: scale(1.06);
-}
-
-.workspace-upload.dragging .workspace-upload-card,
-.workspace-upload.dragging .workspace-upload-add-card {
-  border-color: var(--brand-border);
-  background: var(--brand-softer);
-  color: var(--brand-active-text);
-  box-shadow: 0 0 22px var(--brand-glow);
-}
-
-.workspace-upload.dragging .workspace-upload-card {
-  transform: scale(1.08);
+  border-color: var(--brand-primary, #6366f1);
+  background: rgba(99, 102, 241, 0.08);
 }
 
 .workspace-upload.disabled {
-  opacity: 0.55;
-}
-
-.workspace-upload.disabled button {
-  cursor: not-allowed;
-}
-
-.workspace-upload-stack {
-  position: relative;
-  width: 100%;
-  height: 100%;
-}
-
-.workspace-upload-preview {
-  position: absolute;
-  overflow: hidden;
-  width: 54px;
-  height: 66px;
-  border: 1px solid rgba(255, 255, 255, 0.34);
-  border-radius: 6px;
-  background: #24242c;
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.34), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-  transform-origin: center;
-  transition:
-    left 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    top 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    opacity 180ms ease,
-    border-color 180ms ease,
-    box-shadow 180ms ease,
-    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.workspace-upload-preview.asset-0 {
-  left: 3px;
-  top: 6px;
-  z-index: 2;
-  transform: rotate(-5deg);
-}
-
-.workspace-upload-preview.asset-1 {
-  left: 34px;
-  top: 10px;
-  z-index: 1;
-  opacity: 0.72;
-  transform: rotate(8deg) scale(0.92);
-}
-
-.workspace-upload-preview.asset-2 {
-  left: 64px;
-  top: 14px;
-  z-index: 0;
   opacity: 0.5;
-  transform: rotate(16deg) scale(0.84);
-}
-
-.workspace-upload-preview.asset-3 {
-  left: 94px;
-  top: 18px;
-  z-index: 0;
-  opacity: 0.36;
-  transform: rotate(22deg) scale(0.78);
-}
-
-.workspace-upload-preview img,
-.workspace-upload-preview video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.workspace-upload-file-preview {
-  display: grid;
-  place-items: center;
-  width: 100%;
-  height: 100%;
-  color: rgba(255, 255, 255, 0.6);
-  background: linear-gradient(135deg, rgb(var(--brand-primary-rgb) / 0.18), rgb(var(--brand-secondary-rgb) / 0.12));
-}
-
-.workspace-upload:hover .workspace-upload-preview.asset-0,
-.workspace-upload-preview.asset-0:focus-visible {
-  border-color: rgba(255, 255, 255, 0.58);
-  transform: rotate(-5deg) scale(1.07);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.06);
-}
-
-.workspace-upload:hover .workspace-upload-preview.asset-1,
-.workspace-upload-preview.asset-1:focus-visible {
-  opacity: 0.92;
-  left: 62px;
-  top: 6px;
-  z-index: 3;
-  transform: rotate(3deg) scale(1);
-}
-
-.workspace-upload:hover .workspace-upload-preview.asset-2,
-.workspace-upload-preview.asset-2:focus-visible {
-  opacity: 0.88;
-  left: 121px;
-  top: 6px;
-  z-index: 2;
-  transform: rotate(2deg) scale(1);
-}
-
-.workspace-upload:hover .workspace-upload-preview.asset-3,
-.workspace-upload-preview.asset-3:focus-visible {
-  opacity: 0.84;
-  left: 180px;
-  top: 6px;
-  z-index: 1;
-  transform: rotate(1deg) scale(1);
-}
-
-.workspace-upload-add-card {
-  position: absolute;
-  left: 50px;
-  top: 6px;
-  z-index: 3;
-  width: 54px;
-  height: 66px;
-  border: 1.5px dashed rgba(255, 255, 255, 0.92);
-  border-radius: 6px;
-  background: rgba(10, 10, 14, 0.26);
-  color: rgba(255, 255, 255, 0.5);
-  opacity: 0;
   pointer-events: none;
-  transform: translateX(-22px) rotate(8deg) scale(0.6);
-  transform-origin: center;
-  transition:
-    opacity 220ms ease,
-    transform 340ms cubic-bezier(0.34, 1.56, 0.64, 1),
-    border-color 220ms ease,
-    color 220ms ease,
-    background 220ms ease;
-  will-change: transform, opacity;
 }
 
-.workspace-upload-add-count {
-  position: absolute;
-  right: -6px;
-  top: -6px;
-  display: inline-flex;
-  min-width: 18px;
-  height: 18px;
+/* Add button (always visible) */
+.workspace-upload-add-btn {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
-  color: #0b0d12;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-/* 悬停第一个框所在区域（或添加第二个素材后保持）：第二个框向右弹出，放大到与第一个框等大，白色虚线 */
-.workspace-upload.has-file:hover .workspace-upload-add-card,
-.workspace-upload.has-file:focus-within .workspace-upload-add-card,
-.workspace-upload.has-file.dragging .workspace-upload-add-card,
-.workspace-upload.has-file .workspace-upload-add-card.is-expanded {
-  opacity: 1;
-  pointer-events: auto;
-  border-color: rgba(255, 255, 255, 0.95);
-  color: rgba(255, 255, 255, 0.78);
-  background: rgba(10, 10, 14, 0.3);
-  transform: translateX(12px) rotate(8deg) scale(1);
-  z-index: 5;
-}
-
-.workspace-upload.has-file:hover .workspace-upload-add-card,
-.workspace-upload.has-file:focus-within .workspace-upload-add-card,
-.workspace-upload.has-file.dragging .workspace-upload-add-card {
-  left: 238px;
-  transform: rotate(3deg) scale(1);
-}
-
-.workspace-upload.has-file .workspace-upload-add-card:hover,
-.workspace-upload.has-file .workspace-upload-add-card:focus-visible {
-  border-color: rgba(255, 255, 255, 0.95);
-  color: rgba(255, 255, 255, 0.82);
-  background: rgba(10, 10, 14, 0.34);
-  transform: translateX(6px) rotate(8deg) scale(1.12);
-  z-index: 5;
-}
-
-.workspace-upload.has-file:hover .workspace-upload-add-card:hover,
-.workspace-upload.has-file .workspace-upload-add-card:focus-visible {
-  transform: rotate(3deg) scale(1.08);
-}
-
-.workspace-upload-zoom,
-.workspace-upload-delete {
-  position: absolute;
-  z-index: 4;
-  opacity: 0;
-  transition:
-    opacity 160ms ease,
-    transform 160ms ease,
-    background 160ms ease;
-}
-
-.workspace-upload-zoom {
-  left: 50%;
-  top: 50%;
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border: 1px solid var(--brand-border);
-  border-radius: 999px;
-  color: var(--brand-active-text);
-  background: rgba(8, 8, 11, 0.78);
-  transform: translate(-50%, -50%) scale(0.82);
-}
-
-.workspace-upload-delete {
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  color: white;
-  background: rgba(8, 8, 11, 0.82);
-  transform: scale(0.82);
-}
-
-.workspace-upload-delete.asset-0 {
-  right: 40px;
-  top: 0;
-}
-
-.workspace-upload-delete.asset-1 {
-  right: 6px;
-  top: 6px;
-}
-
-.workspace-upload.has-file:hover .workspace-upload-zoom,
-.workspace-upload-preview:focus-visible .workspace-upload-zoom,
-.workspace-upload.has-file:hover .workspace-upload-delete,
-.workspace-upload-delete:focus-visible {
-  opacity: 1;
-  transform: translate(-50%, -50%) scale(1);
-}
-
-.workspace-upload.has-file:hover .workspace-upload-delete,
-.workspace-upload-delete:focus-visible {
-  transform: scale(1);
-}
-
-.workspace-upload-delete:hover {
-  background: var(--brand-primary);
-}
-
-/* 视频播放图标 */
-.workspace-upload-play-icon {
-  position: absolute;
-  z-index: 4;
-  left: 50%;
-  top: 50%;
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 999px;
-  color: white;
-  background: rgba(8, 8, 11, 0.72);
-  opacity: 0;
-  transform: translate(-50%, -50%) scale(0.82);
-  transition:
-    opacity 160ms ease,
-    transform 160ms ease,
-    background 160ms ease;
-}
-
-.workspace-upload-preview:hover .workspace-upload-play-icon,
-.workspace-upload-preview:focus-visible .workspace-upload-play-icon {
-  opacity: 1;
-  transform: translate(-50%, -50%) scale(1);
-}
-
-.workspace-upload-play-icon:hover {
-  background: var(--brand-primary);
-}
-
-/* 删除按钮（右上角） */
-.workspace-upload-close-btn {
-  position: absolute;
-  z-index: 5;
-  right: 6px;
-  top: 6px;
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border: none;
-  border-radius: 999px;
-  color: white;
-  background: rgba(8, 8, 11, 0.78);
+  gap: 6px;
+  width: 72px;
+  height: 72px;
+  border-radius: 10px;
+  border: 2px dashed rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.6);
   cursor: pointer;
-  opacity: 0;
-  transform: scale(0.82);
-  transition:
-    opacity 160ms ease,
-    transform 160ms ease,
-    background 160ms ease;
+  transition: all 200ms ease;
 }
 
-.workspace-upload-preview:hover .workspace-upload-close-btn,
-.workspace-upload-close-btn:focus-visible {
-  opacity: 1;
-  transform: scale(1);
+.workspace-upload-add-btn:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.9);
 }
 
-.workspace-upload-close-btn:hover {
-  background: var(--brand-primary);
+.workspace-upload-add-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
-.workspace-upload-status {
-  margin: -8px 0 12px 76px;
+.workspace-upload-add-btn.is-empty {
+  width: 100%;
+  height: 88px;
+  border-radius: 12px;
+}
+
+.workspace-upload-add-label {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.52);
+  font-weight: 500;
+  color: inherit;
+  white-space: nowrap;
 }
 
-.workspace-upload-status.error {
-  color: #fca5a5;
-}
-
-.workspace-prompt-shell {
-  position: relative;
+/* Asset thumbnails stack */
+.workspace-upload-stack {
+  display: flex;
+  align-items: center;
+  gap: 0;
   flex: 1;
   min-width: 0;
 }
 
-.workspace-prompt-shell textarea {
+.workspace-upload-stack:hover {
+  gap: 8px;
+}
+
+.workspace-upload-stack:hover .workspace-upload-thumb {
+  margin-left: 0;
+}
+
+/* Individual thumbnail */
+.workspace-upload-thumb {
+  position: relative;
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  margin-left: -20px;
+}
+
+.workspace-upload-thumb:first-child {
+  margin-left: 0;
+}
+
+.workspace-upload-thumb:hover {
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: scale(1.08);
+  z-index: 10;
+}
+
+.workspace-upload-thumb img,
+.workspace-upload-thumb video {
   width: 100%;
-  min-height: 114px;
-  padding-right: 64px;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.workspace-upload-file-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.15));
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Video play overlay */
+.workspace-thumb-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  color: white;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+.workspace-upload-thumb:hover .workspace-thumb-play {
+  opacity: 1;
+}
+
+/* Kind badge */
+.workspace-thumb-kind {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  font-size: 10px;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+.workspace-upload-thumb:hover .workspace-thumb-kind {
+  opacity: 1;
+}
+
+.workspace-thumb-kind.kind-video {
+  background: rgba(239, 68, 68, 0.9);
+}
+
+.workspace-thumb-kind.kind-image {
+  background: rgba(59, 130, 246, 0.9);
+}
+
+.workspace-thumb-kind.kind-audio {
+  background: rgba(168, 85, 247, 0.9);
+}
+
+/* Delete button */
+.workspace-thumb-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.75);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 200ms ease;
+}
+
+.workspace-upload-thumb:hover .workspace-thumb-delete {
+  opacity: 1;
+}
+
+.workspace-thumb-delete:hover {
+  background: rgba(239, 68, 68, 0.9);
+  transform: scale(1.1);
+}
+
+/* More indicator (+N) */
+.workspace-upload-more {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 64px;
+  margin-left: -12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+/* Video input warning */
+.workspace-video-warn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  margin-top: 8px;
+  border-radius: 8px;
+  background: rgba(251, 146, 60, 0.12);
+  border: 1px solid rgba(251, 146, 60, 0.3);
+  color: rgba(251, 146, 60, 1);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Prompt shell */
+.workspace-prompt-shell {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: border-color 200ms ease;
+}
+
+.workspace-prompt-shell:focus-within {
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+.workspace-prompt-shell textarea {
+  flex: 1;
+  min-height: 40px;
+  max-height: 120px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+}
+
+.workspace-prompt-shell textarea::placeholder {
+  color: rgba(255, 255, 255, 0.4);
 }
 
 .workspace-prompt-actions {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
   display: flex;
   align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
-.workspace-mention-pop {
+/* Icon chip (@ button etc) */
+.workspace-icon-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  transition: all 200ms ease;
+}
+
+.workspace-icon-chip:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.workspace-icon-chip.active {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.4);
+  color: rgba(99, 102, 241, 1);
+}
+
+/* Menu pop (dropdown) */
+.workspace-menu-pop {
+  position: absolute;
+  bottom: calc(100% + 8px);
   right: 0;
-  bottom: 46px;
-  min-width: 128px;
+  min-width: 180px;
+  padding: 6px;
+  border-radius: 10px;
+  background: rgba(30, 30, 35, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 100;
 }
 
-.workspace-upload-hint {
-  margin: 8px 0 0 78px;
-  color: rgba(255, 255, 255, 0.34);
-  font-size: 11px;
-  line-height: 1.4;
+.workspace-menu-pop button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms ease;
 }
 
-.workspace-upload-hint--warn {
-  color: rgba(251, 191, 36, 0.88);
+.workspace-menu-pop button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
 }
 
 .workspace-upload-lightbox {
@@ -2541,63 +2434,34 @@
   height: 42px;
 }
 
-.workspace-create-composer-dock.condensed .workspace-upload.has-file {
-  width: 54px;
-  height: 46px;
+.workspace-create-composer-dock.condensed .workspace-upload {
+  gap: 6px;
+  padding: 4px;
 }
 
-.workspace-create-composer-dock.condensed .workspace-upload-card {
-  width: 36px;
+.workspace-create-composer-dock.condensed .workspace-upload-add-btn {
+  width: 40px;
   height: 40px;
 }
 
-.workspace-create-composer-dock.condensed .workspace-upload-stack {
-  width: 54px;
-  height: 46px;
+.workspace-create-composer-dock.condensed .workspace-upload-add-btn.is-empty {
+  width: 40px;
+  height: 40px;
 }
 
-.workspace-create-composer-dock.condensed .workspace-upload-preview {
-  width: 34px;
-  height: 42px;
-}
-
-.workspace-create-composer-dock.condensed .workspace-upload-preview.asset-0 {
-  left: 1px;
-  top: 2px;
-}
-
-.workspace-create-composer-dock.condensed .workspace-upload-preview.asset-1,
-.workspace-create-composer-dock.condensed .workspace-upload-preview.asset-2,
-.workspace-create-composer-dock.condensed .workspace-upload-preview.asset-3 {
+.workspace-create-composer-dock.condensed .workspace-upload-add-label {
   display: none;
 }
 
-.workspace-create-composer-dock.condensed .workspace-upload-add-card {
-  left: 30px;
-  top: 7px;
-  width: 34px;
-  height: 42px;
-  transform: translateX(-14px) rotate(8deg) scale(0.6);
+.workspace-create-composer-dock.condensed .workspace-upload-thumb {
+  width: 36px;
+  height: 36px;
+  margin-left: -12px;
 }
 
-.workspace-create-composer-dock.condensed .workspace-upload.has-file:hover .workspace-upload-add-card,
-.workspace-create-composer-dock.condensed .workspace-upload.has-file:focus-within .workspace-upload-add-card,
-.workspace-create-composer-dock.condensed .workspace-upload.has-file .workspace-upload-add-card.is-expanded {
-  transform: translateX(7px) rotate(8deg) scale(1);
-}
-
-.workspace-create-composer-dock.condensed .workspace-upload-add-card:hover,
-.workspace-create-composer-dock.condensed .workspace-upload-add-card:focus-visible {
-  left: 30px;
-  top: 7px;
-  width: 34px;
-  height: 42px;
-  transform: translateX(3px) rotate(8deg) scale(1.08);
-}
-
-.workspace-create-composer-dock.condensed .workspace-upload-close-btn {
-  right: -4px;
-  top: -4px;
+.workspace-create-composer-dock.condensed .workspace-thumb-delete {
+  width: 14px;
+  height: 14px;
 }
 
 .workspace-create-composer-dock.condensed .workspace-composer textarea {

@@ -905,7 +905,6 @@ const costInsufficient = computed(() => liveCreditView.value.insufficient)
     </div>
 
     <div class="workspace-composer">
-      <div class="workspace-composer-input" :class="{ tall: compact }">
         <div
           class="workspace-upload"
           :class="{ dragging: dragActive, 'has-file': uploadedAssets.length > 0, disabled: uploadDisabled }"
@@ -914,67 +913,59 @@ const costInsufficient = computed(() => liveCreditView.value.insufficient)
           @dragleave.prevent="onUploadDragLeave"
           @drop.prevent="onUploadDrop"
         >
+          <!-- Always-visible add button -->
           <button
-            v-if="uploadedAssets.length === 0"
-            class="workspace-upload-empty"
+            class="workspace-upload-add-btn"
+            :class="{ 'is-empty': uploadedAssets.length === 0 }"
             type="button"
             :disabled="uploadDisabled"
-            :title="uploadError || '上传参考素材'"
-            aria-label="上传参考素材"
+            :title="uploadError || uploadHint"
+            aria-label="上传素材"
             @click="openUploadPicker"
           >
-            <span class="workspace-upload-card" aria-hidden="true">
-              <Plus :size="22" />
-            </span>
+            <Plus :size="uploadedAssets.length === 0 ? 28 : 18" />
+            <span v-if="uploadedAssets.length === 0" class="workspace-upload-add-label">{{ uploadHint }}</span>
           </button>
-          <div v-else class="workspace-upload-stack">
+          <!-- Asset thumbnails (overlapping, expand on hover) -->
+          <div v-if="uploadedAssets.length > 0" class="workspace-upload-stack">
             <button
               v-for="(asset, index) in visibleUploadedAssets"
               :key="asset.id"
-              class="workspace-upload-preview"
-              :class="`asset-${index}`"
+              class="workspace-upload-thumb"
+              :class="'thumb-' + index"
               type="button"
               :title="asset.name"
               @click="openAssetPreview(asset)"
             >
               <img v-if="asset.kind === 'image'" :src="asset.url" alt="" />
               <video v-else-if="asset.kind === 'video'" :src="asset.url" muted playsinline />
-              <span v-else class="workspace-upload-file-preview">
-                <Music2 v-if="asset.kind === 'audio'" :size="22" />
-                <FileUp v-else :size="22" />
+              <span v-else class="workspace-upload-file-icon">
+                <Music2 v-if="asset.kind === 'audio'" :size="18" />
+                <FileUp v-else :size="18" />
               </span>
-              <!-- 视频播放图标 -->
-              <span v-if="asset.kind === 'video'" class="workspace-upload-play-icon" aria-hidden="true">
-                <Play :size="16" fill="currentColor" />
+              <!-- Video play overlay -->
+              <span v-if="asset.kind === 'video'" class="workspace-thumb-play" aria-hidden="true">
+                <Play :size="14" fill="currentColor" />
               </span>
-              <!-- 放大预览图标（仅图片显示） -->
-              <span v-if="asset.kind === 'image'" class="workspace-upload-zoom" aria-hidden="true">
-                <ZoomIn :size="14" />
+              <!-- Kind badge -->
+              <span class="workspace-thumb-kind" :class="'kind-' + asset.kind">
+                <Video v-if="asset.kind === 'video'" :size="10" />
+                <ImageIcon v-else-if="asset.kind === 'image'" :size="10" />
+                <Music2 v-else-if="asset.kind === 'audio'" :size="10" />
+                <FileUp v-else :size="10" />
               </span>
-              <!-- 删除按钮（右上角） -->
+              <!-- Delete button -->
               <button
-                class="workspace-upload-close-btn"
+                class="workspace-thumb-delete"
                 type="button"
-                title="删除素材"
-                aria-label="删除素材"
+                title="移除"
+                aria-label="移除素材"
                 @click.stop="removeUploadedAsset(asset.id)"
               >
-                <X :size="12" />
+                <X :size="10" />
               </button>
             </button>
-            <button
-              class="workspace-upload-add-card"
-              :class="{ 'is-expanded': addCardExpanded }"
-              type="button"
-              :disabled="uploadDisabled"
-              title="添加素材"
-              aria-label="添加素材"
-              @click="openUploadPicker"
-            >
-              <Plus :size="20" />
-              <span v-if="hiddenUploadedAssetCount > 0" class="workspace-upload-add-count">+{{ hiddenUploadedAssetCount }}</span>
-            </button>
-
+            <span v-if="hiddenUploadedAssetCount > 0" class="workspace-upload-more">+{{ hiddenUploadedAssetCount }}</span>
           </div>
         </div>
         <input
@@ -985,6 +976,12 @@ const costInsufficient = computed(() => liveCreditView.value.insufficient)
           :accept="uploadAccept()"
           @change="onFilePicked"
         />
+        <!-- Video input warning banner -->
+        <div v-if="videoInputHint" class="workspace-video-warn">
+          <Video :size="14" />
+          <span>{{ videoInputHint }}</span>
+        </div>
+        <!-- Prompt input -->
         <div class="workspace-prompt-shell">
           <textarea v-model="prompt" name="prompt" aria-label="创作提示词" :placeholder="promptPlaceholder" />
           <div class="workspace-prompt-actions">
@@ -1010,7 +1007,6 @@ const costInsufficient = computed(() => liveCreditView.value.insufficient)
           </div>
         </div>
         <p class="workspace-upload-hint">{{ uploadHint }}</p>
-        <p v-if="videoInputHint" class="workspace-upload-hint workspace-upload-hint--warn">{{ videoInputHint }}</p>
       </div>
       <div v-if="uploading || uploadError" class="workspace-upload-status" :class="{ error: uploadError }">
         <span v-if="uploading">素材上传中...</span>
