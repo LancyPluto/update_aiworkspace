@@ -264,6 +264,46 @@ CREATE TABLE credit_recharge_orders (
 CREATE UNIQUE INDEX uk_recharge_user_idem ON credit_recharge_orders(user_id, idempotency_key);
 CREATE UNIQUE INDEX uk_recharge_external_trade_no ON credit_recharge_orders(external_trade_no);
 
+CREATE TABLE credit_recharge_order_items (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  order_id BIGINT NOT NULL,
+  gift_card_package_id BIGINT NOT NULL,
+  quantity INT NOT NULL,
+  credits INT NOT NULL,
+  price_amount DECIMAL(18,2) NOT NULL,
+  item_type VARCHAR(32) NOT NULL DEFAULT 'GIFT_CARD',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_recharge_order_items_order ON credit_recharge_order_items(order_id);
+
+CREATE TABLE user_referrals (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  inviter_user_id BIGINT NOT NULL,
+  invitee_user_id BIGINT NOT NULL,
+  invite_code VARCHAR(64),
+  status VARCHAR(32) NOT NULL DEFAULT 'REGISTERED',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX uk_user_referrals_invitee ON user_referrals(invitee_user_id);
+CREATE INDEX idx_user_referrals_inviter ON user_referrals(inviter_user_id, created_at);
+
+CREATE TABLE referral_rewards (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  referral_id BIGINT NOT NULL,
+  inviter_user_id BIGINT NOT NULL,
+  invitee_user_id BIGINT NOT NULL,
+  recharge_order_id BIGINT NOT NULL,
+  reward_credits INT NOT NULL,
+  reward_rate DECIMAL(10,4) NOT NULL DEFAULT 0.1000,
+  status VARCHAR(32) NOT NULL DEFAULT 'CREDITED',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX uk_referral_rewards_order ON referral_rewards(recharge_order_id);
+CREATE INDEX idx_referral_rewards_inviter ON referral_rewards(inviter_user_id, created_at);
+
 CREATE TABLE tool_prompts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   tool_id BIGINT NOT NULL,

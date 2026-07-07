@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue"
+import { computed, onMounted, onUnmounted, ref } from "vue"
 import { AlertCircle } from "lucide-vue-next"
 import { clampAspectRatio } from "@/utils/taskAspectRatio"
 import {
@@ -33,6 +33,25 @@ const props = withDefaults(
 )
 
 const displayRatio = computed(() => clampAspectRatio(props.aspectRatio))
+const viewportHeight = ref(typeof window === "undefined" ? 720 : window.innerHeight)
+
+function refreshViewportHeight() {
+  viewportHeight.value = window.innerHeight
+}
+
+onMounted(() => {
+  refreshViewportHeight()
+  window.addEventListener("resize", refreshViewportHeight)
+})
+
+onUnmounted(() => {
+  window.removeEventListener("resize", refreshViewportHeight)
+})
+
+const previewStyle = computed(() => ({
+  aspectRatio: displayRatio.value,
+  width: `min(100%, ${Math.min(640, Math.max(180, Math.min(viewportHeight.value * 0.72, 520) * displayRatio.value))}px)`,
+}))
 
 const outputPlan = computed(() => {
   if (props.task) return buildTaskImageOutputPlan(props.task)
@@ -74,6 +93,7 @@ function parallelSlotPercentLabel(slotIndex: number): string {
       :key="`slot-${slot}`"
       class="generation-loading-preview generation-loading-preview--slot"
       :class="{ 'generation-loading-preview--failed': failed }"
+      :style="previewStyle"
     >
       <div class="generation-loading-preview__glow" aria-hidden="true" />
       <div class="generation-loading-preview__content">
@@ -98,7 +118,7 @@ function parallelSlotPercentLabel(slotIndex: number): string {
     v-else
     class="generation-loading-preview"
     :class="{ 'generation-loading-preview--failed': failed }"
-    :style="{ aspectRatio: displayRatio }"
+    :style="previewStyle"
   >
     <div class="generation-loading-preview__glow" aria-hidden="true" />
     <div class="generation-loading-preview__content">
@@ -129,12 +149,11 @@ function parallelSlotPercentLabel(slotIndex: number): string {
 
 .generation-preview-group .generation-loading-preview {
   width: 100%;
-  max-height: 260px;
+  max-height: none;
 }
 
 .generation-loading-preview--slot {
   min-height: 180px;
-  aspect-ratio: 16 / 9;
 }
 
 .generation-loading-preview__progress {
@@ -160,7 +179,6 @@ function parallelSlotPercentLabel(slotIndex: number): string {
   --generation-loader-tertiary-rgb: var(--brand-tertiary-rgb, 52 211 153);
   position: relative;
   width: min(100%, 640px);
-  max-height: min(72vh, 520px);
   border: 1px solid rgb(255 255 255 / 0.075);
   border-radius: 16px;
   background:

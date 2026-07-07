@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { RouterLink, useRoute, useRouter } from "vue-router"
 import type { Component } from "vue"
 import {
@@ -213,8 +213,8 @@ const getMembershipLabel = (packageCode: string | null | undefined): string => {
   // 提取套餐类型（starter/growth/pro/flagship）
   const code = packageCode.toLowerCase()
   if (code.includes("starter")) return "标准版"
-  if (code.includes("growth")) return "高级版"
-  if (code.includes("pro")) return "进阶版"
+  if (code.includes("growth")) return "进阶版"
+  if (code.includes("pro")) return "高级版"
   if (code.includes("flagship")) return "豪华版"
   
   return "体验版"
@@ -459,8 +459,8 @@ watch(
           <span>{{ item.label }}</span>
         </RouterLink>
 
-        <button
-          type="button"
+        <RouterLink
+          to="/referral"
           class="group relative mb-3 flex h-11 w-full items-center gap-2.5 overflow-hidden rounded-lg border border-white/[0.055] bg-white/[0.025] px-3 text-left text-sm font-medium text-white/76 transition hover:border-[var(--brand-border)] hover:bg-white/[0.045] hover:text-white"
         >
           <Gift class="h-[18px] w-[18px] shrink-0 text-white/60 transition group-hover:text-white/90" aria-hidden="true" />
@@ -468,27 +468,27 @@ watch(
             <span class="block truncate">推荐有礼</span>
           </span>
           <span class="rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[10px] font-medium text-[var(--brand-active-text)] ring-1 ring-white/[0.05]">最新</span>
-        </button>
+        </RouterLink>
 
         <RouterLink
           to="/billing"
           class="relative mb-2 block rounded-lg border border-white/[0.055] bg-white/[0.025] p-3 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.02)] transition hover:border-[var(--brand-border)] hover:bg-white/[0.04]"
         >
-          <!-- 会员版本标签 - 蓝色横向书签样式，左侧内凹弧形缺口 -->
-          <div class="absolute right-0 top-0 z-10">
-            <div class="relative flex items-center rounded-bl-md rounded-tr-md bg-gradient-to-b from-blue-500 to-blue-700 px-3 py-1 text-xs font-bold text-white shadow-lg">
-              <!-- 左侧内凹弧形缺口 -->
-              <svg class="absolute left-0 h-full w-2 -translate-x-[98%]" viewBox="0 0 12 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path d="M12 0L0 16L12 32V0Z" fill="url(#blue-gradient)" />
-                <defs>
-                  <linearGradient id="blue-gradient" x1="6" y1="0" x2="6" y2="32" gradientUnits="userSpaceOnUse">
-                    <stop stop-color="#3B82F6" />
-                    <stop offset="1" stop-color="#1D4ED8" />
-                  </linearGradient>
-                </defs>
-              </svg>
-              <span>{{ membershipLabel }}</span>
-            </div>
+          <div class="app-shell-credit-ribbon" aria-label="当前会员等级">
+            <svg class="app-shell-credit-ribbon__flag" viewBox="0 0 86 30" preserveAspectRatio="none" aria-hidden="true">
+              <defs>
+                <linearGradient id="app-shell-credit-ribbon-gradient" x1="0" y1="0" x2="86" y2="30" gradientUnits="userSpaceOnUse">
+                  <stop offset="0" stop-color="#7dd3fc" />
+                  <stop offset="0.42" stop-color="#2563eb" />
+                  <stop offset="1" stop-color="#1d4ed8" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M14 0H78C82.4183 0 86 3.58172 86 8V30H14L0 15L14 0Z"
+                fill="url(#app-shell-credit-ribbon-gradient)"
+              />
+            </svg>
+            <span>{{ membershipLabel }}</span>
           </div>
 
           <p class="mt-2 flex items-center gap-2 font-mono text-[12px] font-semibold tabular-nums text-white/88">
@@ -930,6 +930,41 @@ watch(
 
 .app-shell-credit-progress {
   background: var(--brand-progress-gradient);
+}
+
+.app-shell-credit-ribbon {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  z-index: 10;
+  display: inline-flex;
+  min-width: 76px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 11px 0 24px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+  filter:
+    drop-shadow(0 7px 13px rgb(29 78 216 / 0.34))
+    drop-shadow(0 1px 0 rgb(255 255 255 / 0.14));
+}
+
+.app-shell-credit-ribbon__flag {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.app-shell-credit-ribbon span {
+  position: relative;
+  z-index: 1;
+  white-space: nowrap;
 }
 
 .app-shell-accent-trigger {

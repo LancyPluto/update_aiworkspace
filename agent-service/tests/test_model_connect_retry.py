@@ -1,7 +1,7 @@
-import pytest
 import httpx
+import pytest
 
-from app.clients.model_client import _is_retryable_connection_error, _retry_openai_compatible_call
+from app.clients.model_client import _format_connection_error, _is_retryable_connection_error, _retry_openai_compatible_call
 
 
 def test_is_retryable_connection_error_matches_connect_failures():
@@ -23,3 +23,14 @@ async def test_retry_openai_compatible_call_retries_then_succeeds():
     result = await _retry_openai_compatible_call(flaky, retry_count=2)
     assert result == {"ok": True}
     assert attempts["count"] == 2
+
+
+def test_format_connection_error_reports_proxy_and_no_proxy(monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://host.docker.internal:7890")
+    monkeypatch.setenv("NO_PROXY", "localhost,api.deepseek.com")
+
+    message = _format_connection_error(httpx.ConnectError("ConnectError"))
+
+    assert "当前代理=http://host.docker.internal:7890" in message
+    assert "NO_PROXY=localhost,api.deepseek.com" in message
+    assert "check_outbound_proxy.py" in message

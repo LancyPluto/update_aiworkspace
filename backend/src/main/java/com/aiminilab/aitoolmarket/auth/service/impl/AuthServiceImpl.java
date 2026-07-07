@@ -17,6 +17,7 @@ import com.aiminilab.aitoolmarket.common.enums.UserStatus;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderMapper;
+import com.aiminilab.aitoolmarket.credit.service.ReferralService;
 import com.aiminilab.aitoolmarket.user.dto.UserProfileResponse;
 import com.aiminilab.aitoolmarket.user.entity.User;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
@@ -33,19 +34,22 @@ public class AuthServiceImpl implements AuthService {
     private final SmsCodeService smsCodeService;
     private final HumanCaptchaService humanCaptchaService;
     private final CreditRechargeOrderMapper creditRechargeOrderMapper;
+    private final ReferralService referralService;
 
     public AuthServiceImpl(UserMapper userMapper,
                            PasswordEncoder passwordEncoder,
                            JwtTokenProvider jwtTokenProvider,
                            SmsCodeService smsCodeService,
                            HumanCaptchaService humanCaptchaService,
-                           CreditRechargeOrderMapper creditRechargeOrderMapper) {
+                           CreditRechargeOrderMapper creditRechargeOrderMapper,
+                           ReferralService referralService) {
         this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
         this.smsCodeService = smsCodeService;
         this.humanCaptchaService = humanCaptchaService;
         this.creditRechargeOrderMapper = creditRechargeOrderMapper;
+        this.referralService = referralService;
     }
 
     @Override
@@ -78,6 +82,7 @@ public class AuthServiceImpl implements AuthService {
         user.setStatus(UserStatus.ACTIVE.name());
         Long userId = insertUser(user);
         user.setId(userId);
+        referralService.bindInviteCode(userId, request.inviteCode());
         return buildLoginResponse(user);
     }
 
@@ -140,6 +145,7 @@ public class AuthServiceImpl implements AuthService {
         user.setStatus(UserStatus.ACTIVE.name());
         Long userId = insertUser(user);
         user.setId(userId);
+        referralService.bindInviteCode(userId, request.inviteCode());
         return buildLoginResponse(user);
     }
 
@@ -162,6 +168,7 @@ public class AuthServiceImpl implements AuthService {
             created.setStatus(UserStatus.ACTIVE.name());
             Long userId = insertUser(created);
             created.setId(userId);
+            referralService.bindInviteCode(userId, request.inviteCode());
             return buildLoginResponse(created);
         }
         try {

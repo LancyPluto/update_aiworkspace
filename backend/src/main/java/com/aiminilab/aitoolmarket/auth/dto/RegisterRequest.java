@@ -7,6 +7,7 @@ public record RegisterRequest(
         String username,
         @NotBlank @Size(min = 6, max = 64) String password,
         String phone,
-        String nickname
+        String nickname,
+        String inviteCode
 ) {
 }

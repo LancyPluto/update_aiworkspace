@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.credit.entity.GiftCard;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
@@ -33,6 +34,9 @@ public interface GiftCardMapper extends BaseMapper<GiftCard> {
                 .eq(GiftCard::getOwnerUserId, ownerUserId)
                 .last("LIMIT 1"));
     }
+
+    @Select("SELECT COUNT(*) FROM gift_cards WHERE recharge_order_id = #{orderId}")
+    int countByRechargeOrderId(@Param("orderId") Long orderId);
 
     @Update("""
             UPDATE gift_cards

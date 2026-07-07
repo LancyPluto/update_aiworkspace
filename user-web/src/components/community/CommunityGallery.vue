@@ -199,6 +199,21 @@ function audioMedia(post: CommunityPost) {
   }
 }
 
+function sameStylePreviewUrl(post: CommunityPost) {
+  const kind = postKind(post)
+  if (kind === "image") return activePostImageUrl(post)
+  if (kind === "audio") return audioMedia(post).coverUrl
+  return normalizeCommunityMediaUrl(post.coverUrl)
+}
+
+function sameStyleCardStyle(post: CommunityPost) {
+  const previewUrl = sameStylePreviewUrl(post)
+  if (!previewUrl) return {}
+  return {
+    "--same-style-preview": `url("${previewUrl.replace(/["\\]/g, "\\$&")}")`,
+  }
+}
+
 function galleryAudioProgressFor(postId: number) {
   if (playingPostId.value !== postId || !galleryAudioDuration.value) return 0
   return Math.min(100, Math.max(0, (galleryAudioCurrentTime.value / galleryAudioDuration.value) * 100))
@@ -677,6 +692,7 @@ onUnmounted(() => {
       v-if="loading"
       :items="skeletonItems"
       item-key="id"
+      :gap="2"
       :estimate-height="(item) => item.height"
       aria-busy="true"
       aria-label="加载中"
@@ -697,9 +713,9 @@ onUnmounted(() => {
     <div v-else-if="!posts.length" class="state-panel">暂时没有匹配的公开作品，换个筛选条件再试试。</div>
 
     <template v-else>
-      <MasonryLayout :items="posts" :item-key="(post) => post.id" aria-label="社区作品">
+      <MasonryLayout :items="posts" :item-key="(post) => post.id" :gap="2" aria-label="社区作品">
         <template #default="{ item: post }">
-        <article class="post-card group">
+        <article class="post-card group" :style="sameStyleCardStyle(post)">
           <div class="card-main">
             <div class="thumb">
               <button
@@ -788,6 +804,8 @@ onUnmounted(() => {
               </button>
             </div>
 
+          </div>
+          <div class="card-footer">
             <button
               type="button"
               class="same-style-btn"
@@ -1032,7 +1050,7 @@ onUnmounted(() => {
   width: 100%;
   align-items: center;
   border: 0;
-  border-radius: 10px;
+  border-radius: 2px;
   background: transparent;
   padding: 9px 10px;
   color: rgb(255 255 255 / 0.68);
@@ -1128,11 +1146,16 @@ onUnmounted(() => {
 
 .post-card {
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid rgb(255 255 255 / 0.06);
-  border-radius: 14px;
+  border-radius: 6px;
   background: rgb(255 255 255 / 0.02);
   transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+  z-index: 1;
+}
+
+.post-card:hover {
+  z-index: 10;
 }
 
 .post-card:hover {
@@ -1143,6 +1166,9 @@ onUnmounted(() => {
 
 .card-main {
   position: relative;
+  overflow: hidden;
+  border-radius: 6px;
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.035);
 }
 
 .card-clickable {
@@ -1159,8 +1185,23 @@ onUnmounted(() => {
 .thumb {
   position: relative;
   overflow: hidden;
-  border-radius: 14px;
+  border-radius: 6px;
   background: rgb(255 255 255 / 0.03);
+}
+
+.thumb video {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+}
+
+.thumb video::-webkit-media-controls {
+  display: none !important;
+}
+
+.thumb video::-webkit-media-controls-enclosure {
+  display: none !important;
 }
 
 .thumb-media {
@@ -1227,6 +1268,13 @@ onUnmounted(() => {
   gap: 10px;
   background: linear-gradient(180deg, transparent 0%, rgb(0 0 0 / 0.18) 38%, rgb(0 0 0 / 0.62) 100%);
   padding: 28px 10px 9px;
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+
+.post-card:hover .card-meta-bar,
+.card-meta-bar:focus-within {
+  opacity: 1;
 }
 
 .card-meta-bar > * {
@@ -1385,32 +1433,145 @@ onUnmounted(() => {
   stroke: currentColor;
 }
 
-.same-style-btn {
+.card-footer {
   position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 2;
-  display: inline-flex;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  overflow: hidden;
+  display: flex;
   align-items: center;
-  gap: 6px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  padding: 8px 12px;
-  font-size: 12px;
-  font-weight: 700;
-  box-shadow: 0 8px 20px rgb(0 0 0 / 0.35);
+  justify-content: center;
+  height: 52px;
+  padding: 8px;
+  border-radius: 0 0 6px 6px;
+  background: rgb(14 14 16 / 0.46);
+  box-shadow:
+    0 14px 28px rgb(0 0 0 / 0.34),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
   opacity: 0;
-  transform: translateY(-4px);
-  transition: opacity 0.18s ease, transform 0.18s ease;
-  cursor: pointer;
+  pointer-events: none;
+  transform: translateY(calc(100% - 10px)) scaleY(0.86);
+  transform-origin: top center;
+  transition:
+    opacity 0.22s ease,
+    transform 0.28s cubic-bezier(0.2, 0.85, 0.24, 1);
+  backdrop-filter: blur(18px) saturate(1.35);
 }
 
-.post-card:hover .same-style-btn,
-.same-style-btn:focus-visible {
+.card-footer::before,
+.card-footer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.card-footer::before {
+  background-image: var(--same-style-preview);
+  background-position: center bottom;
+  background-size: cover;
+  filter: blur(16px) saturate(1.45) brightness(0.72);
+  opacity: 0.84;
+  transform: scale(1.22);
+}
+
+.card-footer::after {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.12), transparent 34%),
+    linear-gradient(180deg, rgb(10 10 12 / 0.16), rgb(8 8 10 / 0.50)),
+    radial-gradient(circle at 50% 0%, rgb(255 255 255 / 0.18), transparent 58%);
+}
+
+.post-card:hover .card-footer {
   opacity: 1;
-  transform: translateY(0);
+  pointer-events: auto;
+  transform: translateY(100%) scaleY(1);
+}
+
+.thumb :deep(.video-play-indicator) {
+  display: none;
+}
+
+.same-style-btn {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(100% - 4px);
+  min-height: 34px;
+  gap: 6px;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.26);
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.34), rgb(255 255 255 / 0.10) 43%, rgb(255 255 255 / 0.055)),
+    linear-gradient(90deg, rgb(255 255 255 / 0.06), rgb(255 255 255 / 0.18) 50%, rgb(255 255 255 / 0.06));
+  color: rgb(255 255 255 / 0.94);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.42),
+    inset 0 -1px 0 rgb(255 255 255 / 0.10),
+    0 8px 18px rgb(0 0 0 / 0.22);
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.34);
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    filter 0.18s ease,
+    transform 0.18s ease;
+  backdrop-filter: blur(18px) saturate(1.55);
+}
+
+.same-style-btn::before {
+  content: "";
+  position: absolute;
+  inset: 1px 1px auto;
+  height: 44%;
+  border-radius: 5px 5px 9px 9px;
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.34), transparent);
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.same-style-btn::after {
+  content: "";
+  position: absolute;
+  top: -35%;
+  bottom: -35%;
+  left: -38%;
+  width: 34%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.28), transparent);
+  opacity: 0;
+  transform: rotate(18deg);
+  pointer-events: none;
+  transition: left 0.5s ease, opacity 0.24s ease;
+}
+
+.same-style-btn > * {
+  position: relative;
+  z-index: 1;
+}
+
+.same-style-btn:hover:not(:disabled) {
+  border-color: rgb(255 255 255 / 0.42);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.54),
+    inset 0 -1px 0 rgb(255 255 255 / 0.14),
+    0 10px 22px rgb(0 0 0 / 0.25);
+  filter: brightness(1.08) saturate(1.12);
+  transform: translateY(-1px);
+}
+
+.same-style-btn:hover:not(:disabled)::after {
+  left: 104%;
+  opacity: 1;
 }
 
 .same-style-btn:disabled {

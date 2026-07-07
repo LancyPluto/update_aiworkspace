@@ -205,6 +205,11 @@
   const codeCountdown = ref(0);
   let countdownTimer = null;
 
+  const inviteCode = computed(() => {
+    const raw = route.query.invite;
+    return typeof raw === 'string' && raw.trim() ? raw.trim() : undefined;
+  });
+
   const loginTitle = computed(() => {
     if (currentMode.value === 'register') return '';
     if (currentMode.value === 'forgotVerify' || currentMode.value === 'forgotReset') return '重置统一登录密码';
@@ -437,7 +442,7 @@
       if (currentMode.value === 'smsLogin') {
         const phoneNum = validatePhone(phone.value);
         if (!/^\d{6}$/.test(smsCode.value)) throw new Error('请输入 6 位短信验证码');
-        await auth.smsLogin({ phone: phoneNum, code: smsCode.value.trim() });
+        await auth.smsLogin({ phone: phoneNum, code: smsCode.value.trim(), inviteCode: inviteCode.value });
         await enterAfterLogin();
         return;
       }
@@ -450,6 +455,7 @@
           phone: phoneNum,
           code: registerCode.value.trim(),
           password: registerPassword.value,
+          inviteCode: inviteCode.value,
         });
         await enterAfterLogin();
         return;
@@ -486,6 +492,11 @@
   onMounted(() => {
     if (auth.isLoggedIn) {
       router.replace(resolvePostLoginRedirect());
+      return;
+    }
+    if (inviteCode.value) {
+      loginModalVisible.value = true;
+      currentMode.value = 'register';
     }
   });
   onBeforeUnmount(() => {

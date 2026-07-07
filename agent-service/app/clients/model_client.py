@@ -906,12 +906,15 @@ def _format_connection_error(exception: Exception) -> str:
     lowered = message.lower()
     if "connection error" in lowered or "connecterror" in lowered or "connect timeout" in lowered:
         proxy = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY") or ""
+        no_proxy = os.getenv("NO_PROXY") or ""
         hint = (
-            "容器出站网络异常（常见于 Clash TUN/fake-ip 下代理未启动或 deploy/.env 中 HTTP_PROXY 不可达）。"
-            "请确认本机 Clash 已开启且 host.docker.internal:7897 可访问，或临时关闭 fake-ip 后重试。"
+            "容器出站网络异常（常见于 Clash/mihomo 节点不可用、TUN/fake-ip 污染、"
+            "deploy/.env 中 CONTAINER_HTTP_PROXY/CONTAINER_NO_PROXY 配置不匹配）。"
+            "请先在服务器执行 deploy/scripts/check_outbound_proxy.py 验证 agent-service 出站链路。"
         )
         if proxy:
-            return f"{message}；当前代理={proxy}；{hint}"
+            no_proxy_part = f"；NO_PROXY={no_proxy}" if no_proxy else ""
+            return f"{message}；当前代理={proxy}{no_proxy_part}；{hint}"
         return f"{message}；{hint}"
     return message
 

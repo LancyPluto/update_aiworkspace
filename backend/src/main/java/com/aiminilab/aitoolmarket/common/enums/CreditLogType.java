@@ -5,6 +5,7 @@ public enum CreditLogType {
     DEDUCT,
     RELEASE,
     RECHARGE,
+    REFERRAL_BONUS,
     MANUAL_ADD,
     MANUAL_DEDUCT
 }

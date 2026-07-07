@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.credit.dto.GiftCardPackageResponse;
 import com.aiminilab.aitoolmarket.credit.dto.GiftCardResponse;
+import com.aiminilab.aitoolmarket.credit.entity.CreditRechargeOrderItem;
 import com.aiminilab.aitoolmarket.credit.entity.GiftCard;
 import com.aiminilab.aitoolmarket.credit.entity.GiftCardPackage;
 import com.aiminilab.aitoolmarket.credit.mapper.GiftCardMapper;
@@ -150,11 +151,42 @@ public class GiftCardServiceImpl implements GiftCardService {
     @Override
     @Transactional
     public void createGiftCardFromOrder(Long userId, Long orderId, Long giftCardPackageId, int credits) {
+        if (giftCardMapper.countByRechargeOrderId(orderId) > 0) {
+            return;
+        }
         GiftCardPackage pkg = packageMapper.selectById(giftCardPackageId);
         if (pkg == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "礼品卡套餐不存在");
         }
 
+        createGiftCard(userId, orderId, giftCardPackageId, credits);
+    }
+
+    @Override
+    @Transactional
+    public void createGiftCardsFromOrderItems(Long userId, Long orderId, List<CreditRechargeOrderItem> items) {
+        if (items == null || items.isEmpty()) {
+            return;
+        }
+        if (giftCardMapper.countByRechargeOrderId(orderId) > 0) {
+            return;
+        }
+        for (CreditRechargeOrderItem item : items) {
+            GiftCardPackage pkg = packageMapper.selectById(item.getGiftCardPackageId());
+            if (pkg == null) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "礼品卡套餐不存在");
+            }
+            int quantity = item.getQuantity() == null ? 1 : item.getQuantity();
+            if (quantity <= 0) {
+                continue;
+            }
+            for (int i = 0; i < quantity; i++) {
+                createGiftCard(userId, orderId, item.getGiftCardPackageId(), item.getCredits());
+            }
+        }
+    }
+
+    private void createGiftCard(Long userId, Long orderId, Long giftCardPackageId, int credits) {
         LocalDateTime now = LocalDateTime.now();
         GiftCard card = new GiftCard();
         card.setCardCode(generateCardCode());

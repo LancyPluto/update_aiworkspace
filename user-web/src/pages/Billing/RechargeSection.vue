@@ -56,6 +56,7 @@ const mode = ref<'credits' | 'giftcard'>('credits')
 const giftCardPackages = ref<GiftCardPackage[]>([])
 const loadingGiftCards = ref(false)
 const pendingGiftCardPackage = ref<GiftCardPackage | null>(null)
+const pendingGiftCardItems = ref<Array<{ pkg: GiftCardPackage; quantity: number }>>([])
 
 // 用户当前会员等级（0-3），-1表示未开通会员
 // 基于后端返回的 membershipPlan（用户最近一次CREDITED订单的套餐代码）
@@ -116,11 +117,15 @@ const successMessage = computed(() =>
 )
 
 const pendingDisplay = computed(() => {
-  if (pendingGiftCardPackage.value) {
+  if (pendingGiftCardItems.value.length > 0) {
+    const itemCount = pendingGiftCardItems.value.reduce((sum, item) => sum + item.quantity, 0)
+    const skuCount = pendingGiftCardItems.value.length
     return {
-      name: pendingGiftCardPackage.value.packageName,
-      credits: pendingGiftCardPackage.value.credits,
-      price: pendingGiftCardPackage.value.priceAmount,
+      name: skuCount === 1
+        ? `${pendingGiftCardItems.value[0].pkg.packageName} x ${pendingGiftCardItems.value[0].quantity}`
+        : `算力礼品卡 ${itemCount} 张`,
+      credits: pendingGiftCardItems.value.reduce((sum, item) => sum + item.pkg.credits * item.quantity, 0),
+      price: pendingGiftCardItems.value.reduce((sum, item) => sum + item.pkg.priceAmount * item.quantity, 0),
     }
   }
   if (pendingPackage.value) {
@@ -271,6 +276,7 @@ function closeChannelModal() {
   showChannelModal.value = false
   pendingPackage.value = null
   pendingGiftCardPackage.value = null
+  pendingGiftCardItems.value = []
 }
 
 function closePayModal() {
@@ -383,24 +389,33 @@ async function loadGiftCardPackages() {
   }
 }
 
-function openGiftCardPayment(pkg: GiftCardPackage, _quantity = 1) {
-  pendingGiftCardPackage.value = pkg
+function openGiftCardPayment(items: Array<{ pkg: GiftCardPackage; quantity: number }>) {
+  const normalized = items.filter((item) => item.quantity > 0)
+  if (normalized.length === 0) return
+  pendingPackage.value = null
+  pendingGiftCardPackage.value = normalized[0].pkg
+  pendingGiftCardItems.value = normalized
   paymentResult.value = null
   error.value = ""
   showChannelModal.value = true
 }
 
-async function createGiftCardOrder(pkg: GiftCardPackage, channel: PaymentChannel) {
+async function createGiftCardOrder(items: Array<{ pkg: GiftCardPackage; quantity: number }>, channel: PaymentChannel) {
+  if (items.length === 0) return
   ordering.value = true
   error.value = ""
   try {
     const order = await createRechargeOrder(
       {
-        packageId: 0,
+        packageId: null,
         paymentChannel: channel,
-        clientRequestId: `giftcard-${pkg.id}-${channel}-${Date.now()}`,
+        clientRequestId: `giftcard-${items.map((item) => `${item.pkg.id}x${item.quantity}`).join("-")}-${channel}-${Date.now()}`,
         orderType: 'GIFT_CARD',
-        giftCardPackageId: pkg.id,
+        giftCardPackageId: items[0].pkg.id,
+        giftCardItems: items.map((item) => ({
+          giftCardPackageId: item.pkg.id,
+          quantity: item.quantity,
+        })),
       },
       { token: auth.token },
     )
@@ -464,6 +479,26 @@ onUnmounted(clearPolling)
         @click="mode = 'giftcard'"
       >
         礼品卡
+      </button>
+    </div>
+
+    <!-- 计费周期切换：按年/按季/按月（仅会员计划） -->
+    <div v-if="mode === 'credits'" class="billing-cycle-tabs" role="tablist" aria-label="订阅周期">
+      <button
+        v-for="tab in BILLING_CYCLES"
+        :key="tab.value"
+        type="button"
+        role="tab"
+        class="billing-cycle-tab"
+        :class="{ 'billing-cycle-tab--active': activeTab === tab.value }"
+        :aria-selected="activeTab === tab.value"
+        @click="onBillingCycleChange(tab.value)"
+      >
+        <span>{{ tab.label }}</span>
+        <span v-if="tab.badge" class="billing-cycle-badge" :class="`billing-cycle-badge--${tab.badgeVariant}`">
+          {{ tab.badge }}
+        </span>
+        <span v-if="tab.hint" class="billing-cycle-hint">{{ tab.hint }}</span>
       </button>
     </div>
 
@@ -613,7 +648,7 @@ onUnmounted(clearPolling)
               type="button"
               class="flex w-full items-center gap-4 rounded-xl border border-border bg-background px-4 py-3 text-left transition hover:border-primary/50 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60"
               :disabled="ordering || !pendingDisplay"
-              @click="pendingPackage ? createOrder(pendingPackage, option.channel) : pendingGiftCardPackage && createGiftCardOrder(pendingGiftCardPackage, option.channel)"
+              @click="pendingPackage ? createOrder(pendingPackage, option.channel) : createGiftCardOrder(pendingGiftCardItems, option.channel)"
             >
               <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
                 <component :is="option.icon" class="h-5 w-5" aria-hidden="true" />
@@ -812,6 +847,71 @@ onUnmounted(clearPolling)
   height: 3px;
   border-radius: 999px 999px 0 0;
   background: #fff;
+}
+
+/* 计费周期切换标签 */
+.billing-cycle-tabs {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.04);
+  border: 1px solid rgb(255 255 255 / 0.06);
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.billing-cycle-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  padding: 8px 12px;
+  border-radius: 10px;
+  color: rgb(255 255 255 / 0.48);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.billing-cycle-tab:hover {
+  color: rgb(255 255 255 / 0.75);
+  background: rgb(255 255 255 / 0.04);
+}
+
+.billing-cycle-tab--active {
+  background: rgb(255 255 255 / 0.09);
+  color: #fff;
+  font-weight: 600;
+}
+
+.billing-cycle-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+
+.billing-cycle-badge--orange {
+  background: linear-gradient(135deg, #f97316, #ea580c);
+  color: #fff7ed;
+}
+
+.billing-cycle-badge--teal {
+  background: linear-gradient(135deg, #38bdf8, #2563eb);
+  color: #eff6ff;
+}
+
+.billing-cycle-hint {
+  font-size: 10px;
+  color: rgb(255 255 255 / 0.35);
 }
 
 @media (max-width: 560px) {
