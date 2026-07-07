@@ -185,6 +185,8 @@ onBeforeUnmount(() => {
         playsinline
         autoplay
         preload="none"
+        controlsList="nodownload nofullscreen noremoteplayback"
+        disablePictureInPicture
         @canplay="onVideoCanPlay"
         @error="onVideoError"
       />
