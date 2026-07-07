@@ -677,7 +677,7 @@ onUnmounted(() => {
       v-if="loading"
       :items="skeletonItems"
       item-key="id"
-      :gap="12"
+      :gap="2"
       :estimate-height="(item) => item.height"
       aria-busy="true"
       aria-label="加载中"
@@ -698,7 +698,7 @@ onUnmounted(() => {
     <div v-else-if="!posts.length" class="state-panel">暂时没有匹配的公开作品，换个筛选条件再试试。</div>
 
     <template v-else>
-      <MasonryLayout :items="posts" :item-key="(post) => post.id" :gap="12" aria-label="社区作品">
+      <MasonryLayout :items="posts" :item-key="(post) => post.id" :gap="2" aria-label="社区作品">
         <template #default="{ item: post }">
         <article class="post-card group">
           <div class="card-main">
@@ -789,6 +789,8 @@ onUnmounted(() => {
               </button>
             </div>
 
+          </div>
+          <div class="card-footer">
             <button
               type="button"
               class="same-style-btn"
@@ -1129,11 +1131,16 @@ onUnmounted(() => {
 
 .post-card {
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid rgb(255 255 255 / 0.06);
   border-radius: 10px;
   background: rgb(255 255 255 / 0.02);
   transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+  z-index: 1;
+}
+
+.post-card:hover {
+  z-index: 10;
 }
 
 .post-card:hover {
@@ -1144,6 +1151,8 @@ onUnmounted(() => {
 
 .card-main {
   position: relative;
+  overflow: hidden;
+  border-radius: 10px 10px 0 0;
 }
 
 .card-clickable {
@@ -1393,32 +1402,41 @@ onUnmounted(() => {
   stroke: currentColor;
 }
 
+.card-footer {
+  overflow: hidden;
+  max-height: 0;
+  border-radius: 0 0 10px 10px;
+  background: rgb(255 255 255 / 0.04);
+  transition: max-height 0.25s ease, padding 0.25s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+}
+
+.post-card:hover .card-footer {
+  max-height: 48px;
+  padding: 8px 10px;
+}
+
 .same-style-btn {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 2;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   border: 0;
   border-radius: 999px;
   background: var(--primary);
   color: var(--primary-foreground);
-  padding: 8px 12px;
+  padding: 7px 14px;
   font-size: 12px;
   font-weight: 700;
-  box-shadow: 0 8px 20px rgb(0 0 0 / 0.35);
-  opacity: 0;
-  transform: translateY(-4px);
-  transition: opacity 0.18s ease, transform 0.18s ease;
   cursor: pointer;
+  transition: background 0.18s ease, transform 0.18s ease;
 }
 
-.post-card:hover .same-style-btn,
-.same-style-btn:focus-visible {
-  opacity: 1;
-  transform: translateY(0);
+.same-style-btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+  transform: scale(1.03);
 }
 
 .same-style-btn:disabled {
