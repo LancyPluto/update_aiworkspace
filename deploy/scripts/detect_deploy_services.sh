@@ -4,7 +4,11 @@
 #   or:  git diff --name-only HEAD~1 HEAD | bash detect_deploy_services.sh
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_PATH="${BASH_SOURCE[0]:-$0}"
+SCRIPT_DIR="${SCRIPT_PATH%/*}"
+if [ "$SCRIPT_DIR" = "$SCRIPT_PATH" ]; then
+  SCRIPT_DIR="."
+fi
 
 if [ -n "${DEPLOY_SERVICES:-}" ]; then
   echo "$DEPLOY_SERVICES"
@@ -26,6 +30,14 @@ add_secret_bearing_services() {
   add agent-service
 }
 
+add_monitoring_services() {
+  add prometheus
+  add grafana
+  add node-exporter
+  add cadvisor
+  add blackbox-exporter
+}
+
 services=()
 
 if [ "$#" -gt 0 ]; then
@@ -35,7 +47,7 @@ else
 fi
 
 if [ "${#files[@]}" -eq 0 ] || [ -z "${files[0]:-}" ]; then
-  echo "backend worker agent-service admin-frontend user-web nginx"
+  echo "backend worker agent-service admin-frontend user-web nginx prometheus grafana node-exporter cadvisor blackbox-exporter"
   exit 0
 fi
 
@@ -50,8 +62,13 @@ for f in "${files[@]}"; do
     admin-frontend/*) add admin-frontend; add nginx ;;
     user-web/*) add user-web; add nginx ;;
     engines/banana-slides/*) add banana-slides ;;
+    deploy/docker-compose.monitoring.yml|deploy/monitoring/*)
+      add_monitoring_services
+      add nginx
+      ;;
     deploy/docker-compose*|deploy/docker-compose.*)
       add_secret_bearing_services
+      add_monitoring_services
       add nginx
       ;;
     deploy/nginx/*) add nginx ;;
@@ -67,7 +84,7 @@ for f in "${files[@]}"; do
 done
 
 if [ "${#services[@]}" -eq 0 ]; then
-  echo "backend worker agent-service admin-frontend user-web nginx"
+  echo "backend worker agent-service admin-frontend user-web nginx prometheus grafana node-exporter cadvisor blackbox-exporter"
 else
   echo "${services[*]}"
 fi

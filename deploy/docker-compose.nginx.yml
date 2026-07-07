@@ -21,7 +21,7 @@ services:
       - ./nginx/wlcloudai.com.key:/etc/nginx/certs/wlcloudai.com.key:ro
       - user_web_dist:/usr/share/nginx/user-web:ro
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/healthz"]
+      test: ["CMD-SHELL", "wget -q --header='Host: wlcloudai.com' -O - http://127.0.0.1/healthz >/dev/null"]
       interval: 15s
       timeout: 5s
       retries: 5

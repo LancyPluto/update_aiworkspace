@@ -125,6 +125,11 @@ OSS_PUBLIC_BUCKET=wlcloudai-assets-public
 OSS_PRIVATE_BUCKET=wlcloudai-assets-private
 OSS_LEGACY_BUCKET=wlcloudai-assets-prod
 OSS_KEY_PREFIX=
+PROMETHEUS_PORT=9091
+GRAFANA_PORT=3001
+GRAFANA_ROOT_URL=https://wlcloudai.com/grafana/
+PROMETHEUS_RETENTION=15d
+GRAFANA_ADMIN_USER=admin
 """.strip().splitlines()
 
 patch = {}
@@ -221,6 +226,7 @@ from pathlib import Path
 
 DEFAULT_JWT = "local-dev-secret"
 DEFAULT_INTERNAL = "local-internal-token"
+DEFAULT_GRAFANA_PASSWORD = "admin123456"
 MIN_JWT_LEN = 32
 env = Path("/root/ai_tool_market/.env")
 
@@ -245,18 +251,22 @@ def upsert(key: str, value: str) -> None:
 data = read_env()
 jwt = data.get("JWT_SECRET", "")
 internal = data.get("INTERNAL_API_TOKEN", "")
+grafana_password = data.get("GRAFANA_ADMIN_PASSWORD", "")
 if jwt in ("", DEFAULT_JWT) or len(jwt) < MIN_JWT_LEN:
     upsert("JWT_SECRET", secrets.token_urlsafe(48))
     print("bootstrapped JWT_SECRET for production")
 if internal in ("", DEFAULT_INTERNAL):
     upsert("INTERNAL_API_TOKEN", secrets.token_urlsafe(32))
     print("bootstrapped INTERNAL_API_TOKEN for production")
+if grafana_password in ("", DEFAULT_GRAFANA_PASSWORD):
+    upsert("GRAFANA_ADMIN_PASSWORD", secrets.token_urlsafe(32))
+    print("bootstrapped GRAFANA_ADMIN_PASSWORD for production")
 
 # docker compose interpolates JWT_SECRET from deploy/.env — mirror secrets there.
 root = read_env()
 deploy = Path("/root/ai_tool_market/deploy/.env")
 lines = deploy.read_text(encoding="utf-8", errors="replace").splitlines() if deploy.exists() else []
-for key in ("JWT_SECRET", "INTERNAL_API_TOKEN"):
+for key in ("JWT_SECRET", "INTERNAL_API_TOKEN", "GRAFANA_ADMIN_PASSWORD"):
     value = root.get(key)
     if not value:
         continue
@@ -313,6 +323,9 @@ fi
 
 cd "\$REMOTE_DIR/deploy"
 COMPOSE_ARGS=(-f docker-compose.yml -f docker-compose.nginx.yml)
+if [ -f docker-compose.monitoring.yml ]; then
+  COMPOSE_ARGS+=(-f docker-compose.monitoring.yml)
+fi
 if echo "\$DEPLOY_SERVICES" | grep -qw banana-slides; then
   COMPOSE_ARGS+=(--profile banana-slides)
 fi
@@ -331,6 +344,13 @@ bash "\$REMOTE_DIR/deploy/scripts/apply_sql_migrations.sh"
 echo "Building services in parallel: \$DEPLOY_SERVICES"
 pids=()
 for svc in \$DEPLOY_SERVICES; do
+  case "\$svc" in
+    backend|worker|agent-service|admin-frontend|user-web|banana-slides) ;;
+    *)
+      echo "  Skipping build for image-only service: \$svc"
+      continue
+      ;;
+  esac
   echo "  Starting build: \$svc"
   docker compose "\${COMPOSE_ARGS[@]}" build "\$svc" &
   pids+=(\$!)
@@ -344,8 +364,45 @@ if [ "\$failed" -ne 0 ]; then
   exit 1
 fi
 
-echo "Force-recreating containers: \$DEPLOY_SERVICES"
-docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate \$DEPLOY_SERVICES
+APP_SERVICES=""
+MONITORING_SERVICES=""
+for svc in \$DEPLOY_SERVICES; do
+  case "\$svc" in
+    prometheus|grafana|node-exporter|cadvisor|blackbox-exporter)
+      MONITORING_SERVICES="\$MONITORING_SERVICES \$svc"
+      ;;
+    *)
+      APP_SERVICES="\$APP_SERVICES \$svc"
+      ;;
+  esac
+done
+
+if [ -n "\$APP_SERVICES" ]; then
+  echo "Force-recreating application containers:\$APP_SERVICES"
+  docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate \$APP_SERVICES
+fi
+
+if [ -n "\$MONITORING_SERVICES" ]; then
+  echo "Starting/updating monitoring containers:\$MONITORING_SERVICES"
+  CORE_MONITORING_SERVICES=""
+  OPTIONAL_MONITORING_SERVICES=""
+  for svc in \$MONITORING_SERVICES; do
+    case "\$svc" in
+      cadvisor) OPTIONAL_MONITORING_SERVICES="\$OPTIONAL_MONITORING_SERVICES \$svc" ;;
+      *) CORE_MONITORING_SERVICES="\$CORE_MONITORING_SERVICES \$svc" ;;
+    esac
+  done
+  if [ -n "\$CORE_MONITORING_SERVICES" ]; then
+    if ! docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate \$CORE_MONITORING_SERVICES; then
+      echo "::warning::Core monitoring stack update failed; application deploy continues." >&2
+    fi
+  fi
+  if [ -n "\$OPTIONAL_MONITORING_SERVICES" ]; then
+    if ! docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate \$OPTIONAL_MONITORING_SERVICES; then
+      echo "::warning::Optional monitoring service update failed:\$OPTIONAL_MONITORING_SERVICES" >&2
+    fi
+  fi
+fi
 
 # nginx 反代静态资源；任意前端/配置变更后都 reload，避免 user_web_dist 已更新但 nginx 仍握旧连接。
 docker compose "\${COMPOSE_ARGS[@]}" restart nginx || true
