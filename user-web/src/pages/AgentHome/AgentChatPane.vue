@@ -99,6 +99,7 @@ import { openCreateWithAssetRecommendation } from "@/utils/assetReplay"
 import { recommendToolsForAsset as recommendAssetTools } from "@/utils/assetToolRecommendations"
 import { publishAssetToCommunity, type CommunityPublishPayload } from "@/utils/publishCommunityAsset"
 import { buildTaskResultBlocks, resolveAudioTracks } from "@/utils/taskResultBlocks"
+import { safeDisplayName } from "@/utils/displayName"
 import { useGeneratedMaterialList, useUploadHistoryList } from "@/composables/useMaterialPickerLists"
 import {
   chatAssetRefByUrl,
@@ -108,6 +109,7 @@ import {
 } from "@/utils/agentChatAssetRefs"
 
 const auth = useAuthStore()
+const userDisplayName = computed(() => safeDisplayName(auth.user?.nickname) || safeDisplayName(auth.user?.username) || "我")
 
 const props = defineProps<{
   sessionId: number
@@ -3129,7 +3131,7 @@ defineExpose({
             :index="index"
             :run-events="runEventsForMessage(message)"
             :user-avatar-url="auth.user?.avatarUrl"
-            :user-display-name="auth.user?.nickname || auth.user?.username || '我'"
+            :user-display-name="userDisplayName"
             :editing-message-id="editingMessageId"
             v-model:editing-message-draft="editingMessageDraft"
             :editing-regenerating="editingRegenerating"

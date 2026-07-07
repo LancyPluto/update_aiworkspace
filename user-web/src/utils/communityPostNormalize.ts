@@ -1,4 +1,5 @@
 import type { CommunityPost, PublicUserProfile } from "@/api/types"
+import { defaultUserDisplayName, safeDisplayName } from "@/utils/displayName"
 
 type RawCommunityPost = CommunityPost & {
   author_nickname?: string | null
@@ -21,7 +22,7 @@ export function normalizeCommunityPost(post: RawCommunityPost): CommunityPost {
   const favorited = post.favorited ?? (post as { is_favorited?: boolean }).is_favorited
   return {
     ...post,
-    authorNickname: post.authorNickname ?? post.author_nickname ?? null,
+    authorNickname: safeDisplayName(post.authorNickname ?? post.author_nickname) || null,
     authorAvatarUrl: post.authorAvatarUrl ?? post.author_avatar_url ?? null,
     promptPreview: post.promptPreview ?? post.prompt_preview ?? null,
     liked: liked === true,
@@ -35,10 +36,12 @@ export function normalizeCommunityPosts(posts: RawCommunityPost[]): CommunityPos
 
 export function resolveCommunityAuthorName(post: Pick<CommunityPost, "authorNickname" | "userId">) {
   const cached = authorProfileCache.get(post.userId)
-  const nickname = post.authorNickname?.trim() || cached?.nickname?.trim() || cached?.username?.trim()
+  const nickname =
+    safeDisplayName(post.authorNickname) ||
+    safeDisplayName(cached?.nickname) ||
+    safeDisplayName(cached?.username)
   if (nickname) return nickname
-  if (post.userId) return `用户${post.userId}`
-  return ""
+  return defaultUserDisplayName(post.userId)
 }
 
 export function resolveCommunityAuthorAvatar(post: Pick<CommunityPost, "authorAvatarUrl" | "userId">) {
@@ -59,10 +62,14 @@ export function mergeCommunityPostAuthor(
 ): CommunityPost {
   if (!profile) return post
   rememberCommunityAuthorProfile(profile)
-  if (post.authorNickname?.trim()) return post
+  const existingAuthorName = safeDisplayName(post.authorNickname)
+  if (existingAuthorName) return { ...post, authorNickname: existingAuthorName }
   return {
     ...post,
-    authorNickname: profile.nickname?.trim() || profile.username?.trim() || `用户${post.userId}`,
+    authorNickname:
+      safeDisplayName(profile.nickname) ||
+      safeDisplayName(profile.username) ||
+      defaultUserDisplayName(post.userId),
     authorAvatarUrl: post.authorAvatarUrl ?? profile.avatarUrl ?? null,
   }
 }

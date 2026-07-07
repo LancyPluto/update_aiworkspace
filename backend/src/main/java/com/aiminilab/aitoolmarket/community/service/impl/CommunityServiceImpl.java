@@ -243,8 +243,8 @@ public class CommunityServiceImpl implements CommunityService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "User not found"));
         return new PublicUserProfileResponse(
                 user.getId(),
-                user.getUsername(),
-                user.getNickname(),
+                publicUserName(user.getUsername(), userId),
+                resolveAuthorNickname(user, userId),
                 user.getAvatarUrl(),
                 user.getBio(),
                 postMapper.countPublicByUserId(userId, null),
@@ -1253,24 +1253,52 @@ public class CommunityServiceImpl implements CommunityService {
 
     private String resolveAuthorNickname(User user, Long userId) {
         if (user != null) {
-            if (user.getNickname() != null && !user.getNickname().isBlank()) {
-                return user.getNickname().trim();
-            }
-            if (user.getUsername() != null && !user.getUsername().isBlank()) {
-                return user.getUsername().trim();
-            }
+            String nickname = safePublicDisplayName(user.getNickname());
+            if (nickname != null) return nickname;
+            String username = safePublicDisplayName(user.getUsername());
+            if (username != null) return username;
         }
-        return normalizeAuthorNickname(null, userId);
+        return defaultPublicDisplayName(userId);
     }
 
     private String normalizeAuthorNickname(String nickname, Long userId) {
-        if (nickname != null && !nickname.isBlank()) {
-            return nickname.trim();
+        String safeName = safePublicDisplayName(nickname);
+        if (safeName != null) return safeName;
+        return defaultPublicDisplayName(userId);
+    }
+
+    private String publicUserName(String username, Long userId) {
+        String safeName = safePublicDisplayName(username);
+        if (safeName != null) return safeName;
+        return defaultPublicDisplayName(userId);
+    }
+
+    private String safePublicDisplayName(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
         }
+        String trimmed = value.trim();
+        return isPhoneLike(trimmed) ? null : trimmed;
+    }
+
+    private String defaultPublicDisplayName(Long userId) {
         if (userId != null) {
-            return "用户 " + userId;
+            return "用户" + userId;
         }
         return null;
+    }
+
+    private boolean isPhoneLike(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String normalized = value.trim().replaceAll("[\\s-]", "");
+        if (normalized.startsWith("+86")) {
+            normalized = normalized.substring(3);
+        } else if (normalized.startsWith("86") && normalized.length() == 13) {
+            normalized = normalized.substring(2);
+        }
+        return normalized.matches("^1\\d{10}$");
     }
 
     private String resolveModality(AiTask task, String resourceType) {

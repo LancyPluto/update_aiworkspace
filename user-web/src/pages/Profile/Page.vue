@@ -9,6 +9,7 @@ import { fetchTasks } from "@/api/taskApi"
 import { cancelCurrentUserAccount, sendCancelAccountSmsCode } from "@/api/userApi"
 import type { CreditAccount, GiftCard } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
+import { defaultUserDisplayName, safeDisplayName } from "@/utils/displayName"
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -80,7 +81,9 @@ function giftCardStatusClass(status: string | undefined | null) {
   }
 }
 
-const displayName = computed(() => auth.user?.nickname || auth.user?.username || "用户")
+const displayName = computed(
+  () => safeDisplayName(auth.user?.nickname) || safeDisplayName(auth.user?.username) || defaultUserDisplayName(auth.user?.id),
+)
 const joinedLabel = computed(() => `UID ${auth.user?.id ?? "--"}`)
 const accountLabel = computed(() => auth.user?.phone || auth.user?.email || auth.user?.username || "--")
 const publicProfileUrl = computed(() => (auth.user?.id ? `/u/${auth.user.id}` : "/profile"))
@@ -289,7 +292,7 @@ async function submitRedeemByCode() {
 
 onMounted(async () => {
   if (!auth.user) await auth.fetchCurrentUser({ clearOnFailure: false })
-  nickname.value = auth.user?.nickname || auth.user?.username || ""
+  nickname.value = safeDisplayName(auth.user?.nickname) || safeDisplayName(auth.user?.username) || ""
   bio.value = auth.user?.bio || ""
   autoPublishAssets.value = auth.user?.autoPublishAssets !== false
   promptPublicByDefault.value = auth.user?.promptPublicByDefault === true

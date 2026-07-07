@@ -227,6 +227,7 @@ from pathlib import Path
 DEFAULT_JWT = "local-dev-secret"
 DEFAULT_INTERNAL = "local-internal-token"
 DEFAULT_GRAFANA_PASSWORD = "admin123456"
+INITIAL_GRAFANA_PASSWORD = "123456"
 MIN_JWT_LEN = 32
 env = Path("/root/ai_tool_market/.env")
 
@@ -259,8 +260,8 @@ if internal in ("", DEFAULT_INTERNAL):
     upsert("INTERNAL_API_TOKEN", secrets.token_urlsafe(32))
     print("bootstrapped INTERNAL_API_TOKEN for production")
 if grafana_password in ("", DEFAULT_GRAFANA_PASSWORD):
-    upsert("GRAFANA_ADMIN_PASSWORD", secrets.token_urlsafe(32))
-    print("bootstrapped GRAFANA_ADMIN_PASSWORD for production")
+    upsert("GRAFANA_ADMIN_PASSWORD", INITIAL_GRAFANA_PASSWORD)
+    print("initialized GRAFANA_ADMIN_PASSWORD for production")
 
 # docker compose interpolates JWT_SECRET from deploy/.env — mirror secrets there.
 root = read_env()

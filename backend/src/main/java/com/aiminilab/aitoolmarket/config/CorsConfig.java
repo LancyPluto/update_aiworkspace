@@ -53,6 +53,8 @@ public class CorsConfig implements WebMvcConfigurer {
                 .toAbsolutePath().normalize().toUri().toString();
         registry.addResourceHandler("/tool-covers/**")
                 .addResourceLocations(toolCoverLocation.endsWith("/") ? toolCoverLocation : toolCoverLocation + "/");
+        registry.addResourceHandler("/assets/**")
+                .addResourceLocations("classpath:/static/assets/");
     }
 
     private boolean containsWildcard(String[] origins) {

@@ -219,6 +219,33 @@ class CommunityApiTest {
     }
 
     @Test
+    void publicCommunityResponsesDoNotExposePhoneLikeUsernames() throws Exception {
+        String phone = "18800188000";
+        long userId = insertLegacyPhoneUsernameUser(phone);
+        long postId = insertPostForUser(userId, "PUBLISHED", "APPROVED", "历史手机号用户作品", true);
+        String fallbackName = "用户" + userId;
+
+        mockMvc.perform(get("/api/v1/community/users/{userId}", userId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.username").value(fallbackName))
+                .andExpect(jsonPath("$.data.username").value(not(phone)))
+                .andExpect(jsonPath("$.data.nickname").value(fallbackName))
+                .andExpect(jsonPath("$.data.nickname").value(not(phone)));
+
+        mockMvc.perform(get("/api/v1/community/users/{userId}/posts", userId)
+                        .param("pageSize", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].id").value((int) postId))
+                .andExpect(jsonPath("$.data.list[0].authorNickname").value(fallbackName))
+                .andExpect(jsonPath("$.data.list[0].authorNickname").value(not(phone)));
+
+        mockMvc.perform(get("/api/v1/community/posts/{postId}", postId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.authorNickname").value(fallbackName))
+                .andExpect(jsonPath("$.data.authorNickname").value(not(phone)));
+    }
+
+    @Test
     void userCanReportPostAndAdminCanListAndResolveIt() throws Exception {
         long postId = insertPostForUser(1L, "PUBLISHED", "APPROVED", "被举报作品", true);
         String userToken = loginUser();
@@ -360,6 +387,16 @@ class CommunityApiTest {
 
     private long insertPost(String status, String auditStatus, String title, boolean promptVisible) {
         return insertPostForUser(2L, status, auditStatus, title, promptVisible);
+    }
+
+    private long insertLegacyPhoneUsernameUser(String phone) {
+        jdbcTemplate.update("""
+                INSERT INTO users (
+                  username, password_hash, phone, nickname, user_type, status, is_deleted
+                )
+                VALUES (?, 'legacy-password-hash', ?, NULL, 'USER', 'ACTIVE', 0)
+                """, phone, phone);
+        return jdbcTemplate.queryForObject("SELECT MAX(id) FROM users", Long.class);
     }
 
     private long insertPostForUser(long userId, String status, String auditStatus, String title, boolean promptVisible) {

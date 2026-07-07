@@ -35,6 +35,7 @@ const sizeClass = computed(() => {
 const avatarSrc = computed(() => {
   if (!props.src || failed.value) return ""
   if (/^https?:\/\//i.test(props.src)) return props.src
+  if (props.src.startsWith("/assets/")) return props.src
   const origin = getApiOrigin()
   if (origin && props.src.startsWith("/")) return `${origin}${props.src}`
   return props.src

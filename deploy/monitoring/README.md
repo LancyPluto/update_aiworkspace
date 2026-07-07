@@ -33,9 +33,11 @@ docker compose \
 默认账号：
 
 - 用户名：`admin`
-- 密码：`admin123456`
+- 密码：`123456`
 
-生产请在 `deploy/.env` 或系统环境中覆盖：
+> `123456` 仅用于初期验收。生产稳定后建议在 `deploy/.env` 中改成强密码，并执行 Grafana 密码重置。
+
+生产可在 `deploy/.env` 或系统环境中覆盖：
 
 ```env
 GRAFANA_ADMIN_USER=admin
