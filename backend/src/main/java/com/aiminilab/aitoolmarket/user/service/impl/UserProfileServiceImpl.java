@@ -208,10 +208,38 @@ public class UserProfileServiceImpl implements UserProfileService {
         if (normalized.isBlank()) {
             return null;
         }
-        if (!normalized.startsWith("/generated/avatars/")) {
+        // 如果传入值与数据库已有值一致（如前端回传），直接信任，无需重复校验
+        if (current != null && normalized.equals(current)) {
+            return normalized;
+        }
+        if (!isManagedAvatarUrl(normalized)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "头像地址无效");
         }
         return normalized;
+    }
+
+    /**
+     * 校验头像地址是否由本系统生成，避免用户传入任意 URL。
+     * <p>本地存储模式返回 {@code /generated/avatars/...} 相对地址；
+     * OSS 存储模式返回 {@code {publicBaseUrl}/avatars/...} 绝对地址（可能是 CDN 或 OSS bucket 直链）。</p>
+     */
+    private boolean isManagedAvatarUrl(String url) {
+        // 剥离 query string（如 ?x-oss-process=...）后再校验前缀
+        String path = url;
+        int qIdx = url.indexOf("?");
+        if (qIdx > 0) {
+            path = url.substring(0, qIdx);
+        }
+        if (path.startsWith("/generated/avatars/")) {
+            return true;
+        }
+        if (path.startsWith("http://") || path.startsWith("https://")) {
+            String publicBase = assetStorageService.getPublicBaseUrl();
+            if (publicBase != null && !publicBase.isBlank() && path.startsWith(publicBase + "/avatars/")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String normalizeBio(String value, String current) {

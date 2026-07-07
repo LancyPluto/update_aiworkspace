@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { RouterLink, useRoute, useRouter } from "vue-router"
 import type { Component } from "vue"
 import {
@@ -929,7 +929,7 @@ watch(
   height: 28px;
   align-items: center;
   justify-content: center;
-  padding: 0 11px 0 20px;
+  padding: 0 12px 0 24px;
   color: #fff;
   font-size: 11px;
   font-weight: 800;
@@ -938,14 +938,14 @@ watch(
   background:
     linear-gradient(135deg, rgb(96 178 255) 0%, rgb(36 110 239) 55%, rgb(25 77 202) 100%);
   border-radius: 0 8px 0 7px;
-  clip-path: polygon(12px 0, 100% 0, 100% 100%, 12px 100%, 0 50%);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 14px 50%);
   filter: drop-shadow(0 8px 14px rgb(18 98 255 / 0.34));
 }
 
 .app-shell-credit-ribbon::before {
   content: "";
   position: absolute;
-  left: 9px;
+  left: 11px;
   top: 0;
   bottom: 0;
   width: 1px;
@@ -955,7 +955,7 @@ watch(
 .app-shell-credit-ribbon::after {
   content: "";
   position: absolute;
-  inset: 1px 2px auto 16px;
+  inset: 1px 2px auto 20px;
   height: 1px;
   background: rgb(255 255 255 / 0.42);
 }
