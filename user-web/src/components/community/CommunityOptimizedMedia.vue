@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue"
-import { ImageOff, Play } from "lucide-vue-next"
+import { ImageOff } from "lucide-vue-next"
 import {
   normalizeCommunityMediaUrl,
   resolveCommunityDerivativeUrl,
@@ -171,9 +171,6 @@ onBeforeUnmount(() => {
         <ImageOff class="h-6 w-6 text-white/38" />
         <p>{{ fallbackLabel }}</p>
       </div>
-      <div class="video-play-indicator" aria-hidden="true">
-        <Play class="h-4 w-4 fill-current" />
-      </div>
       <video
         v-if="shouldRenderVideo"
         ref="videoRef"
@@ -243,22 +240,6 @@ onBeforeUnmount(() => {
 .media-layer--video {
   z-index: 2;
   background: #000;
-}
-
-.video-play-indicator {
-  position: absolute;
-  z-index: 3;
-  right: 10px;
-  top: 10px;
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  border-radius: 999px;
-  background: rgb(0 0 0 / 0.52);
-  color: rgb(255 255 255 / 0.9);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16);
-  backdrop-filter: blur(10px);
 }
 
 .media-fallback {
