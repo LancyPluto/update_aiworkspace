@@ -140,7 +140,6 @@ async function saveProfile() {
   try {
     await auth.updateProfile({
       nickname: nickname.value,
-      avatarUrl: auth.user?.avatarUrl ?? null,
     })
     success.value = "资料已保存"
   } catch (err) {
