@@ -3,6 +3,12 @@ ARG DOCKER_REGISTRY=docker.1ms.run/
 FROM ${DOCKER_REGISTRY}node:22-alpine AS build
 
 WORKDIR /build
+ARG NEXT_PUBLIC_ADMIN_BASE_PATH=/admin
+ARG NEXT_PUBLIC_API_PROXY_TARGET=http://backend:8080
+ARG NEXT_PUBLIC_API_BASE_URL=
+ENV NEXT_PUBLIC_ADMIN_BASE_PATH=${NEXT_PUBLIC_ADMIN_BASE_PATH}
+ENV NEXT_PUBLIC_API_PROXY_TARGET=${NEXT_PUBLIC_API_PROXY_TARGET}
+ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
 COPY admin-frontend/package.json admin-frontend/package-lock.json ./
 RUN npm config set registry https://registry.npmmirror.com && npm ci
 
