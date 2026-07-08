@@ -38,6 +38,7 @@ import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import UserAvatar from "@/components/UserAvatar.vue"
 import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
+import { safeDisplayName } from "@/utils/displayName"
 import {
   applyAppTheme,
   applyBrandAccent,
@@ -223,8 +224,8 @@ const getMembershipLabel = (packageCode: string | null | undefined): string => {
 const membershipLabel = computed(() => getMembershipLabel(auth.user?.membershipPlan))
 const isAgentRoute = computed(() => route.path === "/agent" || route.path.startsWith("/agent/"))
 const safeUserName = computed(() => {
-  const nickname = auth.user?.nickname?.trim() || ""
-  const username = auth.user?.username?.trim() || ""
+  const nickname = safeDisplayName(auth.user?.nickname)
+  const username = safeDisplayName(auth.user?.username)
   const badEncoding = /�|锟|阖€|鍍|\uFFFD/.test(nickname)
   if (nickname && !badEncoding) return nickname
   if (username) return username

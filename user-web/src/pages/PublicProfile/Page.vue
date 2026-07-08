@@ -12,6 +12,7 @@ import ProfileStatsRow from "@/pages/PublicProfile/ProfileStatsRow.vue"
 import ProfileStickyHeader from "@/pages/PublicProfile/ProfileStickyHeader.vue"
 import { useAuthStore } from "@/store/authStore"
 import { applyProfileThemeToElement, resolveProfileThemeId } from "@/utils/profileTheme"
+import { defaultUserDisplayName, safeDisplayName } from "@/utils/displayName"
 import {
   COMMUNITY_POST_UNPUBLISHED_EVENT,
   type CommunityPostUnpublishedDetail,
@@ -35,7 +36,9 @@ const headerCompact = ref(false)
 const scrollOffset = ref(0)
 
 const userId = computed(() => String(route.params.userId || ""))
-const displayName = computed(() => profile.value?.nickname || profile.value?.username || `用户 ${userId.value}`)
+const displayName = computed(
+  () => safeDisplayName(profile.value?.nickname) || safeDisplayName(profile.value?.username) || defaultUserDisplayName(userId.value),
+)
 const featuredCount = computed(() => creator.value?.featuredCount ?? creator.value?.featuredPosts?.length ?? 0)
 
 const { offsetX, offsetY } = useProfileParallax(pageRoot)

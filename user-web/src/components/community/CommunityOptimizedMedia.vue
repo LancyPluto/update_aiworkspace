@@ -27,6 +27,7 @@ const posterFailed = ref(false)
 const videoReady = ref(false)
 const videoPreviewFailed = ref(false)
 const hoverActive = ref(false)
+const videoMounted = ref(false)
 const videoRef = ref<HTMLVideoElement | null>(null)
 let hoverTimer: number | null = null
 
@@ -51,7 +52,7 @@ const isImage = computed(() => props.kind === "image")
 const isVideo = computed(() => props.kind === "video")
 const hasImageLqip = computed(() => Boolean(imageLqipUrl.value) && !lqipFailed.value)
 const hasVideoPoster = computed(() => Boolean(videoPosterUrl.value) && !posterFailed.value)
-const shouldRenderVideo = computed(() => isVideo.value && hoverActive.value && Boolean(videoPreviewUrl.value))
+const shouldRenderVideo = computed(() => isVideo.value && videoMounted.value && Boolean(videoPreviewUrl.value))
 const showFallback = computed(() => {
   if (isImage.value) return !imageThumbUrl.value || imageFailed.value
   if (isVideo.value) return !videoPreviewUrl.value && !hasVideoPoster.value
@@ -65,11 +66,23 @@ function clearHoverTimer() {
   hoverTimer = null
 }
 
+async function startVideoPreview() {
+  hoverActive.value = true
+  videoMounted.value = true
+  await nextTick()
+  if (!hoverActive.value) return
+  void videoRef.value?.play().catch(() => undefined)
+}
+
 function onPointerEnter() {
   if (!isVideo.value || !videoPreviewUrl.value) return
   clearHoverTimer()
+  if (videoMounted.value) {
+    void startVideoPreview()
+    return
+  }
   hoverTimer = window.setTimeout(() => {
-    hoverActive.value = true
+    void startVideoPreview()
     hoverTimer = null
   }, 300)
 }
@@ -77,18 +90,12 @@ function onPointerEnter() {
 function onPointerLeave() {
   clearHoverTimer()
   hoverActive.value = false
-  videoReady.value = false
-  const video = videoRef.value
-  if (video) {
-    video.pause()
-    video.removeAttribute("src")
-    video.load()
-  }
+  videoRef.value?.pause()
 }
 
 function onVideoCanPlay() {
   videoReady.value = true
-  void videoRef.value?.play().catch(() => undefined)
+  if (hoverActive.value) void videoRef.value?.play().catch(() => undefined)
 }
 
 function onVideoError() {
@@ -109,6 +116,7 @@ watch(
     videoReady.value = false
     videoPreviewFailed.value = false
     hoverActive.value = false
+    videoMounted.value = false
     clearHoverTimer()
   },
 )
@@ -116,11 +124,13 @@ watch(
 watch(shouldRenderVideo, async (active) => {
   if (!active) return
   await nextTick()
+  if (!hoverActive.value) return
   void videoRef.value?.play().catch(() => undefined)
 })
 
 onBeforeUnmount(() => {
   clearHoverTimer()
+  videoRef.value?.pause()
 })
 </script>
 

@@ -4,7 +4,9 @@ set -e
 # Only needed when image was built with source changes; on pure config
 # restarts the copy is a no-op since .next already matches.
 if [ "$APP_PRODUCTION_MODE" = "true" ]; then
-  cp -a /prebuilt/.next /app/.next 2>/dev/null || true
+  mkdir -p /app/.next
+  find /app/.next -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+  cp -a /prebuilt/.next/. /app/.next/ 2>/dev/null || true
   NODE_ENV=production exec npm run start -- -H 0.0.0.0 -p 5174
 else
   # Local dev: install full deps (including devDependencies) then start dev server

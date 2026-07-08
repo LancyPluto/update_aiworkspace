@@ -16,6 +16,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Set;
 
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -39,6 +40,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.generated-media-dir=target/test-generated-media"
 })
 class AuthApiTest {
+
+    private static final String DEFAULT_AVATAR_URL =
+            "https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com/assets/default-user-avatar.svg";
+    private static final String DEFAULT_DISPLAY_NAME_PATTERN = "^用户\\d{9}$";
 
     @Autowired
     private MockMvc mockMvc;
@@ -78,6 +83,8 @@ class AuthApiTest {
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.user.id", notNullValue()))
                 .andExpect(jsonPath("$.data.user.username").value("new_user"))
+                .andExpect(jsonPath("$.data.user.nickname").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.user.avatarUrl").value(DEFAULT_AVATAR_URL))
                 .andExpect(jsonPath("$.data.user.userType").value("USER"))
                 .andReturn();
 
@@ -88,6 +95,8 @@ class AuthApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.username").value("new_user"))
+                .andExpect(jsonPath("$.data.nickname").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.avatarUrl").value(DEFAULT_AVATAR_URL))
                 .andExpect(jsonPath("$.data.userType").value("USER"));
 
         var loginResult = mockMvc.perform(post("/api/v1/auth/login")
@@ -101,6 +110,8 @@ class AuthApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.user.username").value("new_user"))
+                .andExpect(jsonPath("$.data.user.nickname").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.user.avatarUrl").value(DEFAULT_AVATAR_URL))
                 .andReturn();
 
         String token = AuthTestTokens.userJwtFrom(loginResult);
@@ -110,6 +121,8 @@ class AuthApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.username").value("new_user"))
+                .andExpect(jsonPath("$.data.nickname").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.avatarUrl").value(DEFAULT_AVATAR_URL))
                 .andExpect(jsonPath("$.data.userType").value("USER"));
     }
 
@@ -140,7 +153,7 @@ class AuthApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.nickname").value("Community Builder"))
-                .andExpect(jsonPath("$.data.avatarUrl").value(org.hamcrest.Matchers.nullValue()));
+                .andExpect(jsonPath("$.data.avatarUrl").value(DEFAULT_AVATAR_URL));
     }
 
     @Test
@@ -193,7 +206,11 @@ class AuthApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.user.id", notNullValue()))
-                .andExpect(jsonPath("$.data.user.username").value("13800138000"))
+                .andExpect(jsonPath("$.data.user.username").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.user.username").value(not("13800138000")))
+                .andExpect(jsonPath("$.data.user.nickname").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.user.nickname").value(not("13800138000")))
+                .andExpect(jsonPath("$.data.user.avatarUrl").value(DEFAULT_AVATAR_URL))
                 .andExpect(jsonPath("$.data.user.phone").value("13800138000"))
                 .andExpect(jsonPath("$.data.user.userType").value("USER"))
                 .andReturn();
@@ -204,7 +221,11 @@ class AuthApiTest {
                         .header("Authorization", "Bearer " + registerToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.data.username").value("13800138000"))
+                .andExpect(jsonPath("$.data.username").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.username").value(not("13800138000")))
+                .andExpect(jsonPath("$.data.nickname").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.nickname").value(not("13800138000")))
+                .andExpect(jsonPath("$.data.avatarUrl").value(DEFAULT_AVATAR_URL))
                 .andExpect(jsonPath("$.data.phone").value("13800138000"))
                 .andExpect(jsonPath("$.data.userType").value("USER"));
 
@@ -218,7 +239,11 @@ class AuthApiTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.data.user.username").value("13800138000"))
+                .andExpect(jsonPath("$.data.user.username").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.user.username").value(not("13800138000")))
+                .andExpect(jsonPath("$.data.user.nickname").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.user.nickname").value(not("13800138000")))
+                .andExpect(jsonPath("$.data.user.avatarUrl").value(DEFAULT_AVATAR_URL))
                 .andExpect(jsonPath("$.data.user.phone").value("13800138000"));
     }
 
@@ -238,7 +263,11 @@ class AuthApiTest {
                                 """.formatted(phone, registerCode)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.data.user.username").value(phone))
+                .andExpect(jsonPath("$.data.user.username").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.user.username").value(not(phone)))
+                .andExpect(jsonPath("$.data.user.nickname").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.user.nickname").value(not(phone)))
+                .andExpect(jsonPath("$.data.user.avatarUrl").value(DEFAULT_AVATAR_URL))
                 .andExpect(jsonPath("$.data.user.phone").value(phone))
                 .andReturn();
 
@@ -247,6 +276,11 @@ class AuthApiTest {
         mockMvc.perform(get("/api/v1/users/me")
                         .header("Authorization", "Bearer " + registerToken))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.username").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.username").value(not(phone)))
+                .andExpect(jsonPath("$.data.nickname").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.nickname").value(not(phone)))
+                .andExpect(jsonPath("$.data.avatarUrl").value(DEFAULT_AVATAR_URL))
                 .andExpect(jsonPath("$.data.phone").value(phone));
 
         String loginCode = sendSmsCode(phone, "LOGIN");
@@ -260,6 +294,11 @@ class AuthApiTest {
                                 """.formatted(phone, loginCode)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.user.username").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.user.username").value(not(phone)))
+                .andExpect(jsonPath("$.data.user.nickname").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.user.nickname").value(not(phone)))
+                .andExpect(jsonPath("$.data.user.avatarUrl").value(DEFAULT_AVATAR_URL))
                 .andExpect(jsonPath("$.data.user.phone").value(phone));
     }
 
@@ -278,7 +317,11 @@ class AuthApiTest {
                                 """.formatted(phone, code)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
-                .andExpect(jsonPath("$.data.user.username").value(phone))
+                .andExpect(jsonPath("$.data.user.username").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.user.username").value(not(phone)))
+                .andExpect(jsonPath("$.data.user.nickname").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
+                .andExpect(jsonPath("$.data.user.nickname").value(not(phone)))
+                .andExpect(jsonPath("$.data.user.avatarUrl").value(DEFAULT_AVATAR_URL))
                 .andExpect(jsonPath("$.data.user.phone").value(phone));
     }
 

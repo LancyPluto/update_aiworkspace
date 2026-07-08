@@ -27,6 +27,11 @@ _ENV_PATCH_LINES = [
     "CONTAINER_HTTPS_PROXY=http://host.docker.internal:7890",
     "NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat",
     "CONTAINER_NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat",
+    "PROMETHEUS_PORT=9091",
+    "GRAFANA_PORT=3001",
+    "GRAFANA_ROOT_URL=https://wlcloudai.com/grafana/",
+    "PROMETHEUS_RETENTION=15d",
+    "GRAFANA_ADMIN_USER=admin",
 ]
 ENV_PATCH_SCRIPT = "\n".join(
     [
@@ -53,6 +58,33 @@ ENV_PATCH_SCRIPT = "\n".join(
         "path.parent.mkdir(parents=True, exist_ok=True)",
         'path.write_text("\\n".join(out) + "\\n", encoding="utf-8")',
         'print("patched", path)',
+        'data = {}',
+        'for line in path.read_text(encoding="utf-8", errors="replace").splitlines():',
+        '    if "=" not in line or line.strip().startswith("#"):',
+        '        continue',
+        '    key, value = line.split("=", 1)',
+        '    data[key.strip()] = value',
+        'if data.get("GRAFANA_ADMIN_PASSWORD", "") in ("", "admin123456"):',
+        '    lines = [line for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if not line.startswith("GRAFANA_ADMIN_PASSWORD=")]',
+        '    lines.append("GRAFANA_ADMIN_PASSWORD=123456")',
+        '    path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")',
+        '    print("initialized GRAFANA_ADMIN_PASSWORD")',
+        'deploy_path = Path("/root/ai_tool_market/deploy/.env")',
+        'deploy_path.parent.mkdir(parents=True, exist_ok=True)',
+        'root_data = {}',
+        'for line in path.read_text(encoding="utf-8", errors="replace").splitlines():',
+        '    if "=" not in line or line.strip().startswith("#"):',
+        '        continue',
+        '    key, value = line.split("=", 1)',
+        '    root_data[key.strip()] = value',
+        'deploy_lines = deploy_path.read_text(encoding="utf-8", errors="replace").splitlines() if deploy_path.exists() else []',
+        'mirror_keys = set(patch) | {"GRAFANA_ADMIN_PASSWORD"}',
+        'deploy_lines = [line for line in deploy_lines if line.split("=", 1)[0].strip() not in mirror_keys]',
+        'for key in mirror_keys:',
+        '    if key in root_data:',
+        '        deploy_lines.append(f"{key}={root_data[key]}")',
+        'deploy_path.write_text("\\n".join(deploy_lines) + "\\n", encoding="utf-8")',
+        'print("mirrored monitoring env to", deploy_path)',
         "PY",
     ]
 )
@@ -81,7 +113,7 @@ def detect_services() -> str:
                 return services
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass
-    return "backend worker agent-service admin-frontend user-web nginx"
+    return "backend worker agent-service admin-frontend user-web nginx prometheus grafana node-exporter cadvisor blackbox-exporter"
 
 
 def main() -> int:
@@ -182,16 +214,62 @@ rm -f "$BUNDLE"
 
 cd "$REMOTE_DIR/deploy"
 COMPOSE_ARGS=(-f docker-compose.yml -f docker-compose.nginx.yml)
+if [ -f docker-compose.monitoring.yml ]; then
+  COMPOSE_ARGS+=(-f docker-compose.monitoring.yml)
+fi
 if echo "$SERVICES" | grep -qw banana-slides; then
   COMPOSE_ARGS+=(--profile banana-slides)
 fi
 
 for svc in $SERVICES; do
+  case "$svc" in
+    backend|worker|agent-service|admin-frontend|user-web|banana-slides) ;;
+    *)
+      echo "Skipping build for image-only service: $svc"
+      continue
+      ;;
+  esac
   echo "Building $svc ..."
   docker compose "${{COMPOSE_ARGS[@]}}" build "$svc"
 done
 
-docker compose "${{COMPOSE_ARGS[@]}}" up -d --force-recreate $SERVICES
+APP_SERVICES=""
+MONITORING_SERVICES=""
+for svc in $SERVICES; do
+  case "$svc" in
+    prometheus|grafana|node-exporter|cadvisor|blackbox-exporter)
+      MONITORING_SERVICES="$MONITORING_SERVICES $svc"
+      ;;
+    *)
+      APP_SERVICES="$APP_SERVICES $svc"
+      ;;
+  esac
+done
+
+if [ -n "$APP_SERVICES" ]; then
+  docker compose "${{COMPOSE_ARGS[@]}}" up -d --force-recreate $APP_SERVICES
+fi
+
+if [ -n "$MONITORING_SERVICES" ]; then
+  CORE_MONITORING_SERVICES=""
+  OPTIONAL_MONITORING_SERVICES=""
+  for svc in $MONITORING_SERVICES; do
+    case "$svc" in
+      cadvisor) OPTIONAL_MONITORING_SERVICES="$OPTIONAL_MONITORING_SERVICES $svc" ;;
+      *) CORE_MONITORING_SERVICES="$CORE_MONITORING_SERVICES $svc" ;;
+    esac
+  done
+  if [ -n "$CORE_MONITORING_SERVICES" ]; then
+    if ! docker compose "${{COMPOSE_ARGS[@]}}" up -d --force-recreate $CORE_MONITORING_SERVICES; then
+      echo "::warning::Core monitoring stack update failed; application deploy continues." >&2
+    fi
+  fi
+  if [ -n "$OPTIONAL_MONITORING_SERVICES" ]; then
+    if ! docker compose "${{COMPOSE_ARGS[@]}}" up -d --force-recreate $OPTIONAL_MONITORING_SERVICES; then
+      echo "::warning::Optional monitoring service update failed:$OPTIONAL_MONITORING_SERVICES" >&2
+    fi
+  fi
+fi
 
 echo "Waiting for user-web health..."
 for i in $(seq 1 36); do

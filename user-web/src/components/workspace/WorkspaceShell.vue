@@ -23,6 +23,7 @@ import UserAvatar from "@/components/UserAvatar.vue"
 import { workspaceBottomNav, workspaceNavGroups } from "@/data/creativeHub"
 import { useAuthStore } from "@/store/authStore"
 import type { WorkspaceNavItem } from "@/types/workspace"
+import { safeDisplayName } from "@/utils/displayName"
 import { applyAppTheme, getStoredTheme, storeAppTheme, type AppTheme } from "@/utils/theme"
 
 const route = useRoute()
@@ -63,8 +64,8 @@ const isActive = (item: WorkspaceNavItem) => {
 }
 
 const userName = computed(() => {
-  const nickname = auth.user?.nickname?.trim() || ""
-  const username = auth.user?.username?.trim() || ""
+  const nickname = safeDisplayName(auth.user?.nickname)
+  const username = safeDisplayName(auth.user?.username)
   const badEncoding = /\uFFFD|锟|阖€|鍍/.test(nickname)
   if (nickname && !badEncoding) return nickname
   if (username) return username
