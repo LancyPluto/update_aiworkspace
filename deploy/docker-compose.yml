@@ -144,6 +144,9 @@ services:
       dockerfile: admin-frontend/Dockerfile
       args:
         DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.1ms.run/}
+        NEXT_PUBLIC_API_PROXY_TARGET: ${ADMIN_NEXT_PUBLIC_API_PROXY_TARGET:-http://backend:8080}
+        NEXT_PUBLIC_API_BASE_URL: ${ADMIN_NEXT_PUBLIC_API_BASE_URL:-}
+        NEXT_PUBLIC_ADMIN_BASE_PATH: ${NEXT_PUBLIC_ADMIN_BASE_PATH:-/admin}
     image: deploy-admin-frontend
     container_name: ai-supermarket-admin-frontend
     working_dir: /app
