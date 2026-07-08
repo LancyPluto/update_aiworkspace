@@ -30,7 +30,8 @@ import java.security.SecureRandom;
 @Service
 public class AuthServiceImpl implements AuthService {
 
-    private static final String DEFAULT_AVATAR_URL = "/assets/default-user-avatar.svg";
+    private static final String DEFAULT_AVATAR_URL =
+            "https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com/assets/default-user-avatar.svg";
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final int DEFAULT_NAME_DIGITS = 9;
 
