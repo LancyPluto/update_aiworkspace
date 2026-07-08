@@ -1,12 +1,12 @@
 import type { RouteRecordRaw } from "vue-router"
 
-const WorkspaceHomePage = () => import("@/pages/WorkspaceHome/Page.vue")
-const CreatorWorkspacePage = () => import("@/pages/CreatorWorkspace/Page.vue")
-const AgentHomePage = () => import("@/pages/AgentHome/Page.vue")
-const MaterialLibraryPage = () => import("@/pages/MaterialLibrary/Page.vue")
-const BillingPage = () => import("@/pages/Billing/Page.vue")
-const ProfilePage = () => import("@/pages/Profile/Page.vue")
-const InspirationCollectionsPage = () => import("@/pages/InspirationCollections/Page.vue")
+import WorkspaceHomePage from "@/pages/WorkspaceHome/Page.vue"
+import CreatorWorkspacePage from "@/pages/CreatorWorkspace/Page.vue"
+import AgentHomePage from "@/pages/AgentHome/Page.vue"
+import MaterialLibraryPage from "@/pages/MaterialLibrary/Page.vue"
+import BillingPage from "@/pages/Billing/Page.vue"
+import ProfilePage from "@/pages/Profile/Page.vue"
+import InspirationCollectionsPage from "@/pages/InspirationCollections/Page.vue"
 
 export const protectedRoutes: RouteRecordRaw[] = [
   {

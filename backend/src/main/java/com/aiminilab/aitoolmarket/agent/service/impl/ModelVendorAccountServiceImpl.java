@@ -16,6 +16,7 @@ import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountService;
+import com.aiminilab.aitoolmarket.agent.support.AgentVisionInputSupport;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.OpenAiCompatibleEndpointSupport;
 import com.aiminilab.aitoolmarket.agent.support.OpenAiCompatibleEndpointSupport.NormalizedEndpoint;
@@ -453,10 +454,12 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         if (!"TEXT_GENERATION".equals(primaryCapability)) {
             return List.of(primaryCapability);
         }
-        if (isQwenVisionModelOrAccount(account, modelName)) {
-            return List.of("TEXT_GENERATION", "VISION_INPUT");
-        }
-        return List.of(primaryCapability);
+        return AgentVisionInputSupport.withInferredVisionInput(
+                account == null ? null : account.getVendorCode(),
+                modelName,
+                account == null ? null : account.getBaseUrl(),
+                List.of(primaryCapability)
+        );
     }
 
     private String providerForCapability(ModelVendorAccount account, String modelName, String capability) {
@@ -529,18 +532,6 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 || model.startsWith("qwen")
                 || model.startsWith("qwq")
                 || model.startsWith("qvq");
-    }
-
-    private boolean isQwenVisionModelOrAccount(ModelVendorAccount account, String modelName) {
-        String model = modelName == null ? "" : modelName.trim().toLowerCase(Locale.ROOT);
-        return isQwenModelOrAccount(account, modelName)
-                && (model.contains("qwen3.6-plus")
-                || model.contains("qwen-vl")
-                || model.contains("qwen2-vl")
-                || model.contains("qwen2.5-vl")
-                || model.contains("qwen3-vl")
-                || model.contains("qvq")
-                || model.contains("omni"));
     }
 
     private String defaultExtraAuthJson(String provider, String modelName) {

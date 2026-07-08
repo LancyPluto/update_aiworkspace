@@ -94,9 +94,7 @@ function clearValue() {
         v-if="kind === 'image'"
         :src="previewUrl(modelValue)"
         alt="已上传素材"
-        class="aspect-video max-h-64 w-full object-contain"
-        loading="lazy"
-        decoding="async"
+        class="max-h-64 w-full object-contain"
       />
       <video
         v-else-if="kind === 'video'"

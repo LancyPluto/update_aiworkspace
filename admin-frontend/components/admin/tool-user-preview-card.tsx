@@ -22,99 +22,8 @@ interface ToolUserPreviewCardProps {
   className?: string
 }
 
-interface ComparisonSweepPreviewProps {
-  originalUrl: string
-  effectUrl: string
-  title?: string
-  subtitle?: string
-  badge?: string
-  originalAlt?: string
-  effectAlt?: string
-  className?: string
-  mediaClassName?: string
-  footerClassName?: string
-  showFooter?: boolean
-}
-
-function ComparisonPreviewMedia({
-  url,
-  alt,
-  className,
-}: {
-  url: string
-  alt: string
-  className?: string
-}) {
-  if (isVideoPreviewUrl(url)) {
-    return (
-      <video
-        src={url}
-        className={className}
-        muted
-        loop
-        autoPlay
-        playsInline
-        preload="metadata"
-        title={alt}
-      />
-    )
-  }
-
-  return <img src={url} alt={alt} className={className} draggable={false} />
-}
-
-export function ComparisonSweepPreview({
-  originalUrl,
-  effectUrl,
-  title,
-  subtitle,
-  badge,
-  originalAlt = "原始素材",
-  effectAlt = "模型效果",
-  className,
-  mediaClassName,
-  footerClassName,
-  showFooter = true,
-}: ComparisonSweepPreviewProps) {
-  return (
-    <div className={cn("tool-comparison-sweep relative overflow-hidden bg-zinc-950 text-white", className)}>
-      <ComparisonPreviewMedia
-        url={originalUrl}
-        alt={originalAlt}
-        className={cn("absolute inset-0 h-full w-full object-cover", mediaClassName)}
-      />
-      <ComparisonPreviewMedia
-        url={effectUrl}
-        alt={effectAlt}
-        className={cn("tool-comparison-sweep__effect absolute inset-0 h-full w-full object-cover", mediaClassName)}
-      />
-      <div className="pointer-events-none absolute inset-0 z-10 bg-[radial-gradient(circle_at_30%_20%,rgb(255_255_255_/_0.16),transparent_34%),linear-gradient(180deg,transparent_0%,rgb(0_0_0_/_0.14)_52%,rgb(0_0_0_/_0.84)_100%)]" />
-      <div className="tool-comparison-sweep__divider pointer-events-none absolute inset-y-0 z-20 -translate-x-1/2">
-        <div className="relative h-full w-[2px] bg-white shadow-[0_0_14px_rgb(255_255_255_/_0.85),0_0_34px_rgb(59_130_246_/_0.45)]">
-          <span className="absolute left-1/2 top-0 h-full w-5 -translate-x-1/2 bg-gradient-to-r from-transparent via-white/25 to-transparent" />
-        </div>
-      </div>
-      {badge ? (
-        <span className="absolute right-3 top-3 z-30 rounded-full bg-black/50 px-2.5 py-1 text-[10px] font-medium text-white/82 ring-1 ring-white/15 backdrop-blur">
-          {badge}
-        </span>
-      ) : null}
-      {showFooter ? (
-        <div
-          className={cn(
-            "absolute inset-x-0 bottom-0 z-30 border-t border-white/10 bg-black/62 px-3.5 py-3 backdrop-blur-md",
-            footerClassName,
-          )}
-        >
-          <h3 className="truncate text-base font-semibold text-white drop-shadow">{title}</h3>
-          {subtitle ? <p className="mt-0.5 line-clamp-1 text-[11px] text-white/72">{subtitle}</p> : null}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
 export function ToolUserPreviewCard({ tool, baseUrl, className }: ToolUserPreviewCardProps) {
+  const [comparisonPosition, setComparisonPosition] = useState(50)
   const [coverFailed, setCoverFailed] = useState(false)
   const [brandIconFailed, setBrandIconFailed] = useState(false)
 
@@ -126,6 +35,13 @@ export function ToolUserPreviewCard({ tool, baseUrl, className }: ToolUserPrevie
   const isAudioEffect = normalizeOutputModality(tool.outputModality) === "AUDIO" && Boolean(audioPreviewUrl)
   const displayCover = coverFailed ? "" : coverUrl
   const description = tool.description && tool.description !== "暂无描述" ? tool.description : "点击进入对话"
+
+  function updateComparisonPosition(event: React.MouseEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect()
+    if (rect.width <= 0) return
+    const next = Math.min(92, Math.max(8, ((event.clientX - rect.left) / rect.width) * 100))
+    setComparisonPosition(next)
+  }
 
   return (
     <div
@@ -145,16 +61,50 @@ export function ToolUserPreviewCard({ tool, baseUrl, className }: ToolUserPrevie
 
       {variant === "comparison" ? (
         <div className="flex flex-col">
-          <ComparisonSweepPreview
-            originalUrl={normalizeMediaUrl(tool.comparisonOriginalUrl, baseUrl)}
-            effectUrl={normalizeMediaUrl(tool.comparisonEffectUrl, baseUrl)}
-            title={tool.name}
-            subtitle={description}
-            badge={modalityLabel(tool.outputModality)}
-            originalAlt={`${tool.name} 原图`}
-            effectAlt={`${tool.name} 效果图`}
-            className="aspect-[3/4] w-full"
-          />
+          <div
+            className="relative aspect-[3/4] w-full cursor-ew-resize overflow-hidden bg-muted"
+            onMouseMove={updateComparisonPosition}
+          >
+            <img
+              src={normalizeMediaUrl(tool.comparisonOriginalUrl, baseUrl)}
+              alt={`${tool.name} 原图`}
+              className="absolute inset-0 h-full w-full object-cover"
+              draggable={false}
+            />
+            <img
+              src={normalizeMediaUrl(tool.comparisonEffectUrl, baseUrl)}
+              alt={`${tool.name} 效果图`}
+              className="absolute inset-0 h-full w-full object-cover"
+              style={{ clipPath: `inset(0 0 0 ${comparisonPosition}%)` }}
+              draggable={false}
+            />
+            <div
+              className="pointer-events-none absolute inset-y-0 z-10 w-px bg-white shadow-[0_0_0_1px_rgb(0_0_0_/_0.35)]"
+              style={{ left: `${comparisonPosition}%` }}
+            />
+            <div
+              className="pointer-events-none absolute top-1/2 z-10 flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/65 bg-black/45 text-[10px] font-semibold text-white shadow-lg backdrop-blur"
+              style={{ left: `${comparisonPosition}%` }}
+            >
+              ↔
+            </div>
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/8 to-transparent" />
+            <span className="absolute left-3 top-12 rounded-full bg-black/45 px-2 py-0.5 text-[10px] font-medium text-white/85 backdrop-blur">
+              原图
+            </span>
+            <span className="absolute right-3 top-12 rounded-full bg-primary/90 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur">
+              效果
+            </span>
+            <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-2">
+              <div className="min-w-0">
+                <h3 className="truncate text-lg font-semibold text-white drop-shadow">{tool.name}</h3>
+                <p className="mt-0.5 line-clamp-1 text-[11px] text-white/75">{description}</p>
+              </div>
+              <span className="shrink-0 rounded-full bg-white/18 px-2 py-0.5 text-[10px] font-medium text-white ring-1 ring-white/25 backdrop-blur">
+                {modalityLabel(tool.outputModality)}
+              </span>
+            </div>
+          </div>
         </div>
       ) : variant === "effect" ? (
         <div className="flex flex-col">

@@ -10,14 +10,7 @@ defineProps<{
 
 <template>
   <RouterLink :to="item.to || '/tool'" class="workspace-media-card">
-    <img
-      :src="item.image"
-      :alt="item.title"
-      width="252"
-      height="141"
-      loading="lazy"
-      decoding="async"
-    />
+    <img :src="item.image" :alt="item.title" />
     <div class="workspace-media-shade" />
     <span v-if="item.tag" class="workspace-media-tag">{{ item.tag }}</span>
     <Play class="workspace-media-play" :size="20" fill="currentColor" />

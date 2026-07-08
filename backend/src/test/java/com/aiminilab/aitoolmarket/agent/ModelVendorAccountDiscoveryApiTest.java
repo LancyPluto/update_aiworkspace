@@ -202,6 +202,41 @@ class ModelVendorAccountDiscoveryApiTest {
     }
 
     @Test
+    void adminCanDiscoverVolcengineDoubaoSeed2AsVisionAgentModel() throws Exception {
+        HttpServer server = modelsServer("""
+                {
+                  "object": "list",
+                  "data": [
+                    {"id": "doubao-seed-2.0-lite", "object": "model"}
+                  ]
+                }
+                """);
+        try {
+            String adminToken = loginAdmin();
+            Long accountId = createVendorAccount(
+                    adminToken,
+                    "volcengine",
+                    "Volcengine Chat",
+                    "http://127.0.0.1:%d/v1".formatted(server.getAddress().getPort())
+            );
+
+            mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/discover-models", accountId)
+                            .header("Authorization", "Bearer " + adminToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.imported").value(1))
+                    .andExpect(jsonPath("$.data.models[0].provider").value("openai_compatible"))
+                    .andExpect(jsonPath("$.data.models[0].capabilities[0]").value("TEXT_GENERATION"))
+                    .andExpect(jsonPath("$.data.models[0].capabilities[1]").value("VISION_INPUT"));
+
+            AgentModelConfig chat = agentModelConfigMapper.findActiveByVendorAccountAndModelName(accountId, "doubao-seed-2.0-lite");
+            assertThat(chat.getProvider()).isEqualTo("openai_compatible");
+            assertThat(chat.getCapabilities()).contains("TEXT_GENERATION", "VISION_INPUT");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void adminCanDeleteVendorAndCascadeBoundToolsModelsAndAccounts() throws Exception {
         HttpServer server = modelsServer("""
                 {

@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.agent.dto;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
+import com.aiminilab.aitoolmarket.agent.support.AgentVisionInputSupport;
 import com.aiminilab.aitoolmarket.agent.support.ImageGenerationParameterResolver;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 
@@ -36,7 +37,12 @@ public record ModelOptionItemResponse(
                 config.getProvider(),
                 vendorCode,
                 vendorName,
-                codec.parse(config.getCapabilities()),
+                AgentVisionInputSupport.withInferredVisionInput(
+                        config.getProvider(),
+                        config.getModelName(),
+                        config.getBaseUrl(),
+                        codec.parse(config.getCapabilities())
+                ),
                 imageParameterResolver.resolve(config),
                 config.getUnitPrice(),
                 config.getBillingUnit(),

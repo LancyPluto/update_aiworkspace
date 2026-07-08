@@ -1,16 +1,17 @@
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
 
-export const CREATE_PENDING_ASSET_KEY = "create_pending_asset"
+export const DASHBOARD_PENDING_ASSET_KEY = "dashboard_pending_asset"
+export const CREATE_PENDING_ASSET_KEY = DASHBOARD_PENDING_ASSET_KEY
 
-export function storeCreatePendingAsset(asset: AssetPreviewItem) {
-  window.sessionStorage.setItem(CREATE_PENDING_ASSET_KEY, JSON.stringify(asset))
+export function storeDashboardPendingAsset(asset: AssetPreviewItem) {
+  window.sessionStorage.setItem(DASHBOARD_PENDING_ASSET_KEY, JSON.stringify(asset))
 }
 
-export function consumeCreatePendingAsset(): AssetPreviewItem | null {
+export function consumeDashboardPendingAsset(): AssetPreviewItem | null {
   try {
-    const raw = window.sessionStorage.getItem(CREATE_PENDING_ASSET_KEY)
+    const raw = window.sessionStorage.getItem(DASHBOARD_PENDING_ASSET_KEY)
     if (!raw) return null
-    window.sessionStorage.removeItem(CREATE_PENDING_ASSET_KEY)
+    window.sessionStorage.removeItem(DASHBOARD_PENDING_ASSET_KEY)
     const parsed = JSON.parse(raw) as AssetPreviewItem
     return parsed?.url || parsed?.rawText || parsed?.prompt ? parsed : null
   } catch {
@@ -18,7 +19,10 @@ export function consumeCreatePendingAsset(): AssetPreviewItem | null {
   }
 }
 
-export function createReplayUrl(
+export const storeCreatePendingAsset = storeDashboardPendingAsset
+export const consumeCreatePendingAsset = consumeDashboardPendingAsset
+
+export function dashboardReplayUrl(
   tool: Pick<AssetPreviewRecommendation, "toolCode" | "outputModality"> | string | null | undefined,
   options: { modality?: string | null; sourcePost?: number | string | null } = {},
 ) {
@@ -28,23 +32,27 @@ export function createReplayUrl(
   query.set("modality", modality)
   if (toolCode) query.set("tool", toolCode)
   if (options.sourcePost) query.set("sourcePost", String(options.sourcePost))
-  return `/create?${query.toString()}`
+  return `/dashboard?${query.toString()}`
 }
 
-export function openCreateWithAsset(
+export const createReplayUrl = dashboardReplayUrl
+
+export function openDashboardWithAsset(
   asset: AssetPreviewItem,
   tool: Pick<AssetPreviewRecommendation, "toolCode" | "outputModality"> | string | null | undefined,
   options: { modality?: string | null; sourcePost?: number | string | null } = {},
 ) {
   const sourcePost = options.sourcePost ?? asset.sourcePostId ?? asset.communityPostId
-  storeCreatePendingAsset(sourcePost ? { ...asset, sourcePostId: Number(sourcePost) } : asset)
-  window.location.href = createReplayUrl(tool, { ...options, sourcePost })
+  storeDashboardPendingAsset(sourcePost ? { ...asset, sourcePostId: Number(sourcePost) } : asset)
+  window.location.href = dashboardReplayUrl(tool, { ...options, sourcePost })
 }
+
+export const openCreateWithAsset = openDashboardWithAsset
 
 export function openCreateWithAssetRecommendation(
   asset: AssetPreviewItem,
   tool: Pick<AssetPreviewRecommendation, "toolCode" | "outputModality"> | string | null | undefined,
   options: { modality?: string | null; sourcePost?: number | string | null } = {},
 ) {
-  openCreateWithAsset(asset, tool, options)
+  openDashboardWithAsset(asset, tool, options)
 }
