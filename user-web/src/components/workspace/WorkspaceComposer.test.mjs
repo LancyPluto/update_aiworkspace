@@ -82,7 +82,7 @@ test("image format menu renders model size, quality, and count controls", async 
   assert.match(css, /\.workspace-image-size-dimensions/)
 })
 
-test("upload dropzone validates dropped files and uses tilted plus affordance", async () => {
+test("upload dropzone validates dropped files and shows compact asset affordances", async () => {
   const [component, css] = await Promise.all([
     readFile(componentUrl, "utf8"),
     readFile(workspaceCssUrl, "utf8"),
@@ -98,38 +98,28 @@ test("upload dropzone validates dropped files and uses tilted plus affordance", 
   assert.match(component, /@dragover\.prevent="onUploadDragOver"/)
   assert.match(component, /@drop\.prevent="onUploadDrop"/)
   assert.match(component, /multiple/)
-  assert.match(component, /workspace-upload-card/)
   assert.match(component, /workspace-upload-stack/)
-  assert.match(component, /workspace-upload-preview/)
-  assert.match(component, /workspace-upload-add-card/)
-  assert.match(component, /workspace-upload-close-btn/)
+  assert.match(component, /workspace-upload-thumb/)
+  assert.match(component, /workspace-upload-more/)
+  assert.match(component, /workspace-mention-pop/)
+  assert.match(component, /workspace-thumb-delete/)
   assert.match(component, /workspace-upload-lightbox/)
   assert.match(component, /const mentionOptions = computed/)
   assert.match(component, /const requiresVideoInput = computed/)
   assert.match(component, /@\(video\|视频\|素材视频\)/)
   assert.match(component, /v-for="item in mentionOptions"/)
-  assert.match(component, /<Plus :size="22" \/>/)
   assert.doesNotMatch(component, /已添加素材：/)
 
-  assert.match(css, /\.workspace-upload-card/)
   assert.match(css, /\.workspace-upload-stack/)
-  assert.match(css, /\.workspace-upload-preview/)
-  assert.match(css, /\.workspace-upload-add-card/)
-  assert.match(css, /\.workspace-upload-close-btn/)
+  assert.match(css, /\.workspace-upload-thumb/)
+  assert.match(css, /\.workspace-upload-more/)
+  assert.match(css, /\.workspace-thumb-play/)
+  assert.match(css, /\.workspace-thumb-kind/)
+  assert.match(css, /\.workspace-thumb-delete/)
   assert.match(css, /\.workspace-upload-lightbox/)
-  assert.match(css, /background:\s*transparent/)
-  assert.match(css, /width:\s*52px/)
-  assert.match(css, /height:\s*58px/)
-  assert.match(css, /rotate\(-6deg\)/)
-  assert.match(css, /\.workspace-upload-empty:hover \.workspace-upload-card/)
-  assert.match(css, /scale\(1\.06\)/)
-  assert.match(
-    css,
-    /\.workspace-upload\.has-file \.workspace-upload-add-card:hover,\s*\.workspace-upload\.has-file \.workspace-upload-add-card:focus-visible\s*\{[\s\S]*?scale\(1\.12\)/,
-  )
-  assert.match(css, /\.workspace-upload:hover \.workspace-upload-preview\.asset-2/)
-  assert.match(css, /\.workspace-upload:hover \.workspace-upload-preview\.asset-3/)
-  assert.match(css, /\.workspace-upload\.dragging \.workspace-upload-card/)
+  assert.match(css, /\.workspace-upload-stack:hover \.workspace-upload-thumb/)
+  assert.match(css, /\.workspace-upload-thumb:hover \.workspace-thumb-delete/)
+  assert.match(css, /\.workspace-upload\.dragging/)
 })
 
 test("composer can submit image tools with an uploaded asset and optional prompt", async () => {

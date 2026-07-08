@@ -10,6 +10,7 @@ import type { ToolSummary } from "@/api/types"
 import { toWorkspaceToolCards, type ToolModeFilter } from "@/adapters/toolPresentationAdapter"
 import { useAuthStore } from "@/store/authStore"
 import { cleanToolDisplayText } from "@/utils/toolDisplayText"
+import "@/styles/workspace.css"
 
 const props = withDefaults(defineProps<{
   mode?: ToolModeFilter

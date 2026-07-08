@@ -112,6 +112,7 @@ function openAuthorProfile() {
         :alt="asset.title"
         class="media"
         loading="lazy"
+        decoding="async"
       />
       <video
         v-else-if="asset.kind === 'video' && mediaUrl"
@@ -130,6 +131,7 @@ function openAuthorProfile() {
           :alt="asset.title"
           class="audio-cover-image"
           loading="lazy"
+          decoding="async"
         />
         <div class="audio-cover-body">
           <div v-if="!coverUrl" class="icon-bubble">

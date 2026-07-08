@@ -60,7 +60,7 @@ import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { buildTaskResultBlocks, formatAudioDuration, resolveAudioTracks } from "@/utils/taskResultBlocks"
 import { isCoreField } from "@/utils/fieldUiMeta"
-import { consumeDashboardPendingAsset } from "@/utils/assetReplay"
+import { consumeCreatePendingAsset } from "@/utils/assetReplay"
 import { cleanToolDisplayText, toolDisplayDescription } from "@/utils/toolDisplayText"
 import { recommendToolsForAsset as recommendAssetTools } from "@/utils/assetToolRecommendations"
 import { formatLiveCreditEstimate, formatMarketplaceCostLabel, usesVariableWorkflowCredits } from "@/utils/toolCreditLabel"
@@ -80,6 +80,7 @@ import { isWorkflowToolCode } from "@/adapters/toolPresentationAdapter"
 import { taskFailureHint, taskProgressMessage } from "@/utils/taskStatusLabels"
 import { buildTaskProgressView } from "@/utils/taskProgressView"
 import { inferTaskAspectRatio } from "@/utils/taskAspectRatio"
+import "@/styles/workspace.css"
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -1630,7 +1631,7 @@ function buildSubjectReplayParams(fields: ToolField[]): Record<string, unknown> 
 }
 
 function consumePendingAssetFromStorage(): AssetPreviewItem | null {
-  return consumeDashboardPendingAsset()
+  return consumeCreatePendingAsset()
 }
 
 function openPreviewTask(asset: AssetPreviewItem) {

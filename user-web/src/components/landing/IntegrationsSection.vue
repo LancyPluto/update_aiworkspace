@@ -52,10 +52,10 @@ const marqueeBottom = [...bottomRow, ...bottomRow]
                   <video
                     :src="item.src"
                     :poster="item.thumbnail"
-                    autoplay
                     muted
                     loop
                     playsinline
+                    preload="metadata"
                     class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   />
                 </template>
@@ -64,6 +64,10 @@ const marqueeBottom = [...bottomRow, ...bottomRow]
                     :src="item.src"
                     :alt="item.title"
                     class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    width="320"
+                    height="220"
+                    loading="lazy"
+                    decoding="async"
                   />
                 </template>
                 <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -86,10 +90,10 @@ const marqueeBottom = [...bottomRow, ...bottomRow]
                   <video
                     :src="item.src"
                     :poster="item.thumbnail"
-                    autoplay
                     muted
                     loop
                     playsinline
+                    preload="metadata"
                     class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   />
                 </template>
@@ -98,6 +102,10 @@ const marqueeBottom = [...bottomRow, ...bottomRow]
                     :src="item.src"
                     :alt="item.title"
                     class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    width="320"
+                    height="220"
+                    loading="lazy"
+                    decoding="async"
                   />
                 </template>
                 <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4 opacity-0 group-hover:opacity-100 transition-opacity">

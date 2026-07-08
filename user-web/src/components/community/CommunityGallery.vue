@@ -43,7 +43,7 @@ import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { getSessionBearerJwt } from "@/api/sessionBearer"
 import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
-import { openDashboardWithAsset } from "@/utils/assetReplay"
+import { openCreateWithAsset } from "@/utils/assetReplay"
 import { communityDisplayTitle, communityCardDescription } from "@/utils/communityDisplay"
 import { hasCommunityAudioMedia, resolveCommunityAudioMedia } from "@/utils/communityAudioMedia"
 import { resolveCommunityAuthorAvatar, resolveCommunityAuthorName } from "@/utils/communityPostNormalize"
@@ -477,7 +477,7 @@ async function createSameStyle(post: CommunityPost, event: Event) {
       { token: auth.token },
     ).catch(() => undefined)
     const selectedMediaUrl = postKind(post) === "image" ? activePostImageUrl(post) : normalizeCommunityMediaUrl(post.coverUrl)
-    openDashboardWithAsset(assetFromCommunityPost(post, selectedMediaUrl), post.toolCode, {
+    openCreateWithAsset(assetFromCommunityPost(post, selectedMediaUrl), post.toolCode, {
       modality: post.modality,
       sourcePost: post.id,
     })

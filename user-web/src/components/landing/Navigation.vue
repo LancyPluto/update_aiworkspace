@@ -17,7 +17,7 @@ const navLinks = [
   { name: '关于我们', href: '#about' },
 ]
 
-const logoSrc = `${import.meta.env.BASE_URL}logo.png`
+const logoSrc = 'https://cdn.wlcloudai.com/static/logo.svg'
 
 const handleScroll = () => {
   isScrolled.value = window.scrollY > 20
@@ -51,6 +51,9 @@ const toggleMobileMenu = () => {
         :src="logoSrc"
         class="h-10 w-auto max-w-[150px] object-contain [filter:drop-shadow(0_0_8px_rgb(34_211_238_/_0.35))]"
         alt="科创点AI"
+        width="40"
+        height="40"
+        decoding="async"
       >
     </a>
         
