@@ -91,6 +91,7 @@ const favoritePickerOpen = ref(false)
 const favoritePickerPost = ref<CommunityPost | null>(null)
 const favoritePickerSubmitting = ref(false)
 const activeMediaIndexes = ref<Record<number, number>>({})
+const videoPreviewHoverPostId = ref<number | null>(null)
 let loadObserver: IntersectionObserver | null = null
 
 const modalityFilters = [
@@ -212,6 +213,16 @@ function sameStyleCardStyle(post: CommunityPost) {
   return {
     "--same-style-preview": `url("${previewUrl.replace(/["\\]/g, "\\$&")}")`,
   }
+}
+
+function onPostPreviewEnter(post: CommunityPost) {
+  if (postKind(post) !== "video" || !hasMediaCover(post)) return
+  videoPreviewHoverPostId.value = post.id
+}
+
+function onPostPreviewLeave(post: CommunityPost) {
+  if (videoPreviewHoverPostId.value !== post.id) return
+  videoPreviewHoverPostId.value = null
 }
 
 function galleryAudioProgressFor(postId: number) {
@@ -415,6 +426,7 @@ async function load(reset = true) {
     pageNo.value = 1
     posts.value = []
     activeMediaIndexes.value = {}
+    videoPreviewHoverPostId.value = null
   } else {
     loadingMore.value = true
   }
@@ -540,6 +552,9 @@ function handleCommunityPostUnpublished(event: Event) {
   const removed = before - posts.value.length
   if (removed > 0) {
     total.value = Math.max(0, total.value - removed)
+    if (videoPreviewHoverPostId.value != null && !posts.value.some((post) => post.id === videoPreviewHoverPostId.value)) {
+      videoPreviewHoverPostId.value = null
+    }
   }
 }
 
@@ -715,7 +730,12 @@ onUnmounted(() => {
     <template v-else>
       <MasonryLayout :items="posts" :item-key="(post) => post.id" :gap="2" aria-label="社区作品">
         <template #default="{ item: post }">
-        <article class="post-card group" :style="sameStyleCardStyle(post)">
+        <article
+          class="post-card group"
+          :style="sameStyleCardStyle(post)"
+          @pointerenter="onPostPreviewEnter(post)"
+          @pointerleave="onPostPreviewLeave(post)"
+        >
           <div class="card-main">
             <div class="thumb">
               <button
@@ -731,6 +751,7 @@ onUnmounted(() => {
                   :source-url="postKind(post) === 'image' ? activePostImageUrl(post) : normalizeCommunityMediaUrl(post.coverUrl)"
                   :alt="postTitle(post)"
                   :fallback-text="cardDescription(post) || postTitle(post)"
+                  :preview-active="videoPreviewHoverPostId === post.id"
                 />
                 <div v-else class="thumb-text">
                   <p>{{ cardDescription(post) || postTitle(post) }}</p>
