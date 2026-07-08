@@ -889,7 +889,7 @@ const costInsufficient = computed(() => liveCreditView.value.insufficient)
 
     <div v-if="!compact && showModeTabs" class="workspace-mode-row">
       <div ref="modeTabRootRef" class="workspace-mode-tabs" :style="modeTabStyle">
-        <span class="workspace-mode-tabs-indicator" :style="modeTabIndicatorStyle" aria-hidden="true" />
+        <span class="workspace-mode-tabs-indicator" :style="modeTabIndicatorStyle" aria-hidden="true"></span>
         <button
           v-for="item in modes"
           :key="item.key"
@@ -928,17 +928,20 @@ const costInsufficient = computed(() => liveCreditView.value.insufficient)
           </button>
           <!-- Asset thumbnails (overlapping, expand on hover) -->
           <div v-if="uploadedAssets.length > 0" class="workspace-upload-stack">
-            <button
+            <div
               v-for="(asset, index) in visibleUploadedAssets"
               :key="asset.id"
               class="workspace-upload-thumb"
               :class="'thumb-' + index"
-              type="button"
+              role="button"
+              tabindex="0"
               :title="asset.name"
               @click="openAssetPreview(asset)"
+              @keydown.enter.prevent="openAssetPreview(asset)"
+              @keydown.space.prevent="openAssetPreview(asset)"
             >
               <img v-if="asset.kind === 'image'" :src="asset.url" alt="" />
-              <video v-else-if="asset.kind === 'video'" :src="asset.url" muted playsinline />
+              <video v-else-if="asset.kind === 'video'" :src="asset.url" muted playsinline></video>
               <span v-else class="workspace-upload-file-icon">
                 <Music2 v-if="asset.kind === 'audio'" :size="18" />
                 <FileUp v-else :size="18" />
@@ -964,7 +967,7 @@ const costInsufficient = computed(() => liveCreditView.value.insufficient)
               >
                 <X :size="10" />
               </button>
-            </button>
+            </div>
             <span v-if="hiddenUploadedAssetCount > 0" class="workspace-upload-more">+{{ hiddenUploadedAssetCount }}</span>
           </div>
         </div>
@@ -983,7 +986,7 @@ const costInsufficient = computed(() => liveCreditView.value.insufficient)
         </div>
         <!-- Prompt input -->
         <div class="workspace-prompt-shell">
-          <textarea v-model="prompt" name="prompt" aria-label="创作提示词" :placeholder="promptPlaceholder" />
+          <textarea v-model="prompt" name="prompt" aria-label="创作提示词" :placeholder="promptPlaceholder"></textarea>
           <div class="workspace-prompt-actions">
             <button
               type="button"
@@ -1007,7 +1010,6 @@ const costInsufficient = computed(() => liveCreditView.value.insufficient)
           </div>
         </div>
         <p class="workspace-upload-hint">{{ uploadHint }}</p>
-      </div>
       <div v-if="uploading || uploadError" class="workspace-upload-status" :class="{ error: uploadError }">
         <span v-if="uploading">素材上传中...</span>
         <span v-else-if="uploadError">{{ uploadError }}</span>
@@ -1188,7 +1190,7 @@ const costInsufficient = computed(() => liveCreditView.value.insufficient)
               </div>
             </div>
           </div>
-          <button v-if="mode === 'image'" class="workspace-chip workspace-style-chip" type="button"><span />自动</button>
+          <button v-if="mode === 'image'" class="workspace-chip workspace-style-chip" type="button"><span></span>自动</button>
           <button class="workspace-icon-chip" type="button" aria-label="高级设置"><Settings2 :size="16" /></button>
           <em v-if="costEstimateLabel" class="workspace-cost-estimate" :class="{ 'workspace-cost-insufficient': costInsufficient }" :title="liveCreditView.hint">{{ costEstimateLabel }}</em>
           <button class="workspace-generate" :disabled="!canGenerate" @click="submit">
@@ -1205,8 +1207,8 @@ const costInsufficient = computed(() => liveCreditView.value.insufficient)
         </button>
         <div class="workspace-upload-lightbox-media">
           <img v-if="previewAsset.kind === 'image'" :src="previewAsset.url" :alt="previewAsset.name" />
-          <video v-else-if="previewAsset.kind === 'video'" :src="previewAsset.url" controls autoplay playsinline />
-          <audio v-else-if="previewAsset.kind === 'audio'" :src="previewAsset.url" controls />
+          <video v-else-if="previewAsset.kind === 'video'" :src="previewAsset.url" controls autoplay playsinline></video>
+          <audio v-else-if="previewAsset.kind === 'audio'" :src="previewAsset.url" controls></audio>
           <FileUp v-else :size="42" />
         </div>
       </div>

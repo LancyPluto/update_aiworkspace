@@ -107,7 +107,7 @@ function figureClass() {
 
 function imageFrameClass() {
   return props.mode === "compact"
-    ? "flex max-h-[560px] items-center justify-center bg-transparent"
+    ? "flex aspect-[4/3] max-h-[560px] min-h-[260px] items-center justify-center bg-transparent"
     : "flex aspect-square items-center justify-center bg-secondary/30"
 }
 
@@ -430,6 +430,7 @@ function escapeXml(value: string): string {
                 :alt="image.label ?? b.title"
                 :class="imageClass()"
                 loading="lazy"
+                decoding="async"
               />
             </div>
             <figcaption v-if="props.mode !== 'compact'" :class="captionClass()">
@@ -487,6 +488,7 @@ function escapeXml(value: string): string {
                 :alt="track.title || b.title"
                 class="h-full w-full object-cover"
                 loading="lazy"
+                decoding="async"
               />
               <div
                 v-else

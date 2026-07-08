@@ -12,25 +12,29 @@ onMounted(() => {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
 
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.5)
+  let centerX = 0
+  let centerY = 0
+  let radius = 0
+
   const resize = () => {
-    canvas.width = canvas.offsetWidth * window.devicePixelRatio
-    canvas.height = canvas.offsetHeight * window.devicePixelRatio
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
+    canvas.width = canvas.offsetWidth * dpr
+    canvas.height = canvas.offsetHeight * dpr
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    centerX = canvas.offsetWidth / 2
+    centerY = canvas.offsetHeight / 2
+    radius = Math.min(centerX, centerY) * 0.8
   }
   
   resizeHandler = resize
   resize()
   window.addEventListener('resize', resize)
 
-  const centerX = canvas.offsetWidth / 2
-  const centerY = canvas.offsetHeight / 2
-  const radius = Math.min(centerX, centerY) * 0.8
-
   let rotationX = 0
   let rotationY = 0
 
   const points: { x: number; y: number; z: number; brightness: number; hue: number }[] = []
-  const numPoints = 800
+  const numPoints = window.matchMedia('(min-width: 1024px)').matches ? 420 : 260
 
   for (let i = 0; i < numPoints; i++) {
     const theta = Math.random() * Math.PI * 2
@@ -47,6 +51,11 @@ onMounted(() => {
   }
 
   const animate = () => {
+    if (document.hidden) {
+      animationId = requestAnimationFrame(animate)
+      return
+    }
+
     ctx.clearRect(0, 0, canvas.offsetWidth, canvas.offsetHeight)
 
     rotationX += 0.003

@@ -33,6 +33,13 @@ export default defineConfig({
           proxy.on("proxyReq", stripBrowserOrigin)
         },
       },
+      "/tool-covers": {
+        target: process.env.VITE_DEV_PROXY_TARGET ?? "http://127.0.0.1:8080",
+        changeOrigin: true,
+        configure(proxy) {
+          proxy.on("proxyReq", stripBrowserOrigin)
+        },
+      },
     },
   },
   // Production uses `vite preview` behind nginx; without this, Host: wlcloudai.com returns 403.
@@ -46,6 +53,10 @@ export default defineConfig({
         changeOrigin: true,
       },
       "/generated": {
+        target: process.env.VITE_DEV_PROXY_TARGET ?? "http://backend:8080",
+        changeOrigin: true,
+      },
+      "/tool-covers": {
         target: process.env.VITE_DEV_PROXY_TARGET ?? "http://backend:8080",
         changeOrigin: true,
       },

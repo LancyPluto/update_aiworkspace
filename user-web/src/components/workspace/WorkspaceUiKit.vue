@@ -17,7 +17,7 @@ defineProps<{
 
   <div v-else-if="kind === 'mediaRail'" class="workspace-media-rail">
     <RouterLink v-for="item in media" :key="item.title" :to="item.to || '/tool'" class="workspace-media-card">
-      <img v-if="item.image" :src="item.image" alt="" />
+      <img v-if="item.image" :src="item.image" alt="" width="252" height="141" loading="lazy" decoding="async" />
       <div v-else class="workspace-media-placeholder">
         <Sparkles :size="24" />
       </div>
@@ -35,7 +35,7 @@ defineProps<{
   <div v-else-if="kind === 'toolGrid'" class="workspace-tool-grid">
     <RouterLink v-for="tool in tools" :key="tool.title" :to="tool.to || '/tool'" class="workspace-tool-card">
       <div class="workspace-tool-image">
-        <img v-if="tool.image" :src="tool.image" alt="" />
+        <img v-if="tool.image" :src="tool.image" alt="" width="320" height="200" loading="lazy" decoding="async" />
         <div v-else class="workspace-tool-placeholder">
           <component :is="tool.icon" :size="24" />
         </div>

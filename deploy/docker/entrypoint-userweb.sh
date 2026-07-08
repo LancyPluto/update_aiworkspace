@@ -1,7 +1,9 @@
 #!/bin/sh
 set -e
-# Copy pre-built dist to the named volume that nginx serves.
-cp -a /prebuilt-dist/. /dist-out/ 2>/dev/null || true
+# Replace the named volume contents with the current build so stale hashed
+# assets or deleted public files cannot survive across deployments.
+find /dist-out -mindepth 1 -maxdepth 1 -exec rm -rf {} \;
+cp -a /prebuilt-dist/. /dist-out/
 
 if [ "$APP_PRODUCTION_MODE" = "true" ]; then
   echo "user-web: pre-built assets copied to /dist-out, idling for nginx..."

@@ -13,6 +13,7 @@ import { workspaceMedia, workspaceTemplates } from "@/data/creativeHub"
 import { buildComposerModelOptions, type CreatorMode, type ComposerState } from "@/adapters/creatorAdapter"
 import type { WorkspaceMediaItem } from "@/types/workspace"
 import { useAuthStore } from "@/store/authStore"
+import "@/styles/workspace.css"
 
 const activeMode = ref<CreatorMode>("video")
 const auth = useAuthStore()
