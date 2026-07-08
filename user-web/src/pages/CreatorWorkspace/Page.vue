@@ -36,7 +36,6 @@ import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 import { taskProgressMessage, taskStatusViewKind } from "@/utils/taskStatusLabels"
 import { buildTaskProgressView } from "@/utils/taskProgressView"
 import { inferTaskAspectRatio } from "@/utils/taskAspectRatio"
-import "@/styles/workspace.css"
 
 const route = useRoute()
 const router = useRouter()
@@ -798,7 +797,8 @@ watch(timelineItems, () => {
 onMounted(async () => {
   consumePendingAssetReplay()
   consumeInitialComposerRoute()
-  await Promise.all([loadTools(), refreshTimeline()])
+  await loadTools()
+  await refreshTimeline()
   window.addEventListener("scroll", updateComposerCondensedFromScroll, { passive: true })
   window.addEventListener("resize", updateComposerCondensedFromScroll)
   await nextTick()
@@ -863,8 +863,8 @@ onBeforeUnmount(() => {
           <div class="workspace-create-prompt">
             <div v-if="item.materials.length" class="workspace-create-materials">
               <figure v-for="material in item.materials" :key="material.key + material.url">
-                <img v-if="material.kind === 'image'" :src="material.url" alt="" loading="lazy" decoding="async" />
-                <video v-else-if="material.kind === 'video'" :src="material.url" muted playsinline preload="metadata" />
+                <img v-if="material.kind === 'image'" :src="material.url" alt="" />
+                <video v-else-if="material.kind === 'video'" :src="material.url" muted playsinline />
                 <FileUp v-else :size="18" />
               </figure>
             </div>

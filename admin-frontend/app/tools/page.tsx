@@ -62,7 +62,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { ComparisonSweepPreview, ToolUserPreviewCard } from "@/components/admin/tool-user-preview-card"
+import { ToolUserPreviewCard } from "@/components/admin/tool-user-preview-card"
 import { ToolIntegrationApiSection } from "@/components/admin/tool-integration-api-section"
 import { resolveIntegrationPluginId } from "@/lib/model-capabilities"
 import {
@@ -1643,7 +1643,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                         </SelectContent>
                       </Select>
                       <p className="text-xs text-muted-foreground">
-                        模型图标会在 C 端展示圆形图标；模型效果使用展示素材；效果对比会用原图和效果图做自动扫线封面预览。
+                        模型图标会在 C 端展示圆形图标；模型效果使用展示素材；效果对比会用原图和效果图做可拖动分界预览。
                       </p>
                     </div>
                     <div className="space-y-2 sm:col-span-2">
@@ -1736,14 +1736,16 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                   </div>
                   <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
                     {form.mediaDisplayMode === "comparison" && form.comparisonOriginalUrl.trim() && form.comparisonEffectUrl.trim() ? (
-                      <ComparisonSweepPreview
-                        originalUrl={normalizeToolMediaUrl(form.comparisonOriginalUrl)}
-                        effectUrl={normalizeToolMediaUrl(form.comparisonEffectUrl)}
-                        originalAlt="comparison original preview"
-                        effectAlt="comparison effect preview"
-                        className="h-16 w-28 shrink-0 rounded-lg ring-1 ring-border"
-                        showFooter={false}
-                      />
+                      <div className="relative h-16 w-28 shrink-0 overflow-hidden rounded-lg bg-muted ring-1 ring-border">
+                        <img src={normalizeToolMediaUrl(form.comparisonOriginalUrl)} alt="comparison original preview" className="h-full w-full object-cover" />
+                        <img
+                          src={normalizeToolMediaUrl(form.comparisonEffectUrl)}
+                          alt="comparison effect preview"
+                          className="absolute inset-0 h-full w-full object-cover"
+                          style={{ clipPath: "inset(0 0 0 50%)" }}
+                        />
+                        <div className="absolute inset-y-0 left-1/2 w-px bg-white/80" />
+                      </div>
                     ) : form.modelIconUrl.trim() ? (
                       <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-border bg-muted/40">
                         <img src={normalizeToolMediaUrl(form.modelIconUrl)} alt="model icon preview" className="h-full w-full object-cover" />

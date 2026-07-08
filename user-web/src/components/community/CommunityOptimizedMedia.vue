@@ -13,7 +13,6 @@ const props = defineProps<{
   sourceUrl?: string | null
   alt?: string
   fallbackText?: string
-  previewActive?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -75,7 +74,7 @@ async function startVideoPreview() {
   void videoRef.value?.play().catch(() => undefined)
 }
 
-function queueVideoPreview(delayMs = 300) {
+function onPointerEnter() {
   if (!isVideo.value || !videoPreviewUrl.value) return
   clearHoverTimer()
   if (videoMounted.value) {
@@ -85,22 +84,13 @@ function queueVideoPreview(delayMs = 300) {
   hoverTimer = window.setTimeout(() => {
     void startVideoPreview()
     hoverTimer = null
-  }, delayMs)
-}
-
-function stopVideoPreview() {
-  clearHoverTimer()
-  hoverActive.value = false
-  videoRef.value?.pause()
-}
-
-function onPointerEnter() {
-  queueVideoPreview()
+  }, 300)
 }
 
 function onPointerLeave() {
-  if (props.previewActive) return
-  stopVideoPreview()
+  clearHoverTimer()
+  hoverActive.value = false
+  videoRef.value?.pause()
 }
 
 function onVideoCanPlay() {
@@ -128,20 +118,7 @@ watch(
     hoverActive.value = false
     videoMounted.value = false
     clearHoverTimer()
-    if (props.previewActive) queueVideoPreview()
   },
-)
-
-watch(
-  () => props.previewActive,
-  (active) => {
-    if (active) {
-      queueVideoPreview()
-    } else if (!active) {
-      stopVideoPreview()
-    }
-  },
-  { immediate: true },
 )
 
 watch(shouldRenderVideo, async (active) => {

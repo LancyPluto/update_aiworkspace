@@ -15,10 +15,9 @@ watch(
     if (
       !loggedIn &&
       route.meta.requiresAuth !== false &&
-      route.name !== "Login" &&
-      route.name !== "RootLogin"
+      route.name !== "Login"
     ) {
-      router.replace({ name: "RootLogin", query: { redirect: route.fullPath } })
+      router.replace({ name: "Login", query: { redirect: route.fullPath } })
     }
   },
 )

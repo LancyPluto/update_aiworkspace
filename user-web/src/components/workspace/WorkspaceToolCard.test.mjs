@@ -4,11 +4,10 @@ import test from "node:test"
 
 const source = await readFile(new URL("./WorkspaceToolCard.vue", import.meta.url), "utf8")
 
-test("video cover errors switch to a stable placeholder instead of assigning jpg to video", () => {
-  assert.match(source, /const coverFailed = ref\(false\)/)
-  assert.match(source, /coverFailed\.value = true/)
-  assert.match(source, /const hasRenderableCover = computed/)
+test("video cover errors switch to an image fallback instead of assigning jpg to video", () => {
+  assert.match(source, /const fallbackAsImage = ref\(false\)/)
+  assert.match(source, /fallbackAsImage\.value = true/)
   assert.doesNotMatch(source, /media\.src = DEFAULT_TOOL_COVER_URL/)
-  assert.match(source, /v-if="tool\.mediaType === 'video'"/)
-  assert.match(source, /v-else class="workspace-official-tool-placeholder"/)
+  assert.match(source, /v-if="tool\.mediaType === 'video' && !fallbackAsImage"/)
+  assert.match(source, /:src="fallbackAsImage \? DEFAULT_TOOL_COVER_URL : tool\.image"/)
 })

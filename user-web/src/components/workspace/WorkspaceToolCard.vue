@@ -48,10 +48,6 @@ function openLaunch() {
           :src="tool.image"
           :alt="tool.title"
           class="workspace-tool-media"
-          width="320"
-          height="200"
-          loading="lazy"
-          decoding="async"
           @error="handleCoverError"
         />
       </template>

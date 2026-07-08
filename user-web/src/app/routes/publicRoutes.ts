@@ -1,12 +1,12 @@
 import type { RouteRecordRaw } from "vue-router"
 
-const LoginPage = () => import("@/pages/Login/Page.vue")
-const VideoToolsPage = () => import("@/pages/VideoTools/Page.vue")
-const ImageToolsPage = () => import("@/pages/ImageTools/Page.vue")
-const ToolCenterPage = () => import("@/pages/ToolCenter/Page.vue")
-const AgentPlaceholderPage = () => import("@/pages/AgentPlaceholder/Page.vue")
-const PublicProfilePage = () => import("@/pages/PublicProfile/Page.vue")
-const CommunityDiscoverPage = () => import("@/pages/CommunityDiscover/Page.vue")
+import LoginPage from "@/pages/Login/Page.vue"
+import VideoToolsPage from "@/pages/VideoTools/Page.vue"
+import ImageToolsPage from "@/pages/ImageTools/Page.vue"
+import ToolCenterPage from "@/pages/ToolCenter/Page.vue"
+import AgentPlaceholderPage from "@/pages/AgentPlaceholder/Page.vue"
+import PublicProfilePage from "@/pages/PublicProfile/Page.vue"
+import CommunityDiscoverPage from "@/pages/CommunityDiscover/Page.vue"
 
 export const publicRoutes: RouteRecordRaw[] = [
   {
