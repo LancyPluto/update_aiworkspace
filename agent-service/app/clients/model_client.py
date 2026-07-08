@@ -441,11 +441,7 @@ async def _to_openai_messages_for_provider(messages: list[ChatMessage], settings
 
 
 def _should_inline_private_image_urls(settings: Settings) -> bool:
-    provider = settings.model_provider.strip().lower()
-    base_url = settings.model_api_base_url.strip().lower()
-    return provider in {"qwen", "qwen_compatible", "dashscope", "bailian"} or (
-        "dashscope.aliyuncs.com" in base_url or "maas.aliyuncs.com" in base_url
-    )
+    return True
 
 
 async def _inline_private_image_urls(messages: list[dict[str, Any]], settings: Settings) -> list[dict[str, Any]]:
