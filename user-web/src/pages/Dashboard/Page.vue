@@ -33,6 +33,7 @@ import {
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import GenerationLoadingPreview from "@/components/GenerationLoadingPreview.vue"
 import ImageStackPreview from "@/components/ImageStackPreview.vue"
+import ToolComparisonCover from "@/components/ToolComparisonCover.vue"
 import CapabilityControls from "@/pages/Chat/CapabilityControls.vue"
 import type { ComposerMediaSlot, PrimaryReferenceMaterialInfo } from "@/pages/Chat/CapabilityControls.vue"
 import DashboardModalityDock from "./DashboardModalityDock.vue"
@@ -1410,6 +1411,13 @@ function onToolCoverError(tool: ToolSummary) {
   }
 }
 
+function usesComparisonToolCover(tool: ToolSummary): boolean {
+  return tool.frontendStyle?.mediaDisplayMode === "comparison"
+    && Boolean(tool.frontendStyle?.comparisonOriginalUrl)
+    && Boolean(tool.frontendStyle?.comparisonEffectUrl)
+    && !brokenToolCoverIds.value.has(tool.id)
+}
+
 function audioTaskTitle(track?: DashboardAudioTrack | null): string {
   if (!track) return "未选择音频"
   return track.title || taskPrompt(track.task) || track.blockTitle || track.task.toolName || `版本 ${track.version}`
@@ -1915,8 +1923,14 @@ onUnmounted(() => {
                   @click="selectTool(tool)"
                 >
                   <div class="marketplace-tool-media">
+                    <ToolComparisonCover
+                      v-if="usesComparisonToolCover(tool)"
+                      :before-src="tool.frontendStyle?.comparisonOriginalUrl || ''"
+                      :after-src="tool.frontendStyle?.comparisonEffectUrl || ''"
+                      :alt="tool.toolName"
+                    />
                     <video
-                      v-if="isVideoPreviewUrl(toolCardCover(tool))"
+                      v-else-if="isVideoPreviewUrl(toolCardCover(tool))"
                       :src="normalizeMediaUrl(toolCardCover(tool))"
                       class="marketplace-tool-image"
                       muted
@@ -3139,8 +3153,14 @@ onUnmounted(() => {
                           @click="selectTool(tool)"
                         >
                           <div class="marketplace-tool-media">
+                            <ToolComparisonCover
+                              v-if="usesComparisonToolCover(tool)"
+                              :before-src="tool.frontendStyle?.comparisonOriginalUrl || ''"
+                              :after-src="tool.frontendStyle?.comparisonEffectUrl || ''"
+                              :alt="tool.toolName"
+                            />
                             <video
-                              v-if="isVideoPreviewUrl(tool.coverUrl)"
+                              v-else-if="isVideoPreviewUrl(tool.coverUrl)"
                               :src="normalizeMediaUrl(tool.coverUrl)"
                               class="marketplace-tool-image"
                               muted

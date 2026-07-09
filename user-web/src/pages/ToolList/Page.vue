@@ -2,6 +2,7 @@
 import { computed, onActivated, onMounted, ref, watch } from "vue"
 import { RouterLink, useRoute } from "vue-router"
 import { ExternalLink, Sparkles } from "lucide-vue-next"
+import ToolComparisonCover from "@/components/ToolComparisonCover.vue"
 import { fetchEnabledAITools } from "@/api/toolApi"
 import { fetchTasks } from "@/api/taskApi"
 import type { AITool } from "@/api/aiToolTypes"
@@ -412,42 +413,12 @@ watch(
           class="marketplace-tool-card"
         >
           <div class="marketplace-tool-media">
-            <template v-if="usesComparisonMedia(tool)">
-              <video
-                v-if="isVideoPreviewUrl(tool.comparisonOriginalUrl)"
-                :src="normalizeMediaUrl(tool.comparisonOriginalUrl)"
-                class="marketplace-tool-image"
-                muted loop autoplay playsinline preload="metadata"
-              />
-              <img
-                v-else
-                :src="normalizeMediaUrl(tool.comparisonOriginalUrl)"
-                :alt="`${tool.name} 原图`"
-                class="marketplace-tool-image"
-                draggable="false"
-              />
-              <video
-                v-if="isVideoPreviewUrl(tool.comparisonEffectUrl)"
-                :src="normalizeMediaUrl(tool.comparisonEffectUrl)"
-                class="marketplace-tool-image marketplace-tool-image--effect"
-                muted loop autoplay playsinline preload="metadata"
-              />
-              <img
-                v-else
-                :src="normalizeMediaUrl(tool.comparisonEffectUrl)"
-                :alt="`${tool.name} 效果图`"
-                class="marketplace-tool-image marketplace-tool-image--effect"
-                draggable="false"
-              />
-              <div class="marketplace-comparison-line" />
-              <div class="marketplace-comparison-handle">
-                <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-                  <circle cx="14" cy="14" r="13" fill="white" stroke="rgba(0,0,0,0.3)" stroke-width="1.5" />
-                  <path d="M10 10L6 14L10 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                  <path d="M18 10L22 14L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-              </div>
-            </template>
+            <ToolComparisonCover
+              v-if="usesComparisonMedia(tool)"
+              :before-src="tool.comparisonOriginalUrl || ''"
+              :after-src="tool.comparisonEffectUrl || ''"
+              :alt="tool.name"
+            />
             <template v-else>
               <video
                 v-if="isVideoPreviewUrl(coverSrcForTool(tool))"
