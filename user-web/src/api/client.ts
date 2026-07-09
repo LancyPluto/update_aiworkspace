@@ -1,6 +1,6 @@
 import type { ApiErrorCode, ApiResponse } from "./types"
 import { SESSION_TOKEN_STORAGE_KEY } from "@/constants/authStorage"
-import { clearSessionBearerJwt, getSessionBearerJwt } from "./sessionBearer"
+import { clearSessionBearerJwt } from "./sessionBearer"
 
 /**
  * 后端 Origin，不含路径。例如 http://localhost:8080
@@ -91,7 +91,7 @@ function redirectToLoginPage(): void {
 
 /**
  * 统一解析契约响应壳；code !== SUCCESS 时抛 ApiBusinessError。
- * credentials + Cookie；Authorization 使用 options.token 或登录后 sessionBearer（与 Cookie 中 JWT 一致）。
+ * credentials + Cookie；Authorization 仅使用 options.token（脚本/调试兼容）。
  */
 export async function apiRequest<T>(
   method: string,
@@ -112,7 +112,7 @@ export async function apiRequest<T>(
     bodyInit = JSON.stringify(rawBody)
   }
 
-  const token = options?.token ?? getSessionBearerJwt()
+  const token = options?.token
   if (token) {
     headers.Authorization = `Bearer ${token}`
   }

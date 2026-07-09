@@ -1,5 +1,4 @@
 import { apiRequest } from "./client"
-import { getSessionBearerJwt } from "./sessionBearer"
 import type {
   CreateTaskRequest,
   CreateTaskResponse,
@@ -44,7 +43,7 @@ export async function streamTaskStatus(
   const headers: Record<string, string> = {
     Accept: "text/event-stream",
   }
-  const token = options?.token ?? getSessionBearerJwt()
+  const token = options?.token
   if (token) headers.Authorization = `Bearer ${token}`
 
   const res = await fetch(`/api/v1/tasks/${id}/events`, {

@@ -18,7 +18,6 @@ import { fetchTaskById } from "@/api/taskApi"
 import { favoritePostToCollection, unfavoritePostFromAllCollections } from "@/utils/communitySync"
 import type { CommunityPost } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
-import { getSessionBearerJwt } from "@/api/sessionBearer"
 import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
 import { communityDisplayTitle } from "@/utils/communityDisplay"
 import { resolveCommunityAuthorAvatar, resolveCommunityAuthorName, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
@@ -40,7 +39,7 @@ const router = useRouter()
 const auth = useAuthStore()
 
 function resolveAuthToken() {
-  return auth.token ?? getSessionBearerJwt()
+  return auth.token
 }
 
 function forceDownload(url: string, filename: string) {

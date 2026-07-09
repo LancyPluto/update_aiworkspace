@@ -75,6 +75,8 @@ app:
     dead-queue: ${RABBITMQ_TASK_DEAD_QUEUE:ai.tool.normal.dead}
     retry-queue-prefix: ${RABBITMQ_TASK_RETRY_QUEUE_PREFIX:ai.tool.normal.retry}
     retry-delays-ms: ${RABBITMQ_TASK_RETRY_DELAYS_MS:5000,30000,120000}
+  task-execution:
+    lease-minutes: ${TASK_EXECUTION_LEASE_MINUTES:30}
   auth:
     captcha:
       enabled: ${ALIYUN_CAPTCHA_ENABLED:false}
@@ -166,3 +168,7 @@ management:
     health:
       probes:
         enabled: true
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] traceId=%X{traceId} %logger{36} - %msg%n"

@@ -5,11 +5,13 @@ import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.community.mapper.CommunityPostMapper;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderMapper;
 import com.aiminilab.aitoolmarket.storage.AssetStorageService;
+import com.aiminilab.aitoolmarket.user.dto.CancelAccountRequest;
 import com.aiminilab.aitoolmarket.user.dto.UpdateUserProfileRequest;
 import com.aiminilab.aitoolmarket.user.entity.User;
 import com.aiminilab.aitoolmarket.user.mapper.AccountDataCleanupMapper;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import java.util.Optional;
 
@@ -17,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -30,13 +33,15 @@ class UserProfileServiceImplTest {
     private static final Long USER_ID = 7L;
 
     private UserMapper userMapper;
+    private SmsCodeService smsCodeService;
+    private CommunityPostMapper communityPostMapper;
 
     private UserProfileServiceImpl buildService(String publicBaseUrl, String currentAvatarUrl) {
         userMapper = mock(UserMapper.class);
         AssetStorageService assetStorageService = mock(AssetStorageService.class);
-        SmsCodeService smsCodeService = mock(SmsCodeService.class);
+        smsCodeService = mock(SmsCodeService.class);
         AccountDataCleanupMapper accountDataCleanupMapper = mock(AccountDataCleanupMapper.class);
-        CommunityPostMapper communityPostMapper = mock(CommunityPostMapper.class);
+        communityPostMapper = mock(CommunityPostMapper.class);
         CreditRechargeOrderMapper creditRechargeOrderMapper = mock(CreditRechargeOrderMapper.class);
 
         when(assetStorageService.getPublicBaseUrl()).thenReturn(publicBaseUrl);
@@ -45,10 +50,12 @@ class UserProfileServiceImplTest {
         when(existing.getId()).thenReturn(USER_ID);
         when(existing.getUsername()).thenReturn("alice");
         when(existing.getNickname()).thenReturn("Alice");
+        when(existing.getPhone()).thenReturn("13800138000");
         when(existing.getAvatarUrl()).thenReturn(currentAvatarUrl);
         when(existing.getDeleted()).thenReturn(false);
         when(userMapper.findById(USER_ID)).thenReturn(Optional.of(existing));
         when(userMapper.updateProfile(eq(USER_ID), anyString(), any())).thenReturn(1);
+        when(userMapper.cancelAccount(eq(USER_ID), anyString(), anyString())).thenReturn(1);
         when(creditRechargeOrderMapper.findCurrentPackageCodeByUserId(USER_ID)).thenReturn(null);
 
         return new UserProfileServiceImpl(userMapper, assetStorageService, smsCodeService,
@@ -93,5 +100,17 @@ class UserProfileServiceImplTest {
         service.update(USER_ID, new UpdateUserProfileRequest("Alice", null));
 
         verify(userMapper).updateProfile(USER_ID, "Alice", currentAvatar);
+    }
+
+    @Test
+    void unpublishesCommunityPostsBeforeCancellingAccount() {
+        UserProfileServiceImpl service = buildService("https://cdn.wlcloudai.com", null);
+
+        service.cancelAccount(USER_ID, new CancelAccountRequest("123456"));
+
+        InOrder inOrder = inOrder(smsCodeService, communityPostMapper, userMapper);
+        inOrder.verify(smsCodeService).verifyCode("13800138000", "CANCEL_ACCOUNT", "123456");
+        inOrder.verify(communityPostMapper).unpublishByUserId(USER_ID);
+        inOrder.verify(userMapper).cancelAccount(eq(USER_ID), anyString(), anyString());
     }
 }

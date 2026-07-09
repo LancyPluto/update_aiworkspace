@@ -16,6 +16,7 @@ public class AppProperties {
     private String aiTaskQueue;
     private String taskQueueBackend = "rabbitmq";
     private Rabbitmq rabbitmq = new Rabbitmq();
+    private TaskExecution taskExecution = new TaskExecution();
     private String generatedMediaDir = "../data/generated-media";
     private Agent agent = new Agent();
     private Auth auth = new Auth();
@@ -82,6 +83,14 @@ public class AppProperties {
 
     public void setRabbitmq(Rabbitmq rabbitmq) {
         this.rabbitmq = rabbitmq == null ? new Rabbitmq() : rabbitmq;
+    }
+
+    public TaskExecution getTaskExecution() {
+        return taskExecution;
+    }
+
+    public void setTaskExecution(TaskExecution taskExecution) {
+        this.taskExecution = taskExecution == null ? new TaskExecution() : taskExecution;
     }
 
     public String getGeneratedMediaDir() {
@@ -305,6 +314,18 @@ public class AppProperties {
             this.retryDelaysMs = retryDelaysMs == null || retryDelaysMs.isEmpty()
                     ? new ArrayList<>(List.of(5000, 30000, 120000))
                     : retryDelaysMs;
+        }
+    }
+
+    public static class TaskExecution {
+        private long leaseMinutes = 30;
+
+        public long getLeaseMinutes() {
+            return leaseMinutes;
+        }
+
+        public void setLeaseMinutes(long leaseMinutes) {
+            this.leaseMinutes = leaseMinutes <= 0 ? 30 : leaseMinutes;
         }
     }
 

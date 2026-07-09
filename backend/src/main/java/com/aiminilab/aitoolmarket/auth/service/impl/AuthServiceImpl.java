@@ -7,6 +7,7 @@ import com.aiminilab.aitoolmarket.auth.dto.RegisterRequest;
 import com.aiminilab.aitoolmarket.auth.dto.ResetPasswordRequest;
 import com.aiminilab.aitoolmarket.auth.dto.SmsAuthRequest;
 import com.aiminilab.aitoolmarket.auth.dto.SmsCodeResponse;
+import com.aiminilab.aitoolmarket.auth.metrics.AuthMetrics;
 import com.aiminilab.aitoolmarket.auth.security.AuthUser;
 import com.aiminilab.aitoolmarket.auth.security.JwtTokenProvider;
 import com.aiminilab.aitoolmarket.auth.service.AuthService;
@@ -33,7 +34,7 @@ public class AuthServiceImpl implements AuthService {
     private static final String DEFAULT_AVATAR_URL =
             "https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com/assets/default-user-avatar.svg";
     private static final SecureRandom RANDOM = new SecureRandom();
-    private static final int DEFAULT_NAME_DIGITS = 9;
+    private static final int DEFAULT_NAME_DIGITS = 5;
 
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
@@ -42,6 +43,7 @@ public class AuthServiceImpl implements AuthService {
     private final HumanCaptchaService humanCaptchaService;
     private final CreditRechargeOrderMapper creditRechargeOrderMapper;
     private final ReferralService referralService;
+    private final AuthMetrics authMetrics;
 
     public AuthServiceImpl(UserMapper userMapper,
                            PasswordEncoder passwordEncoder,
@@ -49,7 +51,8 @@ public class AuthServiceImpl implements AuthService {
                            SmsCodeService smsCodeService,
                            HumanCaptchaService humanCaptchaService,
                            CreditRechargeOrderMapper creditRechargeOrderMapper,
-                           ReferralService referralService) {
+                           ReferralService referralService,
+                           AuthMetrics authMetrics) {
         this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
@@ -57,6 +60,7 @@ public class AuthServiceImpl implements AuthService {
         this.humanCaptchaService = humanCaptchaService;
         this.creditRechargeOrderMapper = creditRechargeOrderMapper;
         this.referralService = referralService;
+        this.authMetrics = authMetrics;
     }
 
     @Override
@@ -101,18 +105,28 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthenticatedSession login(LoginRequest request, boolean adminLogin) {
-        User user = userMapper.findByUsernameOrPhone(request.account())
-                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "账号或密码错误"));
-        if (!UserStatus.ACTIVE.name().equals(user.getStatus())) {
-            throw new BusinessException(ErrorCode.UNAUTHORIZED, "账号已禁用");
+        String userType = adminLogin ? UserType.ADMIN.name() : UserType.USER.name();
+        try {
+            User user = userMapper.findByUsernameOrPhone(request.account())
+                    .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "账号或密码错误"));
+            if (!UserStatus.ACTIVE.name().equals(user.getStatus())) {
+                throw new BusinessException(ErrorCode.UNAUTHORIZED, "账号已禁用");
+            }
+            if (adminLogin && !UserType.ADMIN.name().equals(user.getUserType())) {
+                throw new BusinessException(ErrorCode.ADMIN_FORBIDDEN, "管理员无权限");
+            }
+            if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+                throw new BusinessException(ErrorCode.UNAUTHORIZED, "账号或密码错误");
+            }
+            authMetrics.recordLoginAttempt("success", "password", userType, "ok");
+            return buildLoginResponse(user);
+        } catch (BusinessException exception) {
+            authMetrics.recordLoginAttempt("failure", "password", userType, exception.getErrorCode().name());
+            throw exception;
+        } catch (RuntimeException exception) {
+            authMetrics.recordLoginAttempt("failure", "password", userType, "exception");
+            throw exception;
         }
-        if (adminLogin && !UserType.ADMIN.name().equals(user.getUserType())) {
-            throw new BusinessException(ErrorCode.ADMIN_FORBIDDEN, "管理员无权限");
-        }
-        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
-            throw new BusinessException(ErrorCode.UNAUTHORIZED, "账号或密码错误");
-        }
-        return buildLoginResponse(user);
     }
 
     @Override
@@ -166,37 +180,47 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthenticatedSession loginWithSmsCode(SmsAuthRequest request) {
-        String phone = normalizePhone(request.phone());
-        String code = normalizeBlank(request.code());
-        User user = userMapper.findByPhone(phone).orElse(null);
-        if (user == null) {
-            smsCodeService.verifyCode(phone, "LOGIN_OR_REGISTER", code);
-            userMapper.findByUsername(phone).ifPresent(existing -> {
-                throw new BusinessException(ErrorCode.PARAM_ERROR, "用户名已存在");
-            });
-            String defaultName = createDefaultDisplayName();
-            User created = new User();
-            created.setUsername(defaultName);
-            created.setPasswordHash(passwordEncoder.encode("SMS_LOGIN_ONLY:" + phone + ":" + System.nanoTime()));
-            created.setPhone(phone);
-            created.setNickname(defaultName);
-            created.setAvatarUrl(DEFAULT_AVATAR_URL);
-            created.setUserType(UserType.USER.name());
-            created.setStatus(UserStatus.ACTIVE.name());
-            Long userId = insertUser(created);
-            created.setId(userId);
-            referralService.bindInviteCode(userId, request.inviteCode());
-            return buildLoginResponse(created);
-        }
         try {
-            smsCodeService.verifyCode(phone, "LOGIN", code);
+            String phone = normalizePhone(request.phone());
+            String code = normalizeBlank(request.code());
+            User user = userMapper.findByPhone(phone).orElse(null);
+            if (user == null) {
+                smsCodeService.verifyCode(phone, "LOGIN_OR_REGISTER", code);
+                userMapper.findByUsername(phone).ifPresent(existing -> {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR, "用户名已存在");
+                });
+                String defaultName = createDefaultDisplayName();
+                User created = new User();
+                created.setUsername(defaultName);
+                created.setPasswordHash(passwordEncoder.encode("SMS_LOGIN_ONLY:" + phone + ":" + System.nanoTime()));
+                created.setPhone(phone);
+                created.setNickname(defaultName);
+                created.setAvatarUrl(DEFAULT_AVATAR_URL);
+                created.setUserType(UserType.USER.name());
+                created.setStatus(UserStatus.ACTIVE.name());
+                Long userId = insertUser(created);
+                created.setId(userId);
+                referralService.bindInviteCode(userId, request.inviteCode());
+                authMetrics.recordLoginAttempt("success", "sms", UserType.USER.name(), "registered");
+                return buildLoginResponse(created);
+            }
+            try {
+                smsCodeService.verifyCode(phone, "LOGIN", code);
+            } catch (BusinessException exception) {
+                smsCodeService.verifyCode(phone, "LOGIN_OR_REGISTER", code);
+            }
+            if (!UserStatus.ACTIVE.name().equals(user.getStatus())) {
+                throw new BusinessException(ErrorCode.UNAUTHORIZED, "账号已禁用");
+            }
+            authMetrics.recordLoginAttempt("success", "sms", UserType.USER.name(), "ok");
+            return buildLoginResponse(user);
         } catch (BusinessException exception) {
-            smsCodeService.verifyCode(phone, "LOGIN_OR_REGISTER", code);
+            authMetrics.recordLoginAttempt("failure", "sms", UserType.USER.name(), exception.getErrorCode().name());
+            throw exception;
+        } catch (RuntimeException exception) {
+            authMetrics.recordLoginAttempt("failure", "sms", UserType.USER.name(), "exception");
+            throw exception;
         }
-        if (!UserStatus.ACTIVE.name().equals(user.getStatus())) {
-            throw new BusinessException(ErrorCode.UNAUTHORIZED, "账号已禁用");
-        }
-        return buildLoginResponse(user);
     }
 
     @Override

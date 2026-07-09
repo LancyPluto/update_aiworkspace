@@ -1,9 +1,4 @@
-/**
- * 登录后 JWT：与 HttpOnly Cookie 中相同；优先保证请求带 Authorization（Cookie 未带上时避免 401）。
- * 使用 sessionStorage 与内存同步，刷新单页标签后仍可恢复（本文件不直接写 localStorage）。
- * 长期持久化键仍在 authStore（localStorage）；authStore 在首次加载、登录成功与 clearAuth 时调用
- * setSessionBearerJwt / clearSessionBearerJwt，与 apiRequest 的默认 Bearer 来源对齐。
- */
+/** 旧 Bearer 过渡兼容；浏览器正常会话以 HttpOnly Cookie 为准，不再作为默认请求来源。 */
 const STORAGE_KEY = "atm_user_session_jwt"
 
 let memoryJwt: string | null = null

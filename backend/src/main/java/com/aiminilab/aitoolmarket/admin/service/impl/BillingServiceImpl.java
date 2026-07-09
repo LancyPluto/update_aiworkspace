@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.admin.dto.BillingOverviewResponse;
 import com.aiminilab.aitoolmarket.admin.dto.BillingUsageLogResponse;
 import com.aiminilab.aitoolmarket.admin.entity.BillingUsageLog;
 import com.aiminilab.aitoolmarket.admin.mapper.BillingUsageLogMapper;
+import com.aiminilab.aitoolmarket.admin.metrics.BillingMetrics;
 import com.aiminilab.aitoolmarket.admin.service.BillingService;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
@@ -29,15 +30,18 @@ public class BillingServiceImpl implements BillingService {
     private final AgentModelConfigMapper modelConfigMapper;
     private final ModelVendorAccountMapper vendorAccountMapper;
     private final VendorBalanceAdjustmentMapper vendorBalanceAdjustmentMapper;
+    private final BillingMetrics billingMetrics;
 
     public BillingServiceImpl(BillingUsageLogMapper billingUsageLogMapper,
                               AgentModelConfigMapper modelConfigMapper,
                               ModelVendorAccountMapper vendorAccountMapper,
-                              VendorBalanceAdjustmentMapper vendorBalanceAdjustmentMapper) {
+                              VendorBalanceAdjustmentMapper vendorBalanceAdjustmentMapper,
+                              BillingMetrics billingMetrics) {
         this.billingUsageLogMapper = billingUsageLogMapper;
         this.modelConfigMapper = modelConfigMapper;
         this.vendorAccountMapper = vendorAccountMapper;
         this.vendorBalanceAdjustmentMapper = vendorBalanceAdjustmentMapper;
+        this.billingMetrics = billingMetrics;
     }
 
     @Override
@@ -89,11 +93,28 @@ public class BillingServiceImpl implements BillingService {
     public void recordUsage(String sourceType, Long sourceId, Long userId, AgentModelConfig modelConfig,
                             Integer promptTokens, Integer completionTokens, Integer billableUnits, Integer chargedCredits,
                             BigDecimal vendorCostAmount, BigDecimal markupRatio) {
+        recordUsage(sourceType, sourceId, userId, modelConfig, promptTokens, completionTokens, billableUnits, chargedCredits,
+                vendorCostAmount, markupRatio, "SUCCESS", null, null, null, null, true);
+    }
+
+    @Override
+    @Transactional
+    public void recordUsage(String sourceType, Long sourceId, Long userId, AgentModelConfig modelConfig,
+                            Integer promptTokens, Integer completionTokens, Integer billableUnits, Integer chargedCredits,
+                            BigDecimal vendorCostAmount, BigDecimal markupRatio,
+                            String outcome, String errorCode, String failureStage,
+                            String providerErrorCode, String providerRequestId, Boolean providerCharged) {
         int prompt = nonNegative(promptTokens);
         int completion = nonNegative(completionTokens);
         int units = nonNegative(billableUnits);
         int charged = nonNegative(chargedCredits);
-        if (prompt == 0 && completion == 0 && units == 0 && charged == 0) {
+        BigDecimal explicitVendorCost = vendorCostAmount == null ? BigDecimal.ZERO : vendorCostAmount.max(BigDecimal.ZERO);
+        boolean successOutcome = "SUCCESS".equalsIgnoreCase(cleanOutcome(outcome));
+        boolean vendorWasCharged = Boolean.TRUE.equals(providerCharged)
+                || successOutcome
+                || explicitVendorCost.compareTo(BigDecimal.ZERO) > 0;
+        if (prompt == 0 && completion == 0 && units == 0 && charged == 0
+                && explicitVendorCost.compareTo(BigDecimal.ZERO) <= 0) {
             return;
         }
         BigDecimal inputPricePer1m = price(modelConfig == null ? null : modelConfig.getInputTokenPricePer1m());
@@ -124,22 +145,32 @@ public class BillingServiceImpl implements BillingService {
         BigDecimal derivedCost = costPerMillion(prompt, inputPricePer1m)
                 .add(costPerMillion(completion, outputPricePer1m))
                 .add(perUnitCost(billingUnit, units, unitPrice));
-        BigDecimal vendorCost = vendorCostAmount != null && vendorCostAmount.compareTo(BigDecimal.ZERO) > 0
-                ? vendorCostAmount
+        BigDecimal vendorCost = explicitVendorCost.compareTo(BigDecimal.ZERO) > 0
+                ? explicitVendorCost
                 : derivedCost;
         int costCredits = costToCredits(vendorCost);
         // charged_credits now reflects the real user-facing charge (incl. markup) so that revenue
         // and profitability can be aggregated directly; vendor cost stays in the *_cost columns.
-        int finalCharge = charged > 0 ? charged : costCredits;
+        int finalCharge = charged > 0 ? charged : (successOutcome ? costCredits : 0);
         log.setCostAmount(vendorCost);
         log.setVendorCostAmount(vendorCost);
         log.setChargedCredits(finalCharge);
         log.setCustomerChargeCredits(finalCharge);
         log.setMarginCredits(Math.max(0, finalCharge - costCredits));
         log.setMarkupRatio(markupRatio == null ? BigDecimal.ZERO : markupRatio);
+        log.setOutcome(cleanOutcome(outcome));
+        log.setErrorCode(cleanNullable(errorCode, 64));
+        log.setFailureStage(cleanNullable(failureStage, 64));
+        log.setProviderErrorCode(cleanNullable(providerErrorCode, 128));
+        log.setProviderRequestId(cleanNullable(providerRequestId, 128));
+        log.setProviderCharged(vendorWasCharged);
         log.setCreatedAt(LocalDateTime.now());
         billingUsageLogMapper.insert(log);
-        deductManualVendorBalance(log, modelConfig, vendorCost);
+        billingMetrics.recordUsage(sourceType, log.getOutcome(), log.getProvider(), billingUnit, vendorCost,
+                finalCharge, log.getFailureStage(), log.getErrorCode(), log.getModelName(), vendorWasCharged);
+        if (vendorWasCharged) {
+            deductManualVendorBalance(log, modelConfig, vendorCost);
+        }
     }
 
     private void deductManualVendorBalance(BillingUsageLog log, AgentModelConfig modelConfig, BigDecimal vendorCost) {
@@ -238,6 +269,19 @@ public class BillingServiceImpl implements BillingService {
 
     private String clean(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private String cleanOutcome(String value) {
+        String normalized = clean(value);
+        return normalized == null ? "SUCCESS" : normalized.toUpperCase();
+    }
+
+    private String cleanNullable(String value, int maxLength) {
+        String normalized = clean(value);
+        if (normalized == null) {
+            return null;
+        }
+        return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength);
     }
 
     private String defaultString(String value) {

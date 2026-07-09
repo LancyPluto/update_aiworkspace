@@ -14,28 +14,25 @@ import {
 } from "@/api"
 import { ApiBusinessError } from "@/api/client"
 import { SESSION_TOKEN_STORAGE_KEY } from "@/constants/authStorage"
-import { clearSessionBearerJwt, setSessionBearerJwt } from "@/api/sessionBearer"
+import { clearSessionBearerJwt } from "@/api/sessionBearer"
 
 const TOKEN_KEY = SESSION_TOKEN_STORAGE_KEY
 
 export const useAuthStore = defineStore("auth", () => {
-  const persisted = localStorage.getItem(TOKEN_KEY)
-  const token = ref<string | null>(persisted)
-  if (persisted) {
-    setSessionBearerJwt(persisted)
-  }
+  clearLegacyTokenStorage()
+  const token = ref<string | null>(null)
   const user = ref<UserProfile | null>(null)
   const loading = ref(false)
   const bootstrapComplete = ref(false)
 
-  const isLoggedIn = computed(() => !!token.value)
+  const isLoggedIn = computed(() => !!user.value)
   const isAdmin = computed(() => user.value?.userType === "ADMIN")
 
   async function login(body: LoginRequest) {
     loading.value = true
     try {
       const res = await apiLogin(body)
-      return await applyLoginResponse(res, "登录响应缺少 token")
+      return await applyLoginResponse(res)
     } finally {
       loading.value = false
     }
@@ -45,7 +42,7 @@ export const useAuthStore = defineStore("auth", () => {
     loading.value = true
     try {
       const res = await apiRegister(body)
-      return await applyLoginResponse(res, "注册响应缺少 token")
+      return await applyLoginResponse(res)
     } finally {
       loading.value = false
     }
@@ -55,7 +52,7 @@ export const useAuthStore = defineStore("auth", () => {
     loading.value = true
     try {
       const res = await apiSmsRegister(body)
-      return await applyLoginResponse(res, "注册响应缺少 token")
+      return await applyLoginResponse(res)
     } finally {
       loading.value = false
     }
@@ -65,17 +62,16 @@ export const useAuthStore = defineStore("auth", () => {
     loading.value = true
     try {
       const res = await apiSmsLogin(body)
-      return await applyLoginResponse(res, "登录响应缺少 token")
+      return await applyLoginResponse(res)
     } finally {
       loading.value = false
     }
   }
 
   async function fetchCurrentUser(options?: { clearOnFailure?: boolean }) {
-    if (!token.value) return null
     const clearOnFailure = options?.clearOnFailure !== false
     try {
-      const u = await getCurrentUser({ token: token.value, skipAuthRedirect: true })
+      const u = await getCurrentUser({ skipAuthRedirect: true })
       user.value = u
       return u
     } catch (err) {
@@ -93,8 +89,8 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   async function updateProfile(body: { nickname?: string; avatarUrl?: string | null }) {
-    if (!token.value) throw new Error("请先登录")
-    const profile = await updateCurrentUserProfile(body, { token: token.value })
+    if (!user.value) throw new Error("请先登录")
+    const profile = await updateCurrentUserProfile(body)
     user.value = profile
     return profile
   }
@@ -104,26 +100,24 @@ export const useAuthStore = defineStore("auth", () => {
     autoPublishAssets?: boolean
     promptPublicByDefault?: boolean
   }) {
-    if (!token.value) throw new Error("请先登录")
-    const profile = await updateCommunitySettings(body, { token: token.value })
+    if (!user.value) throw new Error("请先登录")
+    const profile = await updateCommunitySettings(body)
     user.value = profile
     return profile
   }
 
   async function uploadAvatar(file: File) {
-    if (!token.value) throw new Error("请先登录")
-    const response = await uploadCurrentUserAvatar(file, { token: token.value })
+    if (!user.value) throw new Error("请先登录")
+    const response = await uploadCurrentUserAvatar(file)
     user.value = response.user
     return response
   }
 
   async function logout() {
-    if (token.value) {
-      try {
-        await apiLogout({ token: token.value })
-      } catch {
-        // Ignore logout failures and clear local state.
-      }
+    try {
+      await apiLogout({ token: token.value })
+    } catch {
+      // Ignore logout failures and clear local state.
     }
     clearAuth()
   }
@@ -131,16 +125,14 @@ export const useAuthStore = defineStore("auth", () => {
   function clearAuth() {
     token.value = null
     user.value = null
-    localStorage.removeItem(TOKEN_KEY)
+    clearLegacyTokenStorage()
     clearSessionBearerJwt()
   }
 
-  async function applyLoginResponse(res: LoginResponse, missingTokenMessage: string) {
+  async function applyLoginResponse(res: LoginResponse) {
     const t = res.token ?? res.accessToken
-    if (!t) throw new Error(missingTokenMessage)
-    token.value = t
-    localStorage.setItem(TOKEN_KEY, t)
-    setSessionBearerJwt(t)
+    token.value = t ?? null
+    clearLegacyTokenStorage()
     if (res.user) user.value = res.user
     const profile = await fetchCurrentUser({ clearOnFailure: false })
     if (!profile && !user.value) {
@@ -152,9 +144,8 @@ export const useAuthStore = defineStore("auth", () => {
 
   async function init() {
     try {
-      if (token.value) {
-        await fetchCurrentUser()
-      }
+      clearLegacyTokenStorage()
+      await fetchCurrentUser()
     } finally {
       bootstrapComplete.value = true
     }
@@ -180,3 +171,16 @@ export const useAuthStore = defineStore("auth", () => {
     init,
   }
 })
+
+function clearLegacyTokenStorage() {
+  try {
+    localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    // ignore
+  }
+  try {
+    sessionStorage.removeItem("atm_user_session_jwt")
+  } catch {
+    // ignore
+  }
+}

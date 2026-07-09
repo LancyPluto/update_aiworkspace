@@ -321,6 +321,14 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
 
     @Update("""
             UPDATE community_posts
+            SET status = 'UNPUBLISHED', updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = #{userId}
+              AND status = 'PUBLISHED'
+            """)
+    int unpublishByUserId(@Param("userId") Long userId);
+
+    @Update("""
+            UPDATE community_posts
             SET title = #{title},
                 description = #{description},
                 prompt_visible = #{promptVisible},

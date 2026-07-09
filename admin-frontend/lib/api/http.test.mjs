@@ -57,10 +57,9 @@ function uploadForm() {
   return form
 }
 
-test("postForm sends multipart uploads with credentials and bearer token", async () => {
+test("postForm sends multipart uploads with credentials and no default bearer token", async () => {
   installBrowserWindow()
-  const { http, setToken } = await importTsModule("./http.ts")
-  setToken("admin-token")
+  const { http } = await importTsModule("./http.ts")
 
   let captured
   globalThis.fetch = async (url, init) => {
@@ -81,7 +80,7 @@ test("postForm sends multipart uploads with credentials and bearer token", async
   assert.equal(result.url, "/generated/tool-covers/preview.mp4")
   assert.equal(captured.url, "/api/admin/v1/tools/cover-upload")
   assert.equal(captured.init.credentials, "include")
-  assert.equal(captured.init.headers.Authorization, "Bearer admin-token")
+  assert.equal(captured.init.headers.Authorization, undefined)
   assert.equal(captured.init.headers["Content-Type"], undefined)
 })
 

@@ -113,7 +113,7 @@ def detect_services() -> str:
                 return services
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass
-    return "backend worker agent-service admin-frontend user-web nginx prometheus grafana node-exporter cadvisor blackbox-exporter"
+    return "backend worker agent-service admin-frontend user-web nginx prometheus grafana loki promtail node-exporter cadvisor blackbox-exporter"
 
 
 def main() -> int:
@@ -237,7 +237,7 @@ APP_SERVICES=""
 MONITORING_SERVICES=""
 for svc in $SERVICES; do
   case "$svc" in
-    prometheus|grafana|node-exporter|cadvisor|blackbox-exporter)
+    prometheus|grafana|loki|promtail|node-exporter|cadvisor|blackbox-exporter)
       MONITORING_SERVICES="$MONITORING_SERVICES $svc"
       ;;
     *)

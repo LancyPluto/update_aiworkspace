@@ -25,6 +25,12 @@ public interface BillingService {
                      Integer promptTokens, Integer completionTokens, Integer billableUnits, Integer chargedCredits,
                      BigDecimal vendorCostAmount, BigDecimal markupRatio);
 
+    void recordUsage(String sourceType, Long sourceId, Long userId, AgentModelConfig modelConfig,
+                     Integer promptTokens, Integer completionTokens, Integer billableUnits, Integer chargedCredits,
+                     BigDecimal vendorCostAmount, BigDecimal markupRatio,
+                     String outcome, String errorCode, String failureStage,
+                     String providerErrorCode, String providerRequestId, Boolean providerCharged);
+
     /** Backward-compatible overload (no explicit vendor cost / markup). */
     default void recordUsage(String sourceType, Long sourceId, Long userId, AgentModelConfig modelConfig,
                              Integer promptTokens, Integer completionTokens, Integer billableUnits, Integer chargedCredits) {

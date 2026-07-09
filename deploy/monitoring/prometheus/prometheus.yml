@@ -15,6 +15,19 @@ scrape_configs:
     static_configs:
       - targets: ["cadvisor:8080"]
 
+  - job_name: backend-actuator
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["backend:8080"]
+        labels:
+          service: backend
+
+  - job_name: rabbitmq
+    static_configs:
+      - targets: ["rabbitmq:15692"]
+        labels:
+          service: rabbitmq
+
   - job_name: blackbox-http
     metrics_path: /probe
     params:

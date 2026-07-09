@@ -291,6 +291,67 @@ public interface TaskMapper extends BaseMapper<AiTask> {
     @Update("""
             <script>
             UPDATE ai_tasks
+            SET status = 'PROCESSING', progress = #{progress}, progress_message = #{progressMessage},
+                started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{taskId}
+              AND (claim_token IS NULL OR claim_token = #{claimToken})
+              AND status IN
+              <foreach collection="expectedStatuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
+            """)
+    int markProcessingGuarded(@Param("taskId") Long taskId,
+                              @Param("claimToken") String claimToken,
+                              @Param("progress") int progress,
+                              @Param("progressMessage") String progressMessage,
+                              @Param("expectedStatuses") List<String> expectedStatuses);
+
+    @Update("""
+            UPDATE ai_tasks
+            SET status = 'PROCESSING',
+                progress = CASE WHEN progress IS NULL OR progress < 1 THEN 1 ELSE progress END,
+                progress_message = CASE
+                    WHEN progress_message IS NULL OR progress_message = '' OR status <> 'PROCESSING'
+                    THEN '任务已被 Worker 领取'
+                    ELSE progress_message
+                END,
+                claimed_by = #{workerId},
+                claim_token = #{claimToken},
+                lease_until = #{leaseUntil},
+                claimed_at = CURRENT_TIMESTAMP,
+                lease_renewed_at = CURRENT_TIMESTAMP,
+                execution_attempt = COALESCE(execution_attempt, 0) + 1,
+                started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{taskId}
+              AND (
+                status IN ('CREATED', 'QUEUED', 'RETRYING')
+                OR (status = 'PROCESSING' AND lease_until IS NOT NULL AND lease_until < CURRENT_TIMESTAMP)
+              )
+            """)
+    int claimForExecution(@Param("taskId") Long taskId,
+                          @Param("workerId") String workerId,
+                          @Param("claimToken") String claimToken,
+                          @Param("leaseUntil") LocalDateTime leaseUntil);
+
+    @Update("""
+            UPDATE ai_tasks
+            SET lease_until = #{leaseUntil},
+                lease_renewed_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{taskId}
+              AND status = 'PROCESSING'
+              AND claim_token = #{claimToken}
+            """)
+    int renewLease(@Param("taskId") Long taskId,
+                   @Param("claimToken") String claimToken,
+                   @Param("leaseUntil") LocalDateTime leaseUntil);
+
+    @Update("""
+            <script>
+            UPDATE ai_tasks
             SET status = 'AWAITING_USER', progress = #{progress}, progress_message = #{progressMessage},
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{taskId}
@@ -316,6 +377,8 @@ public interface TaskMapper extends BaseMapper<AiTask> {
             <script>
             UPDATE ai_tasks
             SET status = 'SUCCESS', progress = 100, progress_message = '生成完成',
+                claimed_by = NULL, claim_token = NULL, lease_until = NULL,
+                claimed_at = NULL, lease_renewed_at = NULL,
                 finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{taskId}
               AND status IN
@@ -330,8 +393,29 @@ public interface TaskMapper extends BaseMapper<AiTask> {
     @Update("""
             <script>
             UPDATE ai_tasks
+            SET status = 'SUCCESS', progress = 100, progress_message = '生成完成',
+                claimed_by = NULL, claim_token = NULL, lease_until = NULL,
+                claimed_at = NULL, lease_renewed_at = NULL,
+                finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{taskId}
+              AND (claim_token IS NULL OR claim_token = #{claimToken})
+              AND status IN
+              <foreach collection="expectedStatuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
+            """)
+    int markSuccessGuarded(@Param("taskId") Long taskId,
+                           @Param("claimToken") String claimToken,
+                           @Param("expectedStatuses") List<String> expectedStatuses);
+
+    @Update("""
+            <script>
+            UPDATE ai_tasks
             SET status = #{status}, progress = 100, progress_message = #{progressMessage},
                 error_code = #{errorCode}, error_message = #{errorMessage},
+                claimed_by = NULL, claim_token = NULL, lease_until = NULL,
+                claimed_at = NULL, lease_renewed_at = NULL,
                 finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{taskId}
               AND status IN
@@ -350,9 +434,35 @@ public interface TaskMapper extends BaseMapper<AiTask> {
     @Update("""
             <script>
             UPDATE ai_tasks
+            SET status = #{status}, progress = 100, progress_message = #{progressMessage},
+                error_code = #{errorCode}, error_message = #{errorMessage},
+                claimed_by = NULL, claim_token = NULL, lease_until = NULL,
+                claimed_at = NULL, lease_renewed_at = NULL,
+                finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{taskId}
+              AND (claim_token IS NULL OR claim_token = #{claimToken})
+              AND status IN
+              <foreach collection="expectedStatuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
+            """)
+    int markFailedGuarded(@Param("taskId") Long taskId,
+                          @Param("claimToken") String claimToken,
+                          @Param("status") String status,
+                          @Param("errorCode") String errorCode,
+                          @Param("progressMessage") String progressMessage,
+                          @Param("errorMessage") String errorMessage,
+                          @Param("expectedStatuses") List<String> expectedStatuses);
+
+    @Update("""
+            <script>
+            UPDATE ai_tasks
             SET status = 'QUEUED', progress = 0, progress_message = '任务已重新排队',
                 error_code = NULL, error_message = NULL,
                 retry_count = retry_count + 1,
+                claimed_by = NULL, claim_token = NULL, lease_until = NULL,
+                claimed_at = NULL, lease_renewed_at = NULL,
                 queued_at = CURRENT_TIMESTAMP, started_at = NULL,
                 finished_at = NULL, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{taskId}
@@ -385,6 +495,8 @@ public interface TaskMapper extends BaseMapper<AiTask> {
             <script>
             UPDATE ai_tasks
             SET status = 'CANCELLED', progress = 100, progress_message = '管理员已取消任务',
+                claimed_by = NULL, claim_token = NULL, lease_until = NULL,
+                claimed_at = NULL, lease_renewed_at = NULL,
                 finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{taskId}
               AND status IN

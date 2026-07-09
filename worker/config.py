@@ -55,6 +55,8 @@ class Settings:
     rabbitmq_prefetch_count: int = int(os.getenv('RABBITMQ_PREFETCH_COUNT', os.getenv('WORKER_CONCURRENCY', '5')))
     rabbitmq_heartbeat_seconds: int = int(os.getenv('RABBITMQ_HEARTBEAT_SECONDS', '1800'))
     rabbitmq_blocked_connection_timeout_seconds: int = int(os.getenv('RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS', '1800'))
+    worker_id: str = os.getenv('WORKER_ID', f"worker-{os.getenv('HOSTNAME', 'local')}-{os.getpid()}")
+    worker_lease_renew_interval_seconds: float = float(os.getenv('WORKER_LEASE_RENEW_INTERVAL_SECONDS', '600'))
     backend_internal_base_url: str = os.getenv('BACKEND_INTERNAL_BASE_URL', 'http://localhost:8080')
     internal_api_token: str = os.getenv('INTERNAL_API_TOKEN', 'local-internal-token')
     model_provider: str = os.getenv('MODEL_PROVIDER', 'deepseek')

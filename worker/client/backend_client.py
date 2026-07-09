@@ -4,6 +4,8 @@ import hmac
 import json
 import time
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -13,6 +15,7 @@ from config import settings
 
 
 LOGGER = logging.getLogger(__name__)
+_CURRENT_CLAIM_TOKEN: ContextVar[str | None] = ContextVar("worker_claim_token", default=None)
 
 
 class BackendClientError(RuntimeError):
@@ -39,6 +42,26 @@ class BackendClient:
         )
         return self._parse_response(response)
 
+    def claim_task(self, task_id: int, *, worker_id: str, claim_token: str, trace_id: str | None = None) -> dict[str, Any]:
+        response = self._request(
+            "POST",
+            f"/api/internal/v1/tasks/{task_id}/claim",
+            json_body={"workerId": worker_id, "claimToken": claim_token},
+            timeout=self.timeout,
+            trace_id=trace_id,
+        )
+        return self._parse_response(response)
+
+    def renew_lease(self, task_id: int, *, worker_id: str, claim_token: str, trace_id: str | None = None) -> dict[str, Any]:
+        response = self._request(
+            "POST",
+            f"/api/internal/v1/tasks/{task_id}/lease/renew",
+            json_body={"workerId": worker_id, "claimToken": claim_token},
+            timeout=self.timeout,
+            trace_id=trace_id,
+        )
+        return self._parse_response(response)
+
     def get_agent_model_config(self) -> dict[str, Any]:
         response = self._request(
             "GET",
@@ -54,12 +77,14 @@ class BackendClient:
         progress: int | None = None,
         progress_message: str | None = None,
         trace_id: str | None = None,
+        claim_token: str | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {}
         if progress is not None:
             payload["progress"] = progress
         if progress_message:
             payload["progressMessage"] = progress_message
+        self._attach_claim_token(payload, claim_token)
         response = self._request(
             "POST",
             f"/api/internal/v1/tasks/{task_id}/processing",
@@ -69,7 +94,15 @@ class BackendClient:
         )
         return self._parse_response(response)
 
-    def mark_success(self, task_id: int, payload: dict[str, Any], trace_id: str | None = None) -> dict[str, Any]:
+    def mark_success(
+        self,
+        task_id: int,
+        payload: dict[str, Any],
+        trace_id: str | None = None,
+        claim_token: str | None = None,
+    ) -> dict[str, Any]:
+        payload = dict(payload or {})
+        self._attach_claim_token(payload, claim_token)
         response = self._request(
             "POST",
             f"/api/internal/v1/tasks/{task_id}/success",
@@ -79,7 +112,16 @@ class BackendClient:
         )
         return self._parse_response(response)
 
-    def mark_failed(self, task_id: int, payload: dict[str, Any], trace_id: str | None = None) -> dict[str, Any]:
+    def mark_failed(
+        self,
+        task_id: int,
+        payload: dict[str, Any],
+        trace_id: str | None = None,
+        claim_token: str | None = None,
+    ) -> dict[str, Any]:
+        payload = dict(payload or {})
+        self._attach_claim_token(payload, claim_token)
+        payload.setdefault("failureStage", _infer_failure_stage(str(payload.get("errorCode") or "")))
         response = self._request(
             "POST",
             f"/api/internal/v1/tasks/{task_id}/failed",
@@ -177,3 +219,34 @@ class BackendClient:
             LOGGER.debug("backend response data is empty: %s", payload)
             return {}
         return data
+
+    def _attach_claim_token(self, payload: dict[str, Any], claim_token: str | None = None) -> None:
+        token = claim_token or _CURRENT_CLAIM_TOKEN.get()
+        if token and "claimToken" not in payload:
+            payload["claimToken"] = token
+
+
+@contextmanager
+def backend_claim_context(claim_token: str | None):
+    token = _CURRENT_CLAIM_TOKEN.set(claim_token)
+    try:
+        yield
+    finally:
+        _CURRENT_CLAIM_TOKEN.reset(token)
+
+
+def _infer_failure_stage(error_code: str) -> str:
+    normalized = (error_code or "").strip().upper()
+    if normalized in {"INVALID_TASK_PARAMS", "PROMPT_VARIABLE_MISSING"}:
+        return "VALIDATION"
+    if normalized in {"MODEL_PROVIDER_UNAVAILABLE", "MODEL_AUTH_FAILED", "MODEL_CREDIT_INSUFFICIENT", "MODEL_RATE_LIMITED"}:
+        return "BEFORE_PROVIDER"
+    if normalized in {"MEDIA_PERSIST_FAILED", "POSTPROCESS_FAILED"}:
+        return "MEDIA_PERSIST"
+    if normalized in {"WORKER_INTERNAL_ERROR"}:
+        return "WORKER_INTERNAL"
+    if normalized in {"MODEL_TIMEOUT"}:
+        return "PROVIDER_POLLING"
+    if normalized.startswith("MODEL_"):
+        return "PROVIDER_SUBMITTED"
+    return "UNKNOWN"

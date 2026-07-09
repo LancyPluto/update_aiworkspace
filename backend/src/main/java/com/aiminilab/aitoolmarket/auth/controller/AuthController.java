@@ -79,18 +79,17 @@ public class AuthController {
 
     @PostMapping("/logout")
     public ResponseEntity<ApiResponse<Void>> logout(HttpServletRequest request) {
-        extractToken(request).ifPresent(jwtTokenProvider::revokeToken);
+        extractTokens(request).forEach(jwtTokenProvider::revokeToken);
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, authCookieSupport.deleteUserCookie().toString())
                 .body(ApiResponse.success(null));
     }
 
-    private java.util.Optional<String> extractToken(HttpServletRequest request) {
-        java.util.Optional<String> bearerToken = extractBearerToken(request);
-        if (bearerToken.isPresent()) {
-            return bearerToken;
-        }
-        return extractCookieToken(request, AuthCookieSupport.USER_SESSION_COOKIE);
+    private java.util.Set<String> extractTokens(HttpServletRequest request) {
+        java.util.Set<String> tokens = new java.util.LinkedHashSet<>();
+        extractCookieToken(request, AuthCookieSupport.USER_SESSION_COOKIE).ifPresent(tokens::add);
+        extractBearerToken(request).ifPresent(tokens::add);
+        return tokens;
     }
 
     private java.util.Optional<String> extractBearerToken(HttpServletRequest request) {

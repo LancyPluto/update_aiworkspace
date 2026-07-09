@@ -153,6 +153,12 @@ CREATE TABLE ai_tasks (
   max_retry_count INT NOT NULL DEFAULT 1,
   error_code VARCHAR(64),
   error_message TEXT,
+  claimed_by VARCHAR(128),
+  claim_token VARCHAR(128),
+  lease_until DATETIME,
+  claimed_at DATETIME,
+  lease_renewed_at DATETIME,
+  execution_attempt INT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   queued_at DATETIME,
   started_at DATETIME,
@@ -806,6 +812,12 @@ CREATE TABLE billing_usage_logs (
   customer_charge_credits INT NOT NULL DEFAULT 0,
   margin_credits INT NOT NULL DEFAULT 0,
   markup_ratio DECIMAL(10,4) NOT NULL DEFAULT 0,
+  outcome VARCHAR(32) NOT NULL DEFAULT 'SUCCESS',
+  error_code VARCHAR(64),
+  failure_stage VARCHAR(64),
+  provider_error_code VARCHAR(128),
+  provider_request_id VARCHAR(128),
+  provider_charged TINYINT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

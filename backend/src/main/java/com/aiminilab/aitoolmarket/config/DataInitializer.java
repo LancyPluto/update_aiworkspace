@@ -647,6 +647,14 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("ai_tasks", "model_config_id", "ALTER TABLE ai_tasks ADD COLUMN model_config_id BIGINT NULL");
         ensureIndex("ai_tasks", "idx_tasks_model_config", "CREATE INDEX idx_tasks_model_config ON ai_tasks(model_config_id)");
         ensureColumn("ai_tasks", "model_snapshot_json", "ALTER TABLE ai_tasks ADD COLUMN model_snapshot_json TEXT NULL");
+        ensureColumn("ai_tasks", "claimed_by", "ALTER TABLE ai_tasks ADD COLUMN claimed_by VARCHAR(128) NULL");
+        ensureColumn("ai_tasks", "claim_token", "ALTER TABLE ai_tasks ADD COLUMN claim_token VARCHAR(128) NULL");
+        ensureColumn("ai_tasks", "lease_until", "ALTER TABLE ai_tasks ADD COLUMN lease_until DATETIME NULL");
+        ensureColumn("ai_tasks", "claimed_at", "ALTER TABLE ai_tasks ADD COLUMN claimed_at DATETIME NULL");
+        ensureColumn("ai_tasks", "lease_renewed_at", "ALTER TABLE ai_tasks ADD COLUMN lease_renewed_at DATETIME NULL");
+        ensureColumn("ai_tasks", "execution_attempt", "ALTER TABLE ai_tasks ADD COLUMN execution_attempt INT NOT NULL DEFAULT 0");
+        ensureIndex("ai_tasks", "idx_tasks_lease", "CREATE INDEX idx_tasks_lease ON ai_tasks(status, lease_until, id)");
+        ensureIndex("ai_tasks", "idx_tasks_claim_token", "CREATE INDEX idx_tasks_claim_token ON ai_tasks(claim_token)");
         ensureTable("user_upload_assets", """
                 CREATE TABLE user_upload_assets (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -1000,6 +1008,13 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("billing_usage_logs", "customer_charge_credits", "ALTER TABLE billing_usage_logs ADD COLUMN customer_charge_credits INT NOT NULL DEFAULT 0 AFTER charged_credits");
         ensureColumn("billing_usage_logs", "margin_credits", "ALTER TABLE billing_usage_logs ADD COLUMN margin_credits INT NOT NULL DEFAULT 0 AFTER customer_charge_credits");
         ensureColumn("billing_usage_logs", "markup_ratio", "ALTER TABLE billing_usage_logs ADD COLUMN markup_ratio DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER margin_credits");
+        ensureColumn("billing_usage_logs", "outcome", "ALTER TABLE billing_usage_logs ADD COLUMN outcome VARCHAR(32) NOT NULL DEFAULT 'SUCCESS'");
+        ensureColumn("billing_usage_logs", "error_code", "ALTER TABLE billing_usage_logs ADD COLUMN error_code VARCHAR(64) NULL");
+        ensureColumn("billing_usage_logs", "failure_stage", "ALTER TABLE billing_usage_logs ADD COLUMN failure_stage VARCHAR(64) NULL");
+        ensureColumn("billing_usage_logs", "provider_error_code", "ALTER TABLE billing_usage_logs ADD COLUMN provider_error_code VARCHAR(128) NULL");
+        ensureColumn("billing_usage_logs", "provider_request_id", "ALTER TABLE billing_usage_logs ADD COLUMN provider_request_id VARCHAR(128) NULL");
+        ensureColumn("billing_usage_logs", "provider_charged", "ALTER TABLE billing_usage_logs ADD COLUMN provider_charged TINYINT NOT NULL DEFAULT 0");
+        ensureIndex("billing_usage_logs", "idx_billing_usage_outcome_provider", "CREATE INDEX idx_billing_usage_outcome_provider ON billing_usage_logs(outcome, provider, created_at)");
         ensureTable("vendor_balance_adjustments", """
                 CREATE TABLE vendor_balance_adjustments (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,

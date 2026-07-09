@@ -7,6 +7,7 @@ public record WorkerSuccessRequest(
         @NotBlank String contentText,
         Integer promptTokens,
         Integer completionTokens,
-        Integer billableUnits
+        Integer billableUnits,
+        String claimToken
 ) {
 }

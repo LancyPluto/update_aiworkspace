@@ -37,6 +37,12 @@ public class BillingUsageLog {
     private Integer customerChargeCredits;
     private Integer marginCredits;
     private BigDecimal markupRatio;
+    private String outcome;
+    private String errorCode;
+    private String failureStage;
+    private String providerErrorCode;
+    private String providerRequestId;
+    private Boolean providerCharged;
     private LocalDateTime createdAt;
 
     public Long getId() { return id; }
@@ -85,6 +91,18 @@ public class BillingUsageLog {
     public void setMarginCredits(Integer marginCredits) { this.marginCredits = marginCredits; }
     public BigDecimal getMarkupRatio() { return markupRatio; }
     public void setMarkupRatio(BigDecimal markupRatio) { this.markupRatio = markupRatio; }
+    public String getOutcome() { return outcome; }
+    public void setOutcome(String outcome) { this.outcome = outcome; }
+    public String getErrorCode() { return errorCode; }
+    public void setErrorCode(String errorCode) { this.errorCode = errorCode; }
+    public String getFailureStage() { return failureStage; }
+    public void setFailureStage(String failureStage) { this.failureStage = failureStage; }
+    public String getProviderErrorCode() { return providerErrorCode; }
+    public void setProviderErrorCode(String providerErrorCode) { this.providerErrorCode = providerErrorCode; }
+    public String getProviderRequestId() { return providerRequestId; }
+    public void setProviderRequestId(String providerRequestId) { this.providerRequestId = providerRequestId; }
+    public Boolean getProviderCharged() { return providerCharged; }
+    public void setProviderCharged(Boolean providerCharged) { this.providerCharged = providerCharged; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }

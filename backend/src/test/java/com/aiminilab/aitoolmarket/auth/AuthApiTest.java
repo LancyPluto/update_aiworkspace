@@ -43,7 +43,7 @@ class AuthApiTest {
 
     private static final String DEFAULT_AVATAR_URL =
             "https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com/assets/default-user-avatar.svg";
-    private static final String DEFAULT_DISPLAY_NAME_PATTERN = "^用户\\d{9}$";
+    private static final String DEFAULT_DISPLAY_NAME_PATTERN = "^用户\\d{5}$";
 
     @Autowired
     private MockMvc mockMvc;

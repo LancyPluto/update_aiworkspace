@@ -369,7 +369,7 @@ APP_SERVICES=""
 MONITORING_SERVICES=""
 for svc in \$DEPLOY_SERVICES; do
   case "\$svc" in
-    prometheus|grafana|node-exporter|cadvisor|blackbox-exporter)
+    prometheus|grafana|loki|promtail|node-exporter|cadvisor|blackbox-exporter)
       MONITORING_SERVICES="\$MONITORING_SERVICES \$svc"
       ;;
     *)

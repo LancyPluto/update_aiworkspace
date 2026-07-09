@@ -49,6 +49,7 @@ services:
       - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+      - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
@@ -264,6 +265,7 @@ services:
       # 生图任务并发消费：最多 5 个任务同时处理（prefetch 默认跟随 WORKER_CONCURRENCY）
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-5}
       RABBITMQ_PREFETCH_COUNT: ${RABBITMQ_PREFETCH_COUNT:-5}
+      WORKER_LEASE_RENEW_INTERVAL_SECONDS: ${WORKER_LEASE_RENEW_INTERVAL_SECONDS:-600}
       AI_TASK_QUEUE: ${AI_TASK_QUEUE:-ai:task:queue}
       BACKEND_INTERNAL_BASE_URL: http://backend:8080
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-internal-token}
