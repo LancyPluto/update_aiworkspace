@@ -2449,8 +2449,10 @@ onUnmounted(() => {
                     <section class="mt-5">
                       <GenerationLoadingPreview
                         v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')"
+                        class="dashboard-feed-loading-preview"
                         :task="item.task"
                         :aspect-ratio="inferTaskAspectRatio(item.task)"
+                        :max-preview-height="420"
                         :caption="taskProgressView(item.task).caption || taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? '任务生成失败，可以复用本次参数重试。' : '任务正在生成，完成后会追加到信息流底部。')"
                         :percent-label="taskProgressView(item.task).percentLabel"
                         :percent="taskProgressView(item.task).percent"
@@ -2618,6 +2620,7 @@ onUnmounted(() => {
                           <GenerationLoadingPreview
                             :task="item.task"
                             :aspect-ratio="inferTaskAspectRatio(item.task)"
+                            :max-preview-height="360"
                             :caption="taskProgressView(item.task).caption || taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? '任务生成失败，可以复用本次参数重试。' : '任务正在生成，完成后结果会自动出现在这里。')"
                             :percent-label="taskProgressView(item.task).percentLabel"
                             :percent="taskProgressView(item.task).percent"
@@ -3608,6 +3611,34 @@ onUnmounted(() => {
 .dashboard-feed-gallery::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgb(255 255 255 / 0.16);
+}
+
+.dashboard-feed-loading-preview.generation-preview-group {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  align-items: flex-start;
+  gap: 12px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.16) transparent;
+}
+
+.dashboard-feed-loading-preview.generation-preview-group::-webkit-scrollbar {
+  height: 6px;
+}
+
+.dashboard-feed-loading-preview.generation-preview-group::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.16);
+}
+
+.dashboard-feed-loading-preview.generation-loading-preview,
+.dashboard-feed-loading-preview.generation-preview-group :deep(.generation-loading-preview) {
+  max-height: 420px;
+  flex: 0 0 auto;
 }
 
 .dashboard-feed-image {

@@ -89,10 +89,10 @@ export function parseSizeRatio(value: string): number {
 
 export function inferTaskAspectRatio(task: Pick<TaskDetail, "params" | "outputModality" | "toolType">): number {
   const params = task.params || {}
-  const ratio = parseAspectRatio(findAspectRatioText(params))
-  if (ratio > 0) return clampAspectRatio(ratio)
   const sizeRatio = parseSizeRatio(findSizeText(params))
   if (sizeRatio > 0) return clampAspectRatio(sizeRatio)
+  const ratio = parseAspectRatio(findAspectRatioText(params))
+  if (ratio > 0) return clampAspectRatio(ratio)
 
   const modality = `${task.outputModality || ""} ${task.toolType || ""}`.toLowerCase()
   if (modality.includes("video") || modality.includes("视频")) return 16 / 9

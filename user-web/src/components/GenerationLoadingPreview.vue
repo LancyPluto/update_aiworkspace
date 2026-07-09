@@ -20,6 +20,7 @@ const props = withDefaults(
     outputCount?: number
     layout?: ImageOutputLayout
     task?: Pick<TaskDetail, "params" | "outputModality" | "toolType"> | null
+    maxPreviewHeight?: number
   }>(),
   {
     aspectRatio: 1,
@@ -29,6 +30,7 @@ const props = withDefaults(
     outputCount: 1,
     layout: "parallel",
     task: null,
+    maxPreviewHeight: 520,
   },
 )
 
@@ -50,7 +52,7 @@ onUnmounted(() => {
 
 const previewStyle = computed(() => ({
   aspectRatio: displayRatio.value,
-  width: `min(100%, ${Math.min(640, Math.max(180, Math.min(viewportHeight.value * 0.72, 520) * displayRatio.value))}px)`,
+  width: `min(100%, ${Math.min(640, Math.max(180, Math.min(viewportHeight.value * 0.72, props.maxPreviewHeight) * displayRatio.value))}px)`,
 }))
 
 const outputPlan = computed(() => {

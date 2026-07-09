@@ -46,3 +46,14 @@ test("inferTaskAspectRatio reads nested localized ratio labels and size values",
     9 / 16,
   )
 })
+
+test("inferTaskAspectRatio prefers concrete output size over display ratio label", () => {
+  assert.equal(
+    inferTaskAspectRatio({
+      params: { aspectRatio: { label: "9:16", value: "1024x1536" } },
+      outputModality: "image",
+      toolType: "IMAGE",
+    }),
+    1024 / 1536,
+  )
+})
