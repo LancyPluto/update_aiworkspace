@@ -274,10 +274,48 @@ export interface DashboardChartPoint {
   value: number
 }
 
+export interface DashboardBusinessTrendPoint {
+  name: string
+  rechargeRevenueAmount: number
+  usageRevenueAmount: number
+  vendorCostAmount: number
+  grossProfitAmount: number
+  taskTotal: number
+}
+
+export interface DashboardToolContributionPoint {
+  toolName: string
+  taskTotal: number
+  successTaskTotal: number
+  failedTaskTotal: number
+  usageRevenueAmount: number
+  vendorCostAmount: number
+  grossProfitAmount: number
+  successRate: number
+}
+
 export interface DashboardOverview {
+  rangeStartDate: string
+  rangeEndDate: string
   taskTrend: DashboardChartPoint[]
   popularTools: DashboardChartPoint[]
   apiCreditConsumed: number
+  rechargeRevenueAmount: number
+  usageRevenueAmount: number
+  vendorCostAmount: number
+  grossProfitAmount: number
+  grossMarginRate: number
+  taskTotal: number
+  successTaskTotal: number
+  failedTaskTotal: number
+  processingTaskTotal: number
+  successRate: number
+  newUserCount: number
+  totalUserCount: number
+  onlineToolCount: number
+  draftToolCount: number
+  businessTrend: DashboardBusinessTrendPoint[]
+  toolContributions: DashboardToolContributionPoint[]
 }
 
 export interface CreditAccount {
