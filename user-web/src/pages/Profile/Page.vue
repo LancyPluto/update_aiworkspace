@@ -95,6 +95,28 @@ const maskedPhone = computed(() => {
   const phone = auth.user?.phone || ""
   return phone.length === 11 ? `${phone.slice(0, 3)}****${phone.slice(7)}` : phone || "--"
 })
+const userTypeLabel = computed(() => (auth.user?.userType === "ADMIN" ? "管理员" : "普通用户"))
+const accountStatusLabel = computed(() => (auth.user?.status === "ACTIVE" ? "正常" : "受限"))
+const membershipLabel = computed(() => auth.user?.membershipPlan || "基础版")
+const completedProfileItems = computed(() => {
+  let count = 0
+  if (auth.user?.avatarUrl) count += 1
+  if (nickname.value.trim()) count += 1
+  if (bio.value.trim()) count += 1
+  if (auth.user?.phone || auth.user?.email) count += 1
+  return count
+})
+const profileCompletion = computed(() => Math.round((completedProfileItems.value / 4) * 100))
+const successRateLabel = computed(() => {
+  if (!totalTasks.value || successTasks.value == null) return "--"
+  return `${Math.round((successTasks.value / totalTasks.value) * 100)}%`
+})
+const unusedGiftCards = computed(() => giftCards.value.filter((card) => card.status === "UNUSED").length)
+const giftCardCreditTotal = computed(() =>
+  giftCards.value
+    .filter((card) => card.status === "UNUSED")
+    .reduce((sum, card) => sum + card.credits, 0),
+)
 
 async function loadProfileStats() {
   if (!auth.token) return
@@ -303,28 +325,17 @@ onMounted(async () => {
 
 <template>
     <div class="profile-page">
-      <section class="profile-hero">
-        <div class="hero-copy">
-          <p class="eyebrow">Profile foundation</p>
-          <h1>{{ displayName }}</h1>
-          <p>头像、昵称和账号信息会用于后续社区作品卡、评论和个人主页展示。</p>
+      <header class="profile-header">
+        <div>
+          <p class="eyebrow">个人中心</p>
+          <h1>账号与资料</h1>
+          <p class="header-copy">管理公开身份、社区展示偏好、礼品卡和账号安全。</p>
         </div>
-        <div class="hero-avatar">
-          <UserAvatar :src="auth.user?.avatarUrl" :name="displayName" size="xl" />
-          <button type="button" :disabled="uploading" @click="openAvatarPicker">
-            <Loader2 v-if="uploading" class="h-4 w-4 animate-spin" />
-            <Camera v-else class="h-4 w-4" />
-            更换头像
-          </button>
-          <input
-            ref="fileInputRef"
-            type="file"
-            class="sr-only"
-            accept="image/jpeg,image/png,image/webp"
-            @change="handleAvatarSelected"
-          />
-        </div>
-      </section>
+        <button type="button" class="secondary-action" @click="$router.push(publicProfileUrl)">
+          <ExternalLink class="h-4 w-4" />
+          公开主页
+        </button>
+      </header>
 
       <div v-if="error" class="alert alert-error">{{ error }}</div>
       <div v-if="success" class="alert alert-success">
@@ -332,160 +343,243 @@ onMounted(async () => {
         {{ success }}
       </div>
 
-      <section class="profile-grid">
-        <div class="profile-panel edit-panel">
-          <div>
-            <p class="panel-kicker">基础资料</p>
-            <h2>身份展示</h2>
+      <section class="profile-summary">
+        <div class="identity-card">
+          <div class="avatar-stack">
+            <UserAvatar :src="auth.user?.avatarUrl" :name="displayName" size="xl" />
+            <button type="button" class="avatar-action" :disabled="uploading" @click="openAvatarPicker">
+              <Loader2 v-if="uploading" class="h-4 w-4 animate-spin" />
+              <Camera v-else class="h-4 w-4" />
+              更换
+            </button>
+            <input
+              ref="fileInputRef"
+              type="file"
+              class="sr-only"
+              accept="image/jpeg,image/png,image/webp"
+              @change="handleAvatarSelected"
+            />
           </div>
-          <label>
-            <span>昵称</span>
-            <input v-model="nickname" maxlength="40" placeholder="设置一个好记的昵称" />
-          </label>
-          <div class="account-lines">
-            <div>
-              <span>账号</span>
-              <strong>{{ accountLabel }}</strong>
+          <div class="identity-copy">
+            <div class="identity-title-row">
+              <h2>{{ displayName }}</h2>
+              <span class="status-pill" :class="{ muted: auth.user?.status !== 'ACTIVE' }">{{ accountStatusLabel }}</span>
             </div>
-            <div>
-              <span>身份</span>
-              <strong>{{ auth.user?.userType || "--" }}</strong>
-            </div>
-            <div>
-              <span>状态</span>
-              <strong>{{ auth.user?.status || "--" }}</strong>
+            <p>{{ accountLabel }}</p>
+            <div class="identity-meta">
+              <span>{{ joinedLabel }}</span>
+              <span>{{ userTypeLabel }}</span>
+              <span>{{ membershipLabel }}</span>
             </div>
           </div>
-          <button type="button" class="primary-action" :disabled="saving || !nickname.trim()" @click="saveProfile">
-            <Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
-            保存资料
-          </button>
         </div>
 
-        <div class="profile-panel stats-panel">
-          <div>
-            <p class="panel-kicker">轻统计</p>
-            <h2>创作概览</h2>
+        <div class="summary-metrics" :class="{ loading: loadingStats }">
+          <div class="metric-card">
+            <Sparkles class="h-4 w-4" />
+            <span>生成任务</span>
+            <strong>{{ totalTasks ?? "--" }}</strong>
           </div>
-          <div class="stat-list" :class="{ loading: loadingStats }">
-            <div>
-              <Sparkles class="h-4 w-4" />
-              <span>生成任务</span>
-              <strong>{{ totalTasks ?? "--" }}</strong>
-            </div>
-            <div>
-              <Shield class="h-4 w-4" />
-              <span>成功素材</span>
-              <strong>{{ successTasks ?? "--" }}</strong>
-            </div>
-            <div>
-              <CreditPowerIcon :size="14" />
-              <span>可用算力</span>
-              <strong>{{ credit?.balance ?? "--" }}</strong>
-            </div>
+          <div class="metric-card">
+            <Shield class="h-4 w-4" />
+            <span>成功率</span>
+            <strong>{{ successRateLabel }}</strong>
           </div>
-          <div class="community-settings">
-            <div class="settings-title">
-              <ToggleLeft class="h-4 w-4" />
-              <span>社区公开</span>
-            </div>
-            <label class="bio-field">
-              <span>个人简介</span>
-              <textarea v-model="bio" maxlength="280" placeholder="写一句会出现在公开主页上的介绍" />
-            </label>
-            <label class="switch-line">
-              <span>新生成作品默认公开</span>
-              <input v-model="autoPublishAssets" type="checkbox" />
-            </label>
-            <label class="switch-line">
-              <span>默认公开提示词</span>
-              <input v-model="promptPublicByDefault" type="checkbox" />
-            </label>
-            <div class="settings-actions">
-              <button type="button" class="secondary-action" @click="$router.push(publicProfileUrl)">
-                <ExternalLink class="h-4 w-4" />
-                我的公开主页
-              </button>
-              <button type="button" class="primary-action compact" :disabled="savingCommunity" @click="saveCommunitySettings">
-                <Loader2 v-if="savingCommunity" class="h-4 w-4 animate-spin" />
-                保存社区设置
-              </button>
-            </div>
+          <div class="metric-card">
+            <CreditPowerIcon :size="16" />
+            <span>可用算力</span>
+            <strong>{{ credit?.balance ?? "--" }}</strong>
           </div>
-          <p class="profile-note">{{ joinedLabel }} · 成功生成的新作品会按上方设置进入公开主页。</p>
         </div>
       </section>
 
+      <section class="profile-content">
+        <div class="settings-column">
+          <section class="profile-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">基础资料</p>
+                <h2>公开身份</h2>
+              </div>
+              <span class="completion-badge">{{ profileCompletion }}%</span>
+            </div>
+
+            <label class="form-field">
+              <span>昵称</span>
+              <input v-model="nickname" maxlength="40" placeholder="设置一个好记的昵称" />
+            </label>
+
+            <div class="account-lines">
+              <div>
+                <span>账号</span>
+                <strong>{{ accountLabel }}</strong>
+              </div>
+              <div>
+                <span>身份</span>
+                <strong>{{ userTypeLabel }}</strong>
+              </div>
+              <div>
+                <span>会员</span>
+                <strong>{{ membershipLabel }}</strong>
+              </div>
+            </div>
+
+            <button type="button" class="primary-action" :disabled="saving || !nickname.trim()" @click="saveProfile">
+              <Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
+              保存资料
+            </button>
+          </section>
+
+          <section class="profile-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">社区展示</p>
+                <h2>公开偏好</h2>
+              </div>
+              <ToggleLeft class="panel-icon h-5 w-5" />
+            </div>
+
+            <label class="form-field">
+              <span>个人简介</span>
+              <textarea v-model="bio" maxlength="280" placeholder="写一句会出现在公开主页上的介绍"></textarea>
+            </label>
+
+            <div class="switch-list">
+              <label class="switch-line">
+                <span>
+                  <strong>新生成作品默认公开</strong>
+                  <small>生成成功后自动进入公开主页</small>
+                </span>
+                <input v-model="autoPublishAssets" type="checkbox" />
+              </label>
+              <label class="switch-line">
+                <span>
+                  <strong>默认公开提示词</strong>
+                  <small>公开作品中展示创作提示词</small>
+                </span>
+                <input v-model="promptPublicByDefault" type="checkbox" />
+              </label>
+            </div>
+
+            <div class="settings-actions">
+              <button type="button" class="secondary-action" @click="$router.push(publicProfileUrl)">
+                <ExternalLink class="h-4 w-4" />
+                查看公开主页
+              </button>
+              <button type="button" class="primary-action compact" :disabled="savingCommunity" @click="saveCommunitySettings">
+                <Loader2 v-if="savingCommunity" class="h-4 w-4 animate-spin" />
+                保存设置
+              </button>
+            </div>
+          </section>
+        </div>
+
+        <aside class="side-column">
+          <section class="profile-panel compact-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">账户状态</p>
+                <h2>安全概览</h2>
+              </div>
+            </div>
+            <div class="security-list">
+              <div>
+                <span>绑定手机</span>
+                <strong>{{ maskedPhone }}</strong>
+              </div>
+              <div>
+                <span>账号状态</span>
+                <strong>{{ accountStatusLabel }}</strong>
+              </div>
+              <div>
+                <span>冻结算力</span>
+                <strong>{{ credit?.frozen ?? "--" }}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="profile-panel compact-panel gift-overview">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">礼品卡</p>
+                <h2>可兑换资产</h2>
+              </div>
+              <button type="button" class="icon-button" aria-label="兑换礼品卡" @click="openRedeemCodeDialog">
+                <CreditPowerIcon :size="16" />
+              </button>
+            </div>
+            <div class="gift-summary">
+              <strong>{{ unusedGiftCards }}</strong>
+              <span>张未使用礼品卡，共 {{ giftCardCreditTotal.toLocaleString() }} 算力</span>
+            </div>
+          </section>
+        </aside>
+      </section>
+
       <section class="gift-card-zone">
-        <div class="gift-card-header">
+        <div class="section-heading">
           <div>
-            <p class="panel-kicker">Gift cards</p>
-            <h2>我的礼品卡</h2>
-            <p class="gift-card-subtitle">使用、赠送或输入兑换码领取算力</p>
+            <p class="panel-kicker">我的礼品卡</p>
+            <h2>使用与赠送</h2>
           </div>
-          <button type="button" class="gift-card-redeem-entry" @click="openRedeemCodeDialog">
-            <CreditPowerIcon class="h-4 w-4" />
+          <button type="button" class="secondary-action" @click="openRedeemCodeDialog">
+            <CreditPowerIcon :size="16" />
             兑换礼品卡
           </button>
         </div>
 
-        <div v-if="loadingGiftCards" class="gift-card-loading">加载中...</div>
-        <div v-else-if="giftCards.length === 0" class="gift-card-empty">暂无礼品卡</div>
+        <div v-if="loadingGiftCards" class="gift-card-state">
+          <Loader2 class="h-4 w-4 animate-spin" />
+          加载中
+        </div>
+        <div v-else-if="giftCards.length === 0" class="gift-card-state">暂无礼品卡</div>
         <div v-else class="gift-card-list">
-          <div
+          <article
             v-for="card in giftCards"
             :key="card.id"
             class="gift-card-item"
             :style="{ background: giftCardStyle(card.cardTheme).bg, borderColor: giftCardStyle(card.cardTheme).border }"
           >
             <div class="gift-card-info">
-              <div class="gift-card-credits">
-                {{ card.credits.toLocaleString() }} <span>算力</span>
-              </div>
-              <div class="gift-card-code">{{ maskCardCode(card.cardCode) }}</div>
-            </div>
-            <div class="gift-card-footer">
               <span class="gift-card-status" :class="giftCardStatusClass(card.status)">
                 {{ giftCardStatusLabel(card.status) }}
               </span>
-              <div class="gift-card-actions">
-                <template v-if="card.status === 'UNUSED'">
-                  <button
-                    type="button"
-                    class="gift-card-btn redeem-btn"
-                    :disabled="redeemingCardId === card.id"
-                    @click="redeemCard(card.id)"
-                  >
-                    <Loader2 v-if="redeemingCardId === card.id" class="h-4 w-4 animate-spin" />
-                    使用
-                  </button>
-                  <button
-                    type="button"
-                    class="gift-card-btn transfer-btn"
-                    @click="openShareDialog(card)"
-                  >
-                    赠送
-                  </button>
-                </template>
-                <span v-else-if="card.status === 'USED' && card.redeemedAt" class="gift-card-time">
-                  兑换于 {{ card.redeemedAt }}
-                </span>
-                <span v-else-if="card.status === 'USED'" class="gift-card-time">已使用</span>
+              <div class="gift-card-credits">
+                {{ card.credits.toLocaleString() }} <span>算力</span>
               </div>
+              <code class="gift-card-code">{{ maskCardCode(card.cardCode) }}</code>
             </div>
-          </div>
+            <div class="gift-card-actions">
+              <template v-if="card.status === 'UNUSED'">
+                <button
+                  type="button"
+                  class="gift-card-btn redeem-btn"
+                  :disabled="redeemingCardId === card.id"
+                  @click="redeemCard(card.id)"
+                >
+                  <Loader2 v-if="redeemingCardId === card.id" class="h-4 w-4 animate-spin" />
+                  使用
+                </button>
+                <button type="button" class="gift-card-btn" @click="openShareDialog(card)">赠送</button>
+              </template>
+              <span v-else-if="card.status === 'USED' && card.redeemedAt" class="gift-card-time">
+                兑换于 {{ card.redeemedAt }}
+              </span>
+              <span v-else-if="card.status === 'USED'" class="gift-card-time">已使用</span>
+            </div>
+          </article>
         </div>
       </section>
 
       <section class="danger-zone">
         <div>
-          <p class="panel-kicker">Account closure</p>
+          <p class="panel-kicker">账号关闭</p>
           <h2>注销账号</h2>
           <p>注销需要通过绑定手机号 {{ maskedPhone }} 完成身份验证。注销后将清理你的持久化记忆、会话、上下文快照和文件索引，账号余额不会退款。</p>
         </div>
         <button type="button" class="danger-action" @click="cancelDialogOpen = true">
           <Trash2 class="h-4 w-4" />
-          注销
+          注销账号
         </button>
       </section>
 
@@ -1437,6 +1531,711 @@ onMounted(async () => {
   }
 
   .danger-action {
+    width: 100%;
+  }
+}
+
+/* Conservative settings refresh: scoped overrides for the updated template. */
+.profile-page {
+  min-height: 100%;
+  padding: 24px;
+  background: #10110f;
+  color: #f4f5f0;
+}
+
+.profile-header,
+.profile-summary,
+.profile-content,
+.gift-card-zone,
+.danger-zone {
+  width: min(1180px, 100%);
+  margin-inline: auto;
+}
+
+.profile-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.eyebrow,
+.panel-kicker {
+  margin: 0 0 6px;
+  color: #8f968c;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.profile-header h1,
+.profile-panel h2,
+.section-heading h2,
+.danger-zone h2 {
+  margin: 0;
+  color: #fafaf7;
+  letter-spacing: 0;
+}
+
+.profile-header h1 {
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.header-copy {
+  margin: 8px 0 0;
+  color: #9da397;
+  font-size: 14px;
+}
+
+.alert {
+  width: min(1180px, 100%);
+  margin: 0 auto 14px;
+  border-radius: 8px;
+  padding: 11px 12px;
+}
+
+.profile-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.55fr);
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.identity-card,
+.metric-card,
+.profile-panel,
+.gift-card-zone,
+.danger-zone {
+  border: 1px solid rgb(173 164 143 / 0.16);
+  border-radius: 8px;
+  background: #181916;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.identity-card {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 18px;
+}
+
+.avatar-stack {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+}
+
+.avatar-action,
+.primary-action,
+.secondary-action,
+.danger-action,
+.gift-card-btn,
+.icon-button,
+.icon-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 800;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.avatar-action,
+.secondary-action,
+.gift-card-btn,
+.icon-button {
+  border: 1px solid rgb(173 164 143 / 0.22);
+  background: #20231f;
+  color: #e2e5db;
+  padding: 0 12px;
+}
+
+.avatar-action:hover:not(:disabled),
+.secondary-action:hover:not(:disabled),
+.gift-card-btn:hover:not(:disabled),
+.icon-button:hover:not(:disabled) {
+  border-color: rgb(45 212 191 / 0.42);
+  background: #263027;
+  color: #fafaf7;
+  transform: none;
+}
+
+.identity-copy {
+  min-width: 0;
+}
+
+.identity-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.identity-title-row h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #fafaf7;
+  font-size: 24px;
+}
+
+.identity-copy p,
+.identity-meta,
+.security-list span,
+.account-lines span,
+.metric-card span,
+.gift-summary span,
+.danger-zone p {
+  color: #9da397;
+  font-size: 13px;
+}
+
+.identity-copy p {
+  margin: 8px 0 0;
+}
+
+.identity-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.identity-meta span,
+.status-pill,
+.completion-badge,
+.gift-card-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.identity-meta span {
+  border: 1px solid rgb(173 164 143 / 0.14);
+  background: #121411;
+  color: #c4c8bd;
+}
+
+.status-pill {
+  border: 1px solid rgb(52 211 153 / 0.28);
+  background: rgb(6 95 70 / 0.18);
+  color: #a7f3d0;
+}
+
+.status-pill.muted {
+  border-color: rgb(248 113 113 / 0.28);
+  background: rgb(127 29 29 / 0.18);
+  color: #fecaca;
+}
+
+.completion-badge {
+  border: 1px solid rgb(245 158 11 / 0.28);
+  background: rgb(120 53 15 / 0.2);
+  color: #fde68a;
+}
+
+.summary-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.summary-metrics.loading {
+  opacity: 0.65;
+}
+
+.metric-card {
+  display: grid;
+  align-content: space-between;
+  min-height: 116px;
+  padding: 14px;
+}
+
+.metric-card svg {
+  color: #5eead4;
+}
+
+.metric-card strong {
+  color: #fafaf7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 24px;
+}
+
+.profile-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: 14px;
+}
+
+.settings-column,
+.side-column {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.profile-panel {
+  display: grid;
+  gap: 18px;
+  min-height: 0;
+  padding: 18px;
+}
+
+.compact-panel {
+  gap: 14px;
+}
+
+.panel-heading,
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.profile-panel h2,
+.section-heading h2,
+.danger-zone h2 {
+  font-size: 18px;
+}
+
+.panel-icon {
+  color: #5eead4;
+}
+
+.form-field {
+  display: grid;
+  gap: 8px;
+}
+
+.form-field > span {
+  color: #c6cabe;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.form-field input,
+.form-field textarea,
+.transfer-field input,
+.sms-field input,
+.confirm-field input {
+  width: 100%;
+  border: 1px solid rgb(173 164 143 / 0.2);
+  border-radius: 8px;
+  background: #111310;
+  color: #fafaf7;
+  outline: none;
+}
+
+.form-field input,
+.transfer-field input,
+.sms-field input,
+.confirm-field input {
+  height: 42px;
+  padding: 0 12px;
+}
+
+.form-field textarea {
+  min-height: 92px;
+  resize: vertical;
+  padding: 11px 12px;
+  line-height: 1.6;
+}
+
+.form-field input:focus,
+.form-field textarea:focus,
+.transfer-field input:focus,
+.sms-field input:focus,
+.confirm-field input:focus {
+  border-color: rgb(45 212 191 / 0.55);
+  box-shadow: 0 0 0 3px rgb(45 212 191 / 0.12);
+}
+
+.account-lines,
+.security-list {
+  display: grid;
+  border: 1px solid rgb(173 164 143 / 0.12);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.account-lines div,
+.security-list div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  border-bottom: 1px solid rgb(173 164 143 / 0.1);
+  padding: 0 12px;
+}
+
+.account-lines div:last-child,
+.security-list div:last-child {
+  border-bottom: 0;
+}
+
+.account-lines strong,
+.security-list strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #fafaf7;
+  font-size: 13px;
+}
+
+.primary-action {
+  align-self: flex-start;
+  border: 1px solid rgb(45 212 191 / 0.45);
+  background: #0f766e;
+  box-shadow: none;
+  color: #fafaf7;
+  padding: 0 14px;
+}
+
+.primary-action:hover:not(:disabled) {
+  background: #0d9488;
+  transform: none;
+}
+
+.primary-action.compact {
+  align-self: auto;
+}
+
+.primary-action:disabled,
+.secondary-action:disabled,
+.avatar-action:disabled,
+.gift-card-btn:disabled,
+.danger-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.switch-list {
+  display: grid;
+  gap: 10px;
+}
+
+.switch-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid rgb(173 164 143 / 0.12);
+  border-radius: 8px;
+  background: #121411;
+  padding: 12px;
+}
+
+.switch-line span {
+  display: grid;
+  gap: 4px;
+}
+
+.switch-line strong {
+  color: #ecefe7;
+  font-size: 13px;
+}
+
+.switch-line small {
+  color: #8f968c;
+  font-size: 12px;
+}
+
+.switch-line input {
+  width: 42px;
+  height: 24px;
+  accent-color: #14b8a6;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.gift-overview {
+  background: #171d19;
+}
+
+.icon-button {
+  width: 36px;
+  padding: 0;
+}
+
+.gift-summary {
+  display: grid;
+  gap: 6px;
+}
+
+.gift-summary strong {
+  color: #fafaf7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 34px;
+  line-height: 1;
+}
+
+.gift-card-zone,
+.danger-zone {
+  margin-top: 14px;
+  padding: 18px;
+}
+
+.section-heading {
+  margin-bottom: 14px;
+}
+
+.gift-card-state {
+  display: flex;
+  min-height: 92px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px dashed rgb(173 164 143 / 0.2);
+  border-radius: 8px;
+  color: #9da397;
+  font-size: 14px;
+}
+
+.gift-card-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.gift-card-item {
+  display: grid;
+  min-height: 154px;
+  align-content: space-between;
+  gap: 14px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.gift-card-info {
+  display: grid;
+  gap: 9px;
+}
+
+.gift-card-credits {
+  color: #fff;
+  font-size: 26px;
+  font-weight: 900;
+}
+
+.gift-card-credits span {
+  color: rgb(255 255 255 / 0.64);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.gift-card-code,
+.gift-share-code-value {
+  color: rgb(255 255 255 / 0.7);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.gift-card-status {
+  justify-self: start;
+}
+
+.status-unused {
+  border: 1px solid rgb(56 189 248 / 0.3);
+  background: rgb(14 116 144 / 0.28);
+  color: #bae6fd;
+}
+
+.status-used {
+  border: 1px solid rgb(173 164 143 / 0.2);
+  background: rgb(41 37 31 / 0.4);
+  color: #cbd5e1;
+}
+
+.status-expired {
+  border: 1px solid rgb(248 113 113 / 0.3);
+  background: rgb(127 29 29 / 0.28);
+  color: #fecaca;
+}
+
+.gift-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gift-card-time {
+  color: rgb(255 255 255 / 0.58);
+  font-size: 12px;
+}
+
+.redeem-btn {
+  border-color: rgb(45 212 191 / 0.42);
+  background: #0f766e;
+  box-shadow: none;
+  color: #fff;
+}
+
+.danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-color: rgb(248 113 113 / 0.22);
+  background: #1d1717;
+}
+
+.danger-zone p {
+  margin: 8px 0 0;
+  max-width: 760px;
+  line-height: 1.7;
+}
+
+.danger-action {
+  flex-shrink: 0;
+  border: 1px solid rgb(248 113 113 / 0.42);
+  background: rgb(127 29 29 / 0.26);
+  color: #fecaca;
+  padding: 0 14px;
+}
+
+.danger-action:hover:not(:disabled) {
+  background: rgb(185 28 28 / 0.32);
+  transform: none;
+}
+
+.modal-backdrop {
+  background: rgb(8 8 7 / 0.72);
+  backdrop-filter: blur(10px);
+}
+
+.transfer-dialog,
+.cancel-dialog {
+  border-radius: 8px;
+}
+
+.transfer-dialog {
+  border: 1px solid rgb(173 164 143 / 0.18);
+  background: #181916;
+  box-shadow: 0 30px 90px rgb(0 0 0 / 0.38);
+  color: #fafaf7;
+}
+
+.transfer-dialog h2,
+.cancel-dialog h2 {
+  padding-right: 40px;
+}
+
+.transfer-desc {
+  color: #9da397;
+}
+
+.gift-share-code-box {
+  border-color: rgb(45 212 191 / 0.36);
+  border-radius: 8px;
+  background: #111310;
+}
+
+.gift-share-code-label {
+  color: #9da397;
+}
+
+.icon-action,
+.icon-action.dark-icon {
+  top: 14px;
+  right: 14px;
+  width: 34px;
+  border: 1px solid rgb(173 164 143 / 0.22);
+  border-radius: 8px;
+  background: transparent;
+  color: currentColor;
+  padding: 0;
+}
+
+.icon-action:hover,
+.icon-action.dark-icon:hover {
+  background: rgb(173 164 143 / 0.12);
+}
+
+.cancel-dialog {
+  border: 1px solid rgb(15 23 42 / 0.08);
+  box-shadow: 0 30px 90px rgb(0 0 0 / 0.28);
+}
+
+.cancel-warning-card,
+.cancel-checks div {
+  border-radius: 8px;
+}
+
+.sms-field input,
+.confirm-field input {
+  border-radius: 8px;
+}
+
+.danger-action.confirm {
+  min-width: 96px;
+  border-color: #f87171;
+  background: #dc2626;
+}
+
+@media (max-width: 980px) {
+  .profile-summary,
+  .profile-content {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .profile-page {
+    padding: 16px;
+  }
+
+  .profile-header,
+  .identity-card,
+  .danger-zone,
+  .sms-field div,
+  .transfer-actions,
+  .cancel-dialog-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .identity-card {
+    align-items: flex-start;
+  }
+
+  .avatar-stack {
+    justify-items: start;
+  }
+
+  .summary-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-actions,
+  .gift-card-actions {
+    flex-direction: column;
+  }
+
+  .primary-action,
+  .secondary-action,
+  .danger-action,
+  .gift-card-btn {
     width: 100%;
   }
 }
