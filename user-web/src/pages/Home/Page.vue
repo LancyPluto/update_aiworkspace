@@ -15,6 +15,7 @@ import {
   WandSparkles,
   X,
 } from "lucide-vue-next"
+import ToolComparisonCover from "@/components/ToolComparisonCover.vue"
 import { searchCommunityPosts } from "@/api/communityApi"
 import { fetchTools } from "@/api/toolApi"
 import { fetchTasks } from "@/api/taskApi"
@@ -481,42 +482,16 @@ watch(
         <div v-else class="tool-grid">
           <article v-for="tool in featuredTools" :key="tool.toolCode" class="tool-card" @click="quickLaunch(tool)">
             <div class="tool-cover">
-              <template v-if="usesComparison(tool)">
-                <video
-                  v-if="isVideoPreviewUrl(tool.frontendStyle?.comparisonOriginalUrl)"
-                  :src="normalizeMediaUrl(tool.frontendStyle?.comparisonOriginalUrl)"
-                  class="tool-cover-comparison-media"
-                  muted loop autoplay playsinline preload="metadata"
-                />
-                <img
-                  v-else
-                  :src="normalizeMediaUrl(tool.frontendStyle?.comparisonOriginalUrl)"
-                  :alt="tool.toolName"
-                  class="tool-cover-comparison-media"
-                  draggable="false"
-                />
-                <video
-                  v-if="isVideoPreviewUrl(tool.frontendStyle?.comparisonEffectUrl)"
-                  :src="normalizeMediaUrl(tool.frontendStyle?.comparisonEffectUrl)"
-                  class="tool-cover-comparison-media tool-cover-comparison-effect"
-                  muted loop autoplay playsinline preload="metadata"
-                />
-                <img
-                  v-else
-                  :src="normalizeMediaUrl(tool.frontendStyle?.comparisonEffectUrl)"
-                  :alt="tool.toolName"
-                  class="tool-cover-comparison-media tool-cover-comparison-effect"
-                  draggable="false"
-                />
-                <div class="tool-cover-comparison-line" />
-                <div class="tool-cover-comparison-handle">
-                  <svg width="24" height="24" viewBox="0 0 28 28" fill="none">
-                    <circle cx="14" cy="14" r="13" fill="white" stroke="rgba(0,0,0,0.3)" stroke-width="1.5" />
-                    <path d="M10 10L6 14L10 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                    <path d="M18 10L22 14L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                  </svg>
-                </div>
-              </template>
+              <ToolComparisonCover
+                v-if="usesComparison(tool)"
+                :before-src="tool.frontendStyle?.comparisonOriginalUrl || ''"
+                :after-src="tool.frontendStyle?.comparisonEffectUrl || ''"
+                :alt="tool.toolName"
+                image-class="tool-cover-comparison-media"
+                effect-class="tool-cover-comparison-effect"
+                line-class="tool-cover-comparison-line"
+                handle-class="tool-cover-comparison-handle"
+              />
               <template v-else>
                 <video
                   v-if="isVideoPreviewUrl(toolCover(tool))"
@@ -1121,18 +1096,20 @@ watch(
 }
 
 @keyframes home-comparison-wipe {
-  0% { clip-path: inset(0 0 0 10%); }
-  100% { clip-path: inset(0 0 0 90%); }
+  0% { clip-path: inset(0 100% 0 0); }
+  82%,
+  100% { clip-path: inset(0 0 0 0); }
 }
 
 @keyframes home-comparison-pos {
-  0% { left: 10%; }
-  100% { left: 90%; }
+  0% { left: 0%; }
+  82%,
+  100% { left: 100%; }
 }
 
 .tool-cover-comparison-effect {
   z-index: 1;
-  animation: home-comparison-wipe 3s ease-in-out infinite alternate;
+  animation: home-comparison-wipe 3s ease-in-out infinite;
 }
 
 .tool-cover-comparison-line {
@@ -1143,7 +1120,7 @@ watch(
   background: white;
   box-shadow: 0 0 8px rgb(0 0 0 / 0.5), 0 0 20px rgb(255 255 255 / 0.3);
   pointer-events: none;
-  animation: home-comparison-pos 3s ease-in-out infinite alternate;
+  animation: home-comparison-pos 3s ease-in-out infinite;
 }
 
 .tool-cover-comparison-handle {
@@ -1162,7 +1139,7 @@ watch(
   transform: translate(-50%, -50%);
   pointer-events: none;
   backdrop-filter: blur(12px);
-  animation: home-comparison-pos 3s ease-in-out infinite alternate;
+  animation: home-comparison-pos 3s ease-in-out infinite;
 }
 
 .tool-card:hover .tool-cover-comparison-effect,

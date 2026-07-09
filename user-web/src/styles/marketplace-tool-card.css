@@ -231,17 +231,19 @@ button.marketplace-tool-card {
 }
 
 @keyframes comparison-wipe {
-  0% { clip-path: inset(0 0 0 10%); }
-  100% { clip-path: inset(0 0 0 90%); }
+  0% { clip-path: inset(0 100% 0 0); }
+  82%,
+  100% { clip-path: inset(0 0 0 0); }
 }
 
 @keyframes comparison-pos {
-  0% { left: 10%; }
-  100% { left: 90%; }
+  0% { left: 0%; }
+  82%,
+  100% { left: 100%; }
 }
 
 .marketplace-tool-image--effect {
-  animation: comparison-wipe 3s ease-in-out infinite alternate;
+  animation: comparison-wipe 3s ease-in-out infinite;
 }
 
 .marketplace-comparison-line {
@@ -252,7 +254,7 @@ button.marketplace-tool-card {
   background: white;
   box-shadow: 0 0 8px rgb(0 0 0 / 0.5), 0 0 20px rgb(255 255 255 / 0.3);
   pointer-events: none;
-  animation: comparison-pos 3s ease-in-out infinite alternate;
+  animation: comparison-pos 3s ease-in-out infinite;
 }
 
 .marketplace-comparison-handle {
@@ -272,7 +274,7 @@ button.marketplace-tool-card {
   transform: translate(-50%, -50%);
   pointer-events: none;
   backdrop-filter: blur(12px);
-  animation: comparison-pos 3s ease-in-out infinite alternate;
+  animation: comparison-pos 3s ease-in-out infinite;
 }
 
 .marketplace-tool-card:hover .marketplace-tool-image--effect,

@@ -33,6 +33,7 @@ import {
 import AssetPreviewModal from "@/components/AssetPreviewModal.vue"
 import GenerationLoadingPreview from "@/components/GenerationLoadingPreview.vue"
 import ImageStackPreview from "@/components/ImageStackPreview.vue"
+import ToolComparisonCover from "@/components/ToolComparisonCover.vue"
 import CapabilityControls from "@/pages/Chat/CapabilityControls.vue"
 import type { ComposerMediaSlot, PrimaryReferenceMaterialInfo } from "@/pages/Chat/CapabilityControls.vue"
 import DashboardModalityDock from "./DashboardModalityDock.vue"
@@ -1410,6 +1411,13 @@ function onToolCoverError(tool: ToolSummary) {
   }
 }
 
+function usesComparisonToolCover(tool: ToolSummary): boolean {
+  return tool.frontendStyle?.mediaDisplayMode === "comparison"
+    && Boolean(tool.frontendStyle?.comparisonOriginalUrl)
+    && Boolean(tool.frontendStyle?.comparisonEffectUrl)
+    && !brokenToolCoverIds.value.has(tool.id)
+}
+
 function audioTaskTitle(track?: DashboardAudioTrack | null): string {
   if (!track) return "未选择音频"
   return track.title || taskPrompt(track.task) || track.blockTitle || track.task.toolName || `版本 ${track.version}`
@@ -1915,8 +1923,14 @@ onUnmounted(() => {
                   @click="selectTool(tool)"
                 >
                   <div class="marketplace-tool-media">
+                    <ToolComparisonCover
+                      v-if="usesComparisonToolCover(tool)"
+                      :before-src="tool.frontendStyle?.comparisonOriginalUrl || ''"
+                      :after-src="tool.frontendStyle?.comparisonEffectUrl || ''"
+                      :alt="tool.toolName"
+                    />
                     <video
-                      v-if="isVideoPreviewUrl(toolCardCover(tool))"
+                      v-else-if="isVideoPreviewUrl(toolCardCover(tool))"
                       :src="normalizeMediaUrl(toolCardCover(tool))"
                       class="marketplace-tool-image"
                       muted
@@ -2449,8 +2463,10 @@ onUnmounted(() => {
                     <section class="mt-5">
                       <GenerationLoadingPreview
                         v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')"
+                        class="dashboard-feed-loading-preview"
                         :task="item.task"
                         :aspect-ratio="inferTaskAspectRatio(item.task)"
+                        :max-preview-height="420"
                         :caption="taskProgressView(item.task).caption || taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? '任务生成失败，可以复用本次参数重试。' : '任务正在生成，完成后会追加到信息流底部。')"
                         :percent-label="taskProgressView(item.task).percentLabel"
                         :percent="taskProgressView(item.task).percent"
@@ -2618,6 +2634,7 @@ onUnmounted(() => {
                           <GenerationLoadingPreview
                             :task="item.task"
                             :aspect-ratio="inferTaskAspectRatio(item.task)"
+                            :max-preview-height="360"
                             :caption="taskProgressView(item.task).caption || taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? '任务生成失败，可以复用本次参数重试。' : '任务正在生成，完成后结果会自动出现在这里。')"
                             :percent-label="taskProgressView(item.task).percentLabel"
                             :percent="taskProgressView(item.task).percent"
@@ -3136,8 +3153,14 @@ onUnmounted(() => {
                           @click="selectTool(tool)"
                         >
                           <div class="marketplace-tool-media">
+                            <ToolComparisonCover
+                              v-if="usesComparisonToolCover(tool)"
+                              :before-src="tool.frontendStyle?.comparisonOriginalUrl || ''"
+                              :after-src="tool.frontendStyle?.comparisonEffectUrl || ''"
+                              :alt="tool.toolName"
+                            />
                             <video
-                              v-if="isVideoPreviewUrl(tool.coverUrl)"
+                              v-else-if="isVideoPreviewUrl(tool.coverUrl)"
                               :src="normalizeMediaUrl(tool.coverUrl)"
                               class="marketplace-tool-image"
                               muted
@@ -3608,6 +3631,34 @@ onUnmounted(() => {
 .dashboard-feed-gallery::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgb(255 255 255 / 0.16);
+}
+
+.dashboard-feed-loading-preview.generation-preview-group {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  align-items: flex-start;
+  gap: 12px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.16) transparent;
+}
+
+.dashboard-feed-loading-preview.generation-preview-group::-webkit-scrollbar {
+  height: 6px;
+}
+
+.dashboard-feed-loading-preview.generation-preview-group::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.16);
+}
+
+.dashboard-feed-loading-preview.generation-loading-preview,
+.dashboard-feed-loading-preview.generation-preview-group :deep(.generation-loading-preview) {
+  max-height: 420px;
+  flex: 0 0 auto;
 }
 
 .dashboard-feed-image {
