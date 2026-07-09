@@ -50,33 +50,42 @@ const steps = [
           <Gift class="h-4 w-4" aria-hidden="true" />
           推荐有礼
         </p>
-        <h1>邀请好友一起创作，好友充值你得算力奖励</h1>
-        <p class="referral-subtitle">把你的专属链接发给好友。好友通过链接注册并完成算力充值后，系统会按充值到账算力的 10% 自动发放邀请奖励。</p>
+        <h1>邀请好友，获得算力奖励</h1>
+        <p class="referral-subtitle">好友通过你的链接注册并完成普通算力充值后，系统会按充值到账算力的 10% 自动发放邀请奖励。</p>
       </div>
 
       <div class="referral-link-card">
-        <span class="referral-link-card__label">专属邀请链接</span>
+        <div class="referral-link-card__header">
+          <span class="referral-link-card__label">专属邀请链接</span>
+          <code>{{ inviteCode }}</code>
+        </div>
         <div class="referral-link-card__url">
           <Link2 class="h-4 w-4" aria-hidden="true" />
           <span>{{ inviteUrl }}</span>
         </div>
-        <button type="button" class="referral-primary-button" @click="copyInviteLink">
+        <button type="button" class="referral-primary-button" :class="{ copied }" @click="copyInviteLink">
           <Copy class="h-4 w-4" aria-hidden="true" />
           {{ copied ? "已复制" : "复制链接" }}
         </button>
       </div>
     </section>
 
-    <section class="referral-rewards" aria-label="奖励权益">
-      <article v-for="item in rewardCards" :key="item.title" class="referral-reward-card">
-        <div class="referral-reward-card__icon">
-          <component :is="item.icon" class="h-5 w-5" aria-hidden="true" />
-        </div>
-        <div>
-          <p>{{ item.title }}</p>
-          <strong>{{ item.value }} <span>{{ item.unit }}</span></strong>
-        </div>
-      </article>
+    <section class="referral-section" aria-label="奖励权益">
+      <div class="referral-section__heading">
+        <h2>奖励权益</h2>
+        <p>围绕注册、充值和到账三个节点自动处理。</p>
+      </div>
+      <div class="referral-rewards">
+        <article v-for="item in rewardCards" :key="item.title" class="referral-reward-card">
+          <div class="referral-reward-card__icon">
+            <component :is="item.icon" class="h-5 w-5" aria-hidden="true" />
+          </div>
+          <div>
+            <p>{{ item.title }}</p>
+            <strong>{{ item.value }} <span>{{ item.unit }}</span></strong>
+          </div>
+        </article>
+      </div>
     </section>
 
     <section class="referral-panel">
@@ -101,69 +110,92 @@ const steps = [
 <style scoped>
 .referral-page {
   min-height: 100%;
-  padding: 28px;
-  color: #fff;
+  padding: 24px;
+  background: #10110f;
+  color: #f4f5f0;
 }
 
 .referral-hero {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
-  gap: 24px;
-  align-items: stretch;
-  border: 1px solid rgb(255 255 255 / 0.08);
-  border-radius: 14px;
-  background:
-    linear-gradient(135deg, rgb(8 13 24 / 0.98), rgb(14 24 36 / 0.96)),
-    radial-gradient(circle at 18% 0%, rgb(34 211 238 / 0.16), transparent 38%);
-  padding: 30px;
+  gap: 18px;
+  align-items: end;
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  border: 1px solid rgb(173 164 143 / 0.16);
+  border-radius: 8px;
+  background: #181916;
+  padding: 22px;
 }
 
 .referral-eyebrow {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  margin: 0 0 14px;
-  color: rgb(103 232 249);
+  margin: 0 0 8px;
+  color: #5eead4;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 800;
 }
 
 .referral-hero h1 {
-  max-width: 760px;
   margin: 0;
-  font-size: clamp(30px, 5vw, 56px);
-  line-height: 1.04;
+  max-width: 720px;
+  color: #fafaf7;
+  font-size: 30px;
+  line-height: 1.18;
   letter-spacing: 0;
 }
 
 .referral-subtitle {
   max-width: 620px;
-  margin: 16px 0 0;
-  color: rgb(203 213 225 / 0.78);
+  margin: 10px 0 0;
+  color: #9da397;
   font-size: 15px;
-  line-height: 1.8;
+  line-height: 1.75;
 }
 
 .referral-link-card,
 .referral-share-card,
 .referral-reward-card,
-.referral-panel {
-  border: 1px solid rgb(255 255 255 / 0.08);
-  border-radius: 12px;
-  background: rgb(255 255 255 / 0.045);
+.referral-panel,
+.referral-section {
+  border: 1px solid rgb(173 164 143 / 0.16);
+  border-radius: 8px;
+  background: #181916;
 }
 
 .referral-link-card {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 14px;
-  padding: 20px;
+  gap: 12px;
+  padding: 16px;
+  background: #171d19;
+}
+
+.referral-link-card__header,
+.referral-section__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .referral-link-card__label {
-  color: rgb(148 163 184);
+  color: #9da397;
   font-size: 12px;
+  font-weight: 800;
+}
+
+.referral-link-card code {
+  border: 1px solid rgb(45 212 191 / 0.2);
+  border-radius: 999px;
+  background: rgb(6 95 70 / 0.18);
+  color: #a7f3d0;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .referral-link-card__url {
@@ -172,9 +204,10 @@ const steps = [
   align-items: center;
   gap: 8px;
   border-radius: 8px;
-  background: rgb(0 0 0 / 0.26);
+  border: 1px solid rgb(173 164 143 / 0.12);
+  background: #111310;
   padding: 12px;
-  color: rgb(226 232 240);
+  color: #ecefe7;
   font-size: 13px;
 }
 
@@ -190,26 +223,60 @@ const steps = [
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 0;
+  min-height: 42px;
+  border: 1px solid rgb(45 212 191 / 0.45);
   border-radius: 8px;
-  background: #67e8f9;
-  padding: 12px 14px;
-  color: #06212a;
+  background: #0f766e;
+  color: #fafaf7;
   font-weight: 800;
+}
+
+.referral-primary-button:hover {
+  background: #0d9488;
+}
+
+.referral-primary-button.copied {
+  border-color: rgb(52 211 153 / 0.42);
+  background: rgb(6 95 70 / 0.38);
+  color: #bbf7d0;
+}
+
+.referral-section {
+  width: min(1180px, 100%);
+  margin: 14px auto 0;
+  padding: 18px;
+}
+
+.referral-section__heading {
+  margin-bottom: 14px;
+}
+
+.referral-section__heading h2,
+.referral-panel h2,
+.referral-share-card h2 {
+  margin: 0;
+  color: #fafaf7;
+  font-size: 18px;
+}
+
+.referral-section__heading p {
+  margin: 0;
+  color: #9da397;
+  font-size: 13px;
 }
 
 .referral-rewards {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  margin-top: 18px;
+  gap: 12px;
 }
 
 .referral-reward-card {
   display: flex;
-  gap: 14px;
   align-items: center;
-  padding: 18px;
+  gap: 14px;
+  background: #121411;
+  padding: 16px;
 }
 
 .referral-reward-card__icon {
@@ -217,38 +284,34 @@ const steps = [
   width: 42px;
   height: 42px;
   place-items: center;
-  border-radius: 10px;
-  background: rgb(103 232 249 / 0.12);
-  color: rgb(103 232 249);
+  border-radius: 8px;
+  background: rgb(45 212 191 / 0.12);
+  color: #5eead4;
 }
 
 .referral-reward-card p {
   margin: 0 0 4px;
-  color: rgb(148 163 184);
+  color: #9da397;
   font-size: 12px;
 }
 
 .referral-reward-card strong {
+  color: #fafaf7;
   font-size: 26px;
 }
 
 .referral-reward-card span {
-  color: rgb(203 213 225);
+  color: #c4c8bd;
   font-size: 13px;
 }
 
 .referral-panel {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
-  gap: 24px;
-  margin-top: 18px;
-  padding: 22px;
-}
-
-.referral-panel h2,
-.referral-share-card h2 {
-  margin: 0 0 14px;
-  font-size: 18px;
+  gap: 18px;
+  width: min(1180px, 100%);
+  margin: 14px auto 0;
+  padding: 18px;
 }
 
 .referral-steps {
@@ -263,8 +326,9 @@ const steps = [
   display: flex;
   align-items: center;
   gap: 12px;
-  border-radius: 10px;
-  background: rgb(0 0 0 / 0.2);
+  border: 1px solid rgb(173 164 143 / 0.12);
+  border-radius: 8px;
+  background: #121411;
   padding: 12px;
 }
 
@@ -274,8 +338,8 @@ const steps = [
   height: 26px;
   place-items: center;
   border-radius: 999px;
-  background: rgb(103 232 249 / 0.14);
-  color: rgb(103 232 249);
+  background: rgb(45 212 191 / 0.14);
+  color: #5eead4;
   font-size: 12px;
   font-weight: 800;
 }
@@ -283,24 +347,39 @@ const steps = [
 .referral-steps p,
 .referral-share-card p {
   margin: 0;
-  color: rgb(203 213 225 / 0.78);
+  color: #9da397;
   font-size: 13px;
   line-height: 1.7;
 }
 
 .referral-share-card {
   padding: 18px;
+  background: #171d19;
+}
+
+.referral-share-card svg {
+  color: #5eead4;
 }
 
 @media (max-width: 860px) {
   .referral-page {
-    padding: 18px;
+    padding: 16px;
   }
 
   .referral-hero,
   .referral-panel,
   .referral-rewards {
     grid-template-columns: 1fr;
+  }
+
+  .referral-link-card__header,
+  .referral-section__heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .referral-primary-button {
+    width: 100%;
   }
 }
 </style>
