@@ -19,12 +19,23 @@ class FakeBackend:
         self.processing = []
         self.successes = []
         self.failures = []
+        self.claims = []
+        self.renews = []
+        self.claim_response = {"claimed": True, "status": "PROCESSING", "reason": "claimed"}
+
+    def claim_task(self, task_id, *, worker_id, claim_token, trace_id=None):
+        self.claims.append((task_id, worker_id, claim_token, trace_id))
+        return dict(self.claim_response, taskId=task_id, claimToken=claim_token)
+
+    def renew_lease(self, task_id, *, worker_id, claim_token, trace_id=None):
+        self.renews.append((task_id, worker_id, claim_token, trace_id))
+        return {"claimed": True, "taskId": task_id, "claimToken": claim_token}
 
     def get_execution_context(self, task_id, trace_id=None):
         return self.context
 
-    def mark_processing(self, task_id, *, progress=None, progress_message=None, trace_id=None):
-        self.processing.append((task_id, progress, progress_message, trace_id))
+    def mark_processing(self, task_id, *, progress=None, progress_message=None, trace_id=None, claim_token=None):
+        self.processing.append((task_id, progress, progress_message, trace_id, claim_token))
         return {}
 
     def mark_success(self, task_id, payload, trace_id=None):
@@ -136,6 +147,64 @@ class TextToSpeechHandlerTest(unittest.TestCase):
         self.assertEqual(result["status"], "ROUTED")
         self.assertEqual(len(tts_handler.messages), 1)
         self.assertEqual(tts_handler.messages[0]["__executionContext"], context)
+        self.assertEqual(len(backend.claims), 1)
+        self.assertTrue(tts_handler.messages[0]["__claimToken"])
+
+    def test_router_skips_when_task_claim_is_denied(self):
+        context = {
+            "taskId": 103,
+            "status": "QUEUED",
+            "toolType": "TEXT_TO_SPEECH",
+        }
+        backend = FakeBackend(context)
+        backend.claim_response = {"claimed": False, "status": "PROCESSING", "reason": "already_claimed"}
+        tts_handler = RecordingHandler()
+        router = TaskHandlerRouter(
+            text_handler=RecordingHandler(),
+            digital_human_handler=RecordingHandler(),
+            image_generation_handler=RecordingHandler(),
+            text_to_speech_handler=tts_handler,
+            video_generation_handler=RecordingHandler(),
+            backend_client=backend,
+        )
+
+        result = router.handle({"taskId": 103, "traceId": "trace-claim-denied"})
+
+        self.assertEqual(result["status"], "SKIPPED")
+        self.assertEqual(result["reason"], "already_claimed")
+        self.assertEqual(tts_handler.messages, [])
+
+    def test_backend_client_context_adds_claim_token_to_callbacks(self):
+        from client.backend_client import BackendClient, backend_claim_context
+
+        class FakeResponse:
+            status_code = 200
+            text = "{}"
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"code": "SUCCESS", "data": {}}
+
+        class CapturingBackendClient(BackendClient):
+            def __init__(self):
+                self.requests = []
+                self.timeout = (3, 15)
+
+            def _request(self, method, path, *, json_body=None, timeout=None, trace_id=None):
+                self.requests.append({"method": method, "path": path, "json": json_body, "traceId": trace_id})
+                return FakeResponse()
+
+        backend = CapturingBackendClient()
+
+        with backend_claim_context("claim-token-104"):
+            backend.mark_success(104, {"resourceType": "AUDIO", "contentText": "{}"}, trace_id="trace-104")
+            backend.mark_failed(104, {"errorCode": "MODEL_TIMEOUT", "errorMessage": "timeout"}, trace_id="trace-104")
+
+        self.assertEqual(backend.requests[0]["json"]["claimToken"], "claim-token-104")
+        self.assertEqual(backend.requests[1]["json"]["claimToken"], "claim-token-104")
+        self.assertEqual(backend.requests[1]["json"]["failureStage"], "PROVIDER_POLLING")
 
 
 if __name__ == "__main__":

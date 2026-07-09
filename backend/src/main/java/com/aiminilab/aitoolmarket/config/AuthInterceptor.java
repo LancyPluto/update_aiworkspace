@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.config;
 
+import com.aiminilab.aitoolmarket.auth.metrics.AuthMetrics;
 import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.auth.security.AuthCookieSupport;
 import com.aiminilab.aitoolmarket.auth.security.AuthUser;
@@ -45,15 +46,18 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
     private final ObjectMapper objectMapper;
     private final InternalRequestSignatureVerifier internalRequestSignatureVerifier;
     private final UserMapper userMapper;
+    private final AuthMetrics authMetrics;
 
     public AuthInterceptor(JwtTokenProvider jwtTokenProvider,
                            ObjectMapper objectMapper,
                            InternalRequestSignatureVerifier internalRequestSignatureVerifier,
-                           UserMapper userMapper) {
+                           UserMapper userMapper,
+                           AuthMetrics authMetrics) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.objectMapper = objectMapper;
         this.internalRequestSignatureVerifier = internalRequestSignatureVerifier;
         this.userMapper = userMapper;
+        this.authMetrics = authMetrics;
     }
 
     @Override
@@ -71,6 +75,7 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
         CachedBodyRequest wrappedRequest = new CachedBodyRequest(request, body);
         if (!verifyInternalSignature(wrappedRequest, body)) {
             try {
+                authMetrics.recordUnauthorizedRequest(request.getRequestURI(), "internal_signature_invalid");
                 writeError(response, HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHORIZED, "内部接口签名无效");
             } catch (Exception exception) {
                 throw new ServletException(exception);
@@ -97,23 +102,27 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
             if (Boolean.TRUE.equals(request.getAttribute(INTERNAL_SIGNATURE_VERIFIED_ATTRIBUTE))) {
                 return true;
             }
+            authMetrics.recordUnauthorizedRequest(path, "internal_signature_invalid");
             writeError(response, HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHORIZED, "内部接口签名无效");
             return false;
         }
 
         Optional<AuthUser> authUser = extractAuthUser(request);
         if (authUser.isEmpty()) {
+            authMetrics.recordUnauthorizedRequest(path, "missing_or_invalid_token");
             writeError(response, HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHORIZED, "未登录或 Token 失效");
             return false;
         }
 
         if (!isActiveUser(authUser.get())) {
+            authMetrics.recordUnauthorizedRequest(path, "inactive_user");
             writeError(response, HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHORIZED, "账号已注销或被禁用");
             return false;
         }
 
         if (requiresAdmin(path)
                 && !UserType.ADMIN.name().equals(authUser.get().userType())) {
+            authMetrics.recordUnauthorizedRequest(path, "admin_forbidden");
             writeError(response, HttpStatus.FORBIDDEN, ErrorCode.ADMIN_FORBIDDEN, "管理员无权限");
             return false;
         }
@@ -198,12 +207,16 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
     }
 
     private Optional<AuthUser> extractAuthUser(HttpServletRequest request) {
+        Optional<AuthUser> cookieUser = extractSessionCookieToken(request)
+                .flatMap(jwtTokenProvider::parseToken);
+        if (cookieUser.isPresent()) {
+            return cookieUser;
+        }
         Optional<String> bearerToken = extractBearerToken(request);
         if (bearerToken.isPresent()) {
             return jwtTokenProvider.parseToken(bearerToken.get());
         }
-        return extractSessionCookieToken(request)
-                .flatMap(jwtTokenProvider::parseToken);
+        return Optional.empty();
     }
 
     private Optional<String> extractBearerToken(HttpServletRequest request) {

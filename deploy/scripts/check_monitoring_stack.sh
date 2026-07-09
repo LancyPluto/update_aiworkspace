@@ -11,5 +11,5 @@ curl -fsS http://127.0.0.1:${PROMETHEUS_PORT:-9091}/-/ready >/dev/null
 echo "  prometheus: ok"
 
 echo "Checking monitoring containers ..."
-docker ps --format '{{.Names}}' | grep -E 'ai-supermarket-(grafana|prometheus|node-exporter|cadvisor|blackbox-exporter)' >/dev/null
+docker ps --format '{{.Names}}' | grep -E 'ai-supermarket-(grafana|prometheus|loki|promtail|node-exporter|cadvisor|blackbox-exporter)' >/dev/null
 echo "  containers: present"

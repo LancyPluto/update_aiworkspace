@@ -10,7 +10,7 @@ public record ApiResponse<T>(
         String traceId
 ) {
     public static <T> ApiResponse<T> success(T data) {
-        return new ApiResponse<>(ErrorCode.SUCCESS.name(), "ok", data, null);
+        return new ApiResponse<>(ErrorCode.SUCCESS.name(), "ok", data, MDC.get("traceId"));
     }
 
     public static <T> ApiResponse<T> fail(ErrorCode errorCode, String message) {

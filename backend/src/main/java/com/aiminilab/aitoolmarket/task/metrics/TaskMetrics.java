@@ -44,6 +44,21 @@ public class TaskMetrics {
         ).increment();
     }
 
+    public void recordLeaseClaim(String result, String reason) {
+        meterRegistry.counter(
+                "ai_task_lease_claim_total",
+                "result", normalize(result, "unknown"),
+                "reason", normalize(reason, "unknown")
+        ).increment();
+    }
+
+    public void recordLeaseRenew(String result) {
+        meterRegistry.counter(
+                "ai_task_lease_renew_total",
+                "result", normalize(result, "unknown")
+        ).increment();
+    }
+
     private String normalize(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
     }

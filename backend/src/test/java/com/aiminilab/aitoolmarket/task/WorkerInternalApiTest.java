@@ -133,6 +133,165 @@ class WorkerInternalApiTest {
     }
 
     @Test
+    void workerClaimLeasePreventsDuplicateExecutionAndRequiresMatchingToken() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long toolId = createTool(adminToken, "worker_claim_lease_tool", 3);
+        publishTool(adminToken, toolId);
+        String userToken = login("/api/v1/auth/login", "user1");
+        Long taskId = createTask(userToken, "worker_claim_lease_tool");
+
+        String claimBody = """
+                                {
+                                  "workerId": "worker-a",
+                                  "claimToken": "claim-token-a"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/claim", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/claim".formatted(taskId), claimBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(claimBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.claimed").value(true))
+                .andExpect(jsonPath("$.data.status").value("PROCESSING"))
+                .andExpect(jsonPath("$.data.claimToken").value("claim-token-a"));
+
+        String duplicateClaimBody = """
+                                {
+                                  "workerId": "worker-b",
+                                  "claimToken": "claim-token-b"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/claim", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/claim".formatted(taskId), duplicateClaimBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(duplicateClaimBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.claimed").value(false))
+                .andExpect(jsonPath("$.data.reason").value("already_claimed"));
+
+        String wrongProcessingBody = """
+                                {
+                                  "progress": 35,
+                                  "progressMessage": "wrong token",
+                                  "claimToken": "claim-token-b"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/processing", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/processing".formatted(taskId), wrongProcessingBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(wrongProcessingBody))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("TASK_STATUS_INVALID"));
+
+        String renewBody = """
+                                {
+                                  "workerId": "worker-a",
+                                  "claimToken": "claim-token-a"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/lease/renew", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/lease/renew".formatted(taskId), renewBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(renewBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.claimed").value(true))
+                .andExpect(jsonPath("$.data.reason").value("renewed"));
+
+        String successBody = """
+                                {
+                                  "resourceType": "MARKDOWN",
+                                  "contentText": "# Claimed result",
+                                  "claimToken": "claim-token-a"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/success", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/success".formatted(taskId), successBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(successBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("SUCCESS"));
+
+        Integer activeLeaseCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM ai_tasks WHERE id = ? AND claim_token IS NOT NULL",
+                Integer.class,
+                taskId
+        );
+        assertThat(activeLeaseCount).isZero();
+    }
+
+    @Test
+    void staleClaimTokenCallbacksAreRejectedWithoutBillingOrCreditSideEffects() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long toolId = createTool(adminToken, "worker_stale_claim_tool", 4);
+        publishTool(adminToken, toolId);
+        String userToken = login("/api/v1/auth/login", "user1");
+        Long taskId = createTask(userToken, "worker_stale_claim_tool");
+
+        String claimBody = """
+                                {
+                                  "workerId": "worker-a",
+                                  "claimToken": "claim-token-a"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/claim", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/claim".formatted(taskId), claimBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(claimBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.claimed").value(true));
+
+        jdbcTemplate.update("""
+                        UPDATE ai_tasks
+                        SET claimed_by = 'worker-b',
+                            claim_token = 'claim-token-b',
+                            lease_until = DATEADD('MINUTE', 30, CURRENT_TIMESTAMP)
+                        WHERE id = ?
+                        """,
+                taskId);
+
+        String staleSuccessBody = """
+                                {
+                                  "resourceType": "MARKDOWN",
+                                  "contentText": "# stale result",
+                                  "claimToken": "claim-token-a"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/success", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/success".formatted(taskId), staleSuccessBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(staleSuccessBody))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("TASK_STATUS_INVALID"));
+
+        String staleFailedBody = """
+                                {
+                                  "errorCode": "MODEL_CALL_FAILED",
+                                  "errorMessage": "stale failure",
+                                  "providerCharged": true,
+                                  "providerCostAmount": 0.040000,
+                                  "claimToken": "claim-token-a"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/failed", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/failed".formatted(taskId), staleFailedBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(staleFailedBody))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("TASK_STATUS_INVALID"));
+
+        assertThat(countCreditLogs(taskId, "DEDUCT")).isZero();
+        assertThat(countCreditLogs(taskId, "RELEASE")).isZero();
+        assertThat(countBillingUsageLogs(taskId)).isZero();
+        assertThat(countResultResources(taskId)).isZero();
+        String currentStatus = jdbcTemplate.queryForObject(
+                "SELECT status FROM ai_tasks WHERE id = ?",
+                String.class,
+                taskId
+        );
+        assertThat(currentStatus).isEqualTo("PROCESSING");
+    }
+
+    @Test
     void workerCanWriteFailedStatus() throws Exception {
         String adminToken = login("/api/admin/v1/auth/login", "admin");
         Long toolId = createTool(adminToken, "worker_failed_tool", 1);
@@ -173,6 +332,93 @@ class WorkerInternalApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("FAILED"))
                 .andExpect(jsonPath("$.data.result").doesNotExist());
+    }
+
+    @Test
+    void failedTaskCanRecordExplicitProviderCostWithoutChargingUserCredits() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long modelConfigId = createImageModelConfig(adminToken);
+        Long accountId = createManualVendorAccount("manual_failure_cost_account", "https://api.siliconflow.cn", "fake-key", new BigDecimal("10.0000"));
+        jdbcTemplate.update("UPDATE agent_model_configs SET vendor_account_id = ?, api_key = '' WHERE id = ?", accountId, modelConfigId);
+        Long toolId = createTool(adminToken, "worker_failed_provider_cost_tool", 5, "IMAGE_GENERATION", modelConfigId);
+        publishTool(adminToken, toolId);
+        String userToken = login("/api/v1/auth/login", "user1");
+        Long taskId = createTask(userToken, "worker_failed_provider_cost_tool");
+
+        String processingBody = """
+                                {
+                                  "progress": 35,
+                                  "progressMessage": "AI is generating image"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/processing", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/processing".formatted(taskId), processingBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(processingBody))
+                .andExpect(status().isOk());
+
+        String failedBody = """
+                                {
+                                  "errorCode": "MODEL_CALL_FAILED",
+                                  "errorMessage": "provider charged but callback failed",
+                                  "failureStage": "PROVIDER_SUBMITTED",
+                                  "providerCostAmount": 0.030000,
+                                  "providerErrorCode": "UPSTREAM_FAILED",
+                                  "providerRequestId": "provider-request-1"
+                                }
+                                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/failed", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/failed".formatted(taskId), failedBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(failedBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("FAILED"));
+
+        assertThat(countCreditLogs(taskId, "DEDUCT")).isZero();
+        assertThat(countCreditLogs(taskId, "RELEASE")).isEqualTo(1);
+        Integer usageCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM billing_usage_logs WHERE source_type = 'TASK' AND source_id = ? AND outcome = 'FAILED'",
+                Integer.class,
+                taskId
+        );
+        assertThat(usageCount).isEqualTo(1);
+        Integer chargedCredits = jdbcTemplate.queryForObject(
+                "SELECT charged_credits FROM billing_usage_logs WHERE source_type = 'TASK' AND source_id = ?",
+                Integer.class,
+                taskId
+        );
+        BigDecimal vendorCost = jdbcTemplate.queryForObject(
+                "SELECT vendor_cost_amount FROM billing_usage_logs WHERE source_type = 'TASK' AND source_id = ?",
+                BigDecimal.class,
+                taskId
+        );
+        Integer providerCharged = jdbcTemplate.queryForObject(
+                "SELECT provider_charged FROM billing_usage_logs WHERE source_type = 'TASK' AND source_id = ?",
+                Integer.class,
+                taskId
+        );
+        BigDecimal balance = jdbcTemplate.queryForObject(
+                "SELECT balance_amount FROM model_vendor_accounts WHERE id = ?",
+                BigDecimal.class,
+                accountId
+        );
+        assertThat(chargedCredits).isZero();
+        assertThat(vendorCost).isEqualByComparingTo("0.030000");
+        assertThat(providerCharged).isEqualTo(1);
+        assertThat(balance).isEqualByComparingTo("9.970000");
+
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/failed", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/failed".formatted(taskId), failedBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(failedBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("FAILED"));
+        Integer duplicateUsageCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM billing_usage_logs WHERE source_type = 'TASK' AND source_id = ?",
+                Integer.class,
+                taskId
+        );
+        assertThat(duplicateUsageCount).isEqualTo(1);
     }
 
     @Test
@@ -585,6 +831,34 @@ class WorkerInternalApiTest {
             return AuthTestTokens.adminJwtFrom(result);
         }
         return AuthTestTokens.userJwtFrom(result);
+    }
+
+    private int countCreditLogs(Long taskId, String logType) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM credit_logs WHERE task_id = ? AND log_type = ?",
+                Integer.class,
+                taskId,
+                logType
+        );
+        return count == null ? 0 : count;
+    }
+
+    private int countBillingUsageLogs(Long taskId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM billing_usage_logs WHERE source_type = 'TASK' AND source_id = ?",
+                Integer.class,
+                taskId
+        );
+        return count == null ? 0 : count;
+    }
+
+    private int countResultResources(Long taskId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM ai_result_resources WHERE task_id = ?",
+                Integer.class,
+                taskId
+        );
+        return count == null ? 0 : count;
     }
 
     private Long createTool(String adminToken, String toolCode, int estimatedCreditCost) throws Exception {

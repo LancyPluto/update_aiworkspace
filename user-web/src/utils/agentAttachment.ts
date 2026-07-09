@@ -1,5 +1,4 @@
 import { getApiOrigin } from "@/api/client"
-import { getSessionBearerJwt } from "@/api/sessionBearer"
 
 const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".heif", ".avif"]
 const previewUrlCache = new Map<string, string>()
@@ -31,8 +30,7 @@ export async function fetchAgentFilePreviewUrl(url?: string | null, token?: stri
   if (cached) return cached
 
   const headers: Record<string, string> = {}
-  const bearer = token ?? getSessionBearerJwt()
-  if (bearer) headers.Authorization = `Bearer ${bearer}`
+  if (token) headers.Authorization = `Bearer ${token}`
 
   const response = await fetch(resolved, {
     method: "GET",

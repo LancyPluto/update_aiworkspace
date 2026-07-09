@@ -143,6 +143,8 @@ public class UserProfileServiceImpl implements UserProfileService {
         }
         smsCodeService.verifyCode(phone, CANCEL_ACCOUNT_SMS_SCENE, smsCode);
 
+        communityPostMapper.unpublishByUserId(userId);
+
         accountDataCleanupMapper.deleteAgentFileChunks(userId);
         accountDataCleanupMapper.deleteAgentFiles(userId);
         accountDataCleanupMapper.deleteAgentPendingToolContext(userId);

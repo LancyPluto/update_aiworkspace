@@ -1,6 +1,8 @@
 package com.aiminilab.aitoolmarket.task.controller;
 
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
+import com.aiminilab.aitoolmarket.task.dto.ClaimTaskRequest;
+import com.aiminilab.aitoolmarket.task.dto.ClaimTaskResponse;
 import com.aiminilab.aitoolmarket.task.dto.CreateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.ExecutionContextResponse;
 import com.aiminilab.aitoolmarket.task.dto.InternalCreateTaskRequest;
@@ -55,6 +57,18 @@ public class InternalTaskController {
     @GetMapping("/{taskId}/execution-context")
     public ApiResponse<ExecutionContextResponse> executionContext(@PathVariable Long taskId) {
         return ApiResponse.success(internalTaskService.executionContext(taskId));
+    }
+
+    @PostMapping("/{taskId}/claim")
+    public ApiResponse<ClaimTaskResponse> claim(@PathVariable Long taskId,
+                                                @RequestBody ClaimTaskRequest request) {
+        return ApiResponse.success(internalTaskService.claim(taskId, request));
+    }
+
+    @PostMapping("/{taskId}/lease/renew")
+    public ApiResponse<ClaimTaskResponse> renewLease(@PathVariable Long taskId,
+                                                     @RequestBody ClaimTaskRequest request) {
+        return ApiResponse.success(internalTaskService.renewLease(taskId, request));
     }
 
     @PostMapping("/{taskId}/processing")

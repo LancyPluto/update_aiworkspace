@@ -16,10 +16,13 @@ import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.credit.dto.PricingQuote;
 import com.aiminilab.aitoolmarket.credit.dto.PricingUsage;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.credit.service.PricingService;
+import com.aiminilab.aitoolmarket.task.dto.ClaimTaskRequest;
+import com.aiminilab.aitoolmarket.task.dto.ClaimTaskResponse;
 import com.aiminilab.aitoolmarket.task.dto.ExecutionContextResponse;
 import com.aiminilab.aitoolmarket.task.dto.ExecutionModelConfigResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
@@ -48,6 +51,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -71,6 +75,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     private final CommunityService communityService;
     private final WorkflowExecutionService workflowExecutionService;
     private final PrivateAssetAccessService privateAssetAccessService;
+    private final AppProperties appProperties;
 
     public InternalTaskServiceImpl(TaskMapper taskMapper, ToolMapper toolMapper,
                                    AgentModelConfigMapper agentModelConfigMapper,
@@ -84,7 +89,8 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                                    BillingService billingService,
                                    TaskMetrics taskMetrics, CommunityService communityService,
                                    WorkflowExecutionService workflowExecutionService,
-                                   PrivateAssetAccessService privateAssetAccessService) {
+                                   PrivateAssetAccessService privateAssetAccessService,
+                                   AppProperties appProperties) {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
         this.agentModelConfigMapper = agentModelConfigMapper;
@@ -102,6 +108,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         this.communityService = communityService;
         this.workflowExecutionService = workflowExecutionService;
         this.privateAssetAccessService = privateAssetAccessService;
+        this.appProperties = appProperties;
     }
 
     @Override
@@ -130,16 +137,79 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     }
 
     @Override
+    @Transactional
+    public ClaimTaskResponse claim(Long taskId, ClaimTaskRequest request) {
+        String workerId = cleanClaimPart(request == null ? null : request.workerId(), 128);
+        String claimToken = cleanClaimPart(request == null ? null : request.claimToken(), 128);
+        AiTask before = findTask(taskId);
+        if (workerId == null || claimToken == null) {
+            taskMetrics.recordLeaseClaim("denied", "invalid_request");
+            return claimResponse(false, before, null, null, "invalid_request");
+        }
+        if (TaskStateMachine.isTerminal(before.getStatus())) {
+            taskMetrics.recordLeaseClaim("denied", "terminal");
+            return claimResponse(false, before, claimToken, workerId, "terminal");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        boolean expiredProcessing = TaskStatus.PROCESSING.name().equals(before.getStatus())
+                && before.getLeaseUntil() != null
+                && before.getLeaseUntil().isBefore(now);
+        LocalDateTime leaseUntil = now.plusMinutes(leaseMinutes());
+        int updated = taskMapper.claimForExecution(taskId, workerId, claimToken, leaseUntil);
+        if (updated == 0) {
+            AiTask current = findTask(taskId);
+            String reason = TaskStateMachine.isTerminal(current.getStatus())
+                    ? "terminal"
+                    : TaskStatus.PROCESSING.name().equals(current.getStatus())
+                    ? "already_claimed"
+                    : "status_not_claimable";
+            taskMetrics.recordLeaseClaim("denied", reason);
+            return claimResponse(false, current, claimToken, workerId, reason);
+        }
+        AiTask claimed = findTask(taskId);
+        String reason = expiredProcessing ? "expired_reclaimed" : "claimed";
+        taskMetrics.recordLeaseClaim("success", reason);
+        return claimResponse(true, claimed, claimToken, workerId, reason);
+    }
+
+    @Override
+    @Transactional
+    public ClaimTaskResponse renewLease(Long taskId, ClaimTaskRequest request) {
+        String workerId = cleanClaimPart(request == null ? null : request.workerId(), 128);
+        String claimToken = cleanClaimPart(request == null ? null : request.claimToken(), 128);
+        AiTask before = findTask(taskId);
+        if (claimToken == null) {
+            taskMetrics.recordLeaseRenew("denied");
+            return claimResponse(false, before, claimToken, workerId, "invalid_request");
+        }
+        LocalDateTime leaseUntil = LocalDateTime.now().plusMinutes(leaseMinutes());
+        int updated = taskMapper.renewLease(taskId, claimToken, leaseUntil);
+        if (updated == 0) {
+            AiTask current = findTask(taskId);
+            String reason = TaskStateMachine.isTerminal(current.getStatus())
+                    ? "terminal"
+                    : "token_mismatch";
+            taskMetrics.recordLeaseRenew("denied");
+            return claimResponse(false, current, claimToken, workerId, reason);
+        }
+        taskMetrics.recordLeaseRenew("success");
+        return claimResponse(true, findTask(taskId), claimToken, workerId, "renewed");
+    }
+
+    @Override
     public TaskStatusResponse markProcessing(Long taskId, WorkerProcessingRequest request) {
         int progress = request.progress() == null ? 10 : Math.max(0, Math.min(99, request.progress()));
         String message = request.progressMessage() == null || request.progressMessage().isBlank()
                 ? "AI is processing"
                 : limitText(request.progressMessage(), 240);
         AiTask task = findTask(taskId);
+        String claimToken = cleanClaimPart(request.claimToken(), 128);
+        ensureClaimToken(task, claimToken);
         if (!TaskStatus.PROCESSING.name().equals(task.getStatus())) {
             TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.PROCESSING.name());
         }
-        if (taskMapper.markProcessing(taskId, progress, message, List.of(TaskStatus.QUEUED.name(), TaskStatus.PROCESSING.name())) == 0) {
+        if (taskMapper.markProcessingGuarded(taskId, claimToken, progress, message,
+                List.of(TaskStatus.QUEUED.name(), TaskStatus.PROCESSING.name())) == 0) {
             TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.PROCESSING.name());
         }
         return TaskStatusResponse.from(findTask(taskId));
@@ -149,11 +219,22 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     @Transactional
     public TaskStatusResponse markSuccess(Long taskId, WorkerSuccessRequest request) {
         AiTask task = findTask(taskId);
+        String claimToken = cleanClaimPart(request.claimToken(), 128);
+        ensureClaimToken(task, claimToken);
         if (isWorkflowStepTask(task)) {
-            workflowExecutionService.onStepTaskSuccess(taskId, request);
-            if (!TaskStatus.SUCCESS.name().equals(task.getStatus())) {
-                taskMapper.markSuccess(taskId, List.of(TaskStatus.PROCESSING.name(), TaskStatus.QUEUED.name()));
+            if (TaskStatus.SUCCESS.name().equals(task.getStatus()) || TaskStatus.CANCELLED.name().equals(task.getStatus())) {
+                return TaskStatusResponse.from(task);
             }
+            int updated = taskMapper.markSuccessGuarded(taskId, claimToken,
+                    List.of(TaskStatus.PROCESSING.name(), TaskStatus.QUEUED.name()));
+            if (updated == 0) {
+                AiTask current = findTask(taskId);
+                if (TaskStateMachine.isTerminal(current.getStatus())) {
+                    return TaskStatusResponse.from(current);
+                }
+                rejectGuardedCallback(taskId, current, TaskStatus.SUCCESS.name());
+            }
+            workflowExecutionService.onStepTaskSuccess(taskId, request);
             return TaskStatusResponse.from(findTask(taskId));
         }
         if (TaskStatus.SUCCESS.name().equals(task.getStatus())) {
@@ -163,13 +244,13 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             return TaskStatusResponse.from(task);
         }
         TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.SUCCESS.name());
-        int updated = taskMapper.markSuccess(taskId, List.of(TaskStatus.PROCESSING.name()));
+        int updated = taskMapper.markSuccessGuarded(taskId, claimToken, List.of(TaskStatus.PROCESSING.name()));
         if (updated == 0) {
             AiTask current = findTask(taskId);
-            if (TaskStatus.SUCCESS.name().equals(current.getStatus()) || TaskStatus.CANCELLED.name().equals(current.getStatus())) {
+            if (TaskStateMachine.isTerminal(current.getStatus())) {
                 return TaskStatusResponse.from(current);
             }
-            TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.SUCCESS.name());
+            rejectGuardedCallback(taskId, current, TaskStatus.SUCCESS.name());
         }
         AiTool billingTool = toolMapper.findById(task.getToolId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
@@ -245,11 +326,8 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     @Transactional
     public TaskStatusResponse markFailed(Long taskId, WorkerFailedRequest request) {
         AiTask task = findTask(taskId);
-        if (isWorkflowStepTask(task)) {
-            workflowExecutionService.onStepTaskFailed(taskId, request);
-            Long rootTaskId = resolveWorkflowRootTaskId(task);
-            return TaskStatusResponse.from(findTask(rootTaskId == null ? taskId : rootTaskId));
-        }
+        String claimToken = cleanClaimPart(request.claimToken(), 128);
+        ensureClaimToken(task, claimToken);
         String errorCode = request.errorCode() == null || request.errorCode().isBlank()
                 ? ErrorCode.MODEL_CALL_FAILED.name()
                 : request.errorCode();
@@ -263,13 +341,34 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                 errorCode,
                 limitText(("MODEL_TIMEOUT".equals(errorCode) ? "任务超时：" : "任务失败：") + errorCode, 240)
         );
+        if (isWorkflowStepTask(task)) {
+            if (TaskStateMachine.isTerminal(task.getStatus())) {
+                Long rootTaskId = resolveWorkflowRootTaskId(task);
+                return TaskStatusResponse.from(findTask(rootTaskId == null ? taskId : rootTaskId));
+            }
+            TaskStateMachine.ensureTransition(task.getStatus(), targetStatus);
+            int updated = taskMapper.markFailedGuarded(taskId, claimToken, targetStatus, errorCode,
+                    progressMessage, errorMessage, List.of(TaskStatus.PROCESSING.name()));
+            if (updated == 0) {
+                AiTask current = findTask(taskId);
+                if (TaskStateMachine.isTerminal(current.getStatus())) {
+                    Long rootTaskId = resolveWorkflowRootTaskId(current);
+                    return TaskStatusResponse.from(findTask(rootTaskId == null ? taskId : rootTaskId));
+                }
+                rejectGuardedCallback(taskId, current, targetStatus);
+            }
+            workflowExecutionService.onStepTaskFailed(taskId, request);
+            Long rootTaskId = resolveWorkflowRootTaskId(task);
+            return TaskStatusResponse.from(findTask(rootTaskId == null ? taskId : rootTaskId));
+        }
         if (TaskStatus.FAILED.name().equals(task.getStatus()) || TaskStatus.TIMEOUT.name().equals(task.getStatus())
                 || TaskStatus.SUCCESS.name().equals(task.getStatus())
                 || TaskStatus.CANCELLED.name().equals(task.getStatus())) {
             return TaskStatusResponse.from(task);
         }
         TaskStateMachine.ensureTransition(task.getStatus(), targetStatus);
-        int updated = taskMapper.markFailed(taskId, targetStatus, errorCode, progressMessage, errorMessage, List.of(TaskStatus.PROCESSING.name()));
+        int updated = taskMapper.markFailedGuarded(taskId, claimToken, targetStatus, errorCode,
+                progressMessage, errorMessage, List.of(TaskStatus.PROCESSING.name()));
         if (updated == 0) {
             AiTask current = findTask(taskId);
             if (TaskStatus.FAILED.name().equals(current.getStatus()) || TaskStatus.TIMEOUT.name().equals(current.getStatus())
@@ -277,14 +376,95 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                     || TaskStatus.CANCELLED.name().equals(current.getStatus())) {
                 return TaskStatusResponse.from(current);
             }
-            TaskStateMachine.ensureTransition(current.getStatus(), targetStatus);
+            rejectGuardedCallback(taskId, current, targetStatus);
         }
         creditService.release(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
+        recordFailureCostIfPresent(task, request, targetStatus, errorCode);
         if (shouldMarkToolUnhealthy(errorCode)) {
             agentToolDescriptorService.markToolHealth(task.getToolCode(), "FAILED", errorMessage);
         }
         taskMetrics.recordTaskOutcome(task.getToolCode(), targetStatus, task.getCreatedAt(), findTask(taskId).getFinishedAt());
         return TaskStatusResponse.from(findTask(taskId));
+    }
+
+    private void recordFailureCostIfPresent(AiTask task, WorkerFailedRequest request, String outcome, String errorCode) {
+        boolean providerCharged = Boolean.TRUE.equals(request.providerCharged());
+        boolean hasExplicitCost = request.providerCostAmount() != null && request.providerCostAmount().signum() > 0;
+        if (!providerCharged && !hasExplicitCost) {
+            return;
+        }
+        try {
+            AiTool billingTool = toolMapper.findById(task.getToolId())
+                    .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+            ModelExecutionSnapshot snapshot = modelExecutionSnapshotService.parse(task.getModelSnapshotJson());
+            AgentModelConfig modelConfig = snapshot != null
+                    ? snapshot.toModelConfig()
+                    : resolveTaskModelConfig(task, billingTool);
+            billingService.recordUsage("TASK", task.getId(), task.getUserId(), modelConfig,
+                    request.promptTokens(), request.completionTokens(), request.billableUnits(), 0,
+                    request.providerCostAmount(), null,
+                    outcome, errorCode, normalizeFailureStage(request.failureStage()),
+                    request.providerErrorCode(), request.providerRequestId(), providerCharged);
+        } catch (Exception exception) {
+            LOGGER.warn("failed to record provider failure cost taskId={} outcome={} errorCode={}",
+                    task.getId(), outcome, errorCode, exception);
+        }
+    }
+
+    private String normalizeFailureStage(String failureStage) {
+        if (failureStage == null || failureStage.isBlank()) {
+            return "UNKNOWN";
+        }
+        String normalized = failureStage.trim().toUpperCase();
+        return normalized.length() <= 64 ? normalized : normalized.substring(0, 64);
+    }
+
+    private int leaseMinutes() {
+        long configured = appProperties.getTaskExecution() == null ? 30 : appProperties.getTaskExecution().getLeaseMinutes();
+        return (int) Math.max(1, Math.min(24 * 60, configured));
+    }
+
+    private ClaimTaskResponse claimResponse(boolean claimed, AiTask task, String claimToken, String workerId, String reason) {
+        return new ClaimTaskResponse(
+                claimed,
+                task == null ? null : task.getId(),
+                task == null ? null : task.getStatus(),
+                claimToken == null && task != null ? task.getClaimToken() : claimToken,
+                workerId == null && task != null ? task.getClaimedBy() : workerId,
+                task == null ? null : task.getLeaseUntil(),
+                task == null ? null : task.getExecutionAttempt(),
+                reason
+        );
+    }
+
+    private void ensureClaimToken(AiTask task, String requestClaimToken) {
+        if (task == null || task.getClaimToken() == null || task.getClaimToken().isBlank()) {
+            return;
+        }
+        String normalized = cleanClaimPart(requestClaimToken, 128);
+        if (!task.getClaimToken().equals(normalized)) {
+            throw new BusinessException(ErrorCode.TASK_STATUS_INVALID, "任务执行租约不匹配");
+        }
+    }
+
+    private void rejectGuardedCallback(Long taskId, AiTask current, String targetStatus) {
+        LOGGER.warn(
+                "worker callback rejected after guarded update miss taskId={} currentStatus={} targetStatus={} claimedBy={} leaseUntil={}",
+                taskId,
+                current == null ? null : current.getStatus(),
+                targetStatus,
+                current == null ? null : current.getClaimedBy(),
+                current == null ? null : current.getLeaseUntil()
+        );
+        throw new BusinessException(ErrorCode.TASK_STATUS_INVALID, "任务状态或执行租约已变化，请忽略本次回调");
+    }
+
+    private String cleanClaimPart(String value, int maxLength) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.length() <= maxLength ? trimmed : trimmed.substring(0, maxLength);
     }
 
     private boolean shouldMarkToolUnhealthy(String errorCode) {

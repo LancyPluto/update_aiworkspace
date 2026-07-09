@@ -7,7 +7,7 @@ export async function adminLogin(account: string, password: string) {
     { account, password },
     { skipAuthRedirect: true },
   )
-  setToken(data.accessToken)
+  setToken(null)
   setStoredUser(data.user)
   return data
 }

@@ -129,11 +129,6 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json'
   }
-  const token = getToken()
-  if (token) {
-    headers.Authorization = `Bearer ${token}`
-  }
-
   let response: Response
   try {
     response = await fetch(buildUrl(path, options.query), {
@@ -202,11 +197,6 @@ export const http = {
     const headers: Record<string, string> = {
       Accept: 'application/json',
     }
-    const token = getToken()
-    if (token) {
-      headers.Authorization = `Bearer ${token}`
-    }
-
     let response: Response
     try {
       response = await fetch(buildUrl(path), {

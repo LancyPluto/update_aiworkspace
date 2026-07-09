@@ -41,7 +41,6 @@ import MasonryLayout from "@/components/MasonryLayout.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
-import { getSessionBearerJwt } from "@/api/sessionBearer"
 import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
 import { openDashboardWithAsset } from "@/utils/assetReplay"
 import { communityDisplayTitle, communityCardDescription } from "@/utils/communityDisplay"
@@ -58,7 +57,7 @@ const route = useRoute()
 const auth = useAuthStore()
 
 function resolveAuthToken() {
-  return auth.token ?? getSessionBearerJwt()
+  return auth.token
 }
 
 const posts = ref<CommunityPost[]>([])

@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.task;
 
+import com.aiminilab.aitoolmarket.auth.metrics.AuthMetrics;
 import com.aiminilab.aitoolmarket.auth.security.InternalRequestSignatureVerifier;
 import com.aiminilab.aitoolmarket.auth.security.JwtTokenProvider;
 import com.aiminilab.aitoolmarket.config.AuthInterceptor;
@@ -48,7 +49,8 @@ class WorkerInternalApiSecurityTest {
                 mock(JwtTokenProvider.class),
                 new ObjectMapper(),
                 verifier,
-                mock(UserMapper.class)
+                mock(UserMapper.class),
+                mock(AuthMetrics.class)
         );
         authInterceptor.init(new MockFilterConfig());
 

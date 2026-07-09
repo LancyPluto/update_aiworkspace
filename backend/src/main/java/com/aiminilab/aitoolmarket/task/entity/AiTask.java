@@ -39,6 +39,12 @@ public class AiTask {
     private Integer estimatedCreditCost;
     private String errorCode;
     private String errorMessage;
+    private String claimedBy;
+    private String claimToken;
+    private LocalDateTime leaseUntil;
+    private LocalDateTime claimedAt;
+    private LocalDateTime leaseRenewedAt;
+    private Integer executionAttempt;
     private LocalDateTime createdAt;
     private LocalDateTime queuedAt;
     private LocalDateTime startedAt;
@@ -218,6 +224,54 @@ public class AiTask {
 
     public void setErrorMessage(String errorMessage) {
         this.errorMessage = errorMessage;
+    }
+
+    public String getClaimedBy() {
+        return claimedBy;
+    }
+
+    public void setClaimedBy(String claimedBy) {
+        this.claimedBy = claimedBy;
+    }
+
+    public String getClaimToken() {
+        return claimToken;
+    }
+
+    public void setClaimToken(String claimToken) {
+        this.claimToken = claimToken;
+    }
+
+    public LocalDateTime getLeaseUntil() {
+        return leaseUntil;
+    }
+
+    public void setLeaseUntil(LocalDateTime leaseUntil) {
+        this.leaseUntil = leaseUntil;
+    }
+
+    public LocalDateTime getClaimedAt() {
+        return claimedAt;
+    }
+
+    public void setClaimedAt(LocalDateTime claimedAt) {
+        this.claimedAt = claimedAt;
+    }
+
+    public LocalDateTime getLeaseRenewedAt() {
+        return leaseRenewedAt;
+    }
+
+    public void setLeaseRenewedAt(LocalDateTime leaseRenewedAt) {
+        this.leaseRenewedAt = leaseRenewedAt;
+    }
+
+    public Integer getExecutionAttempt() {
+        return executionAttempt;
+    }
+
+    public void setExecutionAttempt(Integer executionAttempt) {
+        this.executionAttempt = executionAttempt;
     }
 
     public LocalDateTime getCreatedAt() {
