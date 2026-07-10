@@ -397,7 +397,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             baseUrl = provider.defaultBaseUrl();
         }
         baseUrl = VolcengineEndpointSupport.normalizeProviderBaseUrl(merged.provider(), baseUrl);
-        MediaGatewayProbeResult probe = probeMediaGateway(baseUrl, executable.getApiKey());
+        MediaGatewayProbeResult probe = probeMediaGateway(baseUrl, executable.getApiKey(), merged.modelName(), true);
         long latencyMs = Math.max(0L, System.currentTimeMillis() - startedAt);
         return new AgentModelConfigTestResponse(
                 probe.success(),
@@ -409,7 +409,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         );
     }
 
-    private MediaGatewayProbeResult probeMediaGateway(String baseUrl, String apiKey) {
+    private MediaGatewayProbeResult probeMediaGateway(String baseUrl, String apiKey, String modelName, boolean verifyModelName) {
         String probeUrl = com.aiminilab.aitoolmarket.agent.support.OpenAiCompatibleModelsEndpoint.resolve(baseUrl);
         try {
             java.net.http.HttpClient client = com.aiminilab.aitoolmarket.agent.support.OutboundHttpClientFactory
@@ -427,6 +427,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 return new MediaGatewayProbeResult(false, "API Key 无效或权限不足（HTTP " + status + "）");
             }
             if (status >= 200 && status < 500) {
+                if (verifyModelName) {
+                    return verifyGatewayModelName(response.body(), modelName, status);
+                }
                 return new MediaGatewayProbeResult(true, "网关鉴权通过（HTTP " + status + "）");
             }
             return new MediaGatewayProbeResult(false, "网关不可达（HTTP " + status + "）");
@@ -434,6 +437,38 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             String detail = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
             return new MediaGatewayProbeResult(false, "网关连接失败：" + detail);
         }
+    }
+
+    private MediaGatewayProbeResult verifyGatewayModelName(String body, String modelName, int status) {
+        String expected = modelName == null ? "" : modelName.trim();
+        if (expected.isBlank()) {
+            return new MediaGatewayProbeResult(false, "网关可达（HTTP " + status + "），但模型名为空，无法确认模型可用性");
+        }
+        try {
+            JsonNode root = objectMapper.readTree(body == null ? "" : body);
+            JsonNode list = root.isArray() ? root : firstArray(root.get("data"), root.get("models"));
+            if (list == null) {
+                return new MediaGatewayProbeResult(false, "网关可达（HTTP " + status + "），但 /models 未返回模型列表，无法确认模型名 " + expected);
+            }
+            for (JsonNode item : list) {
+                String id = item.isTextual() ? item.asText() : textValue(item.get("id"), item.get("name"));
+                if (expected.equals(id)) {
+                    return new MediaGatewayProbeResult(true, "模型 " + expected + " 在网关模型列表中可用");
+                }
+            }
+            return new MediaGatewayProbeResult(false, "网关可达（HTTP " + status + "），但模型列表不包含 " + expected);
+        } catch (Exception exception) {
+            return new MediaGatewayProbeResult(false, "网关可达（HTTP " + status + "），但 /models 响应非标准 JSON，无法确认模型名 " + expected);
+        }
+    }
+
+    private JsonNode firstArray(JsonNode... nodes) {
+        for (JsonNode node : nodes) {
+            if (node != null && node.isArray()) {
+                return node;
+            }
+        }
+        return null;
     }
 
     private record MediaGatewayProbeResult(boolean success, String message) {
@@ -780,7 +815,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         }
         String health = account.getHealthStatus() == null ? "" : account.getHealthStatus().trim();
         if (!"OK".equalsIgnoreCase(health)) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account connectivity test must pass before enabling this model");
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "账户探活未通过，请先测试账户连通性，或先将模型保存为停用状态");
         }
     }
 
