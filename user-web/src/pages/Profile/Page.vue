@@ -203,10 +203,19 @@ function startCancelCooldown(seconds: number) {
   }, 1000)
 }
 
+async function ensureProfileAuth() {
+  if (auth.isLoggedIn) return true
+  const profile = await auth.fetchCurrentUser({ clearOnFailure: false })
+  return Boolean(profile || auth.isLoggedIn)
+}
+
 async function requestCancelSmsCode() {
-  if (!auth.isLoggedIn) return
   error.value = ""
   success.value = ""
+  if (!(await ensureProfileAuth())) {
+    error.value = "请先登录后再发送注销验证码"
+    return
+  }
   sendingCancelCode.value = true
   try {
     const res = await sendCancelAccountSmsCode({ token: auth.token })
@@ -221,7 +230,10 @@ async function requestCancelSmsCode() {
 }
 
 async function submitCancelAccount() {
-  if (!auth.isLoggedIn) return
+  if (!(await ensureProfileAuth())) {
+    error.value = "请先登录后再注销账号"
+    return
+  }
   if (cancelConfirmText.value.trim() !== cancelConfirmPhrase.value) {
     error.value = `请在确认框输入“${cancelConfirmPhrase.value}”`
     return
