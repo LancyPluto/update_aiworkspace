@@ -467,7 +467,7 @@ function applyActiveBranchView(baseMessages: AgentMessage[]) {
 }
 
 async function switchMessageBranch(anchorMessageId: number, delta: -1 | 1) {
-  if (!props.token) return
+  if (!auth.isLoggedIn) return
   const anchor = messages.value.find((message) => message.id === anchorMessageId)
   if (!anchor?.branchVariantMessageIds?.length) return
   const currentIndex = anchor.branchIndex ?? 0
@@ -1018,7 +1018,7 @@ function findRunIdForUserMessage(message: AgentMessage): number | null {
 }
 
 async function discoverActiveRunId(preferSessionId?: number | null): Promise<number | null> {
-  if (!props.token) return null
+  if (!auth.isLoggedIn) return null
   const ordered = [...props.sessions]
   if (preferSessionId != null) {
     ordered.sort((a, b) => {
@@ -1040,7 +1040,7 @@ async function discoverActiveRunId(preferSessionId?: number | null): Promise<num
 }
 
 async function loadPane() {
-  if (!props.token) return
+  if (!auth.isLoggedIn) return
   paneLoading.value = true
   agentError.value = null
   try {
@@ -1070,7 +1070,7 @@ async function loadPane() {
 }
 
 async function hydrateHistoricalRunEvents() {
-  if (!props.token) return
+  if (!auth.isLoggedIn) return
   const runIds = [...new Set(
     messages.value
       .filter((message) => message.role === "ASSISTANT" && message.runId != null)
@@ -1086,7 +1086,7 @@ async function hydrateHistoricalRunEvents() {
 }
 
 async function resumePendingRunForSession() {
-  if (!props.token) return
+  if (!auth.isLoggedIn) return
   const runId = findLatestRunIdInMessages(messages.value)
   if (!runId) return
   try {
@@ -1106,7 +1106,7 @@ async function resumePendingRunForSession() {
 }
 
 async function cancelRecoveryRun() {
-  if (!props.token || recoveryRunId.value == null || cancellingRun.value) return
+  if (!auth.isLoggedIn || recoveryRunId.value == null || cancellingRun.value) return
   cancellingRun.value = true
   agentError.value = null
   try {
@@ -1129,7 +1129,7 @@ async function cancelRecoveryRun() {
 }
 
 async function cancelCurrentRun() {
-  if (!props.token) return
+  if (!auth.isLoggedIn) return
   if (sending.value && !activeRunId.value) {
     sending.value = false
     agentError.value = null
@@ -1162,7 +1162,7 @@ async function cancelCurrentRun() {
 }
 
 async function hydrateFilePreviews() {
-  if (!props.token) return
+  if (!auth.isLoggedIn) return
   const next: Record<number, string> = {}
   await Promise.all(
     files.value.map(async (file) => {
@@ -1178,7 +1178,7 @@ async function hydrateFilePreviews() {
 }
 
 async function loadFiles() {
-  if (!props.token) return
+  if (!auth.isLoggedIn) return
   const res = await fetchAgentFiles(props.sessionId, { token: props.token })
   files.value = res.list
   await hydrateFilePreviews()
@@ -1186,7 +1186,7 @@ async function loadFiles() {
 
 async function openMemoryPanel() {
   memoryPanelOpen.value = true
-  if (!props.token) return
+  if (!auth.isLoggedIn) return
   if (memoryWorkspaces.value.length === 0) {
     await loadMemoryWorkspaces()
   } else if (memoryWorkspaceId.value != null) {
@@ -1200,7 +1200,7 @@ function closeMemoryPanel() {
 }
 
 async function loadMemoryWorkspaces() {
-  if (!props.token) return
+  if (!auth.isLoggedIn) return
   memoryLoading.value = true
   memoryError.value = null
   try {
@@ -1219,7 +1219,7 @@ async function loadMemoryWorkspaces() {
 }
 
 async function loadMemoryItems() {
-  if (!props.token || memoryWorkspaceId.value == null) return
+  if (!auth.isLoggedIn || memoryWorkspaceId.value == null) return
   memoryLoading.value = true
   memoryError.value = null
   try {
@@ -1243,7 +1243,7 @@ async function changeMemoryTab(tab: "active" | "candidate") {
 }
 
 async function toggleMemoryPin(item: AgentWorkspaceMemoryItem) {
-  if (!props.token || memoryWorkspaceId.value == null) return
+  if (!auth.isLoggedIn || memoryWorkspaceId.value == null) return
   memoryError.value = null
   try {
     const saved = await pinAgentWorkspaceMemory(
@@ -1259,7 +1259,7 @@ async function toggleMemoryPin(item: AgentWorkspaceMemoryItem) {
 }
 
 async function approveCandidateMemory(item: AgentWorkspaceMemoryItem) {
-  if (!props.token || memoryWorkspaceId.value == null) return
+  if (!auth.isLoggedIn || memoryWorkspaceId.value == null) return
   memoryError.value = null
   try {
     await approveAgentWorkspaceMemoryCandidate(memoryWorkspaceId.value, item.id, { token: props.token })
@@ -1270,7 +1270,7 @@ async function approveCandidateMemory(item: AgentWorkspaceMemoryItem) {
 }
 
 async function rejectCandidateMemory(item: AgentWorkspaceMemoryItem) {
-  if (!props.token || memoryWorkspaceId.value == null) return
+  if (!auth.isLoggedIn || memoryWorkspaceId.value == null) return
   memoryError.value = null
   try {
     await rejectAgentWorkspaceMemoryCandidate(memoryWorkspaceId.value, item.id, { token: props.token })
@@ -1291,7 +1291,7 @@ async function deleteMemoryFromTrace(memoryId: number) {
     await removeMemory(item)
     return
   }
-  if (!props.token || memoryWorkspaceId.value == null) {
+  if (!auth.isLoggedIn || memoryWorkspaceId.value == null) {
     await openMemoryPanel()
     return
   }
@@ -1336,7 +1336,7 @@ function editMemory(item: AgentWorkspaceMemoryItem) {
 }
 
 async function saveMemory() {
-  if (!props.token || memoryWorkspaceId.value == null || memorySaving.value) return
+  if (!auth.isLoggedIn || memoryWorkspaceId.value == null || memorySaving.value) return
   const title = memoryForm.value.title.trim()
   const content = memoryForm.value.content.trim()
   if (!title || !content) {
@@ -1367,7 +1367,7 @@ async function saveMemory() {
 }
 
 async function removeMemory(item: AgentWorkspaceMemoryItem) {
-  if (!props.token || memoryWorkspaceId.value == null || memoryDeletingId.value != null) return
+  if (!auth.isLoggedIn || memoryWorkspaceId.value == null || memoryDeletingId.value != null) return
   const confirmed = window.confirm(`删除这条记忆：${item.title || item.id}？`)
   if (!confirmed) return
   memoryDeletingId.value = item.id
@@ -1458,6 +1458,7 @@ function agentFileToMaterialAttachment(file: AgentFile): AgentMaterialAttachment
 const pickerUploadList = useUploadHistoryList<AgentMaterialAttachment & { uploadedAt: string }>({
   getKind: () => null,
   getToken: () => props.token,
+  canRequest: () => auth.isLoggedIn,
   getUserId: () => auth.user?.id,
   toHistoryItem: (asset) => {
     const item = uploadAssetToMaterialAttachment(asset)
@@ -1469,6 +1470,7 @@ const pickerUploadList = useUploadHistoryList<AgentMaterialAttachment & { upload
 const generatedMaterialList = useGeneratedMaterialList<AgentMaterialAttachment>({
   getKind: () => null,
   getToken: () => props.token,
+  canRequest: () => auth.isLoggedIn,
   createAssetsFromTask: (task) => createMaterialAssets(task),
 })
 
@@ -1482,7 +1484,7 @@ const materialAssetsHasMore = computed(() => generatedMaterialList.hasMore.value
 
 async function loadRecentAttachments() {
   await pickerUploadList.resetAndLoad()
-  if (!props.token) return
+  if (!auth.isLoggedIn) return
   try {
     const page = await fetchRecentAgentFiles(props.sessionId, { token: props.token })
     const serverItems = page.list
@@ -1502,7 +1504,7 @@ function rememberRecentAttachment(item: AgentUrlAttachment) {
 
 async function removeRecentAttachment(item: AgentMaterialAttachment) {
   pickerUploadList.removeItem(item)
-  if (item.assetId && props.token) {
+  if (item.assetId && auth.isLoggedIn) {
     try {
       await deleteUploadAsset(item.assetId, { token: props.token })
     } catch {
@@ -1512,7 +1514,7 @@ async function removeRecentAttachment(item: AgentMaterialAttachment) {
   }
   const fileId = typeof item.id === "number" ? item.id : Number(item.id)
   const sessionId = item.sessionId ?? sessionIdFromAgentFileUrl(item.url)
-  if (!props.token || !Number.isFinite(fileId) || !sessionId) return
+  if (!auth.isLoggedIn || !Number.isFinite(fileId) || !sessionId) return
   try {
     await deleteAgentFile(sessionId, fileId, { token: props.token })
   } catch {
@@ -1655,7 +1657,7 @@ async function uploadFiles(
   selectedFiles: File[],
   options: { autoSelect?: boolean } = {},
 ) {
-  if (selectedFiles.length === 0 || !props.token || uploading.value) return
+  if (selectedFiles.length === 0 || !auth.isLoggedIn || uploading.value) return
   const autoSelect = options.autoSelect ?? false
   if (!autoSelect) {
     await uploadMaterialFiles(selectedFiles)
@@ -1757,7 +1759,7 @@ function openAttachmentPreview(payload: { name: string; url: string; contentType
 }
 
 async function removeFile(file: AgentFile) {
-  if (!props.token || removingFileId.value != null) return
+  if (!auth.isLoggedIn || removingFileId.value != null) return
   removingFileId.value = file.id
   try {
     await deleteAgentFile(props.sessionId, file.id, { token: props.token })
@@ -1773,7 +1775,7 @@ async function submitMessage(content = input.value) {
   const composerSnapshot = composerRef.value?.getComposerSnapshot()
   const text = (composerSnapshot?.text ?? content).trim()
   if (!text && files.value.length === 0 && urlAttachments.value.length === 0) return
-  if (!props.token || sending.value || editingRegenerating.value || hasActiveRun.value) return
+  if (!auth.isLoggedIn || sending.value || editingRegenerating.value || hasActiveRun.value) return
   stickToBottom.value = true
   if (props.modelsLoading) {
     agentError.value = "模型列表仍在加载，请稍等一下再发送。"
@@ -1899,7 +1901,7 @@ async function submitMessage(content = input.value) {
 }
 
 async function loadPreviewTools() {
-  if (!props.token) return
+  if (!auth.isLoggedIn) return
   try {
     const response = await fetchTools({ token: props.token, query: { pageNo: 1, pageSize: 120 } })
     previewTools.value = response.list
@@ -1909,7 +1911,7 @@ async function loadPreviewTools() {
 }
 
 async function loadAgentTools() {
-  if (!props.token || agentToolsLoading.value) return
+  if (!auth.isLoggedIn || agentToolsLoading.value) return
   agentToolsLoading.value = true
   try {
     agentTools.value = await fetchAgentTools({ token: props.token })
@@ -1925,7 +1927,7 @@ async function updateToolPreference(payload: {
   autoCallEnabled?: boolean
   disabled?: boolean
 }) {
-  if (!props.token) return
+  if (!auth.isLoggedIn) return
   const previousTools = agentTools.value.map((tool) => ({ ...tool }))
   const previousSelectedToolCode = selectedToolCode.value
   agentError.value = null
@@ -1963,7 +1965,7 @@ async function updateToolPreference(payload: {
 }
 
 async function retryFailedRun() {
-  if (!props.token || retryingRun.value || editingRegenerating.value || regeneratingMessageId.value != null || hasActiveRun.value || lastFailedRunId.value == null) return
+  if (!auth.isLoggedIn || retryingRun.value || editingRegenerating.value || regeneratingMessageId.value != null || hasActiveRun.value || lastFailedRunId.value == null) return
   if (props.modelsLoading) {
     agentError.value = "模型列表仍在加载，请稍等一下再重试。"
     return
@@ -2000,7 +2002,7 @@ async function retryFailedRun() {
 }
 
 async function regenerateAssistantMessage(message: AgentMessage) {
-  if (!props.token || message.role !== "ASSISTANT" || !message.runId) return
+  if (!auth.isLoggedIn || message.role !== "ASSISTANT" || !message.runId) return
   if (retryingRun.value || editingRegenerating.value || regeneratingMessageId.value != null || sending.value || hasActiveRun.value) return
   if (props.modelsLoading) {
     agentError.value = "模型列表仍在加载，请稍等一下再重新生成。"
@@ -2078,7 +2080,7 @@ function cancelEditMessage() {
 }
 
 async function submitEditedMessage(message: AgentMessage) {
-  if (!props.token || message.role !== "USER" || editingRegenerating.value || regeneratingMessageId.value != null || sending.value || hasActiveRun.value) return
+  if (!auth.isLoggedIn || message.role !== "USER" || editingRegenerating.value || regeneratingMessageId.value != null || sending.value || hasActiveRun.value) return
   if (props.modelsLoading) {
     agentError.value = "模型列表仍在加载，请稍等一下再发送。"
     return
@@ -2540,7 +2542,7 @@ async function pollRunUntilComplete(runId: number) {
 }
 
 async function confirmTool(eventId: number, toolCode: string, approved: boolean) {
-  if (!props.token || !activeRunId.value) return
+  if (!auth.isLoggedIn || !activeRunId.value) return
   confirmationError.value = null
   const nextConfirming = new Set(confirmingEventIds.value)
   nextConfirming.add(eventId)
@@ -2573,7 +2575,7 @@ async function confirmTool(eventId: number, toolCode: string, approved: boolean)
 }
 
 async function refreshMessages(options?: { preserveStreamingRunId?: number }) {
-  if (!props.token) return
+  if (!auth.isLoggedIn) return
   const preserved = options?.preserveStreamingRunId != null ? streamingMessageForRun(options.preserveStreamingRunId) : undefined
   const messageRes = await fetchAgentMessages(props.sessionId, { token: props.token })
   const mergedMessages = messageRes.list.map((message) => {
@@ -2724,7 +2726,7 @@ async function openAssetPreview(asset: AssetPreviewItem, message?: AgentMessage)
   const runEvents = message?.runId != null ? runEventsForMessage(message) : []
   const taskId = resolveTaskIdFromRunEvents(runEvents, asset.url)
 
-  if (taskId && props.token) {
+  if (taskId && auth.isLoggedIn) {
     try {
       const task = await fetchTaskById(taskId, { token: props.token })
       enriched = mergeAssetWithTask(enriched, task, {
@@ -2766,7 +2768,7 @@ function openPreviewTask(asset: AssetPreviewItem) {
 }
 
 async function publishPreviewAsset(asset: AssetPreviewItem, payload?: CommunityPublishPayload) {
-  if (!auth.token || !asset.taskId) return
+  if (!auth.isLoggedIn || !asset.taskId) return
   try {
     const post = await publishAssetToCommunity(asset, {
       token: auth.token,
@@ -2781,7 +2783,7 @@ async function publishPreviewAsset(asset: AssetPreviewItem, payload?: CommunityP
 }
 
 async function unpublishPreviewAsset(asset: AssetPreviewItem) {
-  if (!auth.token || !asset.communityPostId) return
+  if (!auth.isLoggedIn || !asset.communityPostId) return
   try {
     await unpublishCommunityPost(asset.communityPostId, { token: auth.token })
     previewAsset.value = { ...asset, communityPostId: undefined }

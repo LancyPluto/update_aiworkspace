@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -29,6 +30,9 @@ class AdminUserCreditApiTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     void taskCreditsFreezeSettleAndReleaseAcrossTaskLifecycle() throws Exception {
@@ -97,6 +101,8 @@ class AdminUserCreditApiTest {
     @Test
     void adminCanManageUsersAndCredits() throws Exception {
         String adminToken = login("/api/admin/v1/auth/login", "admin");
+        String userToken = login("/api/v1/auth/login", "user1");
+        jdbcTemplate.update("UPDATE gift_card_packages SET status = 'HIDDEN' WHERE package_code = 'admin_default'");
 
         mockMvc.perform(get("/api/admin/v1/users")
                         .param("keyword", "user1")
@@ -125,6 +131,14 @@ class AdminUserCreditApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.balance").value(200))
                 .andExpect(jsonPath("$.data.totalGranted").value(200));
+
+        mockMvc.perform(get("/api/v1/credits/gift-cards")
+                        .param("status", "UNUSED")
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].credits").value(50))
+                .andExpect(jsonPath("$.data[0].status").value("UNUSED"))
+                .andExpect(jsonPath("$.data[0].packageName").value("管理员赠送礼品卡"));
 
         mockMvc.perform(post("/api/admin/v1/users/{userId}/credits/manual-deduct", 2)
                         .header("Authorization", "Bearer " + adminToken)

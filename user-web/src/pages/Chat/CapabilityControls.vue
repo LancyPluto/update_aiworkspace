@@ -171,6 +171,7 @@ const SEGMENTED_OPTION_LIMIT = 8
 const uploadHistoryList = useUploadHistoryList<UploadHistoryItem>({
   getKind: () => activeUploadKind.value,
   getToken: () => auth.token,
+  canRequest: () => auth.isLoggedIn,
   getUserId: () => auth.user?.id,
   toHistoryItem: (asset) => uploadAssetToHistoryItem(asset),
 })
@@ -178,6 +179,7 @@ const uploadHistoryList = useUploadHistoryList<UploadHistoryItem>({
 const generatedMaterialList = useGeneratedMaterialList<MaterialAsset>({
   getKind: () => activeMaterialKind.value,
   getToken: () => auth.token,
+  canRequest: () => auth.isLoggedIn,
   createAssetsFromTask: (task, targetKind) => createMaterialAssets(task, targetKind),
 })
 

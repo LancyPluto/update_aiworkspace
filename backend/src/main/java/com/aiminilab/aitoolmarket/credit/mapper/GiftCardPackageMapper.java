@@ -20,4 +20,10 @@ public interface GiftCardPackageMapper extends BaseMapper<GiftCardPackage> {
                 .eq(GiftCardPackage::getStatus, "ACTIVE")
                 .last("LIMIT 1"));
     }
+
+    default GiftCardPackage findByPackageCode(String packageCode) {
+        return selectOne(new LambdaQueryWrapper<GiftCardPackage>()
+                .eq(GiftCardPackage::getPackageCode, packageCode)
+                .last("LIMIT 1"));
+    }
 }

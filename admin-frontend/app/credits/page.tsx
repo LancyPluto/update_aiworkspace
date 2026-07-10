@@ -37,7 +37,7 @@ interface CreditUserRow {
   id: string
   rawId: number
   name: string
-  account: string
+  phone: string
   credits: number
   userType: string
 }
@@ -47,6 +47,7 @@ interface CreditRecordRow {
   logId: number
   createdAt: string | null
   user: string
+  userPhone: string
   type: string
   amount: number
   balance: number
@@ -59,7 +60,7 @@ function mapUser(user: AdminMember): CreditUserRow {
     id: `U${String(user.id).padStart(3, "0")}`,
     rawId: user.id,
     name: user.nickname || user.username,
-    account: user.username,
+    phone: user.phone || "",
     credits: memberAccountBalance(user),
     userType: user.userType,
   }
@@ -115,6 +116,7 @@ export default function CreditsPage() {
               logId: log.id,
               createdAt: log.createdAt ?? null,
               user: user.name,
+              userPhone: user.phone,
               type: log.logType,
               amount: signedCreditAmount(log),
               balance: log.balanceAfter,
@@ -150,7 +152,7 @@ export default function CreditsPage() {
 
   const filteredRecords = useMemo(() => {
     return records.filter((record) =>
-      [record.id, record.user, record.type, record.reason].some((value) =>
+      [record.id, record.user, record.userPhone, record.type, record.reason].some((value) =>
         value.toLowerCase().includes(searchQuery.toLowerCase()),
       ),
     )
@@ -168,7 +170,7 @@ export default function CreditsPage() {
 
   const filteredUsers = useMemo(() => {
     return users.filter((user) =>
-      [user.id, user.name, user.account, user.userType].some((value) =>
+      [user.id, user.name, user.phone, user.userType].some((value) =>
         value.toLowerCase().includes(searchQuery.toLowerCase()),
       ),
     )
@@ -223,7 +225,16 @@ export default function CreditsPage() {
 
   const creditColumns = [
     { key: "id" as const, title: "流水 ID" },
-    { key: "user" as const, title: "用户" },
+    {
+      key: "user" as const,
+      title: "用户",
+      render: (_: unknown, item: CreditRecordRow) => (
+        <div>
+          <p className="font-medium">{item.user}</p>
+          <p className="text-xs text-muted-foreground">{item.userPhone || "--"}</p>
+        </div>
+      ),
+    },
     {
       key: "type" as const,
       title: "类型",
@@ -255,7 +266,7 @@ export default function CreditsPage() {
       render: (_: unknown, item: CreditUserRow) => (
         <div>
           <p className="font-medium">{item.name}</p>
-          <p className="text-xs text-muted-foreground">{item.account}</p>
+          <p className="text-xs text-muted-foreground">{item.phone || "--"}</p>
         </div>
       ),
     },
@@ -366,7 +377,7 @@ export default function CreditsPage() {
                   <option value="">请选择用户</option>
                   {users.map((user) => (
                     <option key={user.rawId} value={user.rawId}>
-                      {user.name} ({user.account})
+                      {user.name} ({user.phone || "--"})
                     </option>
                   ))}
                 </select>

@@ -43,6 +43,7 @@ function sortByUploadedAtDesc<T extends { uploadedAt?: string }>(items: T[]): T[
 export function useUploadHistoryList<T extends { id: string; url: string; kind: MaterialKind; uploadedAt: string }>(options: {
   getKind: () => MaterialKind | null
   getToken: () => string | null | undefined
+  canRequest?: () => boolean
   getUserId: () => string | number | undefined
   toHistoryItem: (asset: UserUploadAsset) => T | null
 }) {
@@ -115,7 +116,7 @@ export function useUploadHistoryList<T extends { id: string; url: string; kind: 
     error.value = ""
     hasMore.value = false
     const token = options.getToken()
-    if (!token) {
+    if (!token && options.canRequest?.() !== true) {
       loading.value = false
       return
     }
@@ -145,7 +146,7 @@ export function useUploadHistoryList<T extends { id: string; url: string; kind: 
   async function loadMore() {
     if (loading.value || loadingMore.value || !hasMore.value) return
     const token = options.getToken()
-    if (!token) return
+    if (!token && options.canRequest?.() !== true) return
     const kind = options.getKind()
     loadingMore.value = true
     try {
@@ -207,6 +208,7 @@ export function useUploadHistoryList<T extends { id: string; url: string; kind: 
 export function useGeneratedMaterialList<T extends { id: string; kind: MaterialKind; url: string }>(options: {
   getKind: () => MaterialKind | null
   getToken: () => string | null | undefined
+  canRequest?: () => boolean
   createAssetsFromTask: (task: TaskDetail, kind: MaterialKind) => T[]
 }) {
   const assets = ref<T[]>([]) as Ref<T[]>
@@ -236,7 +238,7 @@ export function useGeneratedMaterialList<T extends { id: string; kind: MaterialK
 
   async function fetchTaskBatch(nextPageNo: number) {
     const token = options.getToken()
-    if (!token) return { list: [] as TaskDetail[], hasNext: false }
+    if (!token && options.canRequest?.() !== true) return { list: [] as TaskDetail[], hasNext: false }
     return fetchTasks({
       token,
       query: { pageNo: nextPageNo, pageSize: MATERIAL_TASK_FETCH_BATCH, status: "SUCCESS" },
@@ -275,7 +277,7 @@ export function useGeneratedMaterialList<T extends { id: string; kind: MaterialK
     error.value = ""
     hasMore.value = false
     const token = options.getToken()
-    if (!token) {
+    if (!token && options.canRequest?.() !== true) {
       loading.value = false
       return
     }
@@ -292,7 +294,7 @@ export function useGeneratedMaterialList<T extends { id: string; kind: MaterialK
   async function loadMore() {
     if (loading.value || loadingMore.value || !hasMore.value) return
     const token = options.getToken()
-    if (!token) return
+    if (!token && options.canRequest?.() !== true) return
     const targetKind = options.getKind()
     loadingMore.value = true
     try {

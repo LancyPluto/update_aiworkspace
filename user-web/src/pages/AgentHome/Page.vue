@@ -47,6 +47,7 @@
   const deleteSessionError = ref<string | null>(null)
   const pinnedSessionIds = ref<number[]>([])
   const collapsedSessionGroups = ref<Record<string, boolean>>({})
+  const creatingSession = ref(false)
 
   const groupedSessions = computed<SessionGroup[]>(() => {
     const map = new Map<string, AgentSessionWithPin[]>()
@@ -179,8 +180,18 @@
     }
   }
 
+  async function ensureAgentAuth() {
+    if (auth.isLoggedIn) return true
+    const profile = await auth.fetchCurrentUser({ clearOnFailure: false })
+    return Boolean(profile || auth.isLoggedIn)
+  }
+
+  function redirectToLogin() {
+    void router.push({ name: "Login", query: { redirect: route.fullPath } })
+  }
+
   async function loadAgentModels() {
-    if (!auth.token) return
+    if (!(await ensureAgentAuth())) return
     modelsLoading.value = true
     try {
       const list = (await fetchAgentModelConfigs({ token: auth.token }))
@@ -212,7 +223,7 @@
   }
 
   async function loadSessions() {
-    if (!auth.token) return
+    if (!(await ensureAgentAuth())) return
     sessionsLoading.value = true
     try {
       const res = await fetchAgentSessions({ token: auth.token })
@@ -235,14 +246,27 @@
   }
 
   async function startSession(title = "新对话") {
-    if (!auth.token) return null
-    const session = await createAgentSession({ title }, { token: auth.token })
-    sessions.value = [session, ...sessions.value.filter((item) => item.id !== session.id)]
-    if (sessionDrafts.value[session.id] === undefined) {
-      sessionDrafts.value[session.id] = ""
+    if (creatingSession.value) return null
+    if (!(await ensureAgentAuth())) {
+      redirectToLogin()
+      return null
     }
-    selectSession(session.id)
-    return session
+    creatingSession.value = true
+    deleteSessionError.value = null
+    try {
+      const session = await createAgentSession({ title }, { token: auth.token })
+      sessions.value = [session, ...sessions.value.filter((item) => item.id !== session.id)]
+      if (sessionDrafts.value[session.id] === undefined) {
+        sessionDrafts.value[session.id] = ""
+      }
+      selectSession(session.id)
+      return session
+    } catch (error) {
+      deleteSessionError.value = error instanceof Error ? error.message : "创建会话失败"
+      return null
+    } finally {
+      creatingSession.value = false
+    }
   }
 
   function routePrompt() {
@@ -262,7 +286,7 @@
 
   async function applyRoutePrompt() {
     const prompt = routePrompt()
-    if (!prompt || !auth.token) return
+    if (!prompt || !(await ensureAgentAuth())) return
 
     const sessionId = await ensureActiveSession()
     if (!sessionId) return
@@ -276,7 +300,7 @@
 
   async function removeSession(session: AgentSession, event: MouseEvent) {
     event.stopPropagation()
-    if (!auth.token || deletingSessionId.value != null) return
+    if (!auth.isLoggedIn || deletingSessionId.value != null) return
     const pane = chatPaneRef.value
     if (session.id === activeSessionId.value && pane?.hasActiveRun) {
       pane.showError("当前会话 Agent 仍在运行，请稍后再删除。")
@@ -352,8 +376,9 @@
       </button>
 
       <aside class="agent-sidebar" :class="{ 'agent-sidebar--collapsed': !sessionSidebarOpen }">
-        <button class="new-chat" type="button" @click="startSession()">
-          <Plus class="h-4 w-4" />
+        <button class="new-chat" type="button" :disabled="creatingSession" @click="startSession()">
+          <Loader2 v-if="creatingSession" class="h-4 w-4 animate-spin" />
+          <Plus v-else class="h-4 w-4" />
           新会话
         </button>
 
@@ -433,8 +458,9 @@
           <div class="empty-mark"><Sparkles class="h-6 w-6" /></div>
           <h2>开始新的 Agent 会话</h2>
           <p>点击左侧「新会话」，或下方按钮创建会话后开始对话。</p>
-          <button type="button" class="new-chat chat-pane-empty-btn" @click="startSession()">
-            <Plus class="h-4 w-4" />
+          <button type="button" class="new-chat chat-pane-empty-btn" :disabled="creatingSession" @click="startSession()">
+            <Loader2 v-if="creatingSession" class="h-4 w-4 animate-spin" />
+            <Plus v-else class="h-4 w-4" />
             新会话
           </button>
         </div>

@@ -151,7 +151,7 @@ public class GiftCardServiceImpl implements GiftCardService {
     @Override
     @Transactional
     public void createGiftCardFromOrder(Long userId, Long orderId, Long giftCardPackageId, int credits) {
-        if (giftCardMapper.countByRechargeOrderId(orderId) > 0) {
+        if (orderId != null && giftCardMapper.countByRechargeOrderId(orderId) > 0) {
             return;
         }
         GiftCardPackage pkg = packageMapper.selectById(giftCardPackageId);
