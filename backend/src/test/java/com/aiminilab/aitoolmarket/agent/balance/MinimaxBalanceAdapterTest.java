@@ -29,4 +29,20 @@ class MinimaxBalanceAdapterTest {
         assertEquals(new BigDecimal("12.34"), result.balanceAmount());
         assertEquals("CNY", result.balanceCurrency());
     }
+
+    @Test
+    void parseOfoxBalanceWithoutCurrencyAsUsdWhenDefaultIsUsd() throws Exception {
+        String body = """
+                {
+                  "data": {
+                    "balance": "7.0367"
+                  }
+                }
+                """;
+        OpenAiCompatibleBalanceProbe probe = new OpenAiCompatibleBalanceProbe(objectMapper);
+        BalanceQueryResult result = probe.parseBody(body, "USD");
+        assertTrue(result.success());
+        assertEquals(new BigDecimal("7.0367"), result.balanceAmount());
+        assertEquals("USD", result.balanceCurrency());
+    }
 }

@@ -149,6 +149,33 @@ class PricingServiceImplTest {
         assertThat(qLowCount3.chargeCredits()).isEqualTo(138);
     }
 
+    @Test
+    void imageTokenEstimate_usesConfiguredModelTokenEstimate() {
+        AiTool tool = new AiTool();
+        tool.setId(20L);
+        AgentModelConfig config = new AgentModelConfig();
+        config.setId(9L);
+        config.setBillingUnit("IMAGE_TOKEN");
+        config.setInputTokenPricePer1m(new BigDecimal("8"));
+        config.setOutputTokenPricePer1m(new BigDecimal("30"));
+
+        PricingMargin margin = new PricingMargin();
+        margin.setScopeType("MODEL");
+        margin.setScopeRef(9L);
+        margin.setMarkupRatio(new BigDecimal("1.50"));
+        margin.setMinCredits(0);
+        margin.setImageEstimateInputTokens(1000);
+        margin.setImageEstimateOutputTokens(1000);
+        margin.setEnabled(true);
+        when(pricingMarginMapper.findEnabledByScope(eq("MODEL"), eq(9L))).thenReturn(margin);
+
+        PricingQuote quote = pricingService.computeQuote(tool, config, OBJECT_MAPPER.createObjectNode(), null, 38);
+
+        assertThat(quote.baseCredits()).isEqualTo(4);
+        assertThat(quote.chargeCredits()).isEqualTo(6);
+        assertThat(quote.breakdown().get(0).detail()).contains("1000 input + 1000 output");
+    }
+
     private PricingRule gptImage2CountRule() {
         PricingRule rule = new PricingRule();
         rule.setRuleType("MULTIPLIER");

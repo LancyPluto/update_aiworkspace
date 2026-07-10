@@ -35,7 +35,7 @@ final class OpenAiCompatibleBalanceProbe {
             for (String path : PROBE_PATHS) {
                 try {
                     String body = VendorBalanceHttpSupport.getJson(origin + path, apiKey);
-                    BalanceQueryResult parsed = parseBody(body);
+                    BalanceQueryResult parsed = parseBody(body, defaultCurrency(account));
                     if (parsed != null) {
                         return parsed;
                     }
@@ -61,6 +61,10 @@ final class OpenAiCompatibleBalanceProbe {
     }
 
     BalanceQueryResult parseBody(String body) throws Exception {
+        return parseBody(body, "CNY");
+    }
+
+    BalanceQueryResult parseBody(String body, String defaultCurrency) throws Exception {
         String trimmed = body == null ? "" : body.trim();
         if (trimmed.isBlank() || !(trimmed.startsWith("{") || trimmed.startsWith("["))) {
             return null;
@@ -73,12 +77,12 @@ final class OpenAiCompatibleBalanceProbe {
         }
         JsonNode data = root.path("data");
         if (!data.isMissingNode() && !data.isNull() && data.isObject()) {
-            BalanceQueryResult fromData = parseNode(data);
+            BalanceQueryResult fromData = parseNode(data, defaultCurrency);
             if (fromData != null) {
                 return fromData;
             }
         }
-        BalanceQueryResult fromRoot = parseNode(root);
+        BalanceQueryResult fromRoot = parseNode(root, defaultCurrency);
         if (fromRoot != null) {
             return fromRoot;
         }
@@ -88,12 +92,12 @@ final class OpenAiCompatibleBalanceProbe {
         return null;
     }
 
-    private BalanceQueryResult parseNode(JsonNode node) {
+    private BalanceQueryResult parseNode(JsonNode node, String defaultCurrency) {
         BigDecimal total = firstDecimal(node,
                 "totalBalance", "balance", "chargeBalance", "available_balance", "availableBalance",
-                "total_balance", "cashBalance", "CashBalance");
+                "total_balance", "cashBalance", "CashBalance", "quota", "available_quota", "availableQuota");
         if (total != null) {
-            String currency = text(node, "currency", "CNY");
+            String currency = text(node, "currency", defaultCurrency);
             return BalanceQueryResult.ok(total, currency);
         }
         JsonNode grants = node.path("grants");
@@ -104,6 +108,15 @@ final class OpenAiCompatibleBalanceProbe {
             }
         }
         return null;
+    }
+
+    private static String defaultCurrency(ModelVendorAccount account) {
+        String baseUrl = account == null || account.getBaseUrl() == null ? "" : account.getBaseUrl().trim().toLowerCase();
+        String vendorCode = account == null || account.getVendorCode() == null ? "" : account.getVendorCode().trim().toLowerCase();
+        if (baseUrl.contains("ofox.ai") || ("openai".equals(vendorCode) && baseUrl.contains("openai"))) {
+            return "USD";
+        }
+        return "CNY";
     }
 
     private static BigDecimal firstDecimal(JsonNode node, String... fields) {

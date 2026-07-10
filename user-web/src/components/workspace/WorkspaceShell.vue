@@ -2,7 +2,9 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { RouterLink, useRoute, useRouter } from "vue-router"
 import {
+  ArrowUpRight,
   Bell,
+  Crown,
   Headphones,
   Gift,
   LogOut,
@@ -13,6 +15,7 @@ import {
   Search,
   Sun,
   UserRound,
+  Zap,
   X,
 } from "lucide-vue-next"
 import { fetchCreditAccount } from "@/api/creditApi"
@@ -73,7 +76,40 @@ const userName = computed(() => {
   return readablePrefix || "User"
 })
 const availableCredits = computed(() => credit.value?.balance ?? null)
+const sidebarCreditRemaining = computed(() => credit.value?.available ?? credit.value?.balance ?? null)
+const sidebarCreditQuota = computed(() => {
+  const totalGranted = credit.value?.totalGranted
+  if (totalGranted != null && totalGranted > 0) return totalGranted
+  const remaining = sidebarCreditRemaining.value
+  if (remaining == null) return null
+  const consumed = credit.value?.totalConsumed ?? 0
+  return remaining + Math.max(consumed, 0)
+})
+const sidebarCreditProgress = computed(() => {
+  const quota = sidebarCreditQuota.value
+  const remaining = sidebarCreditRemaining.value
+  if (remaining == null) return 0
+  if (quota == null || quota <= 0) return remaining > 0 ? 100 : 0
+  return Math.max(0, Math.min(100, (remaining / quota) * 100))
+})
+const sidebarCreditProgressWidth = computed(() => `${Math.max(3, sidebarCreditProgress.value)}%`)
+const sidebarCreditWarning = computed(() => sidebarCreditRemaining.value != null && sidebarCreditProgress.value <= 20)
+const membershipLabel = computed(() => {
+  const code = auth.user?.membershipPlan?.toLowerCase() || ""
+  if (code.includes("flagship")) return "旗舰版"
+  if (code.includes("pro")) return "进阶版"
+  if (code.includes("growth")) return "高级版"
+  if (code.includes("starter")) return "标准版"
+  return "体验版"
+})
+const paidMembership = computed(() => membershipLabel.value !== "体验版")
+const sidebarCreditCtaText = computed(() => (sidebarCreditWarning.value ? "立即升级" : "提升额度"))
 const customerServiceQrSrc = computed(() => customerService.value.qrCodeUrl?.trim() || DEFAULT_CUSTOMER_SERVICE_QR)
+
+function formatCreditNumber(value: number | null | undefined) {
+  if (value == null) return "--"
+  return Math.max(0, Math.round(value)).toLocaleString()
+}
 
 async function loadCreditAccount() {
   if (!auth.isLoggedIn || !auth.token) {
@@ -286,6 +322,42 @@ onUnmounted(() => {
               <span class="workspace-new-badge">最新</span>
               <strong><Gift :size="16" class="inline-block align-[-2px]" />推荐有礼</strong>
               <small>获取更多算力</small>
+            </RouterLink>
+            <RouterLink
+              v-if="auth.isLoggedIn"
+              to="/billing"
+              class="workspace-credit-panel"
+              :class="{ 'workspace-credit-panel--warning': sidebarCreditWarning }"
+              :aria-label="`可用算力 ${formatCreditNumber(sidebarCreditRemaining)}，本月额度 ${formatCreditNumber(sidebarCreditQuota)}，${sidebarCreditCtaText}`"
+              @click="closeMobileNav"
+            >
+              <span
+                class="workspace-credit-panel__glow"
+                aria-hidden="true"
+              />
+              <span class="workspace-credit-panel__header">
+                <span class="workspace-credit-panel__eyebrow">剩余额度</span>
+                <span
+                  class="workspace-credit-panel__plan"
+                  :class="{ 'workspace-credit-panel__plan--paid': paidMembership }"
+                >
+                  <Crown v-if="paidMembership" :size="12" />
+                  <Zap v-else :size="12" />
+                  {{ membershipLabel }}
+                </span>
+              </span>
+              <span class="workspace-credit-panel__value">
+                <strong>{{ formatCreditNumber(sidebarCreditRemaining) }}</strong>
+                <span>可用算力</span>
+              </span>
+              <small class="workspace-credit-panel__quota">本月额度 {{ formatCreditNumber(sidebarCreditQuota) }}</small>
+              <span class="workspace-credit-panel__track" aria-hidden="true">
+                <span class="workspace-credit-panel__bar" :style="{ width: sidebarCreditProgressWidth }" />
+              </span>
+              <span class="workspace-credit-panel__cta">
+                {{ sidebarCreditCtaText }}
+                <ArrowUpRight :size="13" />
+              </span>
             </RouterLink>
             <RouterLink v-if="auth.isLoggedIn" to="/profile" class="workspace-nav-link" @click="closeMobileNav">
               <UserRound :size="16" />

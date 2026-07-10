@@ -10,6 +10,8 @@ public record PricingMarginUpsertRequest(
         Long scopeRef,
         BigDecimal markupRatio,
         Integer minCredits,
+        Integer imageEstimateInputTokens,
+        Integer imageEstimateOutputTokens,
         Boolean enabled,
         String remark
 ) {

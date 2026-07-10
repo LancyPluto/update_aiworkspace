@@ -839,6 +839,8 @@ CREATE TABLE pricing_margins (
   scope_ref BIGINT NOT NULL DEFAULT 0,
   markup_ratio DECIMAL(10,4) NOT NULL DEFAULT 1.2000,
   min_credits INT NOT NULL DEFAULT 0,
+  image_estimate_input_tokens INT,
+  image_estimate_output_tokens INT,
   enabled TINYINT NOT NULL DEFAULT 1,
   remark VARCHAR(255),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -857,6 +857,45 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("model_vendor_accounts", "console_cookie_status", "ALTER TABLE model_vendor_accounts ADD COLUMN console_cookie_status VARCHAR(20) NULL DEFAULT 'UNKNOWN' AFTER console_cookie");
         executeSql("""
                 UPDATE model_vendor_accounts
+                SET balance_currency = 'USD',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE is_deleted = 0
+                  AND LOWER(COALESCE(base_url, '')) LIKE '%ofox.ai%'
+                  AND (balance_currency IS NULL OR balance_currency = '' OR UPPER(balance_currency) = 'CNY')
+                """);
+        executeSql("""
+                UPDATE agent_model_configs
+                SET input_token_price_per_1m = input_token_price_per_1m * 7.2,
+                    output_token_price_per_1m = output_token_price_per_1m * 7.2,
+                    input_token_price_per_1k = input_token_price_per_1k * 7.2,
+                    output_token_price_per_1k = output_token_price_per_1k * 7.2,
+                    unit_price = unit_price * 7.2,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE is_deleted = 0
+                  AND billing_unit = 'IMAGE_TOKEN'
+                  AND input_token_price_per_1m = 8
+                  AND output_token_price_per_1m = 30
+                  AND (
+                    LOWER(COALESCE(model_name, '')) LIKE '%gpt-image%'
+                    OR LOWER(COALESCE(display_name, '')) LIKE '%image2%'
+                    OR LOWER(COALESCE(display_name, '')) LIKE '%gpt-image%'
+                  )
+                  AND (
+                    LOWER(COALESCE(base_url, '')) LIKE '%ofox.ai%'
+                    OR EXISTS (
+                      SELECT 1 FROM model_vendor_accounts account
+                      WHERE account.id = agent_model_configs.vendor_account_id
+                        AND account.is_deleted = 0
+                        AND UPPER(COALESCE(account.balance_currency, '')) = 'USD'
+                        AND (
+                          LOWER(COALESCE(account.base_url, '')) LIKE '%ofox.ai%'
+                          OR LOWER(COALESCE(account.vendor_code, '')) = 'openai'
+                        )
+                    )
+                  )
+                """);
+        executeSql("""
+                UPDATE model_vendor_accounts
                 SET enabled = 0,
                     is_deleted = 1,
                     updated_at = CURRENT_TIMESTAMP
@@ -986,6 +1025,51 @@ public class DataInitializer implements CommandLineRunner {
                 SET status = 'INACTIVE', updated_at = NOW()
                 WHERE package_code = 'test_1000'
                   AND status = 'ACTIVE'
+                """);
+        ensureTable("pricing_margins", """
+                CREATE TABLE pricing_margins (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  scope_type VARCHAR(16) NOT NULL DEFAULT 'GLOBAL',
+                  scope_ref BIGINT NOT NULL DEFAULT 0,
+                  markup_ratio DECIMAL(10,4) NOT NULL DEFAULT 1.2000,
+                  min_credits INT NOT NULL DEFAULT 0,
+                  image_estimate_input_tokens INT NULL,
+                  image_estimate_output_tokens INT NULL,
+                  enabled TINYINT NOT NULL DEFAULT 1,
+                  remark VARCHAR(255),
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_pricing_margin_scope (scope_type, scope_ref),
+                  KEY idx_pricing_margin_lookup (scope_type, scope_ref, enabled)
+                )
+                """);
+        ensureColumn("pricing_margins", "image_estimate_input_tokens", "ALTER TABLE pricing_margins ADD COLUMN image_estimate_input_tokens INT NULL AFTER min_credits");
+        ensureColumn("pricing_margins", "image_estimate_output_tokens", "ALTER TABLE pricing_margins ADD COLUMN image_estimate_output_tokens INT NULL AFTER image_estimate_input_tokens");
+        ensureTable("pricing_rules", """
+                CREATE TABLE pricing_rules (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  scope_type VARCHAR(16) NOT NULL DEFAULT 'MODEL',
+                  scope_ref BIGINT NOT NULL DEFAULT 0,
+                  param_key VARCHAR(64) NOT NULL,
+                  rule_type VARCHAR(16) NOT NULL DEFAULT 'MULTIPLIER',
+                  match_op VARCHAR(8) NOT NULL DEFAULT 'EQ',
+                  match_value VARCHAR(64),
+                  factor DECIMAL(10,4) NOT NULL DEFAULT 1.0000,
+                  extra_credits INT NOT NULL DEFAULT 0,
+                  priority INT NOT NULL DEFAULT 100,
+                  enabled TINYINT NOT NULL DEFAULT 1,
+                  remark VARCHAR(255),
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  KEY idx_pricing_rules_scope (scope_type, scope_ref, enabled, priority)
+                )
+                """);
+        executeSqlIgnore("""
+                INSERT INTO pricing_margins (scope_type, scope_ref, markup_ratio, min_credits, enabled, remark)
+                SELECT 'GLOBAL', 0, 1.2000, 0, 1, '默认全局加价 20%'
+                WHERE NOT EXISTS (
+                  SELECT 1 FROM pricing_margins WHERE scope_type = 'GLOBAL' AND scope_ref = 0
+                )
                 """);
         ensureTable("billing_usage_logs", """
                 CREATE TABLE billing_usage_logs (

@@ -2,8 +2,10 @@
 import { RouterLink, useRoute, useRouter } from "vue-router"
 import type { Component } from "vue"
 import {
+  ArrowUpRight,
   Bot,
   Compass,
+  Crown,
   Home,
   Lightbulb,
   Package,
@@ -27,6 +29,7 @@ import {
   Palette,
   Check,
   Gift,
+  Zap,
 } from "lucide-vue-next"
 import { ref, onMounted, onUnmounted, computed, watch } from "vue"
 import { useGlobalSearch, type GlobalSearchResultItem, type GlobalSearchScope } from "@/composables/useGlobalSearch"
@@ -201,10 +204,19 @@ function isActive(item: NavLink) {
 }
 
 const creditPercent = computed(() => {
-  if (!credit.value) return 0
-  // 使用 balance 而不是 available，因为 available = balance - frozen
-  // 冻结算力不应该影响进度条显示
-  return Math.round((credit.value.balance / (credit.value.totalGranted || 1)) * 100)
+  const quota = creditQuota.value
+  const remaining = remainingCredits.value
+  if (remaining == null) return 0
+  if (quota == null || quota <= 0) return remaining > 0 ? 100 : 0
+  return Math.max(0, Math.min(100, Math.round((remaining / quota) * 100)))
+})
+const creditProgressWidth = computed(() => `${Math.max(3, creditPercent.value)}%`)
+const creditWarning = computed(() => remainingCredits.value != null && creditPercent.value <= 20)
+const remainingCredits = computed(() => credit.value?.available ?? credit.value?.balance ?? null)
+const creditQuota = computed(() => {
+  if (!credit.value) return null
+  if (credit.value.totalGranted > 0) return credit.value.totalGranted
+  return (credit.value.available ?? credit.value.balance) + Math.max(credit.value.totalConsumed ?? 0, 0)
 })
 
 // 套餐代码到会员版本的映射
@@ -222,6 +234,8 @@ const getMembershipLabel = (packageCode: string | null | undefined): string => {
 }
 
 const membershipLabel = computed(() => getMembershipLabel(auth.user?.membershipPlan))
+const paidMembership = computed(() => membershipLabel.value !== "体验版")
+const creditCtaText = computed(() => (creditWarning.value ? "立即升级" : "提升额度"))
 const isAgentRoute = computed(() => route.path === "/agent" || route.path.startsWith("/agent/"))
 const safeUserName = computed(() => {
   const nickname = safeDisplayName(auth.user?.nickname)
@@ -232,6 +246,11 @@ const safeUserName = computed(() => {
   const readablePrefix = nickname.match(/^[\w\s.-]{2,}/)?.[0]?.trim()
   return readablePrefix || "User"
 })
+
+function formatCreditNumber(value: number | null | undefined) {
+  if (value == null) return "---"
+  return Math.max(0, Math.round(value)).toLocaleString()
+}
 
 function handleCreditsUpdated(event: Event) {
   const detail = (event as CustomEvent<CreditAccount | undefined>).detail
@@ -473,38 +492,32 @@ watch(
 
         <RouterLink
           to="/billing"
-          class="relative mb-2 block rounded-lg border border-white/[0.055] bg-white/[0.025] p-3 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.02)] transition hover:border-[var(--brand-border)] hover:bg-white/[0.04]"
+          class="app-shell-credit-card"
+          :class="{ 'app-shell-credit-card--warning': creditWarning }"
+          :aria-label="`可用算力 ${formatCreditNumber(remainingCredits)}，本月额度 ${formatCreditNumber(creditQuota)}，${creditCtaText}`"
         >
-          <div class="app-shell-credit-ribbon" aria-label="当前会员等级">
-            <svg class="app-shell-credit-ribbon__flag" viewBox="0 0 86 30" preserveAspectRatio="none" aria-hidden="true">
-              <defs>
-                <linearGradient id="app-shell-credit-ribbon-gradient" x1="0" y1="0" x2="86" y2="30" gradientUnits="userSpaceOnUse">
-                  <stop offset="0" stop-color="#7dd3fc" />
-                  <stop offset="0.42" stop-color="#2563eb" />
-                  <stop offset="1" stop-color="#1d4ed8" />
-                </linearGradient>
-              </defs>
-              <path
-                d="M14 0H78C82.4183 0 86 3.58172 86 8V30H14L0 15L14 0Z"
-                fill="url(#app-shell-credit-ribbon-gradient)"
-              />
-            </svg>
-            <span>{{ membershipLabel }}</span>
-          </div>
-
-          <p class="mt-2 flex items-center gap-2 font-mono text-[12px] font-semibold tabular-nums text-white/88">
-            <CreditPowerIcon :size="16" />
-            {{ credit ? credit.balance.toLocaleString() : '---' }}
-            <span class="ml-1 font-normal text-white/28">
-              / {{ credit ? credit.totalGranted.toLocaleString() : '---' }}
+          <span class="app-shell-credit-card__glow" aria-hidden="true" />
+          <span class="app-shell-credit-card__header">
+            <span class="app-shell-credit-card__eyebrow">剩余额度</span>
+            <span class="app-shell-credit-card__plan" :class="{ 'app-shell-credit-card__plan--paid': paidMembership }">
+              <Crown v-if="paidMembership" :size="12" />
+              <Zap v-else :size="12" />
+              {{ membershipLabel }}
             </span>
-          </p>
-          <div class="mt-3 h-1 overflow-hidden rounded-full bg-white/[0.08]">
-            <div
-              class="app-shell-credit-progress h-full rounded-full"
-              :style="{ width: Math.min(creditPercent, 100) + '%' }"
-            />
-          </div>
+          </span>
+          <span class="app-shell-credit-card__value">
+            <CreditPowerIcon :size="18" />
+            <strong>{{ formatCreditNumber(remainingCredits) }}</strong>
+            <span>可用算力</span>
+          </span>
+          <small class="app-shell-credit-card__quota">本月额度 {{ formatCreditNumber(creditQuota) }}</small>
+          <span class="app-shell-credit-card__track" aria-hidden="true">
+            <span class="app-shell-credit-progress" :style="{ width: creditProgressWidth }" />
+          </span>
+          <span class="app-shell-credit-card__cta">
+            {{ creditCtaText }}
+            <ArrowUpRight :size="13" />
+          </span>
         </RouterLink>
 
         <RouterLink
@@ -929,43 +942,181 @@ watch(
   box-shadow: var(--brand-button-shadow);
 }
 
-.app-shell-credit-progress {
-  background: var(--brand-progress-gradient);
+.app-shell-credit-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  border: 1px solid rgb(82 230 255 / 0.28);
+  border-radius: 8px;
+  padding: 13px 14px 12px;
+  background:
+    linear-gradient(160deg, rgb(13 41 51 / 0.88), rgb(8 10 16 / 0.94) 58%),
+    rgb(255 255 255 / 0.025);
+  color: rgb(255 255 255 / 0.78);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 0.24), inset 0 1px 0 rgb(255 255 255 / 0.07);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
-.app-shell-credit-ribbon {
+.app-shell-credit-card:hover {
+  border-color: rgb(82 230 255 / 0.52);
+  box-shadow: 0 16px 34px rgb(0 0 0 / 0.3), 0 0 24px rgb(82 230 255 / 0.12);
+  transform: translateY(-1px);
+}
+
+.app-shell-credit-card__glow {
   position: absolute;
-  top: -1px;
-  right: -1px;
-  z-index: 10;
-  display: inline-flex;
-  min-width: 76px;
-  height: 30px;
+  inset: -40% -20% auto auto;
+  width: 120px;
+  height: 120px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgb(82 230 255 / 0.18), transparent 64%);
+  pointer-events: none;
+}
+
+.app-shell-credit-card__header,
+.app-shell-credit-card__value,
+.app-shell-credit-card__quota,
+.app-shell-credit-card__track,
+.app-shell-credit-card__cta {
+  position: relative;
+  z-index: 1;
+}
+
+.app-shell-credit-card__header {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 0 11px 0 24px;
-  color: #fff;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.app-shell-credit-card__eyebrow {
+  color: rgb(255 255 255 / 0.48);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.app-shell-credit-card__plan {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid rgb(59 130 246 / 0.22);
+  border-radius: 999px;
+  color: #60d7ff;
+  background: rgb(59 130 246 / 0.1);
   font-size: 11px;
   font-weight: 800;
   line-height: 1;
-  letter-spacing: 0;
-  filter:
-    drop-shadow(0 7px 13px rgb(29 78 216 / 0.34))
-    drop-shadow(0 1px 0 rgb(255 255 255 / 0.14));
-}
-
-.app-shell-credit-ribbon__flag {
-  position: absolute;
-  inset: 0;
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.app-shell-credit-ribbon span {
-  position: relative;
-  z-index: 1;
   white-space: nowrap;
+}
+
+.app-shell-credit-card__plan--paid {
+  border-color: rgb(245 208 97 / 0.28);
+  color: #f5d061;
+  background: rgb(245 208 97 / 0.12);
+}
+
+.app-shell-credit-card__value {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.app-shell-credit-card__value strong {
+  min-width: 0;
+  color: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 23px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+  text-shadow: 0 0 18px rgb(82 230 255 / 0.2);
+}
+
+.app-shell-credit-card__value span {
+  color: rgb(255 255 255 / 0.56);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.app-shell-credit-card__quota {
+  color: rgb(255 255 255 / 0.38);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.app-shell-credit-card__track {
+  display: block;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.09);
+}
+
+.app-shell-credit-progress {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #52e6ff, #78f3e0);
+  box-shadow: 0 0 12px rgb(82 230 255 / 0.45);
+  transition: width 220ms ease, background 160ms ease;
+}
+
+.app-shell-credit-card__cta {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 2px;
+  border: 1px solid rgb(82 230 255 / 0.28);
+  border-radius: 8px;
+  background:
+    linear-gradient(#111820, #111820) padding-box,
+    linear-gradient(90deg, rgb(82 230 255 / 0.85), rgb(195 68 255 / 0.72)) border-box;
+  color: #e8fbff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.app-shell-credit-card--warning {
+  border-color: rgb(251 146 60 / 0.36);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 0.24), 0 0 22px rgb(251 146 60 / 0.1);
+}
+
+.app-shell-credit-card--warning .app-shell-credit-card__value strong {
+  color: #ffb86b;
+  text-shadow: 0 0 18px rgb(251 146 60 / 0.26);
+  animation: app-shell-credit-breathe 2.4s ease-in-out infinite;
+}
+
+.app-shell-credit-card--warning .app-shell-credit-progress {
+  background: linear-gradient(90deg, #ffb86b, #fb7185);
+  box-shadow: 0 0 14px rgb(251 146 60 / 0.5);
+}
+
+.app-shell-credit-card--warning .app-shell-credit-card__cta {
+  border-color: rgb(251 146 60 / 0.34);
+  background:
+    linear-gradient(#17120f, #17120f) padding-box,
+    linear-gradient(90deg, rgb(251 146 60 / 0.86), rgb(245 208 97 / 0.72)) border-box;
+}
+
+@keyframes app-shell-credit-breathe {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0 rgb(251 146 60 / 0));
+  }
+
+  50% {
+    filter: drop-shadow(0 0 8px rgb(251 146 60 / 0.42));
+  }
 }
 
 .app-shell-accent-trigger {
