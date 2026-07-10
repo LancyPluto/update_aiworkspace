@@ -47,6 +47,51 @@ class ModelVendorAccountDiscoveryApiTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
+    void openAiAccountWithoutLinkedModelsUsesGatewayProbeInsteadOfAgentModelRequest() throws Exception {
+        HttpServer server = modelsServer("""
+                {
+                  "object": "list",
+                  "data": [
+                    {"id": "openai/gpt-image-2", "object": "model"}
+                  ]
+                }
+                """);
+        try {
+            String adminToken = loginAdmin();
+            Long accountId = createVendorAccount(adminToken, "openai", "Unbound OpenAI Gateway",
+                    "http://127.0.0.1:%d".formatted(server.getAddress().getPort()));
+
+            mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
+                            .header("Authorization", "Bearer " + adminToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.success").value(true))
+                    .andExpect(jsonPath("$.data.provider").value("openai_images_gateway"))
+                    .andExpect(jsonPath("$.data.account.healthStatus").value("OK"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void accountProbeReportsCredentialFailureForUnauthorizedGateway() throws Exception {
+        HttpServer server = statusServer(401, "{\"error\":\"unauthorized\"}");
+        try {
+            String adminToken = loginAdmin();
+            Long accountId = createVendorAccount(adminToken, "openai", "Unauthorized Gateway",
+                    "http://127.0.0.1:%d".formatted(server.getAddress().getPort()));
+
+            mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
+                            .header("Authorization", "Bearer " + adminToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.success").value(false))
+                    .andExpect(jsonPath("$.data.message").value(org.hamcrest.Matchers.containsString("API Key 无效")))
+                    .andExpect(jsonPath("$.data.account.healthStatus").value("ERROR"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void adminCanDiscoverOpenAiCompatibleModelsAndUpsertConfigs() throws Exception {
         HttpServer server = modelsServer("""
                 {
@@ -376,6 +421,54 @@ class ModelVendorAccountDiscoveryApiTest {
         assertThat(lastTestSuccess).isFalse();
     }
 
+    @Test
+    void imageModelTestChecksModelNameWithoutMarkingAccountUnhealthy() throws Exception {
+        HttpServer server = modelsServer("""
+                {
+                  "object": "list",
+                  "data": [
+                    {"id": "another-image-model", "object": "model"}
+                  ]
+                }
+                """);
+        try {
+            String adminToken = loginAdmin();
+            Long accountId = createVendorAccount(adminToken, "openai", "Image Gateway",
+                    "http://127.0.0.1:%d/v1".formatted(server.getAddress().getPort()));
+            jdbcTemplate.update("UPDATE model_vendor_accounts SET health_status='OK' WHERE id=?", accountId);
+            jdbcTemplate.update("""
+                    INSERT INTO agent_model_configs(vendor_account_id, display_name, config_code, provider, model_name,
+                                                    base_url, api_key, extra_auth_json, billing_unit, capabilities,
+                                                    enabled, agent_enabled, last_test_success)
+                    VALUES(?, 'GPT Image 2', 'image-model-name-miss', 'openai_images_gateway', 'openai/gpt-image-2',
+                           '', '', NULL, 'IMAGE_TOKEN', '["IMAGE_GENERATION"]',
+                           1, 0, 1)
+                    """, accountId);
+            Long modelId = jdbcTemplate.queryForObject(
+                    "SELECT id FROM agent_model_configs WHERE config_code='image-model-name-miss'",
+                    Long.class);
+
+            mockMvc.perform(post("/api/admin/v1/agent/model-config/{id}/test", modelId)
+                            .header("Authorization", "Bearer " + adminToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.success").value(false))
+                    .andExpect(jsonPath("$.data.message").value(org.hamcrest.Matchers.containsString("不包含 openai/gpt-image-2")));
+
+            Boolean lastTestSuccess = jdbcTemplate.queryForObject(
+                    "SELECT last_test_success FROM agent_model_configs WHERE id=?",
+                    Boolean.class,
+                    modelId);
+            String accountHealth = jdbcTemplate.queryForObject(
+                    "SELECT health_status FROM model_vendor_accounts WHERE id=?",
+                    String.class,
+                    accountId);
+            assertThat(lastTestSuccess).isFalse();
+            assertThat(accountHealth).isEqualTo("OK");
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private HttpServer modelsServer(String body) throws Exception {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         java.util.function.Consumer<com.sun.net.httpserver.HttpExchange> handler = exchange -> {
@@ -393,6 +486,27 @@ class ModelVendorAccountDiscoveryApiTest {
         };
         server.createContext("/v1/models", handler::accept);
         server.createContext("/compatible-mode/v1/models", handler::accept);
+        server.start();
+        return server;
+    }
+
+    private HttpServer statusServer(int status, String body) throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        java.util.function.Consumer<com.sun.net.httpserver.HttpExchange> handler = exchange -> {
+            assertThat(exchange.getRequestHeaders().getFirst("Authorization")).isEqualTo("Bearer discovery-secret");
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            try {
+                exchange.sendResponseHeaders(status, bytes.length);
+                try (OutputStream output = exchange.getResponseBody()) {
+                    output.write(bytes);
+                }
+            } catch (Exception exception) {
+                throw new RuntimeException(exception);
+            }
+        };
+        server.createContext("/v1/models", handler::accept);
+        server.createContext("/models", handler::accept);
         server.start();
         return server;
     }

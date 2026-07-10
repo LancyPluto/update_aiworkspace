@@ -13,6 +13,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -46,6 +47,9 @@ class AdminAgentApiTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @MockBean
     private TokenDenylistService tokenDenylistService;
@@ -510,11 +514,9 @@ class AdminAgentApiTest {
     }
 
     @Test
-    void vendorAccountTestUsesLinkedOpenAiCompatibleModelForMoonshot() throws Exception {
+    void vendorAccountTestDoesNotDependOnLinkedOpenAiCompatibleModelForMoonshot() throws Exception {
         mockExternalAuthDependencies();
         String adminToken = login("/api/admin/v1/auth/login", "admin");
-        Mockito.when(agentServiceClient.testModelConfig(any()))
-                .thenReturn(new AgentModelConfigTestResponse(true, "openai_compatible", "kimi-k2.6", 12L, "ok", "pong"));
 
         String accountResponse = mockMvc.perform(post("/api/admin/v1/model-vendor-accounts")
                         .header("Authorization", "Bearer " + adminToken)
@@ -560,13 +562,13 @@ class AdminAgentApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.success").value(true))
                 .andExpect(jsonPath("$.data.provider").value("openai_compatible"))
-                .andExpect(jsonPath("$.data.modelName").value("kimi-k2.6"))
+                .andExpect(jsonPath("$.data.modelName").value("gpt-4o-mini"))
                 .andExpect(jsonPath("$.data.account.healthStatus").value("OK"));
 
         Mockito.verify(agentServiceClient).testModelConfig(argThat(request ->
                 request != null
                         && "openai_compatible".equals(request.provider())
-                        && "kimi-k2.6".equals(request.modelName())
+                        && "gpt-4o-mini".equals(request.modelName())
                         && "https://api.moonshot.cn/v1".equals(request.baseUrl())
                         && "sk-moonshot-test".equals(request.apiKey())));
     }
@@ -772,10 +774,7 @@ class AdminAgentApiTest {
                 .getContentAsString();
         Long accountId = Long.parseLong(accountResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
 
-        mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
-                        .header("Authorization", "Bearer " + adminToken))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.success").value(true));
+        jdbcTemplate.update("UPDATE model_vendor_accounts SET health_status='OK' WHERE id=?", accountId);
 
         String configResponse = mockMvc.perform(post("/api/admin/v1/agent/model-config")
                         .header("Authorization", "Bearer " + adminToken)

@@ -160,19 +160,16 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     @Override
     public ModelVendorAccountTestResponse adminTest(Long id) {
         ModelVendorAccount account = findActiveOrThrow(id);
-        AgentModelConfig linkedForTest = selectLinkedModelForAccountTest(account);
-        String providerCode = linkedForTest != null && providerRegistry.isSupported(linkedForTest.getProvider())
-                ? linkedForTest.getProvider().trim().toLowerCase(Locale.ROOT)
-                : resolveTestProvider(account.getVendorCode());
+        String providerCode = resolveAccountProbeProvider(account);
         ModelProviderDefinition provider = providerRegistry.findByCode(providerCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "unsupported model provider for test"));
         if ("accept_only".equalsIgnoreCase(provider.testStrategy())) {
             return testAcceptOnlyVendorAccount(account, providerCode, provider);
         }
-        if (requiresMediaGatewayProbe(provider)) {
+        if (requiresMediaGatewayProbe(provider) || isOpenAiLikeVendor(account)) {
             return testMediaGatewayVendorAccount(account, providerCode, provider);
         }
-        AgentModelConfigRequest testRequest = accountTestRequest(account, providerCode, provider, linkedForTest);
+        AgentModelConfigRequest testRequest = accountTestRequest(account, providerCode, provider, null);
         boolean success;
         String message;
         Long latencyMs;
@@ -226,6 +223,19 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 testRequest.modelName(),
                 toResponse(account)
         );
+    }
+
+    private String resolveAccountProbeProvider(ModelVendorAccount account) {
+        String vendor = account.getVendorCode() == null ? "" : account.getVendorCode().trim().toLowerCase(Locale.ROOT);
+        if ("openai".equals(vendor) || "openai_gateway".equals(vendor)) {
+            return "openai_images_gateway";
+        }
+        return resolveTestProvider(vendor);
+    }
+
+    private boolean isOpenAiLikeVendor(ModelVendorAccount account) {
+        String vendor = account == null || account.getVendorCode() == null ? "" : account.getVendorCode().trim().toLowerCase(Locale.ROOT);
+        return "openai".equals(vendor) || "openai_gateway".equals(vendor);
     }
 
     private AgentModelConfig selectLinkedModelForAccountTest(ModelVendorAccount account) {

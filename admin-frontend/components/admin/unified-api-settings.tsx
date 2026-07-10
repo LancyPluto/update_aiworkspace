@@ -205,6 +205,10 @@ function isHealthyStatus(value?: string | null) {
   return (value || "").trim().toUpperCase() === "OK"
 }
 
+function accountProbePassed(account?: ModelVendorAccount | null) {
+  return isHealthyStatus(account?.healthStatus)
+}
+
 function modelAccountHealth(model: UnifiedApiModelItem, vendor: UnifiedApiVendorGroup) {
   if (!model.vendorAccountId) return "UNKNOWN"
   const account = vendor.accounts.find((item) => item.id === model.vendorAccountId)
@@ -1147,6 +1151,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     const account = vendor.accounts.find((a) => a.id === accountId) || vendor.accounts[0]
     const meta = providerForVendor(providers, vendor.vendorCode, vendor.models[0]?.provider)
     const defaultProvider = meta?.code || vendor.models[0]?.provider || "openai_compatible"
+    const accountReady = accountProbePassed(account)
     setModelVendorCode(vendor.vendorCode)
     setModelForm({
       ...emptyModelForm(),
@@ -1159,6 +1164,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       executionTask: routeTasksForModel(defaultProvider, modelCapabilitiesForProvider(undefined, meta))[0]?.value || "",
       executionOptionsJson: "",
       billingUnit: (meta?.billingDefault as AgentModelConfigPayload["billingUnit"]) || "TOKEN_PER_M",
+      enabled: accountReady,
+      agentEnabled: accountReady,
     })
     setModelDialogOpen(true)
   }
@@ -2076,9 +2083,12 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 value={modelForm.vendorAccountId ? String(modelForm.vendorAccountId) : undefined}
                 onValueChange={(value) => {
                   const accountId = Number(value)
+                  const account = modelAccountOptions.find((item) => item.id === accountId)
+                  const accountReady = accountProbePassed(account)
                   setModelForm((form) => ({
                     ...form,
                     vendorAccountId: Number.isFinite(accountId) ? accountId : undefined,
+                    ...(form.id ? {} : { enabled: accountReady, agentEnabled: accountReady }),
                   }))
                 }}
               >
@@ -2107,6 +2117,11 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                         ? `${account.vendorLabel || account.vendorCode} · ${accountCredentialLabel(account)} · ${account.healthStatus || "UNKNOWN"}`
                         : `账号 #${modelForm.vendorAccountId} 详情未加载，请重新选择一个可用账户`}
                     </p>
+                    {!modelForm.id && account && !accountProbePassed(account) ? (
+                      <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        该账户尚未探活通过，新模型将先以停用状态保存。请先点账户闪电测试，成功后再启用模型。
+                      </p>
+                    ) : null}
                     <div className="rounded-md border bg-muted/30 p-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant={inherited ? "outline" : "secondary"} className="text-xs">
