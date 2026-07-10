@@ -147,6 +147,53 @@ class WorkerCallbackIdempotencyTest {
     }
 
     @Test
+    void retryThenLateTimeoutCallbackDoesNotReleaseNewFreezeOrEndQueuedTask() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long toolId = createTool(adminToken, "retry_late_timeout_tool", 4);
+        publishTool(adminToken, toolId);
+        String userToken = login("/api/v1/auth/login", "user1");
+        Long taskId = createTask(userToken, "retry_late_timeout_tool", "retry-late-timeout-request");
+        markProcessing(taskId);
+        markFailed(taskId, "first timeout").andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/v1/tasks/{taskId}/retry", taskId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("QUEUED"));
+
+        markFailed(taskId, "MODEL_TIMEOUT", "late timeout from previous delivery")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("QUEUED"));
+
+        org.assertj.core.api.Assertions.assertThat(countCreditLogs(taskId, "FREEZE")).isEqualTo(2);
+        org.assertj.core.api.Assertions.assertThat(countCreditLogs(taskId, "RELEASE")).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(countCreditLogs(taskId, "DEDUCT")).isZero();
+    }
+
+    @Test
+    void retryThenProcessingFailureReleasesRetriedFreezeOnce() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long toolId = createTool(adminToken, "retry_second_failure_tool", 4);
+        publishTool(adminToken, toolId);
+        String userToken = login("/api/v1/auth/login", "user1");
+        Long taskId = createTask(userToken, "retry_second_failure_tool", "retry-second-failure-request");
+        markProcessing(taskId);
+        markFailed(taskId, "first failure").andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/v1/tasks/{taskId}/retry", taskId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("QUEUED"));
+        markProcessing(taskId);
+        markFailed(taskId, "second failure").andExpect(status().isOk());
+        markFailed(taskId, "duplicate second failure").andExpect(status().isOk());
+
+        org.assertj.core.api.Assertions.assertThat(countCreditLogs(taskId, "FREEZE")).isEqualTo(2);
+        org.assertj.core.api.Assertions.assertThat(countCreditLogs(taskId, "RELEASE")).isEqualTo(2);
+        org.assertj.core.api.Assertions.assertThat(countCreditLogs(taskId, "DEDUCT")).isZero();
+    }
+
+    @Test
     void invalidAdminRetryTransitionReturnsBusinessError() throws Exception {
         String adminToken = login("/api/admin/v1/auth/login", "admin");
         Long toolId = createTool(adminToken, "retry_queued_tool", 2);
@@ -264,12 +311,16 @@ class WorkerCallbackIdempotencyTest {
     }
 
     private org.springframework.test.web.servlet.ResultActions markFailed(Long taskId, String errorMessage) throws Exception {
+        return markFailed(taskId, "MODEL_CALL_FAILED", errorMessage);
+    }
+
+    private org.springframework.test.web.servlet.ResultActions markFailed(Long taskId, String errorCode, String errorMessage) throws Exception {
         String body = """
                 {
-                  "errorCode": "MODEL_CALL_FAILED",
+                  "errorCode": "%s",
                   "errorMessage": "%s"
                 }
-                """.formatted(errorMessage);
+                """.formatted(errorCode, errorMessage);
         return mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/failed", taskId), "POST",
                         "/api/internal/v1/tasks/%d/failed".formatted(taskId), body)
                         .contentType(MediaType.APPLICATION_JSON)
