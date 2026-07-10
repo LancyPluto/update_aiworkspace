@@ -54,7 +54,7 @@ export const workspaceNavGroups: { label?: string; items: WorkspaceNavItem[] }[]
 ]
 
 export const workspaceBottomNav: WorkspaceNavItem[] = [
-  { label: "会员与算力", to: "/billing", match: ["/billing", "/pricing"] },
+  { label: "会员与算力", icon: Ticket, to: "/billing", match: ["/billing", "/pricing"] },
 ]
 
 export const workspaceShowcaseTools: WorkspaceStaticToolItem[] = [

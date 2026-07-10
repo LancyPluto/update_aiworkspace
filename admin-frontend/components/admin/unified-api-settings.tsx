@@ -68,6 +68,10 @@ import { toast } from "sonner"
 
 const adminBasePath = (process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || "").replace(/\/$/, "")
 const VISION_INPUT_CAPABILITY = "VISION_INPUT"
+const DEFAULT_USD_CNY_RATE = 7.2
+const USD_CNY_RATE = Number.isFinite(Number(process.env.NEXT_PUBLIC_USD_CNY_RATE))
+  ? Number(process.env.NEXT_PUBLIC_USD_CNY_RATE)
+  : DEFAULT_USD_CNY_RATE
 
 function VendorIcon({ iconAsset, label }: { iconAsset: string; label: string }) {
   const [failed, setFailed] = useState(false)
@@ -383,7 +387,12 @@ const emptyAccountForm = (): AccountFormState => ({
   enabled: true,
 })
 
-type ModelFormState = AgentModelConfigPayload & { id?: number; endpointPath?: string | null }
+type ModelFormState = AgentModelConfigPayload & {
+  id?: number
+  endpointPath?: string | null
+  pricingCurrency?: "CNY" | "USD"
+  exchangeRateToCny?: number
+}
 
 const emptyModelForm = (): ModelFormState => ({
   vendorAccountId: undefined,
@@ -400,6 +409,8 @@ const emptyModelForm = (): ModelFormState => ({
   outputTokenPricePer1m: 0,
   billingUnit: "TOKEN_PER_M",
   unitPrice: 0,
+  pricingCurrency: "CNY",
+  exchangeRateToCny: 1,
   enabled: true,
   agentEnabled: true,
   isDefault: false,
@@ -466,6 +477,40 @@ const billingUnitOptions: Array<{ value: NonNullable<AgentModelConfigPayload["bi
 function numberOrZero(value: unknown) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : 0
+}
+
+function normalizedCurrency(value?: string | null) {
+  return (value || "CNY").trim().toUpperCase() === "USD" ? "USD" : "CNY"
+}
+
+function currencySymbol(currency?: string | null) {
+  return normalizedCurrency(currency) === "USD" ? "$" : "¥"
+}
+
+function currencyRateToCny(currency?: string | null) {
+  return normalizedCurrency(currency) === "USD" ? USD_CNY_RATE : 1
+}
+
+function inferBalanceCurrency(vendorCode?: string | null, baseUrl?: string | null) {
+  const vendor = (vendorCode || "").trim().toLowerCase()
+  const url = (baseUrl || "").trim().toLowerCase()
+  if (url.includes("ofox.ai") || (vendor === "openai" && url.includes("openai"))) {
+    return "USD"
+  }
+  return "CNY"
+}
+
+function roundMoney(value: number) {
+  return Number(value.toFixed(6))
+}
+
+function priceToCny(value: unknown, currency?: string | null) {
+  return roundMoney(numberOrZero(value) * currencyRateToCny(currency))
+}
+
+function priceFromCny(value: unknown, currency?: string | null) {
+  const rate = currencyRateToCny(currency)
+  return roundMoney(numberOrZero(value) / rate)
 }
 
 function normalizeOptionalUrl(value?: string | null) {
@@ -604,6 +649,15 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     }
     return vendorAccounts
   }, [accountById, modelForm.vendorAccountId, modelVendorCode, overview])
+
+  const selectedModelAccount = useMemo(
+    () => (modelForm.vendorAccountId ? accountById.get(modelForm.vendorAccountId) : undefined),
+    [accountById, modelForm.vendorAccountId],
+  )
+
+  const modelPricingCurrency = normalizedCurrency(modelForm.pricingCurrency || selectedModelAccount?.balanceCurrency)
+  const modelPricingSymbol = currencySymbol(modelPricingCurrency)
+  const modelPricingRate = currencyRateToCny(modelPricingCurrency)
 
   const fetchOverviewData = useCallback(async () => {
     const [data, catalog] = await Promise.all([
@@ -1067,12 +1121,14 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
   function openCreateAccount(vendorCode: string, label: string) {
     const meta = providerForVendor(providers, vendorCode)
     const existingCount = overview?.vendors.find((vendor) => vendor.vendorCode === vendorCode)?.accounts.length ?? 0
+    const baseUrl = meta?.defaultBaseUrl || ""
     setAccountForm({
       ...emptyAccountForm(),
       vendorCode,
       accountName: `账户${existingCount + 1}`,
-      baseUrl: meta?.defaultBaseUrl || "",
+      baseUrl,
       balanceQueryMode: defaultBalanceModeForVendor(vendorCode),
+      balanceCurrency: inferBalanceCurrency(vendorCode, baseUrl),
     })
     setAccountDialogOpen(true)
   }
@@ -1147,6 +1203,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     const account = vendor.accounts.find((a) => a.id === accountId) || vendor.accounts[0]
     const meta = providerForVendor(providers, vendor.vendorCode, vendor.models[0]?.provider)
     const defaultProvider = meta?.code || vendor.models[0]?.provider || "openai_compatible"
+    const pricingCurrency = normalizedCurrency(account?.balanceCurrency)
     setModelVendorCode(vendor.vendorCode)
     setModelForm({
       ...emptyModelForm(),
@@ -1159,12 +1216,16 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       executionTask: routeTasksForModel(defaultProvider, modelCapabilitiesForProvider(undefined, meta))[0]?.value || "",
       executionOptionsJson: "",
       billingUnit: (meta?.billingDefault as AgentModelConfigPayload["billingUnit"]) || "TOKEN_PER_M",
+      pricingCurrency,
+      exchangeRateToCny: currencyRateToCny(pricingCurrency),
     })
     setModelDialogOpen(true)
   }
 
   function openEditModel(model: UnifiedApiModelItem, vendorCode: string) {
     const meta = providerForVendor(providers, vendorCode, model.provider)
+    const account = model.vendorAccountId ? accountById.get(model.vendorAccountId) : undefined
+    const pricingCurrency = normalizedCurrency(account?.balanceCurrency)
     setModelVendorCode(vendorCode)
     setModelForm({
       id: model.id,
@@ -1183,10 +1244,12 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       isDefault: model.isDefault ?? false,
       capabilities: modelCapabilitiesForProvider(model.capabilities, meta),
       timeoutSeconds: 60,
-      inputTokenPricePer1m: model.inputTokenPricePer1m ?? 0,
-      outputTokenPricePer1m: model.outputTokenPricePer1m ?? 0,
+      inputTokenPricePer1m: priceFromCny(model.inputTokenPricePer1m, pricingCurrency),
+      outputTokenPricePer1m: priceFromCny(model.outputTokenPricePer1m, pricingCurrency),
       billingUnit: (model.billingUnit as AgentModelConfigPayload["billingUnit"]) || "TOKEN_PER_M",
-      unitPrice: model.unitPrice ?? 0,
+      unitPrice: priceFromCny(model.unitPrice, pricingCurrency),
+      pricingCurrency,
+      exchangeRateToCny: currencyRateToCny(pricingCurrency),
     })
     setModelDialogOpen(true)
   }
@@ -1248,12 +1311,14 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       const scrollY = typeof window === "undefined" ? 0 : window.scrollY
       const modelPayload = { ...modelForm }
       delete modelPayload.endpointPath
+      delete modelPayload.pricingCurrency
+      delete modelPayload.exchangeRateToCny
       const payload: AgentModelConfigPayload = {
         ...modelPayload,
         apiKey: "",
-        inputTokenPricePer1m: numberOrZero(modelForm.inputTokenPricePer1m),
-        outputTokenPricePer1m: numberOrZero(modelForm.outputTokenPricePer1m),
-        unitPrice: numberOrZero(modelForm.unitPrice),
+        inputTokenPricePer1m: priceToCny(modelForm.inputTokenPricePer1m, modelPricingCurrency),
+        outputTokenPricePer1m: priceToCny(modelForm.outputTokenPricePer1m, modelPricingCurrency),
+        unitPrice: priceToCny(modelForm.unitPrice, modelPricingCurrency),
       }
       if (modelForm.id) {
         await updateAgentModelConfig(modelForm.id, payload)
@@ -1984,6 +2049,24 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                   <p className="text-xs text-muted-foreground">手填余额会在计费日志写入后按厂商成本自动扣减。</p>
                 )}
               </div>
+              <div className="space-y-2">
+                <Label>余额币种</Label>
+                <Select
+                  value={normalizedCurrency(accountForm.balanceCurrency)}
+                  onValueChange={(value) => setAccountForm((f) => ({ ...f, balanceCurrency: normalizedCurrency(value) }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="CNY">人民币 CNY</SelectItem>
+                    <SelectItem value="USD">美元 USD</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  oFox/OpenAI 余额通常是美元；绑定该账户的模型成本会按此币种录入并自动折算。
+                </p>
+              </div>
             </div>
             <div className="space-y-2">
               <Label>低余额阈值</Label>
@@ -2076,10 +2159,23 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 value={modelForm.vendorAccountId ? String(modelForm.vendorAccountId) : undefined}
                 onValueChange={(value) => {
                   const accountId = Number(value)
-                  setModelForm((form) => ({
-                    ...form,
-                    vendorAccountId: Number.isFinite(accountId) ? accountId : undefined,
-                  }))
+                  const nextAccount = Number.isFinite(accountId) ? accountById.get(accountId) : undefined
+                  const nextCurrency = normalizedCurrency(nextAccount?.balanceCurrency)
+                  setModelForm((form) => {
+                    const previousCurrency = normalizedCurrency(form.pricingCurrency || selectedModelAccount?.balanceCurrency)
+                    const inputCny = priceToCny(form.inputTokenPricePer1m, previousCurrency)
+                    const outputCny = priceToCny(form.outputTokenPricePer1m, previousCurrency)
+                    const unitCny = priceToCny(form.unitPrice, previousCurrency)
+                    return {
+                      ...form,
+                      vendorAccountId: Number.isFinite(accountId) ? accountId : undefined,
+                      inputTokenPricePer1m: priceFromCny(inputCny, nextCurrency),
+                      outputTokenPricePer1m: priceFromCny(outputCny, nextCurrency),
+                      unitPrice: priceFromCny(unitCny, nextCurrency),
+                      pricingCurrency: nextCurrency,
+                      exchangeRateToCny: currencyRateToCny(nextCurrency),
+                    }
+                  })
                 }}
               >
                 <SelectTrigger>
@@ -2312,11 +2408,16 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 <p className="text-xs text-muted-foreground">
                   {billingUnitOptions.find((option) => option.value === modelForm.billingUnit)?.description || "维护该模型的成本口径"}
                 </p>
+                {modelPricingCurrency === "USD" ? (
+                  <p className="text-xs text-amber-600">
+                    当前绑定账户余额币种为 USD，成本按美元录入，保存时按 1 USD = {modelPricingRate} CNY 自动折算为人民币成本。
+                  </p>
+                ) : null}
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 {modelForm.billingUnit === "PER_CALL" || modelForm.billingUnit === "PER_SECOND" ? (
                   <div className="space-y-2 sm:col-span-2">
-                    <Label>{modelForm.billingUnit === "PER_SECOND" ? "每秒成本" : "单次调用成本"}</Label>
+                    <Label>{modelForm.billingUnit === "PER_SECOND" ? "每秒成本" : "单次调用成本"}（{modelPricingSymbol}）</Label>
                     <Input
                       type="number"
                       min="0"
@@ -2324,11 +2425,16 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                       value={modelForm.unitPrice ?? 0}
                       onChange={(e) => setModelForm((f) => ({ ...f, unitPrice: numberOrZero(e.target.value) }))}
                     />
+                    {modelPricingCurrency === "USD" ? (
+                      <p className="text-xs text-muted-foreground">
+                        将保存为 ¥{priceToCny(modelForm.unitPrice, modelPricingCurrency)}/单位。
+                      </p>
+                    ) : null}
                   </div>
                 ) : (
                   <>
                     <div className="space-y-2">
-                      <Label>输入成本 / 百万 Token</Label>
+                      <Label>输入成本 / 百万 Token（{modelPricingSymbol}）</Label>
                       <Input
                         type="number"
                         min="0"
@@ -2336,9 +2442,14 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                         value={modelForm.inputTokenPricePer1m ?? 0}
                         onChange={(e) => setModelForm((f) => ({ ...f, inputTokenPricePer1m: numberOrZero(e.target.value) }))}
                       />
+                      {modelPricingCurrency === "USD" ? (
+                        <p className="text-xs text-muted-foreground">
+                          将保存为 ¥{priceToCny(modelForm.inputTokenPricePer1m, modelPricingCurrency)}/百万。
+                        </p>
+                      ) : null}
                     </div>
                     <div className="space-y-2">
-                      <Label>输出成本 / 百万 Token</Label>
+                      <Label>输出成本 / 百万 Token（{modelPricingSymbol}）</Label>
                       <Input
                         type="number"
                         min="0"
@@ -2346,10 +2457,15 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                         value={modelForm.outputTokenPricePer1m ?? 0}
                         onChange={(e) => setModelForm((f) => ({ ...f, outputTokenPricePer1m: numberOrZero(e.target.value) }))}
                       />
+                      {modelPricingCurrency === "USD" ? (
+                        <p className="text-xs text-muted-foreground">
+                          将保存为 ¥{priceToCny(modelForm.outputTokenPricePer1m, modelPricingCurrency)}/百万。
+                        </p>
+                      ) : null}
                     </div>
                     {modelForm.billingUnit === "IMAGE_TOKEN" ? (
                       <div className="space-y-2 sm:col-span-2">
-                        <Label>图片基础成本</Label>
+                        <Label>图片基础成本（{modelPricingSymbol}）</Label>
                         <Input
                           type="number"
                           min="0"
@@ -2357,6 +2473,11 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                           value={modelForm.unitPrice ?? 0}
                           onChange={(e) => setModelForm((f) => ({ ...f, unitPrice: numberOrZero(e.target.value) }))}
                         />
+                        {modelPricingCurrency === "USD" ? (
+                          <p className="text-xs text-muted-foreground">
+                            将保存为 ¥{priceToCny(modelForm.unitPrice, modelPricingCurrency)}/次。
+                          </p>
+                        ) : null}
                       </div>
                     ) : null}
                   </>

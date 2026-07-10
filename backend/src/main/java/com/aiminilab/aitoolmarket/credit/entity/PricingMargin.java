@@ -18,6 +18,8 @@ public class PricingMargin {
     private Long scopeRef;
     private BigDecimal markupRatio;
     private Integer minCredits;
+    private Integer imageEstimateInputTokens;
+    private Integer imageEstimateOutputTokens;
     private Boolean enabled;
     private String remark;
     private LocalDateTime createdAt;
@@ -33,6 +35,10 @@ public class PricingMargin {
     public void setMarkupRatio(BigDecimal markupRatio) { this.markupRatio = markupRatio; }
     public Integer getMinCredits() { return minCredits; }
     public void setMinCredits(Integer minCredits) { this.minCredits = minCredits; }
+    public Integer getImageEstimateInputTokens() { return imageEstimateInputTokens; }
+    public void setImageEstimateInputTokens(Integer imageEstimateInputTokens) { this.imageEstimateInputTokens = imageEstimateInputTokens; }
+    public Integer getImageEstimateOutputTokens() { return imageEstimateOutputTokens; }
+    public void setImageEstimateOutputTokens(Integer imageEstimateOutputTokens) { this.imageEstimateOutputTokens = imageEstimateOutputTokens; }
     public Boolean getEnabled() { return enabled; }
     public void setEnabled(Boolean enabled) { this.enabled = enabled; }
     public String getRemark() { return remark; }

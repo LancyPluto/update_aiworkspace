@@ -6,6 +6,8 @@ export interface PricingMargin {
   scopeRef?: number | null
   markupRatio: number
   minCredits: number
+  imageEstimateInputTokens?: number | null
+  imageEstimateOutputTokens?: number | null
   enabled: boolean
   remark?: string | null
 }

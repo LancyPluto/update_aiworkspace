@@ -46,6 +46,8 @@ public class PricingConfigAdminServiceImpl implements PricingConfigAdminService 
                 ? new BigDecimal("1.20")
                 : request.markupRatio();
         int minCredits = request.minCredits() == null ? 0 : Math.max(0, request.minCredits());
+        Integer imageEstimateInputTokens = positiveOrNull(request.imageEstimateInputTokens());
+        Integer imageEstimateOutputTokens = positiveOrNull(request.imageEstimateOutputTokens());
 
         PricingMargin entity;
         if (request.id() != null) {
@@ -63,6 +65,8 @@ public class PricingConfigAdminServiceImpl implements PricingConfigAdminService 
         entity.setScopeRef(scopeRef);
         entity.setMarkupRatio(markup);
         entity.setMinCredits(minCredits);
+        entity.setImageEstimateInputTokens(imageEstimateInputTokens);
+        entity.setImageEstimateOutputTokens(imageEstimateOutputTokens);
         entity.setEnabled(request.enabled() == null ? Boolean.TRUE : request.enabled());
         entity.setRemark(request.remark());
         if (entity.getId() == null) {
@@ -161,5 +165,9 @@ public class PricingConfigAdminServiceImpl implements PricingConfigAdminService 
             throw new BusinessException(ErrorCode.PARAM_ERROR, "该作用域需要指定关联 ID");
         }
         return scopeRef;
+    }
+
+    private Integer positiveOrNull(Integer value) {
+        return value == null || value <= 0 ? null : value;
     }
 }

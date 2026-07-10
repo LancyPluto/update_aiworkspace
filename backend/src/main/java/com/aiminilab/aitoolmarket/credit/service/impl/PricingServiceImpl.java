@@ -46,13 +46,13 @@ public class PricingServiceImpl implements PricingService {
     public PricingQuote computeQuote(AiTool tool, AgentModelConfig modelConfig, JsonNode params,
                                      PricingUsage usage, int fallbackCredits) {
         int fallback = Math.max(0, fallbackCredits);
-        ResolvedMargin margin = resolveMargin(tool, modelConfig);
+        ResolvedPricing pricing = resolvePricing(tool, modelConfig);
         if (modelConfig == null) {
-            return fallbackQuote(fallback, margin);
+            return fallbackQuote(fallback, pricing);
         }
-        VendorCost vendor = computeVendorCost(modelConfig, params, usage);
+        VendorCost vendor = computeVendorCost(modelConfig, params, usage, pricing);
         if (!vendor.derived) {
-            return fallbackQuote(fallback, margin);
+            return fallbackQuote(fallback, pricing);
         }
 
         List<PricingBreakdownItem> breakdown = new ArrayList<>();
@@ -65,15 +65,15 @@ public class PricingServiceImpl implements PricingService {
         adjustedCost = rules.cost;
 
         int baseCredits = costToCredits(adjustedCost) + rules.extraCredits;
-        int charge = applyMarkup(baseCredits, margin.ratio);
-        if (charge < margin.minCredits) {
-            breakdown.add(PricingBreakdownItem.of("保底价", "低于保底价，按最低收费", margin.minCredits - charge));
-            charge = margin.minCredits;
+        int charge = applyMarkup(baseCredits, pricing.ratio);
+        if (charge < pricing.minCredits) {
+            breakdown.add(PricingBreakdownItem.of("保底价", "低于保底价，按最低收费", pricing.minCredits - charge));
+            charge = pricing.minCredits;
         }
         breakdown.add(PricingBreakdownItem.of("平台加价",
-                "加价 " + margin.ratio.stripTrailingZeros().toPlainString() + " 倍", charge - baseCredits));
+                "加价 " + pricing.ratio.stripTrailingZeros().toPlainString() + " 倍", charge - baseCredits));
 
-        return new PricingQuote(adjustedCost, baseCredits, margin.ratio, charge, true, breakdown);
+        return new PricingQuote(adjustedCost, baseCredits, pricing.ratio, charge, true, breakdown);
     }
 
     @Override
@@ -81,14 +81,15 @@ public class PricingServiceImpl implements PricingService {
         return computeQuote(null, modelConfig, null, new PricingUsage(promptTokens, completionTokens, null), 0);
     }
 
-    private PricingQuote fallbackQuote(int fallbackCredits, ResolvedMargin margin) {
-        int charge = Math.max(fallbackCredits, margin.minCredits);
+    private PricingQuote fallbackQuote(int fallbackCredits, ResolvedPricing pricing) {
+        int charge = Math.max(fallbackCredits, pricing.minCredits);
         List<PricingBreakdownItem> breakdown = List.of(
                 PricingBreakdownItem.of("预设算力", "未匹配模型计价，按工具预设值", charge));
-        return new PricingQuote(BigDecimal.ZERO, fallbackCredits, margin.ratio, charge, false, breakdown);
+        return new PricingQuote(BigDecimal.ZERO, fallbackCredits, pricing.ratio, charge, false, breakdown);
     }
 
-    private VendorCost computeVendorCost(AgentModelConfig modelConfig, JsonNode params, PricingUsage usage) {
+    private VendorCost computeVendorCost(AgentModelConfig modelConfig, JsonNode params, PricingUsage usage,
+                                         ResolvedPricing pricing) {
         String unit = modelConfig.getBillingUnit();
         if ((BILLING_UNIT_PER_CALL.equals(unit) || BILLING_UNIT_PER_SECOND.equals(unit))
                 && modelConfig.getUnitPrice() != null) {
@@ -99,8 +100,11 @@ public class PricingServiceImpl implements PricingService {
         }
         if (BILLING_UNIT_IMAGE_TOKEN.equals(unit)) {
             if (usage == null) {
-                BigDecimal cost = tokenCost(modelConfig, IMAGE_INPUT_TOKEN_UPPER_ESTIMATE, IMAGE_OUTPUT_TOKEN_UPPER_ESTIMATE);
-                return cost.compareTo(BigDecimal.ZERO) > 0 ? VendorCost.derived(cost, "图片 token 预估") : VendorCost.fallback();
+                BigDecimal cost = tokenCost(modelConfig, pricing.imageEstimateInputTokens, pricing.imageEstimateOutputTokens);
+                String detail = "图片 token 预估 "
+                        + pricing.imageEstimateInputTokens + " input + "
+                        + pricing.imageEstimateOutputTokens + " output";
+                return cost.compareTo(BigDecimal.ZERO) > 0 ? VendorCost.derived(cost, detail) : VendorCost.fallback();
             }
             if (!usage.hasTokens()) {
                 return VendorCost.fallback();
@@ -252,24 +256,50 @@ public class PricingServiceImpl implements PricingService {
         return rule.getFactor() == null ? BigDecimal.ONE : rule.getFactor();
     }
 
-    private ResolvedMargin resolveMargin(AiTool tool, AgentModelConfig modelConfig) {
+    private ResolvedPricing resolvePricing(AiTool tool, AgentModelConfig modelConfig) {
+        PricingMargin modelMargin = null;
+        PricingMargin categoryMargin = null;
+        PricingMargin globalMargin = null;
         if (modelConfig != null && modelConfig.getId() != null) {
-            ResolvedMargin model = toMargin(pricingMarginMapper.findEnabledByScope("MODEL", modelConfig.getId()));
-            if (model != null) {
-                return model;
-            }
+            modelMargin = pricingMarginMapper.findEnabledByScope("MODEL", modelConfig.getId());
         }
         if (tool != null && tool.getCategoryId() != null) {
-            ResolvedMargin category = toMargin(pricingMarginMapper.findEnabledByScope("CATEGORY", tool.getCategoryId()));
-            if (category != null) {
-                return category;
-            }
+            categoryMargin = pricingMarginMapper.findEnabledByScope("CATEGORY", tool.getCategoryId());
         }
-        ResolvedMargin global = toMargin(pricingMarginMapper.findEnabledByScope("GLOBAL", 0L));
-        return global != null ? global : new ResolvedMargin(DEFAULT_MARKUP, 0);
+        globalMargin = pricingMarginMapper.findEnabledByScope("GLOBAL", 0L);
+
+        ResolvedPricing scoped = toPricing(firstNonNull(modelMargin, categoryMargin, globalMargin));
+        if (scoped == null) {
+            scoped = new ResolvedPricing(DEFAULT_MARKUP, 0,
+                    IMAGE_INPUT_TOKEN_UPPER_ESTIMATE, IMAGE_OUTPUT_TOKEN_UPPER_ESTIMATE);
+        }
+        return new ResolvedPricing(
+                scoped.ratio,
+                scoped.minCredits,
+                firstPositive(
+                        modelMargin == null ? null : modelMargin.getImageEstimateInputTokens(),
+                        categoryMargin == null ? null : categoryMargin.getImageEstimateInputTokens(),
+                        globalMargin == null ? null : globalMargin.getImageEstimateInputTokens(),
+                        IMAGE_INPUT_TOKEN_UPPER_ESTIMATE),
+                firstPositive(
+                        modelMargin == null ? null : modelMargin.getImageEstimateOutputTokens(),
+                        categoryMargin == null ? null : categoryMargin.getImageEstimateOutputTokens(),
+                        globalMargin == null ? null : globalMargin.getImageEstimateOutputTokens(),
+                        IMAGE_OUTPUT_TOKEN_UPPER_ESTIMATE)
+        );
     }
 
-    private ResolvedMargin toMargin(PricingMargin margin) {
+    @SafeVarargs
+    private final <T> T firstNonNull(T... items) {
+        for (T item : items) {
+            if (item != null) {
+                return item;
+            }
+        }
+        return null;
+    }
+
+    private ResolvedPricing toPricing(PricingMargin margin) {
         if (margin == null) {
             return null;
         }
@@ -277,7 +307,22 @@ public class PricingServiceImpl implements PricingService {
                 ? DEFAULT_MARKUP
                 : margin.getMarkupRatio();
         int min = margin.getMinCredits() == null ? 0 : Math.max(0, margin.getMinCredits());
-        return new ResolvedMargin(ratio, min);
+        return new ResolvedPricing(
+                ratio,
+                min,
+                positiveOrDefault(margin.getImageEstimateInputTokens(), IMAGE_INPUT_TOKEN_UPPER_ESTIMATE),
+                positiveOrDefault(margin.getImageEstimateOutputTokens(), IMAGE_OUTPUT_TOKEN_UPPER_ESTIMATE));
+    }
+
+    private int firstPositive(Integer first, Integer second, Integer third, int fallback) {
+        if (first != null && first > 0) return first;
+        if (second != null && second > 0) return second;
+        if (third != null && third > 0) return third;
+        return fallback;
+    }
+
+    private int positiveOrDefault(Integer value, int fallback) {
+        return value == null || value <= 0 ? fallback : value;
     }
 
     private int applyMarkup(int baseCredits, BigDecimal ratio) {
@@ -331,7 +376,12 @@ public class PricingServiceImpl implements PricingService {
         return rule.getParamKey() + " " + op + " " + rule.getMatchValue();
     }
 
-    private record ResolvedMargin(BigDecimal ratio, int minCredits) {
+    private record ResolvedPricing(
+            BigDecimal ratio,
+            int minCredits,
+            int imageEstimateInputTokens,
+            int imageEstimateOutputTokens
+    ) {
     }
 
     private record RuleOutcome(BigDecimal cost, int extraCredits) {

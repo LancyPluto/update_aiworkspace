@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS pricing_margins (
   scope_ref BIGINT NOT NULL DEFAULT 0,                 -- categoryId 或 modelConfigId；GLOBAL 固定为 0
   markup_ratio DECIMAL(10,4) NOT NULL DEFAULT 1.2000,  -- 加价倍率（含成本，1.20 = 加价 20%）
   min_credits INT NOT NULL DEFAULT 0,                  -- 保底价（最低收取算力，防止低价单亏损）
+  image_estimate_input_tokens INT NULL,                -- IMAGE_TOKEN 预估输入 token；空值继承上级或默认 8000
+  image_estimate_output_tokens INT NULL,               -- IMAGE_TOKEN 预估输出 token；空值继承上级或默认 8000
   enabled TINYINT NOT NULL DEFAULT 1,
   remark VARCHAR(255),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

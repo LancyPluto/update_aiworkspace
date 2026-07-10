@@ -74,7 +74,7 @@ import {
 } from "./dashboardAttribution"
 import { buildDashboardTaskParams, buildOptimisticDashboardTask } from "./dashboardTaskFactory"
 import { normalizeMediaUrl, resolveSummaryToolCoverUrl } from "@/utils/toolCoverMedia"
-import { resolveCommunityDerivativeUrl, resolveOssVideoPosterUrl } from "@/utils/communityPostMedia"
+import { resolveOssImageDerivativeUrl, resolveOssVideoPosterUrl } from "@/utils/communityPostMedia"
 import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import { forceDownload } from "@/utils/download"
 import { isWorkflowToolCode } from "@/adapters/toolPresentationAdapter"
@@ -2481,7 +2481,7 @@ onUnmounted(() => {
                         <img
                           v-for="image in imageItemsForBlocks(item.blocks)"
                           :key="image.url"
-                          :src="resolveCommunityDerivativeUrl(image.url, 'image-thumb') || image.url"
+                          :src="resolveOssImageDerivativeUrl(image.url, 640, 85) || image.url"
                           :alt="image.label || item.task.toolName"
                           class="dashboard-feed-image"
                           loading="lazy"

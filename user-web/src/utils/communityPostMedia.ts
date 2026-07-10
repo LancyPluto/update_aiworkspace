@@ -33,13 +33,16 @@ function communityMediaDerivativeUrl(value: string, suffix: string, extension: s
 
 export function resolveCommunityDerivativeUrl(value?: string | null, kind?: CommunityDerivativeKind): string {
   if (!value || !kind) return ""
+  const source = normalizeCommunityMediaUrl(value)
+  if (!source || source.startsWith("data:")) return ""
   if (kind === "image-thumb") {
     const ossThumb = resolveOssImageDerivativeUrl(value, 640, 85)
     if (ossThumb) return ossThumb
-    return normalizeCommunityMediaUrl(value)
+    return communityMediaDerivativeUrl(value, "thumb-640", "webp")
   }
   if (kind === "image-lqip") {
-    return resolveOssImageDerivativeUrl(value, 32, 30)
+    const ossLqip = resolveOssImageDerivativeUrl(value, 32, 30)
+    return ossLqip || communityMediaDerivativeUrl(value, "lqip-32", "webp")
   }
   if (kind === "video-poster") {
     const ossPoster = resolveOssVideoPosterUrl(value)

@@ -1,3 +1,4 @@
+from client.seedance_video_client import SeedanceVideoTimeoutError
 from handlers.video_generation_handler import VideoGenerationHandler
 
 
@@ -78,6 +79,11 @@ class StrictSeedanceClient:
         }
 
 
+class TimeoutSeedanceClient:
+    def generate_video(self, **_kwargs) -> dict:
+        raise SeedanceVideoTimeoutError("seedance poll timed out")
+
+
 class FakeVideoPersister:
     def find_existing_task_video(self, *, task_id: int) -> dict[str, str] | None:
         return None
@@ -134,3 +140,22 @@ def test_seedance_video_handler_omits_tail_frame_protocol_field() -> None:
     assert seedance.request["prompt"] == "扣篮"
     assert seedance.request["duration"] == "3"
     assert seedance.request["aspect_ratio"] == "16:9"
+
+
+def test_video_handler_timeout_marks_failed_for_credit_release() -> None:
+    backend = FakeBackendClient()
+    handler = VideoGenerationHandler(
+        backend_client=backend,
+        seedance_client=TimeoutSeedanceClient(),
+        video_persister=FakeVideoPersister(),
+    )
+
+    result = handler.handle({"taskId": 131, "traceId": "trace-timeout"})
+
+    assert result["status"] == "FAILED"
+    assert result["errorCode"] == "MODEL_TIMEOUT"
+    assert backend.success_payload is None
+    assert backend.failed_payload == {
+        "errorCode": "MODEL_TIMEOUT",
+        "errorMessage": "seedance poll timed out",
+    }
