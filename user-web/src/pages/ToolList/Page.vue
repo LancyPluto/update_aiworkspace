@@ -71,8 +71,22 @@ function coverForTopTool(modality: string): string {
   return tool ? coverSrcForTool(tool) : ""
 }
 
+function comparisonModeForTool(tool: AITool): string | undefined {
+  return tool.frontendStyle?.mediaDisplayMode || tool.mediaDisplayMode
+}
+
+function comparisonOriginalForTool(tool: AITool): string {
+  return tool.frontendStyle?.comparisonOriginalUrl || tool.comparisonOriginalUrl || ""
+}
+
+function comparisonEffectForTool(tool: AITool): string {
+  return tool.frontendStyle?.comparisonEffectUrl || tool.comparisonEffectUrl || ""
+}
+
 function usesComparisonMedia(tool: AITool): boolean {
-  return tool.mediaDisplayMode === "comparison" && Boolean(tool.comparisonOriginalUrl) && Boolean(tool.comparisonEffectUrl)
+  return comparisonModeForTool(tool) === "comparison"
+    && Boolean(comparisonOriginalForTool(tool))
+    && Boolean(comparisonEffectForTool(tool))
 }
 
 
@@ -415,8 +429,8 @@ watch(
           <div class="marketplace-tool-media">
             <ToolComparisonCover
               v-if="usesComparisonMedia(tool)"
-              :before-src="tool.comparisonOriginalUrl || ''"
-              :after-src="tool.comparisonEffectUrl || ''"
+              :before-src="comparisonOriginalForTool(tool)"
+              :after-src="comparisonEffectForTool(tool)"
               :alt="tool.name"
             />
             <template v-else>

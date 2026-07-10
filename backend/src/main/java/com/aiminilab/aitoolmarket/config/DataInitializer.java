@@ -619,6 +619,21 @@ public class DataInitializer implements CommandLineRunner {
     }
 
     private void ensureSchemaCompatibility() {
+        ensureTable("admin_operation_logs", """
+                CREATE TABLE admin_operation_logs (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  admin_id BIGINT NOT NULL,
+                  operation_type VARCHAR(64) NOT NULL,
+                  target_type VARCHAR(64) NOT NULL,
+                  target_id BIGINT NULL,
+                  content_json TEXT NULL,
+                  reason VARCHAR(512) NULL,
+                  ip_address VARCHAR(64) NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
+        ensureIndex("admin_operation_logs", "idx_admin_operation_logs_created_at", "CREATE INDEX idx_admin_operation_logs_created_at ON admin_operation_logs(created_at)");
+        ensureIndex("admin_operation_logs", "idx_admin_operation_logs_admin_id", "CREATE INDEX idx_admin_operation_logs_admin_id ON admin_operation_logs(admin_id)");
         ensureColumn("users", "avatar_url", "ALTER TABLE users ADD COLUMN avatar_url VARCHAR(512) NULL");
         ensureColumn("users", "bio", "ALTER TABLE users ADD COLUMN bio VARCHAR(280) NULL");
         ensureColumn("users", "auto_publish_assets", "ALTER TABLE users ADD COLUMN auto_publish_assets TINYINT NOT NULL DEFAULT 1");

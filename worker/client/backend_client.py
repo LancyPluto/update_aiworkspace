@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import hashlib
 import hmac
 import json
@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import requests
 
 from config import settings
+from observability.metrics import record_backend_request, record_lease_renew, record_status_update
 
 
 LOGGER = logging.getLogger(__name__)
@@ -173,7 +174,15 @@ class BackendClient:
             body = json.dumps(json_body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
             kwargs["data"] = body
         kwargs["headers"] = self._signature_headers(method, path, body, trace_id=trace_id)
-        return self.session.request(method, self._url(path), **kwargs)
+        start = time.perf_counter()
+        try:
+            response = self.session.request(method, self._url(path), **kwargs)
+        except requests.RequestException:
+            record_backend_request(method, path, "network_error", time.perf_counter() - start)
+            raise
+        record_backend_request(method, path, str(response.status_code), time.perf_counter() - start)
+        _record_backend_operation_metric(path, response.status_code)
+        return response
 
     def _signature_headers(self, method: str, path: str, body: bytes, *, trace_id: str | None = None) -> dict[str, str]:
         timestamp = str(int(time.time() * 1000))
@@ -250,3 +259,17 @@ def _infer_failure_stage(error_code: str) -> str:
     if normalized.startswith("MODEL_"):
         return "PROVIDER_SUBMITTED"
     return "UNKNOWN"
+
+
+def _record_backend_operation_metric(path: str, status_code: int) -> None:
+    ok = 200 <= int(status_code) < 300
+    normalized = urlsplit(path).path
+    if normalized.endswith("/processing"):
+        record_status_update("processing" if ok else "processing_failed")
+    elif normalized.endswith("/success"):
+        record_status_update("success" if ok else "success_failed")
+    elif normalized.endswith("/failed"):
+        record_status_update("failed" if ok else "failed_failed")
+    elif normalized.endswith("/lease/renew"):
+        record_lease_renew("success" if ok else "failed")
+

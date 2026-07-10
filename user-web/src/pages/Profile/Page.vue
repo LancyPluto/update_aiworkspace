@@ -119,7 +119,7 @@ const giftCardCreditTotal = computed(() =>
 )
 
 async function loadProfileStats() {
-  if (!auth.token) return
+  if (!auth.isLoggedIn) return
   loadingStats.value = true
   try {
     const [creditRes, allTasks, completedTasks] = await Promise.all([
@@ -204,7 +204,7 @@ function startCancelCooldown(seconds: number) {
 }
 
 async function requestCancelSmsCode() {
-  if (!auth.token) return
+  if (!auth.isLoggedIn) return
   error.value = ""
   success.value = ""
   sendingCancelCode.value = true
@@ -221,7 +221,7 @@ async function requestCancelSmsCode() {
 }
 
 async function submitCancelAccount() {
-  if (!auth.token) return
+  if (!auth.isLoggedIn) return
   if (cancelConfirmText.value.trim() !== cancelConfirmPhrase.value) {
     error.value = `请在确认框输入“${cancelConfirmPhrase.value}”`
     return
@@ -241,7 +241,7 @@ async function submitCancelAccount() {
 }
 
 async function loadGiftCards() {
-  if (!auth.token) return
+  if (!auth.isLoggedIn) return
   loadingGiftCards.value = true
   try {
     giftCards.value = await fetchMyGiftCards({ token: auth.token })

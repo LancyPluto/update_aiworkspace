@@ -1,56 +1,87 @@
 {
   "uid": "ai-tool-market-reliability-cn",
-  "title": "AI工具市场-业务可靠性总览",
-  "tags": ["ai-tool-market", "业务可靠性", "生产化"],
+  "title": "AI工具市场-生产可靠性总览",
+  "tags": ["ai-tool-market", "业务可靠性", "Grafana", "Loki", "Alloy"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "15s",
   "time": { "from": "now-6h", "to": "now" },
-  "templating": { "list": [] },
+  "templating": {
+    "list": [
+      {
+        "name": "traceId",
+        "type": "textbox",
+        "label": "TraceId / X-Request-Id",
+        "query": "",
+        "current": { "text": "", "value": "" },
+        "hide": 0
+      }
+    ]
+  },
   "panels": [
     {
       "id": 1,
       "type": "stat",
-      "title": "后端指标采集状态",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "title": "后端采集状态",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "up{job=\"backend-actuator\"}", "legendFormat": "{{instance}}" }],
+      "targets": [{ "expr": "up{job=\"backend-actuator\"}", "legendFormat": "backend" }],
       "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
     },
     {
       "id": 2,
       "type": "stat",
-      "title": "任务成功率",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "title": "Agent采集状态",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "up{job=\"agent-service\"}", "legendFormat": "agent" }],
+      "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Worker采集状态",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "up{job=\"worker\"}", "legendFormat": "worker" }],
+      "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Alloy采集状态",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "up{job=\"alloy\"}", "legendFormat": "alloy" }],
+      "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "登录成功率(1小时)",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum(increase({__name__=~\"auth_login_attempts_total(_total)?\",result=\"success\"}[1h])) / clamp_min(sum(increase({__name__=~\"auth_login_attempts_total(_total)?\"}[1h])), 1) * 100", "legendFormat": "%" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 90 }, { "color": "green", "value": 98 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "任务成功率(1小时)",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "expr": "sum(increase({__name__=~\"ai_task_total(_total)?\",status=\"SUCCESS\"}[1h])) / clamp_min(sum(increase({__name__=~\"ai_task_total(_total)?\"}[1h])), 1) * 100", "legendFormat": "%" }],
       "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 90 }, { "color": "green", "value": 98 }] } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
     },
     {
-      "id": 3,
-      "type": "stat",
-      "title": "失败供应商成本(元)",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum(increase({__name__=~\"ai_billing_vendor_cost_cny_total(_total)?\",outcome!=\"SUCCESS\"}[6h]))", "legendFormat": "CNY" }],
-      "fieldConfig": { "defaults": { "unit": "currencyCNY", "decimals": 2, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 10 }] } }, "overrides": [] },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
-    },
-    {
-      "id": 4,
-      "type": "stat",
-      "title": "死信队列积压",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum(rabbitmq_queue_messages{queue=~\".*dead.*\"})", "legendFormat": "messages" }],
-      "fieldConfig": { "defaults": { "decimals": 0, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 10 }] } }, "overrides": [] },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
-    },
-    {
-      "id": 5,
+      "id": 7,
       "type": "timeseries",
       "title": "后端接口 QPS",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
@@ -60,7 +91,7 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
     },
     {
-      "id": 6,
+      "id": 8,
       "type": "timeseries",
       "title": "后端接口 P95 延迟",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
@@ -70,78 +101,102 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
     },
     {
-      "id": 7,
-      "type": "timeseries",
-      "title": "任务结果分布",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (status, tool_code) (increase({__name__=~\"ai_task_total(_total)?\"}[15m]))", "legendFormat": "{{status}} {{tool_code}}" }],
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "lineInterpolation": "linear", "fillOpacity": 35, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
-    },
-    {
-      "id": 8,
-      "type": "timeseries",
-      "title": "执行租约领取/续租",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [
-        { "expr": "sum by (result, reason) (rate({__name__=~\"ai_task_lease_claim_total(_total)?\"}[5m]))", "legendFormat": "claim {{result}} {{reason}}" },
-        { "expr": "sum by (result) (rate({__name__=~\"ai_task_lease_renew_total(_total)?\"}[5m]))", "legendFormat": "renew {{result}}" }
-      ],
-      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
-    },
-    {
       "id": 9,
       "type": "timeseries",
-      "title": "失败成本归因",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "title": "Web Vitals 前端体验",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (provider, failure_stage, error_code) (increase({__name__=~\"ai_billing_vendor_cost_cny_total(_total)?\",outcome!=\"SUCCESS\"}[30m]))", "legendFormat": "{{provider}} {{failure_stage}} {{error_code}}" }],
-      "fieldConfig": { "defaults": { "unit": "currencyCNY", "custom": { "drawStyle": "bars", "lineInterpolation": "linear", "fillOpacity": 35, "showPoints": "never" } }, "overrides": [] },
+      "targets": [
+        { "expr": "sum by (name, rating, page) (increase({__name__=~\"web_vital_total(_total)?\"}[15m]))", "legendFormat": "{{name}} {{rating}} {{page}}" },
+        { "expr": "sum by (name, page) (rate(web_vital_value_sum[5m])) / clamp_min(sum by (name, page) (rate(web_vital_value_count[5m])), 1)", "legendFormat": "均值 {{name}} {{page}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
     },
     {
       "id": 10,
       "type": "timeseries",
-      "title": "RabbitMQ 队列积压",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "title": "管理端操作审计",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
-        { "expr": "rabbitmq_queue_messages_ready", "legendFormat": "ready {{queue}}" },
-        { "expr": "rabbitmq_queue_messages_unacked", "legendFormat": "unacked {{queue}}" }
+        { "expr": "sum by (resource, method, result) (increase({__name__=~\"admin_operation_total(_total)?\"}[15m]))", "legendFormat": "{{method}} {{resource}} {{result}}" },
+        { "expr": "histogram_quantile(0.95, sum by (le, resource) (rate(admin_operation_duration_seconds_bucket[5m])))", "legendFormat": "P95 {{resource}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Agent Service 指标",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum by (path, status) (rate(agent_service_http_requests_total[5m]))", "legendFormat": "HTTP {{path}} {{status}}" },
+        { "expr": "sum by (entrypoint, status, error_code) (increase(agent_service_runs_completed_total[15m]))", "legendFormat": "Run {{entrypoint}} {{status}} {{error_code}}" },
+        { "expr": "sum by (tool_code, status) (increase(agent_service_tool_calls_total[15m]))", "legendFormat": "Tool {{tool_code}} {{status}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
     },
     {
       "id": 12,
-      "type": "stat",
-      "title": "登录成功率",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 28 },
+      "type": "timeseries",
+      "title": "Worker 任务与租约",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum(increase({__name__=~\"auth_login_attempts_total(_total)?\",result=\"success\"}[1h])) / clamp_min(sum(increase({__name__=~\"auth_login_attempts_total(_total)?\"}[1h])), 1) * 100", "legendFormat": "%" }],
-      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 90 }, { "color": "green", "value": 98 }] } }, "overrides": [] },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+      "targets": [
+        { "expr": "sum by (tool_code, tool_type, status, error_code) (increase(worker_tasks_completed_total[15m]))", "legendFormat": "Task {{tool_code}} {{status}} {{error_code}}" },
+        { "expr": "sum by (result, reason) (increase(worker_tasks_claim_total[15m]))", "legendFormat": "Claim {{result}} {{reason}}" },
+        { "expr": "sum by (status) (increase(worker_lease_renew_total[15m]))", "legendFormat": "Lease {{status}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
     },
     {
       "id": 13,
       "type": "timeseries",
-      "title": "Agent 工具调用结果",
-      "gridPos": { "h": 4, "w": 18, "x": 6, "y": 28 },
+      "title": "失败成本归因",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (status, tool_code) (increase({__name__=~\"ai_agent_tool_call_total(_total)?\"}[30m]))", "legendFormat": "{{status}} {{tool_code}}" }],
+      "targets": [
+        { "expr": "sum by (provider, failure_stage, error_code) (increase({__name__=~\"ai_billing_vendor_cost_cny_total(_total)?\",outcome!=\"SUCCESS\"}[30m]))", "legendFormat": "成本 {{provider}} {{failure_stage}} {{error_code}}" },
+        { "expr": "sum by (provider, failure_stage, provider_charged) (increase({__name__=~\"ai_provider_failure_total(_total)?\"}[30m]))", "legendFormat": "失败 {{provider}} {{failure_stage}} charged={{provider_charged}}" }
+      ],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "lineInterpolation": "linear", "fillOpacity": 35, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
     },
     {
-      "id": 11,
+      "id": 14,
+      "type": "timeseries",
+      "title": "RabbitMQ 队列积压",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "rabbitmq_queue_messages_ready", "legendFormat": "ready {{queue}}" },
+        { "expr": "rabbitmq_queue_messages_unacked", "legendFormat": "unacked {{queue}}" },
+        { "expr": "rabbitmq_queue_messages{queue=~\".*dead.*\"}", "legendFormat": "dead {{queue}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
+    },
+    {
+      "id": 15,
       "type": "logs",
-      "title": "TraceId 日志查询入口",
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 32 },
+      "title": "TraceId 跨服务日志查询",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 36 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{container=~\"ai-supermarket-(backend|worker|agent-service).*\"} |= \"traceId=\"", "refId": "A" }],
+      "targets": [{ "expr": "{container=~\"ai-supermarket-(backend|worker|agent-service|mysql|rabbitmq|nginx|admin-frontend|user-web).*\"} |= \"${traceId}\"", "refId": "A" }],
+      "options": { "showTime": true, "showLabels": true, "wrapLogMessage": true, "sortOrder": "Descending" }
+    },
+    {
+      "id": 16,
+      "type": "logs",
+      "title": "最近错误日志",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 45 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "expr": "{container=~\"ai-supermarket-(backend|worker|agent-service|mysql|rabbitmq|nginx|admin-frontend|user-web).*\"} |~ \"(?i)(error|exception|failed|timeout|warn)\"", "refId": "A" }],
       "options": { "showTime": true, "showLabels": true, "wrapLogMessage": true, "sortOrder": "Descending" }
     }
   ]

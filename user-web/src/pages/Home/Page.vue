@@ -490,7 +490,6 @@ watch(
                 image-class="tool-cover-comparison-media"
                 effect-class="tool-cover-comparison-effect"
                 line-class="tool-cover-comparison-line"
-                handle-class="tool-cover-comparison-handle"
               />
               <template v-else>
                 <video
@@ -1121,31 +1120,6 @@ watch(
   box-shadow: 0 0 8px rgb(0 0 0 / 0.5), 0 0 20px rgb(255 255 255 / 0.3);
   pointer-events: none;
   animation: home-comparison-pos 3s ease-in-out infinite;
-}
-
-.tool-cover-comparison-handle {
-  position: absolute;
-  top: 50%;
-  z-index: 5;
-  display: flex;
-  width: 34px;
-  height: 34px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: rgb(0 0 0 / 0.45);
-  color: var(--foreground, #333);
-  box-shadow: 0 16px 32px rgb(0 0 0 / 0.3);
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  backdrop-filter: blur(12px);
-  animation: home-comparison-pos 3s ease-in-out infinite;
-}
-
-.tool-card:hover .tool-cover-comparison-effect,
-.tool-card:hover .tool-cover-comparison-line,
-.tool-card:hover .tool-cover-comparison-handle {
-  animation-play-state: paused;
 }
 
 .modality-badge,

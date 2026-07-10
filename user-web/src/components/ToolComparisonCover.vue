@@ -10,14 +10,12 @@ const props = withDefaults(
     imageClass?: string
     effectClass?: string
     lineClass?: string
-    handleClass?: string
   }>(),
   {
     alt: "",
     imageClass: "marketplace-tool-image",
     effectClass: "marketplace-tool-image--effect",
     lineClass: "marketplace-comparison-line",
-    handleClass: "marketplace-comparison-handle",
   },
 )
 
@@ -140,13 +138,6 @@ async function onAfterVideoEnded(event: Event) {
     />
 
     <div :class="lineClass" :style="motionStyle" />
-    <div :class="handleClass" :style="motionStyle">
-      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
-        <circle cx="14" cy="14" r="13" fill="white" stroke="rgba(0,0,0,0.3)" stroke-width="1.5" />
-        <path d="M10 10L6 14L10 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-        <path d="M18 10L22 14L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-      </svg>
-    </div>
   </div>
 </template>
 
@@ -160,10 +151,8 @@ async function onAfterVideoEnded(event: Event) {
 
 .tool-comparison-cover--resetting .marketplace-tool-image--effect,
 .tool-comparison-cover--resetting .marketplace-comparison-line,
-.tool-comparison-cover--resetting .marketplace-comparison-handle,
 .tool-comparison-cover--resetting .tool-cover-comparison-effect,
-.tool-comparison-cover--resetting .tool-cover-comparison-line,
-.tool-comparison-cover--resetting .tool-cover-comparison-handle {
+.tool-comparison-cover--resetting .tool-cover-comparison-line {
   animation: none !important;
 }
 
@@ -204,28 +193,4 @@ async function onAfterVideoEnded(event: Event) {
   animation: home-comparison-pos 3s ease-in-out infinite;
 }
 
-.tool-comparison-cover .tool-cover-comparison-handle {
-  position: absolute;
-  top: 50%;
-  z-index: 5;
-  display: flex;
-  width: 34px;
-  height: 34px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: rgb(0 0 0 / 0.45);
-  color: var(--foreground, #333);
-  box-shadow: 0 16px 32px rgb(0 0 0 / 0.3);
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  backdrop-filter: blur(12px);
-  animation: home-comparison-pos 3s ease-in-out infinite;
-}
-
-.tool-card:hover .tool-comparison-cover .tool-cover-comparison-effect,
-.tool-card:hover .tool-comparison-cover .tool-cover-comparison-line,
-.tool-card:hover .tool-comparison-cover .tool-cover-comparison-handle {
-  animation-play-state: paused;
-}
 </style>

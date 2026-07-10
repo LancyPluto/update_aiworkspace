@@ -1,5 +1,7 @@
-import logging
+﻿import logging
+import time
 
+from app.observability.metrics import record_run_completed, record_run_started, record_tool_call
 from app.clients.backend_client import BackendClient, BackendClientError
 from app.clients.model_client import ModelClient, ModelClientError
 from app.config import Settings
@@ -51,9 +53,14 @@ class AgentRuntime:
         self.default_settings = default_settings or Settings()
 
     async def execute_run(self, run_id: int) -> None:
+        entrypoint = "run"
+        engine_name = "unknown"
+        started_at = time.perf_counter()
+        record_run_started(entrypoint)
         try:
             context = await self.backend.get_run_context(run_id)
             if getattr(context, "status", None) in TERMINAL_RUN_STATUSES:
+                record_run_completed(entrypoint, "skipped", "terminal_status", engine_name, time.perf_counter() - started_at)
                 return
             model_client = await self._model_client(context)
             context = await self._with_rolling_summary(context, model_client)
@@ -63,24 +70,36 @@ class AgentRuntime:
                 deep_agents_enabled=self.default_settings.agent_deep_agents_enabled,
                 graph_engine_enabled=self.default_settings.agent_graph_engine_enabled,
             ).select_engine(message=context.message, requested_runtime=_requested_runtime(context))
+            engine_name = engine.__class__.__name__
             await engine.run(context)
+            record_run_completed(entrypoint, "success", "none", engine_name, time.perf_counter() - started_at)
         except BackendClientError as exc:
             logger.exception("Agent run failed while calling backend, runId=%s", run_id)
             await self._fail(run_id, "BACKEND_CALL_FAILED", str(exc))
+            record_run_completed(entrypoint, "failed", "BACKEND_CALL_FAILED", engine_name, time.perf_counter() - started_at)
         except ModelClientError as exc:
             logger.exception("Agent run failed while calling model provider, runId=%s", run_id)
             await self._fail(run_id, "MODEL_CALL_FAILED", str(exc))
+            record_run_completed(entrypoint, "failed", "MODEL_CALL_FAILED", engine_name, time.perf_counter() - started_at)
         except ToolExecutionError as exc:
+            error_code = exc.error_code or "TOOL_CALL_FAILED"
             logger.exception("Agent run failed while executing tool, runId=%s", run_id)
-            await self._fail(run_id, exc.error_code or "TOOL_CALL_FAILED", str(exc))
+            await self._fail(run_id, error_code, str(exc))
+            record_run_completed(entrypoint, "failed", error_code, engine_name, time.perf_counter() - started_at)
         except Exception as exc:  # pragma: no cover - defensive runtime boundary.
             logger.exception("Agent run failed with internal error, runId=%s", run_id)
             await self._fail(run_id, "AGENT_INTERNAL_ERROR", str(exc))
+            record_run_completed(entrypoint, "failed", "AGENT_INTERNAL_ERROR", engine_name, time.perf_counter() - started_at)
 
     async def execute_confirmed_tool(self, run_id: int, tool_code: str) -> None:
+        entrypoint = "confirmed_tool"
+        engine_name = "unknown"
+        started_at = time.perf_counter()
+        record_run_started(entrypoint)
         try:
             context = await self.backend.get_run_context(run_id)
             if getattr(context, "status", None) in TERMINAL_RUN_STATUSES:
+                record_run_completed(entrypoint, "skipped", "terminal_status", engine_name, time.perf_counter() - started_at)
                 return
             model_client = await self._model_client(context)
             context = await self._with_rolling_summary(context, model_client)
@@ -90,19 +109,31 @@ class AgentRuntime:
                 deep_agents_enabled=self.default_settings.agent_deep_agents_enabled,
                 graph_engine_enabled=self.default_settings.agent_graph_engine_enabled,
             ).select_engine(message=context.message, requested_runtime=_requested_runtime(context))
+            engine_name = engine.__class__.__name__
             await engine.run_confirmed_tool(context, tool_code)
+            record_tool_call(tool_code, "success")
+            record_run_completed(entrypoint, "success", "none", engine_name, time.perf_counter() - started_at)
         except BackendClientError as exc:
             logger.exception("Agent confirmed-tool run failed while calling backend, runId=%s, toolCode=%s", run_id, tool_code)
             await self._fail(run_id, "BACKEND_CALL_FAILED", str(exc))
+            record_tool_call(tool_code, "failed")
+            record_run_completed(entrypoint, "failed", "BACKEND_CALL_FAILED", engine_name, time.perf_counter() - started_at)
         except ModelClientError as exc:
             logger.exception("Agent confirmed-tool run failed while calling model provider, runId=%s, toolCode=%s", run_id, tool_code)
             await self._fail(run_id, "MODEL_CALL_FAILED", str(exc))
+            record_tool_call(tool_code, "failed")
+            record_run_completed(entrypoint, "failed", "MODEL_CALL_FAILED", engine_name, time.perf_counter() - started_at)
         except ToolExecutionError as exc:
+            error_code = exc.error_code or "TOOL_CALL_FAILED"
             logger.exception("Agent confirmed-tool run failed while executing tool, runId=%s, toolCode=%s", run_id, tool_code)
-            await self._fail(run_id, exc.error_code or "TOOL_CALL_FAILED", str(exc))
+            await self._fail(run_id, error_code, str(exc))
+            record_tool_call(tool_code, "failed")
+            record_run_completed(entrypoint, "failed", error_code, engine_name, time.perf_counter() - started_at)
         except Exception as exc:  # pragma: no cover - defensive runtime boundary.
             logger.exception("Agent confirmed-tool run failed with internal error, runId=%s, toolCode=%s", run_id, tool_code)
             await self._fail(run_id, "AGENT_INTERNAL_ERROR", str(exc))
+            record_tool_call(tool_code, "failed")
+            record_run_completed(entrypoint, "failed", "AGENT_INTERNAL_ERROR", engine_name, time.perf_counter() - started_at)
 
     async def debug_route(self, context):
         try:

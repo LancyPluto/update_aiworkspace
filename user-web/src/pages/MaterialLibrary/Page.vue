@@ -283,7 +283,7 @@ function syncPreviewAssetCommunityState(asset: AssetPreviewItem) {
 }
 
 function openPublishModal(asset: AssetPreviewItem) {
-  if (!auth.token || !asset.taskId || communityActionTaskId.value) return
+  if (!auth.isLoggedIn || !asset.taskId || communityActionTaskId.value) return
   publishModalAsset.value = asset
 }
 
@@ -293,7 +293,7 @@ function closePublishModal() {
 }
 
 async function publishMaterialAsset(asset: AssetPreviewItem, payload?: CommunityPublishPayload) {
-  if (!auth.token || !asset.taskId || communityActionTaskId.value) return
+  if (!auth.isLoggedIn || !asset.taskId || communityActionTaskId.value) return
   communityActionTaskId.value = asset.taskId
   publishSubmitting.value = true
   try {
@@ -320,7 +320,7 @@ async function confirmPublishMaterial(payload: CommunityPublishPayload) {
 }
 
 async function unpublishMaterialAsset(asset: AssetPreviewItem) {
-  if (!auth.token || !asset.taskId || communityActionTaskId.value) return
+  if (!auth.isLoggedIn || !asset.taskId || communityActionTaskId.value) return
   communityActionTaskId.value = asset.taskId
   try {
     const postId = await resolvePublishedCommunityPostId(asset.taskId, {
@@ -359,7 +359,7 @@ async function removeMaterial(item: MaterialItem) {
           hint: item.task.communityPostId,
         })
       : null
-    if (auth.token && communityPostId) {
+    if (auth.isLoggedIn && communityPostId) {
       await unpublishCommunityPost(communityPostId, { token: auth.token })
       emitCommunityPostUnpublished({ postId: communityPostId, taskId: item.task.taskId })
     }

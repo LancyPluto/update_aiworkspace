@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Windows-friendly production deploy: git bundle sync + selective Docker rebuild."""
 from __future__ import annotations
 
@@ -113,7 +113,7 @@ def detect_services() -> str:
                 return services
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass
-    return "backend worker agent-service admin-frontend user-web nginx prometheus grafana loki promtail node-exporter cadvisor blackbox-exporter"
+    return "backend worker agent-service admin-frontend user-web nginx prometheus grafana loki alloy node-exporter cadvisor blackbox-exporter"
 
 
 def main() -> int:
@@ -303,3 +303,4 @@ echo "Deploy complete: $NEW_SHA"
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

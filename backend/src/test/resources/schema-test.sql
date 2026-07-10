@@ -1132,3 +1132,15 @@ INSERT INTO gift_card_packages (package_code, package_name, credits, price_amoun
 ('gift_1000', '1000算力礼品卡', 1000, 19.60, 'gold', 'ACTIVE', 3),
 ('gift_3000', '3000算力礼品卡', 3000, 58.50, 'dark', 'ACTIVE', 4),
 ('admin_default', '管理员赠送礼品卡', 0, 0.00, 'green', 'ACTIVE', 999);
+
+CREATE TABLE admin_operation_logs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  admin_id BIGINT NOT NULL,
+  operation_type VARCHAR(64) NOT NULL,
+  target_type VARCHAR(64),
+  target_id BIGINT,
+  content_json CLOB,
+  reason VARCHAR(512),
+  ip_address VARCHAR(64),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

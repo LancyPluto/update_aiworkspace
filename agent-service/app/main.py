@@ -1,12 +1,14 @@
-from fastapi import FastAPI
+﻿from fastapi import FastAPI
 from fastapi import Request
+import time
 
-from app.api import health, internal_files, internal_market, internal_runs
+from app.api import health, internal_files, internal_market, internal_runs, metrics
 from app.clients.backend_client import BackendClient
 from app.clients.model_config_tester import ModelConfigTester
 from app.config import Settings, settings as default_settings
 from app.core.runtime import AgentRuntime
 from app.observability.logging import configure_logging
+from app.observability.metrics import record_http_request
 from app.observability.trace import TRACE_ID_HEADER, reset_trace_id, resolve_trace_id, set_trace_id
 
 
@@ -30,14 +32,19 @@ def create_app(
     async def trace_id_middleware(request: Request, call_next):
         trace_id = resolve_trace_id(request.headers.get(TRACE_ID_HEADER))
         token = set_trace_id(trace_id)
+        start = time.perf_counter()
+        status_code = 500
         try:
             response = await call_next(request)
+            status_code = response.status_code
+            response.headers[TRACE_ID_HEADER] = trace_id
+            return response
         finally:
             reset_trace_id(token)
-        response.headers[TRACE_ID_HEADER] = trace_id
-        return response
+            record_http_request(request.method, request.url.path, status_code, time.perf_counter() - start)
 
     app.include_router(health.router)
+    app.include_router(metrics.router)
     app.include_router(internal_runs.router)
     app.include_router(internal_files.router)
     app.include_router(internal_market.router)
@@ -45,3 +52,5 @@ def create_app(
 
 
 app = create_app()
+
+
