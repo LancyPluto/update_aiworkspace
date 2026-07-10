@@ -81,7 +81,20 @@ jobs:
       - name: Run tests
         working-directory: backend
         # surefire 并行已在 pom.xml 中配置，避免在 CI 命令行追加属性导致参数解析差异
-        run: mvn -B test -T 1C
+        run: |
+          mkdir -p ../ci-summary
+          set -o pipefail
+          mvn -B test -T 1C 2>&1 | tee ../ci-summary/backend-test.log
+      - name: Summarize failure
+        if: failure()
+        run: python .github/scripts/ci_failure_summary.py build --job "Backend (Maven)" --log ci-summary/backend-test.log --out ci-summary/backend-test.md
+      - name: Upload failure summary
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-failure-summary-backend
+          path: ci-summary/
+          if-no-files-found: ignore
 
   agent-service-test:
     name: Agent Service (pytest)
@@ -101,8 +114,22 @@ jobs:
       - name: Install and test
         working-directory: agent-service
         run: |
-          pip install -r requirements.txt
-          pytest -q
+          mkdir -p ../ci-summary
+          set -o pipefail
+          {
+            pip install -r requirements.txt
+            pytest -q
+          } 2>&1 | tee ../ci-summary/agent-service-test.log
+      - name: Summarize failure
+        if: failure()
+        run: python .github/scripts/ci_failure_summary.py build --job "Agent Service (pytest)" --log ci-summary/agent-service-test.log --out ci-summary/agent-service-test.md
+      - name: Upload failure summary
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-failure-summary-agent-service
+          path: ci-summary/
+          if-no-files-found: ignore
 
   worker-test:
     name: Worker (pytest)
@@ -122,8 +149,22 @@ jobs:
       - name: Install and test
         working-directory: worker
         run: |
-          pip install -r requirements.txt pytest
-          pytest -q
+          mkdir -p ../ci-summary
+          set -o pipefail
+          {
+            pip install -r requirements.txt pytest
+            pytest -q
+          } 2>&1 | tee ../ci-summary/worker-test.log
+      - name: Summarize failure
+        if: failure()
+        run: python .github/scripts/ci_failure_summary.py build --job "Worker (pytest)" --log ci-summary/worker-test.log --out ci-summary/worker-test.md
+      - name: Upload failure summary
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-failure-summary-worker
+          path: ci-summary/
+          if-no-files-found: ignore
 
   frontend-build:
     name: Frontends (build)
@@ -145,13 +186,31 @@ jobs:
       - name: Build admin-frontend
         working-directory: admin-frontend
         run: |
-          npm ci
-          npm run build
+          mkdir -p ../ci-summary
+          set -o pipefail
+          {
+            npm ci
+            npm run build
+          } 2>&1 | tee ../ci-summary/frontend-build.log
       - name: Build user-web
         working-directory: user-web
         run: |
-          npm ci
-          npm run build
+          mkdir -p ../ci-summary
+          set -o pipefail
+          {
+            npm ci
+            npm run build
+          } 2>&1 | tee -a ../ci-summary/frontend-build.log
+      - name: Summarize failure
+        if: failure()
+        run: python .github/scripts/ci_failure_summary.py build --job "Frontends (build)" --log ci-summary/frontend-build.log --out ci-summary/frontend-build.md
+      - name: Upload failure summary
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-failure-summary-frontend
+          path: ci-summary/
+          if-no-files-found: ignore
 
   # ── Python import/syntax validation ─────────────────────────────
   python-import-check:
@@ -216,6 +275,55 @@ jobs:
 
       - name: Audit worker dependencies
         run: pip-audit -r worker/requirements.txt --desc on 2>&1 | head -80 || true
+
+  ci-failure-notify:
+    name: CI Failure Summary
+    needs: [backend-test, agent-service-test, worker-test, frontend-build]
+    if: |
+      always() &&
+      !cancelled() &&
+      (needs.backend-test.result == 'failure' || needs.agent-service-test.result == 'failure' || needs.worker-test.result == 'failure' || needs.frontend-build.result == 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Download failure summaries
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ci-failure-summary-*
+          path: ci-summary-collected
+          merge-multiple: true
+
+      - name: Write combined summary
+        run: |
+          echo "# CI 失败总览" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Backend: ${{ needs.backend-test.result }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Agent Service: ${{ needs.agent-service-test.result }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Worker: ${{ needs.worker-test.result }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Frontends: ${{ needs.frontend-build.result }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if compgen -G "ci-summary-collected/*.md" > /dev/null; then
+            for file in ci-summary-collected/*.md; do
+              cat "$file" >> "$GITHUB_STEP_SUMMARY"
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+            done
+          else
+            echo "没有找到失败摘要 artifact，请直接查看失败 job 日志。" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Send Gmail/SMTP notification
+        env:
+          CI_SUMMARY_SMTP_HOST: ${{ secrets.CI_SUMMARY_SMTP_HOST }}
+          CI_SUMMARY_SMTP_PORT: ${{ secrets.CI_SUMMARY_SMTP_PORT }}
+          CI_SUMMARY_SMTP_USERNAME: ${{ secrets.CI_SUMMARY_SMTP_USERNAME }}
+          CI_SUMMARY_SMTP_PASSWORD: ${{ secrets.CI_SUMMARY_SMTP_PASSWORD }}
+          CI_SUMMARY_MAIL_FROM: ${{ secrets.CI_SUMMARY_MAIL_FROM }}
+          CI_SUMMARY_MAIL_TO: ${{ secrets.CI_SUMMARY_MAIL_TO }}
+        run: python .github/scripts/ci_failure_summary.py mail --summary-dir ci-summary-collected
 
   deploy-production:
     name: Deploy to Production
