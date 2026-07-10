@@ -15,6 +15,7 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
@@ -44,6 +45,7 @@ class AuthApiTest {
     private static final String DEFAULT_AVATAR_URL =
             "https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com/assets/default-user-avatar.svg";
     private static final String DEFAULT_DISPLAY_NAME_PATTERN = "^用户\\d{5}$";
+    private static final AtomicInteger PHONE_SEQUENCE = new AtomicInteger(1000);
 
     @Autowired
     private MockMvc mockMvc;
@@ -249,7 +251,7 @@ class AuthApiTest {
 
     @Test
     void registersAndLogsInUserBySmsCode() throws Exception {
-        String phone = "13900139000";
+        String phone = uniquePhone();
         String registerCode = sendSmsCode(phone, "REGISTER");
 
         var registerResult = mockMvc.perform(post("/api/v1/auth/sms-register")
@@ -304,7 +306,7 @@ class AuthApiTest {
 
     @Test
     void loginOrRegisterSmsCodeCreatesUserWhenPhoneIsNew() throws Exception {
-        String phone = "13600136000";
+        String phone = uniquePhone();
         String code = sendSmsCode(phone, "LOGIN_OR_REGISTER");
 
         mockMvc.perform(post("/api/v1/auth/sms-login")
@@ -327,7 +329,7 @@ class AuthApiTest {
 
     @Test
     void resetsPasswordBySmsCode() throws Exception {
-        String phone = "13500135000";
+        String phone = uniquePhone();
         String registerCode = sendSmsCode(phone, "REGISTER");
         mockMvc.perform(post("/api/v1/auth/sms-register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -369,7 +371,7 @@ class AuthApiTest {
 
     @Test
     void rejectsInvalidSmsCode() throws Exception {
-        String phone = "13700137000";
+        String phone = uniquePhone();
         sendSmsCode(phone, "REGISTER");
 
         mockMvc.perform(post("/api/v1/auth/sms-register")
@@ -458,6 +460,11 @@ class AuthApiTest {
         mockMvc.perform(get("/api/v1/users/me"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+    }
+
+    private String uniquePhone() {
+        int suffix = PHONE_SEQUENCE.getAndIncrement();
+        return "13800" + String.format("%06d", suffix);
     }
 
     private String sendSmsCode(String phone, String scene) throws Exception {
