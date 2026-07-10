@@ -63,6 +63,29 @@ class CommunityApiTest {
     }
 
     @Test
+    void autoPublishWorkflowVideoUsesFinalVideoMediaUrl() {
+        jdbcTemplate.update("UPDATE users SET auto_publish_assets = 1, prompt_public_by_default = 0 WHERE id = 2");
+        long taskId = insertSuccessVideoTask(2L, "workflow_video");
+        AiTask task = taskMapper.findById(taskId).orElseThrow();
+
+        communityService.autoPublishTask(task, "VIDEO", """
+                {
+                  "resourceType": "VIDEO",
+                  "finalVideoUrl": "/generated/workflow/final.mp4",
+                  "coverUrl": "/generated/workflow/cover.png",
+                  "segments": [{"sceneIndex": 1, "videoUrl": "/generated/workflow/clip-1.mp4"}]
+                }
+                """);
+
+        java.util.Map<String, Object> post = jdbcTemplate.queryForMap(
+                "SELECT modality, cover_url, media_url FROM community_posts WHERE task_id = ?",
+                taskId);
+        org.junit.jupiter.api.Assertions.assertEquals("VIDEO", post.get("modality"));
+        org.junit.jupiter.api.Assertions.assertEquals("/generated/workflow/cover.png", post.get("cover_url"));
+        org.junit.jupiter.api.Assertions.assertEquals("/generated/workflow/final.mp4", post.get("media_url"));
+    }
+
+    @Test
     void autoPublishSkipsWhenUserPreferenceDisabled() {
         jdbcTemplate.update("UPDATE users SET auto_publish_assets = 0 WHERE id = 2");
         long taskId = insertSuccessImageTask(2L, "auto_publish_off");
@@ -383,6 +406,35 @@ class CommunityApiTest {
                 VALUES (?, ?, 'IMAGE', ?)
                 """, taskId, userId, "{\"images\":[{\"url\":\"/generated/community-task.png\"}]}");
         return taskId;
+    }
+
+    private long insertSuccessVideoTask(long userId, String suffix) {
+        Long categoryId = jdbcTemplate.query(
+                "SELECT id FROM tool_categories ORDER BY id LIMIT 1",
+                rs -> rs.next() ? rs.getLong(1) : null);
+        if (categoryId == null) {
+            jdbcTemplate.update("""
+                    INSERT INTO tool_categories (category_code, category_name, sort_order, status)
+                    VALUES ('community_video_test', '视频测试分类', 1, 'ACTIVE')
+                    """);
+            categoryId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM tool_categories", Long.class);
+        }
+        jdbcTemplate.update("""
+                INSERT INTO ai_tools (
+                  tool_code, tool_name, category_id, status, tool_type, execution_handler,
+                  input_modality, output_modality, estimated_credit_cost
+                )
+                VALUES (?, '漫剧视频工具', ?, 'ONLINE', 'VIDEO_GENERATION', 'VIDEO_GENERATION', 'TEXT', 'VIDEO', 10)
+                """, "community_video_" + suffix, categoryId);
+        Long toolId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM ai_tools", Long.class);
+        String taskNo = "COMM-VIDEO-" + suffix + "-" + System.nanoTime();
+        jdbcTemplate.update("""
+                INSERT INTO ai_tasks (
+                  task_no, user_id, tool_id, status, progress, params_json, estimated_credit_cost, finished_at
+                )
+                VALUES (?, ?, ?, 'SUCCESS', 100, '{"prompt":"video prompt"}', 10, CURRENT_TIMESTAMP)
+                """, taskNo, userId, toolId);
+        return jdbcTemplate.queryForObject("SELECT MAX(id) FROM ai_tasks", Long.class);
     }
 
     private long insertPost(String status, String auditStatus, String title, boolean promptVisible) {

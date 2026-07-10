@@ -490,6 +490,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
 
     private boolean shouldMarkToolUnhealthy(String errorCode) {
         return "MODEL_AUTH_FAILED".equals(errorCode)
+                || "MODEL_CAPABILITY_DISABLED".equals(errorCode)
                 || "MODEL_PROVIDER_UNAVAILABLE".equals(errorCode);
     }
 

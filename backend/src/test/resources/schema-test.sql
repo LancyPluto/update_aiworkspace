@@ -1144,3 +1144,24 @@ CREATE TABLE admin_operation_logs (
   ip_address VARCHAR(64),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE auth_security_events (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  event_type VARCHAR(64) NOT NULL,
+  result VARCHAR(16) NOT NULL,
+  method VARCHAR(32),
+  user_type VARCHAR(16),
+  user_id BIGINT,
+  account_hash VARCHAR(64),
+  account_masked VARCHAR(64),
+  failure_reason VARCHAR(128),
+  ip_address VARCHAR(64),
+  user_agent VARCHAR(512),
+  trace_id VARCHAR(64),
+  country VARCHAR(64),
+  region VARCHAR(64),
+  city VARCHAR(64),
+  latitude DECIMAL(10,6),
+  longitude DECIMAL(10,6),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

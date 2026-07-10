@@ -21,6 +21,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static com.aiminilab.aitoolmarket.testsupport.InternalApiTestSupport.signed;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -872,6 +873,58 @@ class AdminAgentApiTest {
 
         Mockito.verify(agentServiceClient, Mockito.never()).testModelConfig(argThat(request ->
                 "siliconflow_images".equals(request.provider())));
+    }
+
+    @Test
+    void openAiImageModelConfigTestFailsWhenGenerationCapabilityIsDisabled() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0),
+                0
+        );
+        server.createContext("/v1/models", exchange -> {
+            byte[] body = "{\"data\":[{\"id\":\"gpt-image-2\"}]}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.createContext("/v1/images/generations", exchange -> {
+            byte[] body = """
+                    {"error":{"message":"Image generation is not enabled for this group","type":"permission_error"}}
+                    """.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(403, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        try {
+            String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort() + "/v1";
+
+            mockMvc.perform(post("/api/admin/v1/agent/model-config/test")
+                            .header("Authorization", "Bearer " + adminToken)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "provider": "ofox_openai_images",
+                                      "modelName": "gpt-image-2",
+                                      "baseUrl": "%s",
+                                      "apiKey": "test-key",
+                                      "timeoutSeconds": 30,
+                                      "enabled": true,
+                                      "capabilities": ["IMAGE_GENERATION"]
+                                    }
+                                    """.formatted(baseUrl)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.success").value(false))
+                    .andExpect(jsonPath("$.data.message").value(containsString("Image generation is not enabled")));
+
+            Mockito.verify(agentServiceClient, Mockito.never()).testModelConfig(any());
+        } finally {
+            server.stop(0);
+        }
     }
 
     private void mockExternalAuthDependencies() {

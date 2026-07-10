@@ -120,6 +120,7 @@ services:
       AGENT_MAX_MESSAGES_PER_MINUTE: ${AGENT_MAX_MESSAGES_PER_MINUTE:-10}
       AGENT_MAX_RUNS_PER_HOUR: ${AGENT_MAX_RUNS_PER_HOUR:-30}
       AGENT_DEFAULT_CREDIT_BUDGET: ${AGENT_DEFAULT_CREDIT_BUDGET:-20}
+      AUTH_GEOIP_DATABASE_PATH: ${AUTH_GEOIP_DATABASE_PATH:-/data/geoip/GeoLite2-City.mmdb}
       GENERATED_MEDIA_DIR: /data/generated-media
       JAVA_TOOL_OPTIONS: ${BACKEND_JAVA_TOOL_OPTIONS:--XX:InitialRAMPercentage=10.0 -XX:MaxRAMPercentage=50.0 -XX:+UseG1GC -XX:+UseStringDeduplication -XX:MaxGCPauseMillis=200 -Djava.security.egd=file:/dev/./urandom}
       # OSS / ASSET_STORAGE_* 由 env_file ../.env 注入，勿在此写默认值以免覆盖
@@ -132,6 +133,7 @@ services:
     volumes:
       - ../WXcert:/app/WXcert:ro
       - ../docs:/docs:ro
+      - ../data/geoip:/data/geoip:ro
       - ../data/generated-media:/data/generated-media
     dns:
       # Keep backend model connectivity tests away from poisoned/default container DNS.

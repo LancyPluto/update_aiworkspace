@@ -78,6 +78,11 @@ app:
   task-execution:
     lease-minutes: ${TASK_EXECUTION_LEASE_MINUTES:30}
   auth:
+    security-audit:
+      enabled: ${AUTH_SECURITY_AUDIT_ENABLED:true}
+      account-hash-pepper: ${AUTH_SECURITY_AUDIT_HASH_PEPPER:${JWT_SECRET:}}
+      geoip:
+        database-path: ${AUTH_GEOIP_DATABASE_PATH:}
     captcha:
       enabled: ${ALIYUN_CAPTCHA_ENABLED:false}
       provider: ${CAPTCHA_PROVIDER:aliyun}

@@ -634,6 +634,32 @@ public class DataInitializer implements CommandLineRunner {
                 """);
         ensureIndex("admin_operation_logs", "idx_admin_operation_logs_created_at", "CREATE INDEX idx_admin_operation_logs_created_at ON admin_operation_logs(created_at)");
         ensureIndex("admin_operation_logs", "idx_admin_operation_logs_admin_id", "CREATE INDEX idx_admin_operation_logs_admin_id ON admin_operation_logs(admin_id)");
+        ensureTable("auth_security_events", """
+                CREATE TABLE auth_security_events (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  event_type VARCHAR(64) NOT NULL,
+                  result VARCHAR(16) NOT NULL,
+                  method VARCHAR(32) NULL,
+                  user_type VARCHAR(16) NULL,
+                  user_id BIGINT NULL,
+                  account_hash VARCHAR(64) NULL,
+                  account_masked VARCHAR(64) NULL,
+                  failure_reason VARCHAR(128) NULL,
+                  ip_address VARCHAR(64) NULL,
+                  user_agent VARCHAR(512) NULL,
+                  trace_id VARCHAR(64) NULL,
+                  country VARCHAR(64) NULL,
+                  region VARCHAR(64) NULL,
+                  city VARCHAR(64) NULL,
+                  latitude DECIMAL(10,6) NULL,
+                  longitude DECIMAL(10,6) NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
+        ensureIndex("auth_security_events", "idx_auth_security_events_created_at", "CREATE INDEX idx_auth_security_events_created_at ON auth_security_events(created_at)");
+        ensureIndex("auth_security_events", "idx_auth_security_events_type_result", "CREATE INDEX idx_auth_security_events_type_result ON auth_security_events(event_type, result, created_at)");
+        ensureIndex("auth_security_events", "idx_auth_security_events_geo", "CREATE INDEX idx_auth_security_events_geo ON auth_security_events(latitude, longitude, created_at)");
+        ensureIndex("auth_security_events", "idx_auth_security_events_ip_time", "CREATE INDEX idx_auth_security_events_ip_time ON auth_security_events(ip_address, created_at)");
         ensureColumn("users", "avatar_url", "ALTER TABLE users ADD COLUMN avatar_url VARCHAR(512) NULL");
         ensureColumn("users", "bio", "ALTER TABLE users ADD COLUMN bio VARCHAR(280) NULL");
         ensureColumn("users", "auto_publish_assets", "ALTER TABLE users ADD COLUMN auto_publish_assets TINYINT NOT NULL DEFAULT 1");

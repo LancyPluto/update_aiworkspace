@@ -37,6 +37,10 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GRAFANA_MYSQL_HOST: ${GRAFANA_MYSQL_HOST:-mysql:3306}
+      GRAFANA_MYSQL_DATABASE: ${GRAFANA_MYSQL_DATABASE:-ai_supermarket_v1}
+      GRAFANA_MYSQL_USER: ${GRAFANA_MYSQL_USER:-grafana_readonly}
+      GRAFANA_MYSQL_PASSWORD: ${GRAFANA_MYSQL_PASSWORD:-}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro

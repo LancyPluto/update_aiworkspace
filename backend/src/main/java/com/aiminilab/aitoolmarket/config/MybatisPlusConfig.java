@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 @MapperScan({
         "com.aiminilab.aitoolmarket.admin.mapper",
         "com.aiminilab.aitoolmarket.agent.mapper",
+        "com.aiminilab.aitoolmarket.auth.mapper",
         "com.aiminilab.aitoolmarket.credit.mapper",
         "com.aiminilab.aitoolmarket.community.mapper",
         "com.aiminilab.aitoolmarket.task.mapper",

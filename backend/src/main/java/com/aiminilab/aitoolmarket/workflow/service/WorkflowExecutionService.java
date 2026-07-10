@@ -433,6 +433,14 @@ public class WorkflowExecutionService {
         if (markdown == null || markdown.isBlank()) {
             markdown = buildFallbackMarkdown(context, finalVideoUrl);
         }
+        if (finalVideoUrl != null && !finalVideoUrl.isBlank()) {
+            workflowRootTaskFinalizer.finalizeSuccess(
+                    run.getRootTaskId(),
+                    "VIDEO",
+                    buildWorkflowVideoResultContent(context, compose, finalVideoUrl, markdown)
+            );
+            return;
+        }
         workflowRootTaskFinalizer.finalizeSuccess(run.getRootTaskId(), markdown);
     }
 
@@ -761,6 +769,59 @@ public class WorkflowExecutionService {
         }
         builder.append("> AI 制作\n");
         return builder.toString();
+    }
+
+    private String buildWorkflowVideoResultContent(ObjectNode context,
+                                                   JsonNode compose,
+                                                   String finalVideoUrl,
+                                                   String markdown) {
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("resourceType", "VIDEO");
+        result.put("finalVideoUrl", finalVideoUrl);
+        result.put("videoUrl", finalVideoUrl);
+        String coverUrl = firstNonBlank(
+                text(compose, "coverUrl"),
+                text(compose, "imageUrl"),
+                text(context.path("keyframe"), "coverUrl"),
+                text(context.path("keyframe"), "imageUrl")
+        );
+        if (coverUrl == null) {
+            JsonNode images = context.path("keyframe").path("images");
+            if (images.isArray() && !images.isEmpty()) {
+                coverUrl = firstNonBlank(text(images.get(0), "imageUrl"), text(images.get(0), "url"));
+            }
+        }
+        if (coverUrl != null && !coverUrl.isBlank()) {
+            result.put("coverUrl", coverUrl);
+        }
+        String subtitleUrl = text(compose, "subtitleUrl");
+        if (subtitleUrl != null && !subtitleUrl.isBlank()) {
+            result.put("subtitleUrl", subtitleUrl);
+        }
+        JsonNode segments = compose.path("segments");
+        if (segments.isArray() && !segments.isEmpty()) {
+            result.set("segments", segments);
+        }
+        JsonNode sceneCount = compose.path("sceneCount");
+        if (sceneCount.isNumber()) {
+            result.set("sceneCount", sceneCount);
+        }
+        if (markdown != null && !markdown.isBlank()) {
+            result.put("markdown", markdown);
+        }
+        return writeJson(result);
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private void pauseForUserFeedback(WorkflowRun run,
