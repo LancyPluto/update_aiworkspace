@@ -158,6 +158,7 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
                 || path.equals("/actuator/prometheus")
                 || path.startsWith("/actuator/metrics")
                 || path.startsWith("/api/v1/auth/")
+                || ("POST".equalsIgnoreCase(method) && path.equals("/api/v1/observability/web-vitals"))
                 || path.equals("/api/v1/settings/customer-service")
                 || path.startsWith("/api/v1/pay/wechat/")
                 || path.startsWith("/api/v1/pay/alipay/")
@@ -299,3 +300,4 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
         }
     }
 }
+

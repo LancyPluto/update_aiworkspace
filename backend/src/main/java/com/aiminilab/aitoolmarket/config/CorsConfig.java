@@ -1,5 +1,7 @@
 package com.aiminilab.aitoolmarket.config;
 
+import com.aiminilab.aitoolmarket.admin.audit.AdminOperationAuditInterceptor;
+
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -12,10 +14,14 @@ import java.nio.file.Path;
 public class CorsConfig implements WebMvcConfigurer {
 
     private final AuthInterceptor authInterceptor;
+    private final AdminOperationAuditInterceptor adminOperationAuditInterceptor;
     private final AppProperties appProperties;
 
-    public CorsConfig(AuthInterceptor authInterceptor, AppProperties appProperties) {
+    public CorsConfig(AuthInterceptor authInterceptor,
+                      AdminOperationAuditInterceptor adminOperationAuditInterceptor,
+                      AppProperties appProperties) {
         this.authInterceptor = authInterceptor;
+        this.adminOperationAuditInterceptor = adminOperationAuditInterceptor;
         this.appProperties = appProperties;
     }
 
@@ -40,6 +46,7 @@ public class CorsConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(authInterceptor).addPathPatterns("/api/**");
+        registry.addInterceptor(adminOperationAuditInterceptor).addPathPatterns("/api/admin/v1/**");
     }
 
     @Override
@@ -66,3 +73,5 @@ public class CorsConfig implements WebMvcConfigurer {
         return false;
     }
 }
+
+

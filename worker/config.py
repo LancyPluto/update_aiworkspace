@@ -1,4 +1,4 @@
-import os
+﻿import os
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,6 +57,9 @@ class Settings:
     rabbitmq_blocked_connection_timeout_seconds: int = int(os.getenv('RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS', '1800'))
     worker_id: str = os.getenv('WORKER_ID', f"worker-{os.getenv('HOSTNAME', 'local')}-{os.getpid()}")
     worker_lease_renew_interval_seconds: float = float(os.getenv('WORKER_LEASE_RENEW_INTERVAL_SECONDS', '600'))
+    metrics_enabled: bool = _env_bool('METRICS_ENABLED', True)
+    metrics_host: str = os.getenv('METRICS_HOST', '0.0.0.0')
+    metrics_port: int = int(os.getenv('METRICS_PORT', '9101'))
     backend_internal_base_url: str = os.getenv('BACKEND_INTERNAL_BASE_URL', 'http://localhost:8080')
     internal_api_token: str = os.getenv('INTERNAL_API_TOKEN', 'local-internal-token')
     model_provider: str = os.getenv('MODEL_PROVIDER', 'deepseek')
@@ -239,3 +242,4 @@ def resolve_infinitetalk_api_key(model_config: dict[str, Any] | None = None) -> 
             if configured_text and not configured_text.startswith("replace-with-"):
                 return configured_text
     return (settings.infinitetalk_api_key or "").strip()
+

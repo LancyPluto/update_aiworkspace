@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import threading
 import uuid
 from contextlib import nullcontext
@@ -15,6 +15,7 @@ from handlers.subject_sync_handler import SubjectSyncHandler
 from handlers.video_generation_handler import VideoGenerationHandler
 from handlers.workflow_step_handler import WorkflowStepHandler
 from observability.log_context import log_trace_context
+from observability.metrics import record_claim, record_lease_renew, task_timer
 
 
 LOGGER = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ class TaskHandlerRouter:
         claim_token = uuid.uuid4().hex
         claim = self._claim_task(task_id, claim_token, trace_id)
         if not claim.get("claimed", True):
+            record_claim("denied", claim.get("reason", "claim_denied"))
             LOGGER.info(
                 "skip unclaimed task taskId=%s status=%s reason=%s traceId=%s",
                 task_id,
@@ -73,6 +75,7 @@ class TaskHandlerRouter:
                 "reason": claim.get("reason", "claim_denied"),
                 "traceId": trace_id,
             }
+        record_claim("claimed", claim.get("reason", "ok"))
         active_claim_token = claim.get("claimToken") or claim_token
         if claim.get("reason") == "client_without_claim":
             active_claim_token = None
@@ -100,7 +103,7 @@ class TaskHandlerRouter:
             if active_claim_token
             else nullcontext()
         )
-        with backend_claim_context(active_claim_token), lease_context:
+        with backend_claim_context(active_claim_token), lease_context, task_timer(context):
             params = context.get("params") or {}
             if params.get("workflowStep"):
                 return self.workflow_step_handler.handle(routed_message)
@@ -165,5 +168,9 @@ class _LeaseRenewer:
                     claim_token=self.claim_token,
                     trace_id=self.trace_id,
                 )
+                record_lease_renew("success")
             except Exception:
+                record_lease_renew("failed")
                 LOGGER.warning("failed to renew task lease taskId=%s traceId=%s", self.task_id, self.trace_id or "-", exc_info=True)
+
+

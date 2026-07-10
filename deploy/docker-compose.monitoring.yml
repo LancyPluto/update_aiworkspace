@@ -55,15 +55,18 @@ services:
       - ./monitoring/loki/config.yml:/etc/loki/config.yml:ro
       - loki_data:/loki
 
-  promtail:
-    image: ${DOCKER_REGISTRY:-docker.1ms.run/}grafana/promtail:3.3.2
-    container_name: ai-supermarket-promtail
+  alloy:
+    image: ${DOCKER_REGISTRY:-docker.1ms.run/}grafana/alloy:v1.5.1
+    container_name: ai-supermarket-alloy
     restart: unless-stopped
     command:
-      - -config.file=/etc/promtail/config.yml
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
     volumes:
-      - ./monitoring/promtail/config.yml:/etc/promtail/config.yml:ro
-      - promtail_positions:/positions
+      - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy_data:/var/lib/alloy/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
     depends_on:
@@ -110,4 +113,5 @@ volumes:
   prometheus_data:
   grafana_data:
   loki_data:
-  promtail_positions:
+  alloy_data:
+

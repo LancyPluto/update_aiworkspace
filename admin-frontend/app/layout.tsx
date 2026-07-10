@@ -1,6 +1,7 @@
-import type { Metadata } from 'next'
+﻿import type { Metadata } from 'next'
 import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from '@/components/ui/sonner'
+import { WebVitalsReporter } from '@/components/web-vitals-reporter'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -33,9 +34,11 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           {children}
+          <WebVitalsReporter />
           <Toaster richColors closeButton position="top-center" duration={5000} />
         </ThemeProvider>
       </body>
     </html>
   )
 }
+

@@ -1,5 +1,6 @@
-import json
+﻿import json
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -25,6 +26,7 @@ from app.core.schemas import (
     WorkspaceMemoryItem,
 )
 from app.observability.trace import TRACE_ID_HEADER, current_trace_id
+from app.observability.metrics import record_backend_request
 from app.security.signature import signature_headers
 
 
@@ -285,10 +287,13 @@ class BackendClient:
         trace_id = current_trace_id()
         if trace_id:
             headers[TRACE_ID_HEADER] = trace_id
+        start = time.perf_counter()
         try:
             response = await self._client.request(method, self.base_url + path, content=body if payload is not None else None, headers=headers)
         except httpx.HTTPError as exc:
+            record_backend_request(method, path, "network_error", time.perf_counter() - start)
             raise BackendClientError(f"backend request failed: {exc}") from exc
+        record_backend_request(method, path, str(response.status_code), time.perf_counter() - start)
         return self._parse_response(response)
 
     def _parse_response(self, response: httpx.Response) -> dict[str, Any]:
@@ -337,3 +342,5 @@ def _truncate(value: str, limit: int = 1200) -> str:
     if len(value) <= limit:
         return value
     return value[:limit] + "...<truncated>"
+
+
