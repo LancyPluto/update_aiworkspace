@@ -243,6 +243,16 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         if (TaskStatus.CANCELLED.name().equals(task.getStatus())) {
             return TaskStatusResponse.from(task);
         }
+        if (!TaskStatus.PROCESSING.name().equals(task.getStatus())) {
+            LOGGER.warn(
+                    "worker success callback ignored for non-processing task taskId={} currentStatus={} claimedBy={} leaseUntil={}",
+                    taskId,
+                    task.getStatus(),
+                    task.getClaimedBy(),
+                    task.getLeaseUntil()
+            );
+            return TaskStatusResponse.from(task);
+        }
         TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.SUCCESS.name());
         int updated = taskMapper.markSuccessGuarded(taskId, claimToken, List.of(TaskStatus.PROCESSING.name()));
         if (updated == 0) {
@@ -364,6 +374,17 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         if (TaskStatus.FAILED.name().equals(task.getStatus()) || TaskStatus.TIMEOUT.name().equals(task.getStatus())
                 || TaskStatus.SUCCESS.name().equals(task.getStatus())
                 || TaskStatus.CANCELLED.name().equals(task.getStatus())) {
+            return TaskStatusResponse.from(task);
+        }
+        if (!TaskStatus.PROCESSING.name().equals(task.getStatus())) {
+            LOGGER.warn(
+                    "worker failure callback ignored for non-processing task taskId={} currentStatus={} targetStatus={} claimedBy={} leaseUntil={}",
+                    taskId,
+                    task.getStatus(),
+                    targetStatus,
+                    task.getClaimedBy(),
+                    task.getLeaseUntil()
+            );
             return TaskStatusResponse.from(task);
         }
         TaskStateMachine.ensureTransition(task.getStatus(), targetStatus);
