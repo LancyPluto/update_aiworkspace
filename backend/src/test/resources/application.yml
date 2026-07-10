@@ -13,6 +13,8 @@ spring:
 
 app:
   production-mode: false
+  cache:
+    enabled: false
   jwt-secret: local-dev-secret
   internal-api-token: local-internal-token
   ai-task-queue: ai:task:queue
