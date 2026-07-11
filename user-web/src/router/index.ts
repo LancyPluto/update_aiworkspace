@@ -2,6 +2,8 @@ import { createRouter, createWebHistory } from "vue-router"
 import { useAuthStore } from "@/store/authStore"
 
 import LoginPage from "@/pages/Login/Page.vue"
+import LegalPage from "@/pages/Legal/Page.vue"
+import { contactDocument, labelingDocument, privacyDocument, refundDocument, termsDocument } from "@/data/legalDocuments"
 
 const AppLayout = () => import("@/layouts/AppLayout.vue")
 const HomePage = () => import("@/pages/Home/Page.vue")
@@ -30,6 +32,11 @@ const router = createRouter({
       path: "/login",
       redirect: (to) => ({ path: "/", query: to.query }),
     },
+    { path: "/legal/privacy", name: "Privacy", meta: { requiresAuth: false }, component: LegalPage, props: privacyDocument },
+    { path: "/legal/terms", name: "Terms", meta: { requiresAuth: false }, component: LegalPage, props: termsDocument },
+    { path: "/legal/aigc-labeling", name: "AigcLabeling", meta: { requiresAuth: false }, component: LegalPage, props: labelingDocument },
+    { path: "/legal/refund", name: "Refund", meta: { requiresAuth: false }, component: LegalPage, props: refundDocument },
+    { path: "/contact", name: "Contact", meta: { requiresAuth: false }, component: LegalPage, props: contactDocument },
     {
       path: "/",
       component: AppLayout,

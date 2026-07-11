@@ -43,6 +43,47 @@ test("runtime router exposes the current production frontend contract", async ()
   }
 })
 
+test("public legal and contact routes are stable and do not require login", async () => {
+  const router = await readSource("router/index.ts")
+  for (const route of ["/legal/privacy", "/legal/terms", "/legal/aigc-labeling", "/legal/refund", "/contact"]) {
+    const escaped = route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    assert.match(router, new RegExp(`path: ["']${escaped}["'][^\n]*requiresAuth: false`), `missing public route ${route}`)
+  }
+})
+
+test("brand logo is a real local image shared by landing and app shell", async () => {
+  const logo = await readFile(new URL("../asset/logo.png", srcRoot))
+  const brand = await readSource("config/brand.ts")
+  const navigation = await readSource("components/landing/Navigation.vue")
+  const shell = await readSource("components/AppShell.vue")
+
+  assert.deepEqual([...logo.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10])
+  assert.match(brand, /BASE_URL}logo\.png/)
+  assert.match(navigation, /BRAND_LOGO_URL/)
+  assert.match(shell, /BRAND_LOGO_URL/)
+  assert.doesNotMatch(shell, /cdn\.wlcloudai\.com\/static\/logo\.png/)
+})
+
+test("visible agreement and footer service links are not placeholders", async () => {
+  const login = await readSource("pages/Login/Page.vue")
+  const footer = await readSource("components/landing/FooterSection.vue")
+
+  assert.match(login, /to="\/legal\/privacy"/)
+  assert.match(login, /to="\/legal\/terms"/)
+  for (const route of ["/legal/privacy", "/legal/terms", "/legal/aigc-labeling", "/legal/refund", "/contact"]) {
+    assert.match(footer, new RegExp(route.replaceAll("/", "\\/")), `footer missing ${route}`)
+  }
+  assert.doesNotMatch(footer, /href:\s*["']#["']/)
+})
+
+test("markdown rendering registers supported highlight languages without bundling every language", async () => {
+  const markdown = await readSource("utils/markdownRender.ts")
+  assert.match(markdown, /highlight\.js\/lib\/core/)
+  assert.match(markdown, /registerLanguage\("javascript"/)
+  assert.match(markdown, /registerLanguage\("python"/)
+  assert.doesNotMatch(markdown, /from ["']highlight\.js["']/)
+})
+
 test("dashboard remains the tool-aware generation workspace", async () => {
   const router = await readSource("router/index.ts")
   const dashboard = await readSource("pages/Dashboard/Page.vue")

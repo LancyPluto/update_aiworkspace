@@ -43,6 +43,11 @@
 | `/billing` | 登录 | 会员、算力与充值。 |
 | `/referral` | 登录 | 推荐有礼。 |
 | `/profile` | 登录 | 个人资料。 |
+| `/legal/privacy` | 公开 | 隐私政策，版本化用户服务文件。 |
+| `/legal/terms` | 公开 | 服务条款，版本化用户服务文件。 |
+| `/legal/aigc-labeling` | 公开 | AI 生成内容标识说明。 |
+| `/legal/refund` | 公开 | 退款范围、申请与核验说明。 |
+| `/contact` | 公开 | 客服与内容投诉渠道。 |
 
 ## 业务跳转规则
 
@@ -72,3 +77,4 @@
 3. 社区同款、资产复用和工具卡启动均进入 `/dashboard` 且不丢 tool。
 4. 所有侧栏和页面内导航目标均在 `router/index.ts` 中存在。
 5. `npm test` 和 `npm run build` 均通过；构建产物不包含历史复制版页面 chunk。
+6. Logo 使用 `asset/logo.png` 本地资源；登录协议和页脚服务入口不得使用空 `#` 链接。

@@ -33,6 +33,7 @@ import {
 } from "lucide-vue-next"
 import { ref, onMounted, onUnmounted, computed, watch } from "vue"
 import { useGlobalSearch, type GlobalSearchResultItem, type GlobalSearchScope } from "@/composables/useGlobalSearch"
+import { BRAND_LOGO_URL } from "@/config/brand"
 import { fetchCreditAccount } from "@/api/creditApi"
 import { fetchCustomerServiceSettings } from "@/api/settingsApi"
 import type { CustomerServiceSettings } from "@/api/settingsApi"
@@ -404,7 +405,7 @@ watch(
       <div class="app-shell-brand-row flex h-[92px] shrink-0 items-center justify-between px-6 pb-4 pt-6">
         <div class="app-shell-brand-ambient" aria-hidden="true" />
         <RouterLink to="/agent" class="app-shell-agent-logo-link min-w-0 flex-1">
-          <img src="https://cdn.wlcloudai.com/static/logo.png" class="app-shell-agent-logo" alt="科创点AI" />
+          <img :src="BRAND_LOGO_URL" class="app-shell-agent-logo" alt="科创点AI" />
         </RouterLink>
         <button
           type="button"
