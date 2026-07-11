@@ -172,7 +172,7 @@ async function load() {
 
 async function toggleLike() {
   const sessionToken = resolveAuthToken()
-  if (!post.value || !sessionToken) return router.push({ name: "Login", query: { redirect: route.fullPath } })
+  if (!post.value || !auth.isLoggedIn) return router.push({ name: "Login", query: { redirect: route.fullPath } })
   acting.value = true
   try {
     post.value = post.value.liked
@@ -185,7 +185,7 @@ async function toggleLike() {
 
 async function toggleFavorite() {
   const sessionToken = resolveAuthToken()
-  if (!post.value || !sessionToken) return router.push({ name: "Login", query: { redirect: route.fullPath } })
+  if (!post.value || !auth.isLoggedIn) return router.push({ name: "Login", query: { redirect: route.fullPath } })
 
   if (post.value.favorited) {
     acting.value = true
@@ -207,7 +207,7 @@ function closeFavoritePicker() {
 
 async function confirmFavoritePicker(collectionId: number | null) {
   const sessionToken = resolveAuthToken()
-  if (!post.value || !sessionToken) return
+  if (!post.value || !auth.isLoggedIn) return
 
   favoritePickerSubmitting.value = true
   acting.value = true
@@ -222,17 +222,18 @@ async function confirmFavoritePicker(collectionId: number | null) {
 
 function openReportModal() {
   if (!post.value) return
-  if (!auth.token) return router.push({ name: "Login", query: { redirect: route.fullPath } })
+  if (!auth.isLoggedIn) return router.push({ name: "Login", query: { redirect: route.fullPath } })
   reportHint.value = ""
   reportModalOpen.value = true
 }
 
 async function submitReport(payload: { reason?: string }) {
-  if (!post.value || !auth.token || reportSubmitting.value) return
+  if (!post.value || !auth.isLoggedIn || reportSubmitting.value) return
+  const sessionToken = resolveAuthToken()
   reportSubmitting.value = true
   reportHint.value = ""
   try {
-    await reportCommunityPost(post.value.id, payload, { token: auth.token })
+    await reportCommunityPost(post.value.id, payload, { token: sessionToken })
     reportModalOpen.value = false
     reportHint.value = "举报已提交，感谢你的反馈"
   } catch (err) {
@@ -244,14 +245,15 @@ async function submitReport(payload: { reason?: string }) {
 
 async function createSameStyle() {
   if (!post.value) return
-  if (!auth.token) return router.push({ name: "Login", query: { redirect: route.fullPath } })
+  if (!auth.isLoggedIn) return router.push({ name: "Login", query: { redirect: route.fullPath } })
   if (!post.value.toolCode) return
+  const sessionToken = resolveAuthToken()
   sameStyleLoading.value = true
   try {
-    post.value = await markCommunityPostSameStyle(post.value.id, { token: auth.token })
+    post.value = await markCommunityPostSameStyle(post.value.id, { token: sessionToken })
     void trackCommunityEvent(
       { postId: post.value.id, eventType: "dashboard_open", source: "community_detail", toolCode: post.value.toolCode },
-      { token: auth.token },
+      { token: sessionToken },
     ).catch(() => undefined)
     openCreateWithAssetRecommendation(assetFromCommunityPost(post.value, kind.value === "image" ? activeImageUrl.value : normalizeCommunityMediaUrl(post.value.coverUrl)), post.value.toolCode, {
       modality: post.value.modality,

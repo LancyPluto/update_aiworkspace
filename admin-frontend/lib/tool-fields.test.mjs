@@ -4,8 +4,24 @@ import test from "node:test"
 import ts from "typescript"
 
 async function importTsModule(path) {
-  const source = await readFile(new URL(path, import.meta.url), "utf8")
-  const { outputText } = ts.transpileModule(source, {
+  let source = await readFile(new URL(path, import.meta.url), "utf8")
+  source = source
+    .replace(/import type \{ ToolField, ToolFieldPayload \} from ".*?"\r?\n/, "")
+    .replace(/import \{[\s\S]*?\} from "@\/lib\/field-ui-meta"\r?\n/, "")
+  const helpers = `
+function parseFieldOptionsJson(raw) {
+  if (!raw) return { options: [], meta: {} }
+  try {
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) return { options: parsed, meta: {} }
+    return { options: Array.isArray(parsed?.options) ? parsed.options : [], meta: parsed?.meta || {} }
+  } catch { return { options: [], meta: {} } }
+}
+function buildMetaOptionsJson(options, meta, core) {
+  return JSON.stringify({ options, meta: { ...meta, core: core === true } })
+}
+`
+  const { outputText } = ts.transpileModule(`${helpers}\n${source}`, {
     compilerOptions: {
       module: ts.ModuleKind.ESNext,
       target: ts.ScriptTarget.ES2022,

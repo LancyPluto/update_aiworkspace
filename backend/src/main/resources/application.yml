@@ -10,6 +10,9 @@ server:
 spring:
   application:
     name: ai-tool-market-backend
+  sql:
+    init:
+      encoding: UTF-8
   servlet:
     multipart:
       max-file-size: 100MB

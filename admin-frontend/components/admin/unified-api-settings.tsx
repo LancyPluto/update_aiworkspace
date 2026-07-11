@@ -987,7 +987,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
   const toggleModelAgentEnabled = useCallback(
     async (model: UnifiedApiModelItem, agentEnabled: boolean) => {
       if (agentEnabled && !model.enabled) {
-        setError("请先启用模型，再开启 Agent 可选")
+        setError("请先启用模型，再开启用户端可选")
         return
       }
       const previous = model.agentEnabled ?? true
@@ -1020,7 +1020,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         })
       } catch (err) {
         patchModelAgentEnabled(model.id, previous)
-        setError(err instanceof ApiError ? err.message : "Agent 可选更新失败")
+        setError(err instanceof ApiError ? err.message : "用户端可选更新失败")
       } finally {
         setTogglingAgentModelId(null)
       }
@@ -1557,7 +1557,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                     <TableHead className="w-[180px] text-center">能力</TableHead>
                     <TableHead className="w-[120px] text-center">文档</TableHead>
                     <TableHead className="w-[150px] text-center">成本</TableHead>
-                    <TableHead className="w-[112px] text-center">Agent 可选</TableHead>
+                    <TableHead className="w-[112px] text-center">用户端可选</TableHead>
                     <TableHead className="w-[112px] text-center">启用</TableHead>
                     <TableHead className="w-[180px] text-center">操作</TableHead>
                   </TableRow>
@@ -1660,7 +1660,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                             togglingAgentModelId === model.id
                             || (model.agentEnabled === false && !canEnableAgentForModel(model, vendor))
                           }
-                          label={`Agent 可选 ${model.displayName || model.modelName}`}
+                          label={`用户端可选 ${model.displayName || model.modelName}`}
                           onCheckedChange={(agentEnabled) => toggleModelAgentEnabled(model, agentEnabled)}
                         />
                       </TableCell>

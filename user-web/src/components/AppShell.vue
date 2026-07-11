@@ -240,7 +240,7 @@ const isAgentRoute = computed(() => route.path === "/agent" || route.path.starts
 const safeUserName = computed(() => {
   const nickname = safeDisplayName(auth.user?.nickname)
   const username = safeDisplayName(auth.user?.username)
-  const badEncoding = /�|锟|阖€|鍍|\uFFFD/.test(nickname)
+  const badEncoding = /\uFFFD|锟|阖€|鍍/.test(nickname)
   if (nickname && !badEncoding) return nickname
   if (username) return username
   const readablePrefix = nickname.match(/^[\w\s.-]{2,}/)?.[0]?.trim()
