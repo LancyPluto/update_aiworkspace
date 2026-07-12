@@ -75,6 +75,27 @@ REMOTE_DIR="$REMOTE_DIR"
 DEPLOY_SERVICES="$DEPLOY_SERVICES"
 GITHUB_SHA="${GITHUB_SHA:-unknown}"
 
+read_env_value() {
+  python3 - "\$1" <<'PY'
+import sys
+from pathlib import Path
+
+key = sys.argv[1]
+value = ""
+for relative in (".env", "deploy/.env"):
+    path = Path("/root/ai_tool_market") / relative
+    if not path.exists():
+        continue
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "=" not in line or line.lstrip().startswith("#"):
+            continue
+        current_key, current_value = line.split("=", 1)
+        if current_key.strip() == key:
+            value = current_value.strip().strip('"').strip("'")
+print(value)
+PY
+}
+
 read_secret_snapshot() {
   python3 - <<'PY'
 from pathlib import Path
@@ -331,6 +352,18 @@ if echo "\$DEPLOY_SERVICES" | grep -qw banana-slides; then
   COMPOSE_ARGS+=(--profile banana-slides)
 fi
 
+rollback_on_failure() {
+  status=\$?
+  trap - ERR
+  echo "::error::Release failed; starting application rollback." >&2
+  if ! REMOTE_DIR="\$REMOTE_DIR" DEPLOY_SERVICES="\$DEPLOY_SERVICES" \
+      bash "\$REMOTE_DIR/deploy/scripts/rollback_release.sh"; then
+    echo "::error::Automatic rollback also failed; manual intervention is required." >&2
+  fi
+  exit "\$status"
+}
+trap rollback_on_failure ERR
+
 echo "DEPLOY_SERVICES=\$DEPLOY_SERVICES" | tee -a "\$REMOTE_DIR/deploy/logs/deploy-history.log"
 
 # Apply pending DB migrations BEFORE rebuilding app containers, so the backend
@@ -339,6 +372,18 @@ echo "DEPLOY_SERVICES=\$DEPLOY_SERVICES" | tee -a "\$REMOTE_DIR/deploy/logs/depl
 # backend that crashes on a missing table.
 echo "Applying pending SQL migrations ..."
 docker compose "\${COMPOSE_ARGS[@]}" up -d mysql
+export MYSQL_PASS="\$(read_env_value MYSQL_ROOT_PASSWORD)"
+export MYSQL_DB="\$(read_env_value MYSQL_DATABASE)"
+export BACKUP_ENCRYPTION_PASSWORD="\$(read_env_value BACKUP_ENCRYPTION_PASSWORD)"
+export BACKUP_OSS_URI="\$(read_env_value BACKUP_OSS_URI)"
+MYSQL_PASS="\${MYSQL_PASS:-root123456}"
+MYSQL_DB="\${MYSQL_DB:-ai_supermarket_v1}"
+if [ -n "\$BACKUP_ENCRYPTION_PASSWORD" ]; then
+  echo "Creating encrypted pre-migration backup ..."
+  bash "\$REMOTE_DIR/deploy/scripts/backup_mysql.sh"
+else
+  echo "::warning::Pre-migration backup skipped: BACKUP_ENCRYPTION_PASSWORD is not configured. This is allowed for development/internal testing only." >&2
+fi
 bash "\$REMOTE_DIR/deploy/scripts/apply_sql_migrations.sh"
 
 # Parallel build: launch all builds concurrently, then wait.
@@ -406,28 +451,17 @@ if [ -n "\$MONITORING_SERVICES" ]; then
 fi
 
 # nginx 反代静态资源；任意前端/配置变更后都 reload，避免 user_web_dist 已更新但 nginx 仍握旧连接。
-docker compose "\${COMPOSE_ARGS[@]}" restart nginx || true
+docker compose "\${COMPOSE_ARGS[@]}" restart nginx
 
 if echo "\$DEPLOY_SERVICES" | grep -qw user-web; then
   echo "Writing user-web build-info.json ..."
   docker exec ai-supermarket-user-web sh -c "printf '%s\\n' '{\"gitSha\":\"'\$GITHUB_SHA'\",\"builtAt\":\"'\"\$(date -Iseconds)\"'\"}' > /dist-out/build-info.json" || true
   echo "Reloading nginx after user-web rebuild ..."
-  docker compose "\${COMPOSE_ARGS[@]}" restart nginx || true
+  docker compose "\${COMPOSE_ARGS[@]}" restart nginx
 fi
 
-echo "Waiting for services health..."
-for i in \$(seq 1 12); do
-  health="\$(docker inspect --format '{{.State.Health.Status}}' ai-supermarket-user-web 2>/dev/null || echo missing)"
-  echo "  attempt \$i/12: user-web=\$health"
-  if [[ "\$health" == "healthy" ]]; then
-    break
-  fi
-  sleep 5
-done
-
-curl -sf -o /dev/null -w "root:%{http_code}\n" http://127.0.0.1/ || true
-curl -sf -o /dev/null -w "api:%{http_code}\n" http://127.0.0.1/api/health || true
-curl -sf -o /dev/null -w "admin:%{http_code}\n" -L http://127.0.0.1/admin || true
+echo "Verifying release health..."
+bash "\$REMOTE_DIR/deploy/scripts/verify_release_health.sh"
 if echo "\$DEPLOY_SERVICES" | grep -qw agent-service; then
   echo "Checking agent-service outbound model connectivity ..."
   python3 "\$REMOTE_DIR/deploy/scripts/check_outbound_proxy.py"
@@ -438,6 +472,7 @@ if echo "\$DEPLOY_SERVICES" | grep -qw user-web; then
   echo "user-web bundle: \${js_bundle:-unknown}"
 fi
 docker compose "\${COMPOSE_ARGS[@]}" ps
+trap - ERR
 
 if [ -n "\${SECRET_SNAPSHOT_AFTER:-}" ]; then
   mkdir -p "\$REMOTE_DIR/deploy/logs"

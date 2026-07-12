@@ -160,6 +160,21 @@ jobs:
           npm test
           npm run build
 
+  deploy-contract-test:
+    name: Deploy Contracts
+    needs: changes
+    if: needs.changes.outputs.shared == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - name: Validate deploy scripts
+        run: |
+          bash -n deploy/scripts/*.sh
+          python -m unittest deploy/scripts/test_deploy_contracts.py
+
   # ── Python import/syntax validation ─────────────────────────────
   python-import-check:
     name: Python Import Validation
@@ -226,7 +241,7 @@ jobs:
 
   deploy-production:
     name: Deploy to Production
-    needs: [changes, backend-test, agent-service-test, worker-test, frontend-build, python-import-check]
+    needs: [changes, backend-test, agent-service-test, worker-test, frontend-build, deploy-contract-test, python-import-check]
     # 至少一个模块有变更，且事件为 push 到 dev 或手动触发时才部署
     if: |
       always() &&
@@ -234,6 +249,7 @@ jobs:
       (needs.agent-service-test.result == 'success' || needs.agent-service-test.result == 'skipped') &&
       (needs.worker-test.result == 'success' || needs.worker-test.result == 'skipped') &&
       (needs.frontend-build.result == 'success' || needs.frontend-build.result == 'skipped') &&
+      (needs.deploy-contract-test.result == 'success' || needs.deploy-contract-test.result == 'skipped') &&
       (needs.python-import-check.result == 'success' || needs.python-import-check.result == 'skipped') &&
       (needs.changes.outputs.backend == 'true' || needs.changes.outputs.agent == 'true' || needs.changes.outputs.worker == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.shared == 'true') &&
       ((github.event_name == 'push' && github.ref == 'refs/heads/dev') || github.event_name == 'workflow_dispatch')
