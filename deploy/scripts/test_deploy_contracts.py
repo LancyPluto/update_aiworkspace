@@ -38,6 +38,12 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("release health verification failed", health)
         self.assertIn("Pre-migration backup skipped", deploy)
         self.assertIn('if [ -n "\\$BACKUP_ENCRYPTION_PASSWORD" ]', deploy)
+        self.assertIn('--resolve "$PUBLIC_HOST:443:127.0.0.1"', health)
+        self.assertIn("http://127.0.0.1:8080/api/health", health)
+        self.assertIn("http://127.0.0.1:5174/admin", health)
+        self.assertIn("http://127.0.0.1:8090/health", health)
+        self.assertIn("docker logs --tail 80", health)
+        self.assertNotIn("http_ok http://127.0.0.1/", health)
 
     def test_rollback_uses_recorded_previous_revision(self) -> None:
         rollback = self.read("deploy/scripts/rollback_release.sh")
