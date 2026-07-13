@@ -319,12 +319,13 @@ function openAuthorProfile(post: CommunityPost, event: Event) {
 
 async function toggleLike(post: CommunityPost, event: Event) {
   event.stopPropagation()
-  if (!auth.token) return router.push({ name: "Login", query: { redirect: route.fullPath } })
+  if (!auth.isLoggedIn) return router.push({ name: "Login", query: { redirect: route.fullPath } })
+  const sessionToken = resolveAuthToken()
   actingPostId.value = post.id
   try {
     const updated = post.liked
-      ? await unlikeCommunityPost(post.id, { token: auth.token })
-      : await likeCommunityPost(post.id, { token: auth.token })
+      ? await unlikeCommunityPost(post.id, { token: sessionToken })
+      : await likeCommunityPost(post.id, { token: sessionToken })
     patchPost(updated)
   } finally {
     actingPostId.value = null
@@ -334,7 +335,7 @@ async function toggleLike(post: CommunityPost, event: Event) {
 async function toggleFavorite(post: CommunityPost, event: Event) {
   event.stopPropagation()
   const sessionToken = resolveAuthToken()
-  if (!sessionToken) return router.push({ name: "Login", query: { redirect: route.fullPath } })
+  if (!auth.isLoggedIn) return router.push({ name: "Login", query: { redirect: route.fullPath } })
 
   if (post.favorited) {
     actingPostId.value = post.id
@@ -360,7 +361,7 @@ function closeFavoritePicker() {
 async function confirmFavoritePicker(collectionId: number | null) {
   const post = favoritePickerPost.value
   const sessionToken = resolveAuthToken()
-  if (!post || !sessionToken) return
+  if (!post || !auth.isLoggedIn) return
 
   favoritePickerSubmitting.value = true
   actingPostId.value = post.id
@@ -449,19 +450,20 @@ async function load(reset = true) {
 async function createSameStyle(post: CommunityPost, event: Event) {
   event.stopPropagation()
   sameStyleError.value = ""
-  if (!auth.token) {
+  if (!auth.isLoggedIn) {
     return router.push({ name: "Login", query: { redirect: route.fullPath } })
   }
   if (!post.toolCode) {
     sameStyleError.value = "该作品未关联工具，暂时无法同款创作"
     return
   }
+  const sessionToken = resolveAuthToken()
   sameStyleLoadingId.value = post.id
   try {
-    await markCommunityPostSameStyle(post.id, { token: auth.token })
+    await markCommunityPostSameStyle(post.id, { token: sessionToken })
     void trackCommunityEvent(
       { postId: post.id, eventType: "dashboard_open", source: "discover_card", toolCode: post.toolCode },
-      { token: auth.token },
+      { token: sessionToken },
     ).catch(() => undefined)
     const selectedMediaUrl = postKind(post) === "image" ? activePostImageUrl(post) : normalizeCommunityMediaUrl(post.coverUrl)
     openDashboardWithAsset(assetFromCommunityPost(post, selectedMediaUrl), post.toolCode, {
@@ -693,7 +695,7 @@ onUnmounted(() => {
       item-key="id"
       :gap="2"
       :estimate-height="(item) => item.height"
-      aria-busy="true"
+      :aria-busy="true"
       aria-label="加载中"
     >
       <template #default="{ item }">

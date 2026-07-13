@@ -91,7 +91,7 @@ function isAudioTool(tool: Partial<ToolSummary>): boolean {
 
 function toolEntryPath(toolCode: string): string {
   const encoded = encodeURIComponent(toolCode)
-  return `/create?tool=${encoded}`
+  return `/dashboard?tool=${encoded}`
 }
 
 function searchableText(tool: Partial<ToolSummary>): string {

@@ -136,7 +136,7 @@ function toggleExpand() {
 // ---------------------------------
 
 const isMarketplaceChat = computed(() => isMarketplaceMockToolId(toolId.value))
-const chatBackPath = computed(() => "/tool")
+const chatBackPath = computed(() => "/marketplace")
 const usesTaskChat = computed(() => !isMarketplaceChat.value)
 
 const showWelcome = computed(() => messages.value.length === 0 && !sending.value && !switchingSession.value)

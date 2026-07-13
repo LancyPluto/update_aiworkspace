@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import Button from '@/components/ui/Button.vue'
 import { Menu, X } from 'lucide-vue-next'
+import { BRAND_LOGO_URL } from '@/config/brand'
 
 const emit = defineEmits<{
   'open-login': []
@@ -17,7 +18,7 @@ const navLinks = [
   { name: '关于我们', href: '#about' },
 ]
 
-const logoSrc = `${import.meta.env.BASE_URL}logo.png`
+const logoSrc = BRAND_LOGO_URL
 
 const handleScroll = () => {
   isScrolled.value = window.scrollY > 20
@@ -46,13 +47,13 @@ const toggleMobileMenu = () => {
    <div class="max-w-[1400px] mx-auto px-6 lg:px-12">
   <div class="flex items-center justify-between h-16 lg:h-20">
     <!-- Logo -->
-    <a href="#" class="flex items-center">
+    <RouterLink to="/" class="flex items-center">
       <img
         :src="logoSrc"
         class="h-10 w-auto max-w-[150px] object-contain [filter:drop-shadow(0_0_8px_rgb(34_211_238_/_0.35))]"
         alt="科创点AI"
       >
-    </a>
+    </RouterLink>
         
         <!-- Desktop Navigation -->
         <div class="hidden lg:flex items-center gap-8">

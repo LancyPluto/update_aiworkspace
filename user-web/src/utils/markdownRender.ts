@@ -1,7 +1,34 @@
 import DOMPurify from "dompurify"
 import type { Config } from "dompurify"
-import hljs from "highlight.js"
+import hljs from "highlight.js/lib/core"
+import bash from "highlight.js/lib/languages/bash"
+import css from "highlight.js/lib/languages/css"
+import java from "highlight.js/lib/languages/java"
+import javascript from "highlight.js/lib/languages/javascript"
+import json from "highlight.js/lib/languages/json"
+import markdown from "highlight.js/lib/languages/markdown"
+import python from "highlight.js/lib/languages/python"
+import sql from "highlight.js/lib/languages/sql"
+import typescript from "highlight.js/lib/languages/typescript"
+import xml from "highlight.js/lib/languages/xml"
 import { marked } from "marked"
+
+hljs.registerLanguage("bash", bash)
+hljs.registerLanguage("css", css)
+hljs.registerLanguage("java", java)
+hljs.registerLanguage("javascript", javascript)
+hljs.registerLanguage("json", json)
+hljs.registerLanguage("markdown", markdown)
+hljs.registerLanguage("python", python)
+hljs.registerLanguage("sql", sql)
+hljs.registerLanguage("typescript", typescript)
+hljs.registerLanguage("xml", xml)
+hljs.registerAliases(["sh", "shell"], { languageName: "bash" })
+hljs.registerAliases(["js", "jsx"], { languageName: "javascript" })
+hljs.registerAliases(["md"], { languageName: "markdown" })
+hljs.registerAliases(["py"], { languageName: "python" })
+hljs.registerAliases(["ts", "tsx"], { languageName: "typescript" })
+hljs.registerAliases(["html", "vue"], { languageName: "xml" })
 
 marked.use({
   gfm: true,

@@ -41,7 +41,8 @@
           </div>
           <p class="agreement-text">
             注册登录即代表已阅读并同意我们的
-            <a href="#" @click.prevent>隐私政策</a>
+            <RouterLink to="/legal/privacy">隐私政策</RouterLink>
+            和<RouterLink to="/legal/terms">服务条款</RouterLink>
             ，未注册的手机号将自动注册
           </p>
         </div>
@@ -56,7 +57,8 @@
           </div>
           <p class="agreement-text password-agreement">
             注册登录即代表已阅读并同意我们的
-            <a href="#" @click.prevent>隐私政策</a>
+            <RouterLink to="/legal/privacy">隐私政策</RouterLink>
+            和<RouterLink to="/legal/terms">服务条款</RouterLink>
           </p>
           <div class="auth-row-links">
             <a href="#" @click.prevent="switchMode('forgotVerify')">忘记密码</a>
@@ -85,7 +87,8 @@
           </div>
           <p class="agreement-text">
             注册即代表已阅读并同意我们的
-            <a href="#" @click.prevent>隐私政策</a>
+            <RouterLink to="/legal/privacy">隐私政策</RouterLink>
+            和<RouterLink to="/legal/terms">服务条款</RouterLink>
           </p>
         </div>
 

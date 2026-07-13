@@ -1,165 +1,80 @@
-# Qianduan User-Web Route Map
+# 用户端正式路由契约
 
-This document records the route and deployment contract for the migrated
-qianduan-style user frontend. The authoritative runtime sources are
-`user-web/src/router/index.ts`, `user-web/src/app/routes/publicRoutes.ts`,
-`user-web/src/app/routes/protectedRoutes.ts`, `user-web/vite.config.ts`,
-`deploy/nginx/default.conf`, and `scripts/migration_cutover_smoke.py`; this
-file is the deployment and regression checklist view of those contracts.
+本文记录当前科创点 AI 用户端的实际上线路由。唯一运行时事实源是
+`user-web/src/router/index.ts`；路由 helper 位于 `user-web/src/router/userRoutes.ts`。
 
-## Entry Contract
+2026-06-10 曾引入一套未完成的外部风格前端迁移，其中 `/create`、`/tool`、
+`/video`、`/image`、`/assets` 和 PPT 工作区没有进入当前正式产品。本期已删除其
+孤立页面、导航数据、拆分路由和测试契约，后续不得依据历史提交恢复这些入口。
 
-| Route | Auth | Runtime behavior |
-| --- | --- | --- |
-| `/` | Public | Website login/landing page. Logged-in users are redirected to `/home` unless a valid `redirect` query points elsewhere. |
-| `/login` | Public | Compatibility alias for the same login page. Logged-in users are redirected with the same post-login rule as `/`. |
-| `/home` | Protected | Migrated qianduan-style authenticated home. This is the default successful-login destination. |
+## 入口与认证
 
-Post-login redirects must stay internal paths beginning with `/`. The login
-guard intentionally normalizes `/`, `/home`, `/login`, and invalid redirects to
-`/home` to avoid login loops.
-
-## Primary User Routes
-
-Runtime route definitions are split by access boundary: public routes live in
-`user-web/src/app/routes/publicRoutes.ts`, protected routes live in
-`user-web/src/app/routes/protectedRoutes.ts`, and `router/index.ts` only
-combines them with the auth guard.
-
-| Route | Auth | Current page/component | Notes |
+| 路由 | 认证 | 当前页面 | 说明 |
 | --- | --- | --- | --- |
-| `/create` | Protected | `CreatorWorkspace/Page.vue` | Primary migrated creator workspace. Uses backend tool detail, `DynamicForm`, `creatorAdapter`, and `taskApi.createTask`. |
-| `/video` | Public view | `VideoTools/Page.vue` | Backend-driven video-capable tool discovery. Task submission still routes through protected creation flows. |
-| `/image` | Public view | `ImageTools/Page.vue` | Backend-driven image-capable tool discovery. Task submission still routes through protected creation flows. |
-| `/tool` | Public | `ToolCenter/Page.vue` | Backend-driven tool center with categories, search, pagination, and cover fallbacks. |
-| `/tools/:id` | Public | `ToolDetail/Page.vue` | Existing tool detail contract preserved. PPT tools route to the PPT workspace; ordinary tools enter `/create?tool=<toolCode>`. |
-| `/tools/:id/use` | Protected | `ToolUse/Page.vue` | Legacy dynamic tool-use surface retained for compatibility. |
-| `/tasks` | Protected | `MyTasks/Page.vue` | Preserves task filtering, cancel, delete, regenerate, and cancelled-task display. |
-| `/tasks/:taskId/status` | Protected | `TaskStatus/Page.vue` | Preserves SSE status stream with polling fallback. |
-| `/tasks/:taskId/result` | Protected | `TaskResult/Page.vue` | Preserves generated text/image/audio/video/report result rendering through existing result utilities. |
-| `/assets` | Protected | `MaterialLibrary/Page.vue` | Migrated asset/library route. Preserves preview, download, replay, delete, publish, and unpublish behavior. |
-| `/billing` | Protected | `Billing/Page.vue` | Preserves credit account, package loading, order creation, and payment state. |
-| `/profile` | Protected | `Profile/Page.vue` | Preserves profile, avatar, and community settings behavior. |
-| `/community` | Public | `CommunityDiscover/Page.vue` | Existing community discovery route retained. |
-| `/community/posts/:postId` | Public | `CommunityPost/Page.vue` | Existing post detail, like/favorite, same-style, and collection behavior retained. |
-| `/community/inspirations` | Protected | `InspirationCollections/Page.vue` | Existing inspiration collection behavior retained. |
-| `/u/:userId` | Public | `PublicProfile/Page.vue` | Existing public profile behavior retained. |
-| `/agent` | Protected | `AgentHome/Page.vue` | Existing Agent session/message/run-event/file behavior retained inside the migrated shell. |
-| `/agents` | Public | `AgentPlaceholder/Page.vue` | Public placeholder/compatibility entry. |
-| `/chat/:toolId` | Public | `Chat/Page.vue` | Legacy chat route retained so previous shared links and file-upload chat flows stay reachable. |
-| `/tools/banana_ppt_generator/workspace` | Protected | `PptWorkspace/Page.vue` | Existing PPT workspace entry retained. |
-| `/tools/banana_ppt_generator/workspace/:bindingId` | Protected | `PptWorkspace/Editor.vue` | Existing PPT project editor retained. |
+| `/` | 公开 | `Login/Page.vue` | 登录页；已登录用户进入合法 redirect 或 `/home`。 |
+| `/login` | 公开 | 重定向 | 兼容别名，保留 query 后跳转 `/`。 |
+| `/home` | 登录 | `Home/Page.vue` | 登录后的默认首页。 |
+| `/dashboard` | 登录 | `Dashboard/Page.vue` | 正式生成工作台；`tool`、`modality`、`sourcePost` 等 query 必须保留。 |
 
-Internal business actions must target the migrated routes directly. Asset
-replay, same-style creation, Agent asset recommendations, and old ToolList
-category cards should generate `/create` URLs instead of relying on the
-`/dashboard` compatibility redirect.
+只接受以 `/` 开头的站内登录回跳地址。空值、登录页自身或非法地址统一回到
+`/home`，防止开放重定向和登录循环。
 
-The old visual-only `Dashboard/Page.vue` and `ToolList/Page.vue` surfaces have
-been removed after their route references were replaced by `/create` and
-`ToolCenter/Page.vue`; keep the compatibility route names only as redirects and
-navigation identities.
+## 正式业务路由
 
-## Compatibility Redirects
+| 路由 | 认证 | 当前页面/行为 |
+| --- | --- | --- |
+| `/marketplace` | 公开 | `ToolList/Page.vue` 工具列表。 |
+| `/agents` | 公开 | `ToolList/Page.vue`，智能体筛选模式。 |
+| `/tools/:id` | 公开 | `ToolDetail/Page.vue` 工具详情。 |
+| `/tools/:id/use` | 登录 | `ToolUse/Page.vue` 工具动态表单。 |
+| `/chat/:toolId` | 公开 | 兼容旧分享链接，携带工具编码进入 `/dashboard`。 |
+| `/tasks` | 登录 | `MyTasks/Page.vue` 任务列表。 |
+| `/tasks/:taskId/status` | 登录 | 任务状态页。 |
+| `/tasks/:taskId/result` | 登录 | 任务结果页。 |
+| `/workflow/studio/:taskId` | 登录 | 工作流详情。 |
+| `/library` | 登录 | `MaterialLibrary/Page.vue` 素材与生成资产。 |
+| `/library/subjects` | 登录 | 主体素材库。 |
+| `/subjects` | 登录 | 兼容重定向到 `/library/subjects`。 |
+| `/agent` | 登录 | Agent 会话工作区。 |
+| `/community` | 公开 | 社区发现页。 |
+| `/community/posts/:postId` | 公开 | 社区作品详情。 |
+| `/community/inspirations` | 登录 | 灵感收藏夹。 |
+| `/u/:userId` | 公开 | 用户公开主页。 |
+| `/billing` | 登录 | 会员、算力与充值。 |
+| `/referral` | 登录 | 推荐有礼。 |
+| `/profile` | 登录 | 个人资料。 |
+| `/legal/privacy` | 公开 | 隐私政策，版本化用户服务文件。 |
+| `/legal/terms` | 公开 | 服务条款，版本化用户服务文件。 |
+| `/legal/aigc-labeling` | 公开 | AI 生成内容标识说明。 |
+| `/legal/refund` | 公开 | 退款范围、申请与核验说明。 |
+| `/contact` | 公开 | 客服与内容投诉渠道。 |
 
-These redirects are intentionally kept for externally shared URLs and old user
-habits. Do not remove them until analytics and stakeholder review confirm they
-are no longer needed.
+## 业务跳转规则
 
-| Old route | Redirect target |
-| --- | --- |
-| `/dashboard` | `/create` with original query preserved |
-| `/marketplace` | `/tool` with original query preserved |
-| `/tools` | `/tool` with original query preserved |
-| `/library` | `/assets` with original query preserved |
-| `/pricing` | `/billing` with original query preserved |
+- 首页、工具卡、工具详情、同款创作和素材复用统一进入
+  `/dashboard?tool=<toolCode>`。
+- 素材复用通过 `dashboard_pending_asset` 在同一标签页传递输入素材，并通过
+  query 传递 `modality` 和 `sourcePost`。
+- 工具列表返回地址统一为 `/marketplace`，资产返回地址统一为 `/library`。
+- 所有内部业务代码优先使用 `userRoutes` 或 `assetReplay`，不分散拼接路径。
 
-## Auth Guard Expectations
+## 明确下线的历史入口
 
-Routes whose `meta.requiresAuth` is not explicitly `false` are protected. A
-logged-out user opening a protected route must be sent to:
+以下路径不属于当前产品，不创建页面或兼容重定向：
 
-```text
-/?redirect=<original-full-path>
-```
+- `/create`
+- `/tool`
+- `/video`
+- `/image`
+- `/assets`
+- `/tools/banana_ppt_generator/workspace`
+- `/tools/banana_ppt_generator/workspace/:bindingId`
 
-Public routes must remain reachable without login. Protected routes must remain
-reachable after login and should continue to use the migrated `WorkspaceShell`
-where applicable.
+## 验收
 
-## Proxy And Deployment Contract
-
-The frontend must remain the `user-web` application and deployment root.
-
-Local Vite development:
-
-| Path | Target |
-| --- | --- |
-| `/api/*` | `VITE_DEV_PROXY_TARGET`, default `http://127.0.0.1:8080` |
-| `/generated/*` | `VITE_DEV_PROXY_TARGET`, default `http://127.0.0.1:8080` |
-
-The local Vite proxy strips browser `Origin` before forwarding `/api` and
-`/generated` requests so temporary dev-server ports do not trigger backend CORS
-rejections during browser QA.
-
-Nginx deployment:
-
-| Path | Target |
-| --- | --- |
-| `/` and user routes | `user-web:5173` |
-| `/api/*` | `backend:8080` |
-| `/generated/*` | `backend:8080` |
-| `/api/internal/*` | `404` from public Nginx |
-| `/admin/*` and `/_next/*` | `admin-frontend:5174` |
-
-Production cutover must re-run the route, API, and generated-media smoke checks
-against the target domain after DNS, TLS, and host configuration are applied.
-The baseline smoke includes a negative probe for `/api/internal/health` and
-requires the public Nginx path to return `404`.
-Final approval runs of `scripts/migration_cutover_smoke.py` must include
-`--require-all-gates`, which fails fast unless real image, real video,
-media-publish, and full PPT generation/export gates are all enabled. In this
-strict mode the base URL must be an HTTPS non-local staging or production
-domain. A JSON result with `"ok": true` but `"approvalReady": false` is only a
-baseline/rehearsal pass; final approval requires `"approvalReady": true`.
-
-## Static Data Boundary
-
-The migrated pages may use static qianduan assets as presentation fallbacks, but
-production business content must come from the existing backend APIs:
-
-- Tool lists and tool cards: `/api/v1/tools` and `/api/v1/tools/{toolCode}`.
-- Task creation and status: `/api/v1/tasks*`.
-- Generated media: `/generated/*` served by the backend.
-- Assets/material library: task detail/list data plus generated result
-  resources and community publish state.
-- Billing, profile, community, Agent, and PPT: their existing API modules.
-
-Do not reintroduce `qianduan/src/services/studioApi.ts` or static workspace
-tool data as production business sources.
-
-## Cutover Regression Checklist
-
-Run these checks before declaring the user frontend ready for production
-cutover:
-
-1. `/` renders the login/landing entry; `user1`-style password login redirects
-   to `/home` in local/staging test data.
-2. Public `/tool`, `/video`, `/image`, `/community`, `/community/posts/:postId`,
-   and `/u/:userId` are reachable without login.
-3. Protected `/home`, `/create`, `/tasks`, `/assets`, `/billing`, `/profile`,
-   `/agent`, and PPT workspace routes redirect to `/?redirect=...` when logged
-   out and open after login.
-4. Compatibility redirects for `/dashboard`, `/marketplace`, `/tools`,
-   `/library`, and `/pricing` resolve to their target routes.
-5. `/api/health`, `/api/v1/tools`, authenticated `/api/v1/users/me`, and
-   generated `/generated/*` media work through the deployment host.
-6. Image/video creation, task status, task result, and asset preview/download/
-   publish/unpublish are repeated with the real production media providers, not
-   only local mock tools.
-7. PPT outline, descriptions, images, PPTX/PDF export, editable PPTX export,
-   and the exported file downloads are repeated after banana-slides provider settings
-   are configured for the real environment.
-8. Nginx still blocks public `/api/internal/*`.
-9. The final smoke command uses `--require-all-gates`, points at an HTTPS
-   non-local staging/production domain, and does not use `--allow-mock-tools`.
+1. `/dashboard?tool=gpt_image2` 直接打开和刷新均加载相同工具。
+2. 未登录访问受保护页面时，登录后恢复完整 path 和 query。
+3. 社区同款、资产复用和工具卡启动均进入 `/dashboard` 且不丢 tool。
+4. 所有侧栏和页面内导航目标均在 `router/index.ts` 中存在。
+5. `npm test` 和 `npm run build` 均通过；构建产物不包含历史复制版页面 chunk。
+6. Logo 使用 `asset/logo.png` 本地资源；登录协议和页脚服务入口不得使用空 `#` 链接。

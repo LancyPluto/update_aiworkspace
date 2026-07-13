@@ -94,7 +94,7 @@ function Test-PythonVenvReady {
     if (-not (Test-Path -LiteralPath $VenvPython)) {
         return $false
     }
-    & $VenvPython -c "import uvicorn, pika" 2>$null
+    & $VenvPython -c "import uvicorn, pika, prometheus_client" 2>$null
     return $LASTEXITCODE -eq 0
 }
 
@@ -116,7 +116,7 @@ function Sync-PythonVenvDeps {
     Run-Command $Root $VenvPython @("-m", "pip", "install", "-U", "pip", "wheel")
     Run-Command $Root $VenvPython @("-m", "pip", "install", "-r", $RequirementsDev)
     if (-not (Test-PythonVenvReady)) {
-        throw "Python venv install finished but uvicorn/pika are still missing."
+        throw "Python venv install finished but uvicorn/pika/prometheus_client are still missing."
     }
     Write-Host "[OK] Python venv deps installed"
 }

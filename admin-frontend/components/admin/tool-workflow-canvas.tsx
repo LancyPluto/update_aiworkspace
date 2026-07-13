@@ -592,7 +592,7 @@ export function ToolWorkflowCanvas({
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] leading-4 text-muted-foreground">
-                  读取管理端"系统配置"中的模型，选择后绑定到当前工作流节点。
+                  读取管理端“系统配置”中的模型，选择后绑定到当前工作流节点。
                 </p>
               </div>
             ) : null}

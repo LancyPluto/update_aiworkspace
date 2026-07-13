@@ -33,6 +33,7 @@ import {
 } from "lucide-vue-next"
 import { ref, onMounted, onUnmounted, computed, watch } from "vue"
 import { useGlobalSearch, type GlobalSearchResultItem, type GlobalSearchScope } from "@/composables/useGlobalSearch"
+import { BRAND_LOGO_URL } from "@/config/brand"
 import { fetchCreditAccount } from "@/api/creditApi"
 import { fetchCustomerServiceSettings } from "@/api/settingsApi"
 import type { CustomerServiceSettings } from "@/api/settingsApi"
@@ -240,7 +241,7 @@ const isAgentRoute = computed(() => route.path === "/agent" || route.path.starts
 const safeUserName = computed(() => {
   const nickname = safeDisplayName(auth.user?.nickname)
   const username = safeDisplayName(auth.user?.username)
-  const badEncoding = /�|锟|阖€|鍍|\uFFFD/.test(nickname)
+  const badEncoding = /\uFFFD|锟|阖€|鍍/.test(nickname)
   if (nickname && !badEncoding) return nickname
   if (username) return username
   const readablePrefix = nickname.match(/^[\w\s.-]{2,}/)?.[0]?.trim()
@@ -404,7 +405,7 @@ watch(
       <div class="app-shell-brand-row flex h-[92px] shrink-0 items-center justify-between px-6 pb-4 pt-6">
         <div class="app-shell-brand-ambient" aria-hidden="true" />
         <RouterLink to="/agent" class="app-shell-agent-logo-link min-w-0 flex-1">
-          <img src="https://cdn.wlcloudai.com/static/logo.png" class="app-shell-agent-logo" alt="科创点AI" />
+          <img :src="BRAND_LOGO_URL" class="app-shell-agent-logo" alt="科创点AI" />
         </RouterLink>
         <button
           type="button"

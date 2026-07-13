@@ -6,9 +6,9 @@ import ts from "typescript"
 async function importToolTaskParams() {
   let source = await readFile(new URL("./toolTaskParams.ts", import.meta.url), "utf8")
   source = source
-    .replace(/import type .*? from ".*?"\n/g, "")
+    .replace(/import type .*? from ".*?"\r?\n/g, "")
     .replace(
-      /import \{ parseFieldMeta \} from ".*?"\n/,
+      /import \{ parseFieldMeta \} from ".*?"\r?\n/,
       `const parseFieldMeta = (field) => {
         if (!field?.optionsJson) return {}
         try { return JSON.parse(field.optionsJson) } catch { return {} }
