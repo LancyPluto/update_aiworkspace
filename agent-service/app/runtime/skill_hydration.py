@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -31,12 +32,38 @@ class SkillHydrationService:
     ) -> SkillHydrationResult | None:
         if not settings.agent_skill_hydration_enabled:
             return None
-        skill = _find_skill_for_tool(context, tool_code)
-        if skill is None or skill.skillCode in hydrated_skill_codes:
+        match = _find_skill_for_tool(context, tool_code)
+        if match is None:
             return None
-        payload = await self.backend.get_agent_skill(skill.skillCode)
+        skill, matched_pattern, match_type = match
+        if skill.skillCode in hydrated_skill_codes:
+            return None
+        try:
+            payload = await self.backend.get_agent_skill(skill.skillCode)
+        except Exception as exc:
+            await self._emit_hydration_event(
+                context,
+                skill_code=skill.skillCode,
+                tool_code=tool_code,
+                version=skill.version,
+                matched_pattern=matched_pattern,
+                match_type=match_type,
+                hydrated=False,
+                failure_reason=f"skill fetch failed: {type(exc).__name__}",
+            )
+            raise
         sop = str(payload.get("sopRules") or "").strip()
         if not sop:
+            await self._emit_hydration_event(
+                context,
+                skill_code=skill.skillCode,
+                tool_code=tool_code,
+                version=_int_or_none(payload.get("version") or skill.version),
+                matched_pattern=matched_pattern,
+                match_type=match_type,
+                hydrated=False,
+                failure_reason="published skill has no SOP content",
+            )
             return None
         examples = payload.get("examples")
         examples_text = _format_examples(examples)
@@ -59,22 +86,53 @@ class SkillHydrationService:
             token_estimate=max(1, len(content) // 4),
         )
         hydrated_skill_codes.add(skill.skillCode)
+        await self._emit_hydration_event(
+            context,
+            skill_code=result.skill_code,
+            tool_code=result.tool_code,
+            version=result.version,
+            matched_pattern=matched_pattern,
+            match_type=match_type,
+            hydrated=True,
+            token_estimate=result.token_estimate,
+            content_sha256=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        )
+        return result
+
+    async def _emit_hydration_event(
+        self,
+        context: RunContext,
+        *,
+        skill_code: str,
+        tool_code: str,
+        version: int | None,
+        matched_pattern: str,
+        match_type: str,
+        hydrated: bool,
+        token_estimate: int | None = None,
+        content_sha256: str | None = None,
+        failure_reason: str | None = None,
+    ) -> None:
         try:
             await self.backend.append_event(
                 context.runId,
                 RunEventCreate(
                     eventType=SKILL_HYDRATED,
                     eventJson={
-                        "skillCode": result.skill_code,
-                        "toolCode": result.tool_code,
-                        "version": result.version,
-                        "tokenEstimate": result.token_estimate,
+                        "skillCode": skill_code,
+                        "toolCode": tool_code,
+                        "version": version,
+                        "matchedPattern": matched_pattern,
+                        "matchType": match_type,
+                        "hydrated": hydrated,
+                        "tokenEstimate": token_estimate,
+                        "contentSha256": content_sha256,
+                        "failureReason": failure_reason,
                     },
                 ),
             )
         except Exception:
             pass
-        return result
 
 
 def hydration_message(result: SkillHydrationResult) -> ChatMessage:
@@ -88,8 +146,10 @@ def _find_skill_for_tool(context: RunContext, tool_code: str):
     for skill in context.availableSkills or []:
         for pattern in skill.toolCodes or []:
             token = str(pattern or "").strip().lower()
-            if token and (normalized == token or token in normalized or normalized in token):
-                return skill
+            if normalized == token:
+                return skill, str(pattern), "EXACT"
+            if token and (token in normalized or normalized in token):
+                return skill, str(pattern), "CONTAINS"
     return None
 
 

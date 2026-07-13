@@ -29,6 +29,7 @@ from app.core.event_types import (
 from app.core.intent_router import Intent
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate, ToolDescriptor
 from app.core.user_attachment_priority import apply_user_selected_attachment_priority
+from app.observability.model_request_audit import model_audit_scope
 from app.runtime.agent_graph.prompts import (
     chunk_text as _chunks,
     field_media_modality as _field_media_modality,
@@ -181,7 +182,8 @@ class AgentExecutor:
             except BudgetExceeded:
                 raise
 
-            turn = await self._chat_turn(messages)
+            with model_audit_scope("tool.loop", iteration):
+                turn = await self._chat_turn(messages)
             tool_calls = list(getattr(turn, "tool_calls", []) or [])
             content = turn.content or ""
             last_content = content

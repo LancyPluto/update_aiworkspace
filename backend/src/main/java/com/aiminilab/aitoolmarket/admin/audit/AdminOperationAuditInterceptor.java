@@ -45,6 +45,12 @@ public class AdminOperationAuditInterceptor implements HandlerInterceptor {
         return "POST".equalsIgnoreCase(method)
                 || "PUT".equalsIgnoreCase(method)
                 || "PATCH".equalsIgnoreCase(method)
-                || "DELETE".equalsIgnoreCase(method);
+                || "DELETE".equalsIgnoreCase(method)
+                || ("GET".equalsIgnoreCase(method) && isSensitiveAgentAuditRead(path));
+    }
+
+    private boolean isSensitiveAgentAuditRead(String path) {
+        return path.matches("/api/admin/v1/agent/runs/\\d+/(audit|model-requests)")
+                || path.equals("/api/admin/v1/agent/skills/coverage");
     }
 }

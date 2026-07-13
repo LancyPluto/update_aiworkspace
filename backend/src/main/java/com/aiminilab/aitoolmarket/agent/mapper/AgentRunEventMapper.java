@@ -80,4 +80,7 @@ public interface AgentRunEventMapper extends BaseMapper<AgentRunEvent> {
             ORDER BY id ASC
             """)
     List<AgentRunEvent> findRecentEventsForAdmin(@Param("runId") Long runId, @Param("limit") int limit);
+
+    @Select("SELECT * FROM agent_run_events WHERE event_type=#{eventType} ORDER BY id DESC LIMIT #{limit}")
+    List<AgentRunEvent> findRecentByType(@Param("eventType") String eventType, @Param("limit") int limit);
 }

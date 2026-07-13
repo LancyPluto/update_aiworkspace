@@ -2,6 +2,7 @@
 import time
 
 from app.observability.metrics import record_run_completed, record_run_started, record_tool_call
+from app.observability.model_request_audit import AuditedModelClient, ModelRequestAuditRecorder
 from app.clients.backend_client import BackendClient, BackendClientError
 from app.clients.model_client import ModelClient, ModelClientError
 from app.config import Settings
@@ -56,6 +57,7 @@ class AgentRuntime:
         entrypoint = "run"
         engine_name = "unknown"
         started_at = time.perf_counter()
+        audited_model = None
         record_run_started(entrypoint)
         try:
             context = await self.backend.get_run_context(run_id)
@@ -63,6 +65,9 @@ class AgentRuntime:
                 record_run_completed(entrypoint, "skipped", "terminal_status", engine_name, time.perf_counter() - started_at)
                 return
             model_client = await self._model_client(context)
+            if _supports_model_requests(model_client):
+                audited_model = AuditedModelClient(model_client, ModelRequestAuditRecorder(self.backend, run_id))
+                model_client = audited_model
             context = await self._with_rolling_summary(context, model_client)
             engine = self.runtime_router_factory(
                 self.backend,
@@ -90,11 +95,15 @@ class AgentRuntime:
             logger.exception("Agent run failed with internal error, runId=%s", run_id)
             await self._fail(run_id, "AGENT_INTERNAL_ERROR", str(exc))
             record_run_completed(entrypoint, "failed", "AGENT_INTERNAL_ERROR", engine_name, time.perf_counter() - started_at)
+        finally:
+            if audited_model is not None:
+                audited_model.schedule_audit_flush()
 
     async def execute_confirmed_tool(self, run_id: int, tool_code: str) -> None:
         entrypoint = "confirmed_tool"
         engine_name = "unknown"
         started_at = time.perf_counter()
+        audited_model = None
         record_run_started(entrypoint)
         try:
             context = await self.backend.get_run_context(run_id)
@@ -102,6 +111,9 @@ class AgentRuntime:
                 record_run_completed(entrypoint, "skipped", "terminal_status", engine_name, time.perf_counter() - started_at)
                 return
             model_client = await self._model_client(context)
+            if _supports_model_requests(model_client):
+                audited_model = AuditedModelClient(model_client, ModelRequestAuditRecorder(self.backend, run_id))
+                model_client = audited_model
             context = await self._with_rolling_summary(context, model_client)
             engine = self.runtime_router_factory(
                 self.backend,
@@ -134,6 +146,9 @@ class AgentRuntime:
             await self._fail(run_id, "AGENT_INTERNAL_ERROR", str(exc))
             record_tool_call(tool_code, "failed")
             record_run_completed(entrypoint, "failed", "AGENT_INTERNAL_ERROR", engine_name, time.perf_counter() - started_at)
+        finally:
+            if audited_model is not None:
+                audited_model.schedule_audit_flush()
 
     async def debug_route(self, context):
         try:
@@ -207,3 +222,7 @@ class AgentRuntime:
                 error_code,
                 error_message,
             )
+
+
+def _supports_model_requests(model_client) -> bool:
+    return any(callable(getattr(model_client, name, None)) for name in ("chat", "chat_turn", "chat_stream", "chat_stream_parts"))

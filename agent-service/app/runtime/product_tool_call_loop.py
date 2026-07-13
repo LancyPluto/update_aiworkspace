@@ -22,6 +22,7 @@ from app.core.preferred_tool_bias import (
     sort_tools_with_preferred,
 )
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate, ToolDescriptor
+from app.observability.model_request_audit import model_audit_scope
 from app.core.attachment_catalog import build_user_message_content
 from app.runtime.context_manager import ContextManager
 from app.runtime.session_state import IMAGE_TOOL_PROMPT_COMPLETENESS_RULES, SESSION_STATE_INSTRUCTIONS, format_session_state_context
@@ -92,7 +93,15 @@ class ProductToolCallLoopExecutor:
         hydrated_skill_codes: set[str] = set()
         hydration = SkillHydrationService(self.backend)
 
-        turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
+        model_iteration = 0
+
+        async def audited_turn(stage: str, *, choice: str | dict[str, Any] | None = "auto"):
+            nonlocal model_iteration
+            model_iteration += 1
+            with model_audit_scope(stage, model_iteration):
+                return await chat_turn(messages, tools=tool_defs, tool_choice=choice)
+
+        turn = await audited_turn("tool.selection")
         calls = list(getattr(turn, "tool_calls", []) or [])[:call_limit]
 
         if calls and calls[0].name == EXPAND_TOOL:
@@ -100,7 +109,7 @@ class ProductToolCallLoopExecutor:
             if code and ToolRegistry(context).get(code):
                 expanded_codes.add(code)
                 tool_defs, aliases = self._tool_definitions(context.availableTools, context, expanded_codes=expanded_codes)
-                turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
+                turn = await audited_turn("tool.disclosure.retry")
                 calls = list(getattr(turn, "tool_calls", []) or [])[:call_limit]
 
         if not calls and self._should_expand_full(context, aliases):
@@ -111,11 +120,11 @@ class ProductToolCallLoopExecutor:
                 TOOL_CALL_LOOP_STARTED,
                 {"kind": "product", "phase": "expanded", "tools": [item["function"]["name"] for item in tool_defs]},
             )
-            turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
+            turn = await audited_turn("tool.disclosure.full_retry")
             calls = list(getattr(turn, "tool_calls", []) or [])[:call_limit]
 
         if await self._hydrate_selected_skill(hydration, context, messages, calls, hydrated_skill_codes):
-            turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
+            turn = await audited_turn("skill.hydrated.retry")
             calls = list(getattr(turn, "tool_calls", []) or [])[:call_limit]
 
         if not calls:
@@ -160,12 +169,12 @@ class ProductToolCallLoopExecutor:
                 calls = []
                 break
             messages.append(ChatMessage(role="system", content=_schema_validation_retry_message(missing_prompt_fields)))
-            turn = await chat_turn(messages, tools=tool_defs, tool_choice=_force_tool_choice(call.name))
+            turn = await audited_turn("argument.schema_retry", choice=_force_tool_choice(call.name))
             calls = list(getattr(turn, "tool_calls", []) or [])[:call_limit]
             if calls:
                 continue
             messages.append(ChatMessage(role="system", content=_schema_validation_no_tool_nudge()))
-            turn = await chat_turn(messages, tools=tool_defs, tool_choice=_force_tool_choice(call.name))
+            turn = await audited_turn("argument.schema_retry", choice=_force_tool_choice(call.name))
             calls = list(getattr(turn, "tool_calls", []) or [])[:call_limit]
 
         if not calls and schema_validation_tool_code:
@@ -202,7 +211,7 @@ class ProductToolCallLoopExecutor:
                     context,
                     expanded_codes=expanded_codes,
                 )
-                retry_turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
+                retry_turn = await audited_turn("tool.rejection_retry")
                 retry_calls = list(getattr(retry_turn, "tool_calls", []) or [])[:call_limit]
                 if retry_calls:
                     call = retry_calls[0]

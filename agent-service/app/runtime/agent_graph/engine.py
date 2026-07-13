@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 from typing import Any
 
@@ -43,6 +44,7 @@ from app.core.schemas import (
     ToolDescriptor,
 )
 from app.core.user_attachment_priority import apply_user_selected_attachment_priority
+from app.observability.model_request_audit import model_audit_scope
 from app.runtime.agent_graph.prompts import (
     GRAPH_SYSTEM_PROMPT,
     chunk_text as _chunks,
@@ -305,9 +307,10 @@ class AgentGraphEngine:
             # Recompute the shortlist for the current step so chained outputs
             # (e.g. an image just produced) surface the right next-step tools.
             self._refresh_tool_defs(context, artifacts=state.get("artifacts") or self._run_artifacts)
-        self._guard.reserve_model_call(self._budget)
-        turn = await self.model.chat_turn(state["messages"], tools=self._tool_defs, tool_choice="auto")
         iteration = int(state.get("iteration", 0)) + 1
+        self._guard.reserve_model_call(self._budget)
+        with model_audit_scope("tool.loop", iteration):
+            turn = await self.model.chat_turn(state["messages"], tools=self._tool_defs, tool_choice="auto")
         tool_calls = list(getattr(turn, "tool_calls", []) or [])
         await self.backend.append_event(
             context.runId,
@@ -680,12 +683,35 @@ class AgentGraphEngine:
         full_defs, _ = product_tool_definitions(context.availableTools, context)
         full_tokens = _estimate_tokens(json.dumps(full_defs, ensure_ascii=False))
         disclosed_tokens = _estimate_tokens(json.dumps(self._tool_defs, ensure_ascii=False))
+        shortlisted_codes = sorted({
+            str(getattr(getattr(alias, "tool", None), "toolCode", ""))
+            for alias in self._aliases.values()
+        })
+        shortlisted_codes = [code for code in shortlisted_codes if code]
+        candidate_codes = [tool.toolCode for tool in context.availableTools]
+        filtered_tools = [
+            {"toolCode": code, "reason": "relevance shortlist limit"}
+            for code in candidate_codes
+            if code not in shortlisted_codes and code not in self._expanded_tool_codes
+        ]
+        schema_hashes = {
+            str(definition.get("function", {}).get("name") or "unknown"): hashlib.sha256(
+                json.dumps(definition, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest()
+            for definition in self._tool_defs
+            if isinstance(definition, dict)
+        }
         await self.backend.append_event(
             context.runId,
             RunEventCreate(eventType=TOOL_DISCLOSURE, eventText="tool disclosure applied", eventJson={
                 "availableToolCount": len(context.availableTools),
                 "shortlistedToolCount": len(self._aliases),
                 "expandedToolCount": len(self._expanded_tool_codes),
+                "candidateToolCodes": candidate_codes,
+                "shortlistedToolCodes": shortlisted_codes,
+                "expandedToolCodes": sorted(self._expanded_tool_codes),
+                "filteredTools": filtered_tools,
+                "schemaHashes": schema_hashes,
                 "toolDefsTokensBefore": full_tokens,
                 "toolDefsTokensAfter": disclosed_tokens,
                 "savedPercent": round((full_tokens - disclosed_tokens) / full_tokens * 100, 1) if full_tokens else 0.0,

@@ -99,6 +99,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import com.aiminilab.aitoolmarket.agent.support.AgentAuditRedactor;
 
 @Service
 public class AgentRunServiceImpl implements AgentRunService {
@@ -146,6 +147,7 @@ public class AgentRunServiceImpl implements AgentRunService {
     private final AppProperties appProperties;
     private final ObjectMapper objectMapper;
     private final AgentMetrics agentMetrics;
+    private final AgentAuditRedactor agentAuditRedactor;
 
     public AgentRunServiceImpl(
             AgentSessionMapper agentSessionMapper,
@@ -172,7 +174,8 @@ public class AgentRunServiceImpl implements AgentRunService {
             SystemSettingService systemSettingService,
             AppProperties appProperties,
             ObjectMapper objectMapper,
-            AgentMetrics agentMetrics
+            AgentMetrics agentMetrics,
+            AgentAuditRedactor agentAuditRedactor
     ) {
         this.agentSessionMapper = agentSessionMapper;
         this.agentMessageMapper = agentMessageMapper;
@@ -199,6 +202,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         this.appProperties = appProperties;
         this.objectMapper = objectMapper;
         this.agentMetrics = agentMetrics;
+        this.agentAuditRedactor = agentAuditRedactor;
     }
 
     @Override
@@ -1791,9 +1795,28 @@ public class AgentRunServiceImpl implements AgentRunService {
                 .distinct()
                 .limit(10)
                 .toList();
+        List<AgentToolDescriptorResponse> visibleTools = agentToolDescriptorService.listAvailableToolsForUser(run.getUserId());
+        var availableSkills = agentSkillBundleService.listAvailableSkillDescriptors(visibleTools);
+        var toolPreferences = agentToolPreferenceMapper.findByUserId(run.getUserId())
+                .stream()
+                .map(com.aiminilab.aitoolmarket.agent.dto.AgentToolPreferenceResponse::from)
+                .toList();
+        Map<String, String> agentSettings = systemSettingService.settings().entrySet().stream()
+                .filter(entry -> entry.getKey() != null && entry.getKey().startsWith("agent."))
+                .sorted(Map.Entry.comparingByKey())
+                .collect(java.util.stream.Collectors.toMap(
+                        Map.Entry::getKey,
+                        entry -> entry.getValue() == null ? "" : entry.getValue(),
+                        (left, right) -> right,
+                        java.util.LinkedHashMap::new
+                ));
+        List<String> truncationReasons = new java.util.ArrayList<>();
+        if (contextHistory.size() >= maxHistoryMessages) truncationReasons.add("history_message_limit_reached");
+        if (readyFiles.size() >= FILE_CONTEXT_LIMIT) truncationReasons.add("file_context_limit_reached");
+        if (fileChunks.size() >= FILE_CHUNK_CONTEXT_LIMIT) truncationReasons.add("file_chunk_limit_reached");
 
         var snapshotPayload = new java.util.LinkedHashMap<String, Object>();
-        snapshotPayload.put("version", 1);
+        snapshotPayload.put("version", 2);
         snapshotPayload.put("strategy", "recent_history_plus_run_files");
         snapshotPayload.put("historySource", "message_tree");
         snapshotPayload.put("runId", run.getId());
@@ -1801,6 +1824,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         snapshotPayload.put("leafMessageId", anchorId);
         snapshotPayload.put("workspaceId", session.getWorkspaceId());
         snapshotPayload.put("sourceUserMessageId", run.getSourceUserMessageId());
+        snapshotPayload.put("userMessage", userMessage == null || userMessage.getContentText() == null ? "" : userMessage.getContentText());
         snapshotPayload.put("modelConfig", Map.of(
                 "id", modelConfig.id() == null ? 0 : modelConfig.id(),
                 "provider", modelConfig.provider(),
@@ -1808,6 +1832,15 @@ public class AgentRunServiceImpl implements AgentRunService {
                 "enabled", modelConfig.enabled(),
                 "capabilities", modelConfig.capabilities() == null ? List.of() : modelConfig.capabilities()
         ));
+        snapshotPayload.put("configurationVersion", agentAuditRedactor.sha256(toJson(agentSettings)));
+        snapshotPayload.put("runtimeSettings", agentSettings);
+        snapshotPayload.put("visibleTools", visibleTools);
+        snapshotPayload.put("availableSkills", availableSkills);
+        snapshotPayload.put("toolPreferences", toolPreferences);
+        snapshotPayload.put("preferredToolCode", run.getPreferredToolCode() == null ? "" : run.getPreferredToolCode());
+        snapshotPayload.put("memoryHits", List.of());
+        snapshotPayload.put("memoryCollectionStage", "agent_service_model_request");
+        snapshotPayload.put("truncationReasons", truncationReasons);
         snapshotPayload.put("referenceMentions", referenceMentions);
         snapshotPayload.put("contentParts", contentParts);
         snapshotPayload.put("positionalPrompt", positionalPrompt == null ? "" : positionalPrompt);
@@ -1827,6 +1860,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                         "id", message.getId(),
                         "role", message.getRole(),
                         "chars", message.getContentText() == null ? 0 : message.getContentText().length(),
+                        "content", message.getContentText() == null ? "" : message.getContentText(),
                         "preview", preview(message.getContentText(), 120)
                 ))
                 .toList());
@@ -1834,6 +1868,7 @@ public class AgentRunServiceImpl implements AgentRunService {
                 .map(file -> Map.of(
                         "id", file.getId(),
                         "filename", file.getOriginalFilename(),
+                        "contentType", file.getContentType() == null ? "" : file.getContentType(),
                         "status", file.getStatus()
                 ))
                 .toList());
@@ -1843,6 +1878,8 @@ public class AgentRunServiceImpl implements AgentRunService {
                         "fileId", chunk.fileId(),
                         "filename", chunk.originalFilename(),
                         "chunkIndex", chunk.chunkIndex(),
+                        "contentText", chunk.contentText(),
+                        "metadataJson", chunk.metadataJson() == null ? "" : chunk.metadataJson(),
                         "score", chunk.score()
                 ))
                 .toList());
@@ -1862,7 +1899,9 @@ public class AgentRunServiceImpl implements AgentRunService {
         snapshot.setFileChunkCount(fileChunks.size());
         snapshot.setMemoryItemCount(0);
         snapshot.setEstimatedInputTokens(estimatedTokens);
-        snapshot.setSnapshotJson(toJson(snapshotPayload));
+        String rawSnapshot = toJson(snapshotPayload);
+        snapshot.setPayloadSha256(agentAuditRedactor.sha256(rawSnapshot));
+        snapshot.setSnapshotJson(toJson(agentAuditRedactor.redact(objectMapper.valueToTree(snapshotPayload))));
         snapshot.setCreatedAt(now);
         agentContextSnapshotMapper.insertSnapshot(snapshot);
         return snapshot;

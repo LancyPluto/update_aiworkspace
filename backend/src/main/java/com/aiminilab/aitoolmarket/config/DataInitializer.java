@@ -1243,6 +1243,32 @@ public class DataInitializer implements CommandLineRunner {
         ensureIndex("agent_context_snapshots", "idx_agent_context_snapshots_run", "CREATE INDEX idx_agent_context_snapshots_run ON agent_context_snapshots(run_id, id)");
         ensureIndex("agent_context_snapshots", "idx_agent_context_snapshots_session", "CREATE INDEX idx_agent_context_snapshots_session ON agent_context_snapshots(session_id, id)");
         ensureIndex("agent_context_snapshots", "idx_agent_context_snapshots_user", "CREATE INDEX idx_agent_context_snapshots_user ON agent_context_snapshots(user_id, id)");
+        ensureColumn("agent_context_snapshots", "payload_sha256", "ALTER TABLE agent_context_snapshots ADD COLUMN payload_sha256 CHAR(64) NULL AFTER snapshot_json");
+        ensureTable("agent_model_request_snapshots", """
+                CREATE TABLE agent_model_request_snapshots (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT, run_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
+                  request_sequence INT NOT NULL, request_stage VARCHAR(64) NOT NULL, iteration_no INT NULL,
+                  model_provider_code VARCHAR(64) NULL, model_name VARCHAR(128) NULL,
+                  message_count INT NOT NULL DEFAULT 0, tool_count INT NOT NULL DEFAULT 0,
+                  estimated_input_tokens INT NOT NULL DEFAULT 0, skill_codes_json JSON NULL,
+                  payload_json JSON NULL, payload_sha256 CHAR(64) NOT NULL,
+                  payload_expires_at DATETIME NOT NULL, payload_expired_at DATETIME NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_agent_model_request_run_sequence (run_id, request_sequence),
+                  KEY idx_agent_model_request_run (run_id, id),
+                  KEY idx_agent_model_request_expiry (payload_expires_at, payload_expired_at)
+                )
+                """);
+        ensureTable("agent_run_audit_reviews", """
+                CREATE TABLE agent_run_audit_reviews (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT, run_id BIGINT NOT NULL,
+                  expected_tool_code VARCHAR(128) NULL, final_category VARCHAR(64) NULL,
+                  review_note TEXT NULL, reviewed_by BIGINT NOT NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_agent_run_audit_review_run (run_id)
+                )
+                """);
         ensureTable("ppt_project_bindings", """
                 CREATE TABLE ppt_project_bindings (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,

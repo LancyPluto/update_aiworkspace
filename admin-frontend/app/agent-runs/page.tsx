@@ -275,26 +275,30 @@ export function AgentRunsContent() {
       </div>
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-h-[92vh] max-w-6xl overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="grid h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] !max-w-[1600px] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:h-[calc(100dvh-2rem)] sm:w-[calc(100vw-2rem)]">
+          <DialogHeader className="border-b px-5 py-4 pr-14 sm:px-6">
             <DialogTitle>Agent Run 排查 · #{detail?.run.id ?? "—"}</DialogTitle>
             <DialogDescription>
               用白话说明「为什么失败 / 为什么选了这条路」，技术细节可展开查看。
             </DialogDescription>
           </DialogHeader>
-          {detailLoading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
-          {detail && diagnosis ? (
-            <div className="space-y-5">
-              <RunOverview detail={detail} />
-              <RunDiagnosisHero diagnosis={diagnosis} />
-              {detail.eventTruncated ? (
-                <p className="text-xs text-amber-600">
-                  事件较多，仅展示最近 {detail.events.length} 条（共 {detail.totalEventCount ?? "?"} 条）
-                </p>
-              ) : null}
-              <RunDetailTabs detail={detail} diagnosis={diagnosis} />
-            </div>
-          ) : null}
+          <div className="min-h-0 overflow-y-auto px-4 py-5 sm:px-6">
+            {detailLoading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
+            {detail && diagnosis ? (
+              <div className="mx-auto w-full max-w-[1500px] space-y-5">
+                <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
+                  <RunOverview detail={detail} />
+                  <RunDiagnosisHero diagnosis={diagnosis} />
+                </div>
+                {detail.eventTruncated ? (
+                  <p className="text-xs text-amber-600">
+                    事件较多，仅展示最近 {detail.events.length} 条（共 {detail.totalEventCount ?? "?"} 条）
+                  </p>
+                ) : null}
+                <RunDetailTabs detail={detail} diagnosis={diagnosis} />
+              </div>
+            ) : null}
+          </div>
         </DialogContent>
       </Dialog>
     </>

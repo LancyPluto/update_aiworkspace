@@ -203,6 +203,15 @@ class BackendClient:
     async def append_event(self, run_id: int, event: RunEventCreate) -> None:
         await self._request("POST", f"/api/internal/v1/agent/runs/{run_id}/events", event)
 
+    async def record_model_request_snapshots(self, run_id: int, snapshots: list[dict[str, Any]]) -> None:
+        if not snapshots:
+            return
+        await self._request(
+            "POST",
+            f"/api/internal/v1/agent/runs/{run_id}/model-request-snapshots",
+            {"snapshots": snapshots},
+        )
+
     async def create_run_artifact(self, run_id: int, filename: str, content: str, content_type: str) -> dict[str, Any]:
         return await self._request(
             "POST",

@@ -27,6 +27,9 @@ import com.aiminilab.aitoolmarket.agent.dto.InternalWorkspaceMemoryItemResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalWorkspaceMemoryRetrieveRequest;
 import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentWorkspaceMemoryRequest;
 import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentConversationSummaryRequest;
+import com.aiminilab.aitoolmarket.agent.dto.CreateModelRequestSnapshotsRequest;
+import com.aiminilab.aitoolmarket.agent.dto.AgentModelRequestSnapshotResponse;
+import com.aiminilab.aitoolmarket.agent.service.AgentAuditService;
 import com.aiminilab.aitoolmarket.agent.service.AgentFileService;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.AgentRunService;
@@ -56,24 +59,36 @@ public class InternalAgentController {
     private final AgentWorkspaceService agentWorkspaceService;
     private final AgentFileService agentFileService;
     private final AgentWorkspaceMemoryItemMapper agentWorkspaceMemoryItemMapper;
+    private final AgentAuditService agentAuditService;
 
     public InternalAgentController(AgentRunService agentRunService,
                                    AgentSkillBundleService agentSkillBundleService,
                                    AgentModelConfigService agentModelConfigService,
                                    AgentWorkspaceService agentWorkspaceService,
                                    AgentFileService agentFileService,
-                                   AgentWorkspaceMemoryItemMapper agentWorkspaceMemoryItemMapper) {
+                                   AgentWorkspaceMemoryItemMapper agentWorkspaceMemoryItemMapper,
+                                   AgentAuditService agentAuditService) {
         this.agentRunService = agentRunService;
         this.agentSkillBundleService = agentSkillBundleService;
         this.agentModelConfigService = agentModelConfigService;
         this.agentWorkspaceService = agentWorkspaceService;
         this.agentFileService = agentFileService;
         this.agentWorkspaceMemoryItemMapper = agentWorkspaceMemoryItemMapper;
+        this.agentAuditService = agentAuditService;
     }
 
     @GetMapping("/runs/{runId}/context")
     public ApiResponse<InternalAgentRunContextResponse> context(@PathVariable Long runId) {
         return ApiResponse.success(agentRunService.context(runId));
+    }
+
+    @PostMapping("/runs/{runId}/model-request-snapshots")
+    public ApiResponse<java.util.List<AgentModelRequestSnapshotResponse>> modelRequestSnapshots(
+            @PathVariable Long runId,
+            @Valid @RequestBody CreateModelRequestSnapshotsRequest request) {
+        return ApiResponse.success(request.snapshots().stream()
+                .map(item -> agentAuditService.recordModelRequest(runId, item))
+                .toList());
     }
 
     @GetMapping("/skills/{skillCode}")

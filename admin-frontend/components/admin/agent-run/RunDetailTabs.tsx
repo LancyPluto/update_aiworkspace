@@ -8,6 +8,7 @@ import { RouterRulesPanel } from "@/components/admin/agent-run/RouterRulesPanel"
 import { RunTimeline } from "@/components/admin/agent-run/RunTimeline"
 import { TechnicalDetails } from "@/components/admin/agent-run/TechnicalDetails"
 import { ToolCallCard } from "@/components/admin/agent-run/ToolCallCard"
+import { AgentAuditPanel } from "@/components/admin/agent-run/AgentAuditPanel"
 import type { AdminAgentRunDetail } from "@/lib/api/types"
 import type { RunDiagnosis } from "@/lib/agent-run-diagnostics"
 
@@ -19,14 +20,17 @@ export function RunDetailTabs({
   diagnosis: RunDiagnosis
 }) {
   return (
-    <Tabs defaultValue="timeline" className="w-full">
-      <TabsList className="flex h-auto flex-wrap gap-1">
+    <Tabs defaultValue="timeline" className="w-full min-w-0">
+      <TabsList className="sticky top-0 z-20 flex h-auto w-full flex-wrap justify-start gap-1 border bg-background/95 p-1.5 shadow-sm backdrop-blur sm:w-fit">
         <TabsTrigger value="timeline">时间线</TabsTrigger>
         <TabsTrigger value="router">路由规则</TabsTrigger>
         <TabsTrigger value="tools">工具</TabsTrigger>
         <TabsTrigger value="memory">记忆</TabsTrigger>
         <TabsTrigger value="conversation">对话</TabsTrigger>
         <TabsTrigger value="context">上下文</TabsTrigger>
+        <TabsTrigger value="request-audit">请求上下文</TabsTrigger>
+        <TabsTrigger value="skill-disclosure">Skill/披露</TabsTrigger>
+        <TabsTrigger value="diagnosis">问题归因</TabsTrigger>
       </TabsList>
       <TabsContent value="timeline" className="mt-4">
         <RunTimeline steps={diagnosis.timeline} />
@@ -49,6 +53,15 @@ export function RunDetailTabs({
       </TabsContent>
       <TabsContent value="context" className="mt-4">
         <ContextSnapshotPanel snapshot={detail.contextSnapshot} toolCalls={detail.toolCalls} />
+      </TabsContent>
+      <TabsContent value="request-audit" className="mt-4">
+        <AgentAuditPanel runId={detail.run.id} view="requests" />
+      </TabsContent>
+      <TabsContent value="skill-disclosure" className="mt-4">
+        <AgentAuditPanel runId={detail.run.id} view="skills" />
+      </TabsContent>
+      <TabsContent value="diagnosis" className="mt-4">
+        <AgentAuditPanel runId={detail.run.id} view="diagnosis" />
       </TabsContent>
       <div className="mt-6">
         <TechnicalDetails events={detail.events} toolCalls={detail.toolCalls} />
