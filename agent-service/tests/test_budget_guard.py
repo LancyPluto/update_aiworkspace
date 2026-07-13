@@ -863,7 +863,7 @@ async def test_tool_use_merges_workspace_memory_into_generation_prompt():
 
 
 @pytest.mark.asyncio
-async def test_tool_memory_events_are_emitted_when_retrieval_is_empty():
+async def test_empty_tool_memory_does_not_emit_frozen_snapshot():
     backend = FakeBackend(resource_type="IMAGE", content_text='{"images":[{"url":"/generated/image.png"}]}')
     router_json = (
         '{"intent":"tool_use","selectedToolCode":"gpt_image2",'
@@ -895,9 +895,7 @@ async def test_tool_memory_events_are_emitted_when_retrieval_is_empty():
     assert retrieved_events
     assert retrieved_events[0][3]["count"] == 0
     assert retrieved_events[0][3]["view"] == "router"
-    assert frozen_events
-    assert frozen_events[0][3]["frozen"] is False
-    assert frozen_events[0][3]["count"] == 0
+    assert frozen_events == []
 
 
 @pytest.mark.asyncio

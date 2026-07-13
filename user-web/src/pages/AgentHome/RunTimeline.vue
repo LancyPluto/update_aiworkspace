@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue"
 import { CheckCircle2, ChevronDown, Loader2 } from "lucide-vue-next"
 import type { AgentRunEvent } from "@/api/types"
-import { filterUserFacingRunEvents } from "./runTimelineEvents"
+import { filterUserFacingRunEvents, memoryEventTitle } from "./runTimelineEvents"
 
 const props = defineProps<{
   events: AgentRunEvent[]
@@ -123,9 +123,7 @@ function titleFor(event: AgentRunEvent) {
   if (event.eventType === "memory.context_injected") return "已注入工作区记忆"
   if (event.eventType === "memory.context_frozen") return "已冻结工作区记忆快照"
   if (event.eventType === "memory.retrieved") {
-    if (payload.memoryInjectionSkipped === true) return "已跳过工具记忆注入"
-    const count = typeof payload.count === "number" ? payload.count : Array.isArray(payload.items) ? payload.items.length : 0
-    return count > 0 ? `已读取 ${count} 条长期记忆` : "未读取长期记忆"
+    return memoryEventTitle(payload)
   }
   if (event.eventType === "memory.candidate_created") return "已生成记忆候选"
   if (event.eventType === "memory.saved") return "已保存工作区记忆"
