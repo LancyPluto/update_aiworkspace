@@ -27,25 +27,25 @@ async function importTsModule(path) {
 
 const media = await importTsModule("./communityPostMedia.ts")
 
-test("resolves community image derivative URLs without using originals", () => {
+test("uses originals when a non-OSS derivative cannot be guaranteed", () => {
   assert.equal(
     media.resolveCommunityDerivativeUrl("/generated/demo/photo.png", "image-thumb"),
-    "/generated/demo/photo.thumb-640.webp",
+    "/generated/demo/photo.png",
   )
   assert.equal(
     media.resolveCommunityDerivativeUrl("/generated/demo/photo.png?token=abc", "image-lqip"),
-    "/generated/demo/photo.lqip-32.webp?token=abc",
+    "",
   )
 })
 
-test("resolves community video poster and low-bandwidth preview URLs", () => {
+test("does not invent video derivatives for unmanaged URLs", () => {
   assert.equal(
     media.resolveCommunityDerivativeUrl("https://cdn.example.com/video/work.webm#clip", "video-poster"),
-    "https://cdn.example.com/video/work.poster-640.webp#clip",
+    "",
   )
   assert.equal(
     media.resolveCommunityDerivativeUrl("/generated/video/work.mp4", "video-preview"),
-    "/generated/video/work.preview-480p.mp4",
+    "/generated/video/work.mp4",
   )
 })
 

@@ -1,6 +1,8 @@
 # Build from repository root: docker build -f user-web/Dockerfile .
 ARG DOCKER_REGISTRY=docker.1ms.run/
 FROM ${DOCKER_REGISTRY}node:22-alpine AS build
+ARG VITE_MEDIA_DELIVERY_OPTIMIZATION=true
+ENV VITE_MEDIA_DELIVERY_OPTIMIZATION=${VITE_MEDIA_DELIVERY_OPTIMIZATION}
 
 WORKDIR /build
 COPY user-web/package.json user-web/package-lock.json ./

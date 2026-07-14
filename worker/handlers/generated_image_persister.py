@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import requests
 
 from storage.asset_storage import asset_storage
+from observability.metrics import record_media_persist
 from utils.url_security import safe_get, UrlSecurityError
 
 
@@ -49,7 +50,9 @@ class GeneratedImagePersister:
             try:
                 url = asset_storage.put_bytes_public(relative_key, image_bytes, content_type)
             except Exception as exc:
+                record_media_persist("image", "failed", len(image_bytes))
                 raise GeneratedImagePersistError(f"write generated image failed: {exc}") from exc
+            record_media_persist("image", "success", len(image_bytes))
             path = asset_storage.local_path(relative_key)
             persisted.append(PersistedImage(url=url, source_url=source_url, path=path))
 

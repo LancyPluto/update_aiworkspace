@@ -182,10 +182,27 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
     },
     {
+      "id": 17,
+      "type": "timeseries",
+      "title": "媒体交付与回退",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum by (kind, stage, outcome) (increase({__name__=~\"media_client_event_total(_total)?\"}[15m]))", "legendFormat": "前端 {{kind}} {{stage}} {{outcome}}" },
+        { "expr": "sum by (outcome, reason) (increase(worker_video_preview_total[15m]))", "legendFormat": "视频预览 {{outcome}} {{reason}}" },
+        { "expr": "sum by (kind, outcome) (increase(worker_media_persist_total[15m]))", "legendFormat": "持久化 {{kind}} {{outcome}}" },
+        { "expr": "histogram_quantile(0.95, sum by (le, kind, outcome) (rate(worker_media_derivative_duration_seconds_bucket[15m])))", "legendFormat": "派生 P95 {{kind}} {{outcome}}" },
+        { "expr": "sum by (operation, visibility, outcome) (increase({__name__=~\"asset_storage_operation_total(_total)?\"}[15m]))", "legendFormat": "存储 {{operation}} {{visibility}} {{outcome}}" },
+        { "expr": "histogram_quantile(0.75, sum by (le, page) (rate(web_vital_value_bucket{name=\"LCP\"}[15m])))", "legendFormat": "LCP P75 {{page}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
+    },
+    {
       "id": 15,
       "type": "logs",
       "title": "TraceId 跨服务日志查询",
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 36 },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 44 },
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [{ "expr": "{container=~\"ai-supermarket-(backend|worker|agent-service|mysql|rabbitmq|nginx|admin-frontend|user-web).*\"} |= \"${traceId}\"", "refId": "A" }],
       "options": { "showTime": true, "showLabels": true, "wrapLogMessage": true, "sortOrder": "Descending" }
@@ -194,7 +211,7 @@
       "id": 16,
       "type": "logs",
       "title": "最近错误日志",
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 45 },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 53 },
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [{ "expr": "{container=~\"ai-supermarket-(backend|worker|agent-service|mysql|rabbitmq|nginx|admin-frontend|user-web).*\"} |~ \"(?i)(error|exception|failed|timeout|warn)\"", "refId": "A" }],
       "options": { "showTime": true, "showLabels": true, "wrapLogMessage": true, "sortOrder": "Descending" }
