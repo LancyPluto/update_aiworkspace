@@ -517,14 +517,6 @@ function priceFromCny(value: unknown, currency?: string | null) {
   return roundMoney(numberOrZero(value) / rate)
 }
 
-function normalizeOptionalUrl(value?: string | null) {
-  return (value || "").trim().replace(/\/+$/, "")
-}
-
-function sameBaseUrl(left?: string | null, right?: string | null) {
-  return normalizeOptionalUrl(left) === normalizeOptionalUrl(right)
-}
-
 function parseExtraAuthObject(extraAuthJson?: string | null): Record<string, unknown> {
   const raw = (extraAuthJson || "").trim()
   if (!raw) return {}
@@ -2186,10 +2178,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               </Select>
               {modelForm.vendorAccountId ? (() => {
                 const account = accountById.get(modelForm.vendorAccountId)
-                const modelOverrideBaseUrl = normalizeOptionalUrl(modelForm.baseUrl)
-                const accountBaseUrl = normalizeOptionalUrl(account?.baseUrl)
-                const inherited = !modelOverrideBaseUrl
-                const sameAsAccount = !!modelOverrideBaseUrl && !!accountBaseUrl && sameBaseUrl(modelOverrideBaseUrl, accountBaseUrl)
                 return (
                   <div className="space-y-2">
                     <p className={`text-xs ${account && hasAccountCredential(account) ? "text-muted-foreground" : "text-amber-700"}`}>
@@ -2202,42 +2190,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                         该账户尚未探活通过，新模型将先以停用状态保存。请先点账户闪电测试，成功后再启用模型。
                       </p>
                     ) : null}
-                    <div className="rounded-md border bg-muted/30 p-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant={inherited ? "outline" : "secondary"} className="text-xs">
-                          {inherited ? "继承账号地址" : "模型覆盖地址"}
-                        </Badge>
-                        {!inherited && sameAsAccount ? (
-                          <Badge variant="outline" className="text-xs text-amber-700">
-                            覆盖值与账号当前地址一致
-                          </Badge>
-                        ) : null}
-                        {!inherited ? (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 px-2 text-xs"
-                            onClick={() => setModelForm((form) => ({ ...form, baseUrl: "" }))}
-                          >
-                            改回继承账号地址
-                          </Button>
-                        ) : null}
-                      </div>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        生效地址：{inherited ? (accountBaseUrl || "未配置") : modelOverrideBaseUrl}
-                      </p>
-                      {modelForm.id && modelForm.endpointPath ? (
-                        <p className="mt-1 text-xs text-muted-foreground">Endpoint：{modelForm.endpointPath}</p>
-                      ) : account?.endpointPath && inherited ? (
-                        <p className="mt-1 text-xs text-muted-foreground">继承 Endpoint：{account.endpointPath}</p>
-                      ) : null}
-                      {!inherited ? (
-                        <p className="mt-1 text-xs text-amber-700">
-                          当前模型保存了独立 baseUrl；切换账号后它不会自动跟随账号地址变化。
-                        </p>
-                      ) : null}
-                    </div>
                   </div>
                 )
               })() : (
