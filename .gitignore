@@ -18,6 +18,7 @@ tmp_*.json
 
 # local verification/runtime output
 .tmp/
+.worktrees/
 data/generated-media/
 docs/superpowers/plans/
 engines/banana-slides/backend/.temp/
