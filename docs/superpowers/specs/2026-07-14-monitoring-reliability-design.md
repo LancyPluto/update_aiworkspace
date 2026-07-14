@@ -9,7 +9,7 @@
 - cAdvisor 提供容器 CPU 和内存指标。
 - Blackbox HTTP 探测只检测真实生产入口，不探测不存在的 Vite 端口。
 - Grafana 提供以 2D Geomap 为核心的登录审计地图态势看板。
-- `/admin/monitoring` 提供人工 IP 风控、快捷日志调查和存储健康入口。
+- `/admin/monitoring` 仅提供必须经过管理权限与操作审计的人工 IP 风控。
 
 生产凭据、证书、SSH/CD 安全改造不在本次范围内。
 
@@ -20,7 +20,7 @@
 - 采集所有 Docker 容器标准输出日志。
 - 卷只展示容量、挂载和健康状态；仅采集白名单文本日志，不浏览任意卷内容。
 - Grafana 负责地图态势和深度日志查询。
-- `/admin/monitoring` 负责有权限校验和操作审计的 IP 封禁、修改和解封。
+- `/admin/monitoring` 负责有权限校验和操作审计的 IP 封禁、修改和解封；所有只读看板、日志、Trace 和存储健康视图放在 Grafana。
 - 不引入 OTel、Tempo 或新的可观测性存储系统。
 
 ## 根因与修复边界
@@ -83,8 +83,10 @@ Loki 标签限制为：
 - 显示成功目标数、总目标数和成功率。
 - 增加失败 target 表格。
 - 容器 CPU、内存面板在 cAdvisor 缺失时显示明确说明。
-- 日志面板增加容器、服务、stream、关键字和 TraceId 过滤。
+- 新增“生产容器日志”看板，自动列出全部容器及其最后日志时间、日志速率、错误数和采集状态。
+- 日志面板增加容器、服务、stream、关键字和 TraceId 过滤，选中容器后显示完整日志时间线。
 - TraceId 为空时展示最近日志，不产生误导性的空 Trace 查询状态。
+- Grafana 增加卷容量、挂载目标、使用率和采集状态看板，不提供卷文件浏览。
 
 ## Grafana 地图态势
 
@@ -102,12 +104,7 @@ Loki 标签限制为：
 
 ## `/admin/monitoring` IP 风控
 
-管理后台提供四个视图：
-
-- IP 风控
-- 认证事件
-- 日志与 Trace
-- 存储健康
+管理后台只保留 IP 风控和完成处置所需的认证事件上下文。普通容器日志、Trace 检索、基础设施指标和存储健康均在 Grafana 展示，管理后台通过 Data Link 打开对应 Grafana 查询。
 
 IP 风控操作：
 
@@ -117,16 +114,12 @@ IP 风控操作：
 - 修改到期时间、备注和启用状态。
 - 解封采用软失效，不物理删除记录。
 - 创建、修改和解封必须填写原因并写管理员操作审计。
-
-日志与 Trace 视图通过后端只读代理查询 Loki，不把 Loki 直接暴露给浏览器。查询必须限制时间范围、结果条数和允许的 LogQL 结构。
-
-存储健康只展示 Docker 卷名称、挂载目标、容量、使用率和最近采集状态。数据库、Redis、RabbitMQ 等卷内容不提供文件浏览。
+- 选中 IP 或 TraceId 时可跳转 Grafana 日志查询，但管理后台不代理通用 LogQL，也不复制 Grafana 看板。
 
 ## 数据流
 
 ```text
 Docker stdout/stderr -> Alloy -> Loki -> Grafana logs panels
-                                  -> Backend read-only log query -> /admin/monitoring
 
 Backend auth event -> MySQL auth_security_events -> Grafana Geomap
                                                -> Admin IP risk query
@@ -138,7 +131,7 @@ Admin block action -> Admin API -> security_ip_blocks
 ## 错误处理
 
 - Alloy 无法读取 Docker 日志目录时记录采集错误指标并触发 target down。
-- Loki 不可用时 Grafana 与管理后台显示“日志服务不可用”，不显示空数据。
+- Loki 不可用时 Grafana 显示“日志服务不可用”，不显示空数据。
 - GeoIP 缺失时保留认证事件，但地图标记为“无定位数据”。
 - cAdvisor 不可用时基础设施总览标记采集器失败，不把空面板解释成零使用率。
 - IP 封禁写入失败时不得显示成功；管理员操作审计与封禁变更保持一致。
@@ -182,4 +175,4 @@ Admin block action -> Admin API -> security_ip_blocks
 
 - 完善 Grafana 2D 地图态势。
 - 实现 IP 封禁数据模型、管理 API 和操作审计。
-- 实现 `/admin/monitoring` 风控、日志和存储健康视图。
+- 实现精简的 `/admin/monitoring` IP 风控与认证事件上下文，不重复实现 Grafana 的日志和存储看板。
