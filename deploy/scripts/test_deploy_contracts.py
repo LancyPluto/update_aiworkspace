@@ -43,6 +43,10 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:5174/admin", health)
         self.assertIn("http://127.0.0.1:8090/health", health)
         self.assertIn("docker logs --tail 80", health)
+        self.assertIn("worker_media_runtime_ready", health)
+        self.assertIn("get_ffmpeg_exe", health)
+        self.assertIn("MEDIA_HEALTHCHECK_URL", health)
+        self.assertIn("verify_media_delivery.py", health)
         self.assertNotIn("http_ok http://127.0.0.1/", health)
 
     def test_rollback_uses_recorded_previous_revision(self) -> None:
@@ -50,6 +54,27 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn('get("oldSha", "")', rollback)
         self.assertIn('git reset --hard "$old_sha"', rollback)
         self.assertIn("verify_release_health.sh", rollback)
+
+    def test_media_cache_backfill_is_dry_run_by_default(self) -> None:
+        script = self.read("deploy/scripts/backfill_oss_cache_control.py")
+        self.assertIn('parser.add_argument("--apply", action="store_true"', script)
+        self.assertIn('if args.apply:', script)
+        self.assertIn('bucket.update_object_meta', script)
+        self.assertNotIn("delete_object", script)
+
+    def test_media_delivery_verifies_immutable_cache_and_transform(self) -> None:
+        script = self.read("deploy/scripts/verify_media_delivery.py")
+        self.assertIn("max-age=31536000", script)
+        self.assertIn('("x-oss-process", "image/resize,w_640', script)
+        self.assertIn("etag", script)
+        self.assertIn("image/webp", script)
+
+    def test_nginx_only_marks_content_addressed_generated_media_immutable(self) -> None:
+        config = self.read("deploy/nginx/snippets/app_locations.conf")
+        self.assertIn("[0-9a-f]{40}", config)
+        self.assertIn("max-age=31536000, immutable", config)
+        self.assertIn("max-age=300, must-revalidate", config)
+        self.assertEqual(config.count("proxy_hide_header Cache-Control"), 2)
 
 
 if __name__ == "__main__":

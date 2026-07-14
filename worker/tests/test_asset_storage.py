@@ -3,6 +3,14 @@ from pathlib import Path
 from storage.asset_storage import AssetStorage
 
 
+class FakeBucket:
+    def __init__(self):
+        self.calls = []
+
+    def put_object(self, key, data, headers=None):
+        self.calls.append((key, data, headers))
+
+
 def test_local_put_bytes_returns_generated_url(tmp_path):
     storage = AssetStorage(
         provider="local",
@@ -10,6 +18,9 @@ def test_local_put_bytes_returns_generated_url(tmp_path):
         public_base_url="/generated",
         private_base_url="/generated",
         image_transform_options="",
+        public_cache_control="public,max-age=31536000,immutable",
+        private_cache_control="private,max-age=3600",
+        legacy_cache_control="public,max-age=300,must-revalidate",
         oss_endpoint="",
         oss_bucket_name="",
         oss_public_bucket_name="",
@@ -30,6 +41,9 @@ def test_oss_worker_assets_always_use_private_proxy_url(tmp_path):
         public_base_url="https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com",
         private_base_url="/api/v1/assets/private",
         image_transform_options="",
+        public_cache_control="public,max-age=31536000,immutable",
+        private_cache_control="private,max-age=3600",
+        legacy_cache_control="public,max-age=300,must-revalidate",
         oss_endpoint="oss-cn-guangzhou.aliyuncs.com",
         oss_bucket_name="wlcloudai-assets-private",
         oss_public_bucket_name="wlcloudai-assets-public",
@@ -50,6 +64,9 @@ def test_local_put_bytes_public_uses_hash_filename(tmp_path):
         public_base_url="/generated",
         private_base_url="/generated",
         image_transform_options="",
+        public_cache_control="public,max-age=31536000,immutable",
+        private_cache_control="private,max-age=3600",
+        legacy_cache_control="public,max-age=300,must-revalidate",
         oss_endpoint="",
         oss_bucket_name="",
         oss_public_bucket_name="",
@@ -72,6 +89,9 @@ def test_cdn_url_adds_image_transform_for_images():
         public_base_url="https://cdn.wlcloudai.com",
         private_base_url="/api/v1/assets/private",
         image_transform_options="image/format,webp/quality,Q_85",
+        public_cache_control="public,max-age=31536000,immutable",
+        private_cache_control="private,max-age=3600",
+        legacy_cache_control="public,max-age=300,must-revalidate",
         oss_endpoint="oss-cn-guangzhou.aliyuncs.com",
         oss_bucket_name="wlcloudai-assets-private",
         oss_public_bucket_name="wlcloudai-assets-public",
@@ -111,3 +131,34 @@ def test_oss_settings_default_private_base_to_backend_proxy(monkeypatch):
 
     assert storage.private_base_url == "/api/v1/assets/private"
     assert storage.public_url("video/71/video-1.mp4") == "/api/v1/assets/private/video/71/video-1.mp4"
+
+
+def test_oss_cache_control_separates_private_hashed_and_legacy_objects(tmp_path):
+    storage = AssetStorage(
+        provider="oss",
+        local_root=tmp_path.resolve(),
+        public_base_url="https://cdn.wlcloudai.com",
+        private_base_url="/api/v1/assets/private",
+        image_transform_options="",
+        public_cache_control="public,max-age=31536000,immutable",
+        private_cache_control="private,max-age=3600",
+        legacy_cache_control="public,max-age=300,must-revalidate",
+        oss_endpoint="oss-cn-guangzhou.aliyuncs.com",
+        oss_bucket_name="private",
+        oss_public_bucket_name="public",
+        oss_access_key_id="test-ak",
+        oss_access_key_secret="test-sk",
+        oss_key_prefix="",
+    )
+    private_bucket = FakeBucket()
+    public_bucket = FakeBucket()
+    storage._bucket_client = private_bucket
+    storage._public_bucket_client = public_bucket
+
+    storage._put_oss("uploads/input.png", b"private", "image/png")
+    storage._put_oss_public("images/" + "a" * 40 + ".png", b"public", "image/png")
+    storage._put_oss_public("images/legacy.png", b"legacy", "image/png")
+
+    assert private_bucket.calls[0][2]["Cache-Control"] == "private,max-age=3600"
+    assert public_bucket.calls[0][2]["Cache-Control"] == "public,max-age=31536000,immutable"
+    assert public_bucket.calls[1][2]["Cache-Control"] == "public,max-age=300,must-revalidate"

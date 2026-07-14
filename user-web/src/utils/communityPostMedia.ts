@@ -14,23 +14,6 @@ export function normalizeCommunityMediaUrl(value?: string | null): string {
   return apiOrigin ? `${apiOrigin}${path}` : path
 }
 
-function communityMediaDerivativeUrl(value: string, suffix: string, extension: string): string {
-  const source = normalizeCommunityMediaUrl(value)
-  if (!source || source.startsWith("data:")) return ""
-
-  const queryIndex = source.indexOf("?")
-  const hashIndex = source.indexOf("#")
-  const splitIndex = [queryIndex, hashIndex].filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? -1
-  const path = splitIndex >= 0 ? source.slice(0, splitIndex) : source
-  const tail = splitIndex >= 0 ? source.slice(splitIndex) : ""
-  const slashIndex = path.lastIndexOf("/")
-  const dotIndex = path.lastIndexOf(".")
-  const hasExtension = dotIndex > slashIndex
-  const base = hasExtension ? path.slice(0, dotIndex) : path
-
-  return `${base}.${suffix}.${extension}${tail}`
-}
-
 export function resolveCommunityDerivativeUrl(value?: string | null, kind?: CommunityDerivativeKind): string {
   if (!value || !kind) return ""
   const source = normalizeCommunityMediaUrl(value)
@@ -38,17 +21,17 @@ export function resolveCommunityDerivativeUrl(value?: string | null, kind?: Comm
   if (kind === "image-thumb") {
     const ossThumb = resolveOssImageDerivativeUrl(value, 640, 85)
     if (ossThumb) return ossThumb
-    return communityMediaDerivativeUrl(value, "thumb-640", "webp")
+    return source
   }
   if (kind === "image-lqip") {
     const ossLqip = resolveOssImageDerivativeUrl(value, 32, 30)
-    return ossLqip || communityMediaDerivativeUrl(value, "lqip-32", "webp")
+    return ossLqip
   }
   if (kind === "video-poster") {
     const ossPoster = resolveOssVideoPosterUrl(value)
-    return ossPoster || communityMediaDerivativeUrl(value, "poster-640", "webp")
+    return ossPoster
   }
-  return communityMediaDerivativeUrl(value, "preview-480p", "mp4")
+  return source
 }
 
 const OSS_SNAPSHOT_SUFFIX = "?x-oss-process=video/snapshot,t_1000,f_jpg,w_640,h_0,m_fast"

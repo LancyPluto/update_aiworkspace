@@ -5,6 +5,7 @@ import { useRouter } from "vue-router"
 import { ArrowRight, Clock, Eye, FileText, Heart, Image as ImageIcon, Music, Sparkles, Star, Video, Wand2 } from "lucide-vue-next"
 import { getApiOrigin } from "@/api/client"
 import ImageStackPreview from "@/components/ImageStackPreview.vue"
+import OptimizedImage from "@/components/OptimizedImage.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import type { AssetPreviewItem } from "@/types/assetPreview"
 
@@ -106,12 +107,12 @@ function openAuthorProfile() {
         fit="cover"
         class="media image-stack-media"
       />
-      <img
+      <OptimizedImage
         v-else-if="asset.kind === 'image' && mediaUrl"
         :src="mediaUrl"
         :alt="asset.title"
+        preset="card"
         class="media"
-        loading="lazy"
       />
       <video
         v-else-if="asset.kind === 'video' && mediaUrl"
@@ -124,12 +125,12 @@ function openAuthorProfile() {
         preload="metadata"
       />
       <div v-else-if="asset.kind === 'audio'" class="audio-cover" :class="{ 'has-cover': Boolean(coverUrl) }">
-        <img
+        <OptimizedImage
           v-if="coverUrl"
           :src="coverUrl"
           :alt="asset.title"
+          preset="card"
           class="audio-cover-image"
-          loading="lazy"
         />
         <div class="audio-cover-body">
           <div v-if="!coverUrl" class="icon-bubble">

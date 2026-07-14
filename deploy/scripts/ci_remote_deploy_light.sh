@@ -135,6 +135,11 @@ CORS_ALLOWED_ORIGINS=http://wlcloudai.com,http://www.wlcloudai.com,http://8.134.
 ASSET_STORAGE_PUBLIC_BASE_URL=https://cdn.wlcloudai.com
 ASSET_STORAGE_PRIVATE_BASE_URL=/api/v1/assets/private
 ASSET_STORAGE_IMAGE_TRANSFORM_OPTIONS=image/format,webp/quality,Q_85
+ASSET_PUBLIC_CACHE_CONTROL=public,max-age=31536000,immutable
+ASSET_PRIVATE_CACHE_CONTROL=private,max-age=3600
+ASSET_LEGACY_CACHE_CONTROL=public,max-age=300,must-revalidate
+MEDIA_VIDEO_PREVIEW_ENABLED=true
+VITE_MEDIA_DELIVERY_OPTIMIZATION=true
 HTTP_PROXY=http://host.docker.internal:7890
 HTTPS_PROXY=http://host.docker.internal:7890
 CONTAINER_HTTP_PROXY=http://host.docker.internal:7890

@@ -6,6 +6,7 @@ import type { AudioTrackItem, ResultBlock } from "@/types/result"
 import { formatAudioDuration, resolveAudioTracks } from "@/utils/taskResultBlocks"
 import type { ChatAssetRef } from "@/utils/agentChatAssetRefs"
 import { bindLongPressReference, writeAssetDragData } from "@/utils/agentChatAssetRefs"
+import OptimizedImage from "@/components/OptimizedImage.vue"
 
 const props = withDefaults(defineProps<{
   blocks: ResultBlock[]
@@ -425,11 +426,11 @@ function escapeXml(value: string): string {
             @click="previewImage(b, image, imageIndex)"
           >
             <div :class="imageFrameClass()">
-              <img
+              <OptimizedImage
                 :src="image.url"
                 :alt="image.label ?? b.title"
+                :preset="props.mode === 'compact' ? 'card' : 'detail'"
                 :class="imageClass()"
-                loading="lazy"
               />
             </div>
             <figcaption v-if="props.mode !== 'compact'" :class="captionClass()">
@@ -481,12 +482,12 @@ function escapeXml(value: string): string {
             @dragstart="onAssetDragStart($event, track.url)"
           >
             <div class="relative aspect-[4/3] overflow-hidden bg-secondary/40">
-              <img
+              <OptimizedImage
                 v-if="track.coverUrl"
                 :src="track.coverUrl"
                 :alt="track.title || b.title"
+                preset="card"
                 class="h-full w-full object-cover"
-                loading="lazy"
               />
               <div
                 v-else

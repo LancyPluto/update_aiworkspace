@@ -13,6 +13,8 @@ import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayInputStream;
@@ -47,11 +49,18 @@ public class AssetStorageService {
 
     private final AppProperties appProperties;
     private final Path localRoot;
+    private final AssetStorageMetrics metrics;
     private OSS ossClient;
 
     public AssetStorageService(AppProperties appProperties) {
+        this(appProperties, new AssetStorageMetrics(new SimpleMeterRegistry()));
+    }
+
+    @Autowired
+    public AssetStorageService(AppProperties appProperties, AssetStorageMetrics metrics) {
         this.appProperties = appProperties;
         this.localRoot = Path.of(appProperties.getGeneratedMediaDir()).toAbsolutePath().normalize();
+        this.metrics = metrics;
     }
 
     @PostConstruct
@@ -343,6 +352,7 @@ public class AssetStorageService {
     }
 
     private StoredAsset storeToOss(String relativeKey, byte[] data, String contentType, AssetVisibility visibility) {
+        long started = System.nanoTime();
         AppProperties.AssetStorage storage = appProperties.getAssetStorage();
         String objectKey = storage.getOssKeyPrefix() + relativeKey;
         String bucket = bucketFor(visibility, storage);
@@ -351,13 +361,34 @@ public class AssetStorageService {
         if (contentType != null && !contentType.isBlank()) {
             metadata.setContentType(contentType);
         }
+        metadata.setCacheControl(cacheControlFor(relativeKey, visibility, storage));
         try {
             ossClient.putObject(bucket, objectKey, new ByteArrayInputStream(data), metadata);
         } catch (RuntimeException exception) {
+            metrics.record("put", visibility.name().toLowerCase(Locale.ROOT), "failed", data.length, System.nanoTime() - started);
             log.warn("OSS upload failed: bucket={}, key={}", bucket, objectKey, exception);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "cloud file save failed");
         }
+        metrics.record("put", visibility.name().toLowerCase(Locale.ROOT), "success", data.length, System.nanoTime() - started);
         return new StoredAsset(relativeKey, urlForKey(relativeKey, visibility), "oss://" + bucket + "/" + objectKey);
+    }
+
+    private String cacheControlFor(String relativeKey, AssetVisibility visibility, AppProperties.AssetStorage storage) {
+        if (visibility == AssetVisibility.PRIVATE) {
+            return storage.getPrivateCacheControl();
+        }
+        return isContentAddressed(relativeKey)
+                ? storage.getPublicCacheControl()
+                : storage.getLegacyCacheControl();
+    }
+
+    public static boolean isContentAddressed(String relativeKey) {
+        if (relativeKey == null || relativeKey.isBlank()) {
+            return false;
+        }
+        String filename = relativeKey.replace('\\', '/');
+        filename = filename.substring(filename.lastIndexOf('/') + 1);
+        return filename.matches("(?i)^[0-9a-f]{40}(?:\\.[a-z0-9]+)?(?:\\.[a-z0-9-]+\\.[a-z0-9]+)?$");
     }
 
     private String moveUrl(String url, AssetVisibility targetVisibility) {
@@ -369,43 +400,63 @@ public class AssetStorageService {
             return url;
         }
         AppProperties.AssetStorage storage = appProperties.getAssetStorage();
+        long started = System.nanoTime();
         String targetBucket = bucketFor(targetVisibility, storage);
         String targetKey = storage.getOssKeyPrefix() + source.relativeKey();
         if (source.bucket().equals(targetBucket) && source.objectKey().equals(targetKey)) {
             if (ossClient.doesObjectExist(targetBucket, targetKey)) {
+                metrics.record("move", targetVisibility.name().toLowerCase(Locale.ROOT), "already_present", 0, System.nanoTime() - started);
                 return urlForKey(source.relativeKey(), targetVisibility);
             }
             for (String fallback : knownBuckets(storage)) {
                 if (fallback.equals(targetBucket)) continue;
                 if (ossClient.doesObjectExist(fallback, targetKey)) {
-                    ossClient.copyObject(new CopyObjectRequest(fallback, targetKey, targetBucket, targetKey));
+                    ossClient.copyObject(copyRequest(fallback, targetKey, targetBucket, targetKey, targetVisibility, storage));
                     ossClient.deleteObject(fallback, targetKey);
+                    metrics.record("move", targetVisibility.name().toLowerCase(Locale.ROOT), "success", 0, System.nanoTime() - started);
                     log.info("OSS asset recovered: oss://{}/{} -> oss://{}/{}", fallback, targetKey, targetBucket, targetKey);
                     return urlForKey(source.relativeKey(), targetVisibility);
                 }
             }
             log.warn("OSS asset missing from all buckets: key={}", targetKey);
+            metrics.record("move", targetVisibility.name().toLowerCase(Locale.ROOT), "missing", 0, System.nanoTime() - started);
             return urlForKey(source.relativeKey(), targetVisibility);
         }
         try {
-            ossClient.copyObject(new CopyObjectRequest(source.bucket(), source.objectKey(), targetBucket, targetKey));
+            ossClient.copyObject(copyRequest(source.bucket(), source.objectKey(), targetBucket, targetKey, targetVisibility, storage));
             ossClient.deleteObject(source.bucket(), source.objectKey());
         } catch (com.aliyun.oss.OSSException ossEx) {
             // OSS文件不存在（NoSuchKey）时，只更新数据库状态，不阻塞撤回/删除操作
             if ("NoSuchKey".equals(ossEx.getErrorCode())) {
                 log.warn("OSS asset not found during move, proceeding with status update only: source=oss://{}/{} target=oss://{}/{}",
                         source.bucket(), source.objectKey(), targetBucket, targetKey);
+                metrics.record("move", targetVisibility.name().toLowerCase(Locale.ROOT), "missing", 0, System.nanoTime() - started);
                 return urlForKey(source.relativeKey(), targetVisibility);
             }
+            metrics.record("move", targetVisibility.name().toLowerCase(Locale.ROOT), "failed", 0, System.nanoTime() - started);
             log.warn("OSS asset move failed: source=oss://{}/{} target=oss://{}/{}",
                     source.bucket(), source.objectKey(), targetBucket, targetKey, ossEx);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "cloud file move failed");
         } catch (RuntimeException exception) {
+            metrics.record("move", targetVisibility.name().toLowerCase(Locale.ROOT), "failed", 0, System.nanoTime() - started);
             log.warn("OSS asset move failed: source=oss://{}/{} target=oss://{}/{}",
                     source.bucket(), source.objectKey(), targetBucket, targetKey, exception);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "cloud file move failed");
         }
+        metrics.record("move", targetVisibility.name().toLowerCase(Locale.ROOT), "success", 0, System.nanoTime() - started);
         return urlForKey(source.relativeKey(), targetVisibility);
+    }
+
+    private CopyObjectRequest copyRequest(String sourceBucket, String sourceKey, String targetBucket, String targetKey,
+                                          AssetVisibility targetVisibility, AppProperties.AssetStorage storage) {
+        CopyObjectRequest request = new CopyObjectRequest(sourceBucket, sourceKey, targetBucket, targetKey);
+        ObjectMetadata metadata = ossClient.getObjectMetadata(sourceBucket, sourceKey);
+        if (metadata == null) {
+            metadata = new ObjectMetadata();
+        }
+        metadata.setCacheControl(cacheControlFor(targetKey, targetVisibility, storage));
+        request.setNewObjectMetadata(metadata);
+        return request;
     }
 
     private String urlForKey(String relativeKey, AssetVisibility visibility) {
@@ -731,13 +782,18 @@ public class AssetStorageService {
         String bucket = bucketFor(visibility, storage);
         String objectKey = storage.getOssKeyPrefix() + normalizeRelativeKey(relativeKey);
         Date expiration = new Date(System.currentTimeMillis() + (long) expirationSeconds * 1000);
+        long started = System.nanoTime();
         if (process != null && !process.isBlank()) {
             GeneratePresignedUrlRequest request = new GeneratePresignedUrlRequest(bucket, objectKey);
             request.setExpiration(expiration);
             request.setProcess(process);
-            return ossClient.generatePresignedUrl(request).toString();
+            String url = ossClient.generatePresignedUrl(request).toString();
+            metrics.record("sign", visibility.name().toLowerCase(Locale.ROOT), "success", 0, System.nanoTime() - started);
+            return url;
         }
-        return ossClient.generatePresignedUrl(bucket, objectKey, expiration).toString();
+        String url = ossClient.generatePresignedUrl(bucket, objectKey, expiration).toString();
+        metrics.record("sign", visibility.name().toLowerCase(Locale.ROOT), "success", 0, System.nanoTime() - started);
+        return url;
     }
 
     public String generateSignedPrivateUrl(String relativeKey) {
