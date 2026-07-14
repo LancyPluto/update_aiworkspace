@@ -54,6 +54,7 @@
 - `latencyMs`：探活耗时。
 - `message`：面向管理端的可读信息。
 - `fallbackUsed`：是否使用 fallback。
+- `warning`：凭据有效但存在余额不足、免费额度耗尽或限流时的非阻断告警。
 
 现有 API 响应结构保持兼容，由 Service 将统一结果映射到现有 DTO。
 
@@ -82,13 +83,17 @@
 
 | 响应 | 账户结果 | 行为 |
 |---|---|---|
-| `2xx` | 正常 | 不解析或验证具体模型名 |
-| `401/403` | 异常 | 判定凭据无效，不执行 fallback |
-| `429` | 正常 | 消息提示限流，证明凭据已被网关识别 |
+| `2xx` | 正常 | 不解析或验证具体模型名；余额不足通常不影响模型列表请求 |
+| `401` | 异常 | 判定凭据无效，不执行 fallback |
+| 明确为无效 Key、未授权或签名错误的 `403` | 异常 | 判定凭据无效，不执行 fallback |
+| `402`、明确为余额或免费额度耗尽的 `403` | 正常并告警 | Key 已被识别；账户保持正常，余额问题交给余额和模型状态展示 |
+| `429` | 正常并告警 | Key 已被识别，消息提示额度或频率限制 |
 | `404/405/501` | 未实现 `/models` | 进入厂商 fallback |
 | 网络错误、超时、`5xx` | 异常 | 显示网关不可用，不用 fallback 掩盖故障 |
 
-账户探活成功后可沿用现有行为重新启用该账户下因账户未探活而停用的模型，但不得覆盖模型自身的 `last_test_success` 和 `last_test_message`。
+账户探活通过或仅有余额/限流告警时，账户 `health_status` 保持 `OK`，且不得自动关闭账户的 `enabled` 开关。账户探活成功后可沿用现有行为重新启用该账户下因账户未探活而停用的模型，但不得覆盖模型自身的 `last_test_success` 和 `last_test_message`。
+
+`AccountProbeErrorClassifier` 负责结合 HTTP 状态码和响应体分类错误。只有明确的 `invalid api key`、`unauthorized`、`authentication failed`、`signature invalid` 等鉴权语义才归为凭据失败；`insufficient balance`、`quota exhausted`、`free quota exhausted`、`payment required` 和限流语义归为非阻断告警。无法识别原因的 `403` 保守判定为异常。
 
 ### Fallback
 
@@ -99,7 +104,7 @@ Fallback 仅在 `/models` 明确不受支持时使用：
 - MiniMax 专有音乐、语音能力：账户先尝试 Chat `/models`；无法使用时保留现有策略。
 - 其他未注册厂商：沿用当前 `testStrategy`；其中 `agent_service` 可能执行现有轻量模型调用，并在结果中明确标记 `fallbackUsed=true`，避免与无模型的主路径混淆。
 
-`401/403`、网络错误和 `5xx` 不得进入 fallback，防止把失效 Key 或真实网关故障误判为正常。
+`401`、凭据类 `403`、网络错误和 `5xx` 不得进入 fallback，防止把失效 Key 或真实网关故障误判为正常。余额类 `402/403` 和限流 `429` 已视为账户凭据有效，同样不进入 fallback。
 
 ## 模型探活
 
@@ -153,6 +158,7 @@ Fallback 仅在 `/models` 明确不受支持时使用：
 - 账户卡片闪电按钮表示“网关与凭据是否有效”。
 - 模型行闪电按钮表示“该模型及能力是否可用”。
 - 账户正常但某些模型异常时，厂商汇总仍可显示模型异常数量，但账户卡片不标红。
+- 余额不足、免费额度耗尽或限流时，账户卡片保持正常并展示非阻断告警；账户启用开关保持原值。
 - Fallback 结果文案明确包含“使用兼容探活策略”，便于后续运营排查。
 
 ## 测试
@@ -162,10 +168,12 @@ Fallback 仅在 `/models` 明确不受支持时使用：
 1. DashScope 根地址解析到 `/compatible-mode/v1/models`。
 2. DashScope `compatible-mode/v1` 不重复拼接路径。
 3. `/models` 返回 200 时账户正常，且不调用 Agent Service。
-4. `/models` 返回 401/403 时账户异常且不 fallback。
-5. `/models` 返回 429 时账户正常并显示限流提示。
-6. `/models` 返回 404/405/501 时调用 fallback。
-7. `/models` 返回 5xx 或网络错误时不 fallback。
+4. `/models` 返回 401 或明确凭据错误的 403 时账户异常且不 fallback。
+5. `/models` 返回 402、余额类 403 或 429 时账户正常并显示非阻断告警。
+6. 无法识别原因的 403 保守判定为账户异常。
+7. `/models` 返回 404/405/501 时调用 fallback。
+8. `/models` 返回 5xx 或网络错误时不 fallback。
+9. 余额类告警不得修改账户 `enabled`，也不得把账户 `health_status` 设为 `ERROR`。
 
 ### 模型测试
 
