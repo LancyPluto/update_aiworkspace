@@ -43,7 +43,7 @@ public class AdminProxyConfigController {
         if (runtime.managed() && !runtime.available()) {
             throw new BusinessException(
                     ErrorCode.SYSTEM_ERROR,
-                    "Proxy settings were saved, but Mihomo apply failed: " + runtime.message()
+                    "代理配置已保存，但应用到 Mihomo 失败：" + runtime.message()
             );
         }
         return ApiResponse.success(saved);
