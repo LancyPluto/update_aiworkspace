@@ -4,6 +4,10 @@ set -euo pipefail
 REMOTE_DIR="${REMOTE_DIR:-/root/ai_tool_market}"
 DEPLOY_SERVICES="${DEPLOY_SERVICES:-${*:-}}"
 MANIFEST="$REMOTE_DIR/deploy/logs/last-deploy.json"
+# Keep rollback independent of the checked-out revision's registry default.
+# A private ACR mirror can override this through the deployment environment.
+CADVISOR_IMAGE="${CADVISOR_IMAGE:-m.daocloud.io/gcr.io/cadvisor/cadvisor:v0.49.1}"
+export CADVISOR_IMAGE
 
 if [ ! -f "$MANIFEST" ]; then
   echo "ERROR: deploy manifest is missing; automatic rollback is unavailable" >&2

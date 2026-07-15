@@ -32,6 +32,7 @@ _ENV_PATCH_LINES = [
     "GRAFANA_ROOT_URL=https://wlcloudai.com/grafana/",
     "PROMETHEUS_RETENTION=15d",
     "GRAFANA_ADMIN_USER=admin",
+    "CADVISOR_IMAGE=m.daocloud.io/gcr.io/cadvisor/cadvisor:v0.49.1",
 ]
 ENV_PATCH_SCRIPT = "\n".join(
     [
