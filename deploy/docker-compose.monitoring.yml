@@ -79,7 +79,6 @@ services:
       - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
       - alloy_data:/var/lib/alloy/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
     depends_on:
       - loki
 
@@ -96,7 +95,7 @@ services:
   cadvisor:
     # cAdvisor is not hosted on Docker Hub, so do not prepend DOCKER_REGISTRY here.
     # Override CADVISOR_IMAGE in deploy/.env when using another verified registry mirror.
-    image: ${CADVISOR_IMAGE:-m.daocloud.io/gcr.io/cadvisor/cadvisor:v0.49.1}
+    image: ${CADVISOR_IMAGE:-m.daocloud.io/ghcr.io/google/cadvisor:v0.60.5}
     container_name: ai-supermarket-cadvisor
     restart: unless-stopped
     privileged: true

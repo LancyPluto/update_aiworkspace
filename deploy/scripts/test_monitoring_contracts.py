@@ -51,7 +51,10 @@ class MonitoringContractTests(unittest.TestCase):
         self.assertIn('target_label  = "compose_project"', alloy)
         self.assertNotIn('target_label  = "container_id"', alloy)
         self.assertNotIn('action        = "keep"', alloy)
-        self.assertIn("stage.docker {}", alloy)
+        self.assertIn('loki.source.docker "docker_containers"', alloy)
+        self.assertIn('host             = "unix:///var/run/docker.sock"', alloy)
+        self.assertNotIn('loki.source.file "docker_containers"', alloy)
+        self.assertNotIn('target_label  = "__path__"', alloy)
         self.assertIn("stage.label_drop", alloy)
         self.assertIn('values = ["filename"]', alloy)
 
@@ -74,7 +77,7 @@ class MonitoringContractTests(unittest.TestCase):
     def test_cadvisor_and_health_ports_are_declared(self) -> None:
         compose = self.read("deploy/docker-compose.monitoring.yml")
         self.assertIn(
-            "m.daocloud.io/gcr.io/cadvisor/cadvisor:v0.49.1",
+            "m.daocloud.io/ghcr.io/google/cadvisor:v0.60.5",
             compose,
         )
         self.assertIn('127.0.0.1:${LOKI_PORT:-3100}:3100', compose)

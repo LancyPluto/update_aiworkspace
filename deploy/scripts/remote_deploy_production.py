@@ -32,7 +32,7 @@ _ENV_PATCH_LINES = [
     "GRAFANA_ROOT_URL=https://wlcloudai.com/grafana/",
     "PROMETHEUS_RETENTION=15d",
     "GRAFANA_ADMIN_USER=admin",
-    "CADVISOR_IMAGE=m.daocloud.io/gcr.io/cadvisor/cadvisor:v0.49.1",
+    "CADVISOR_IMAGE=m.daocloud.io/ghcr.io/google/cadvisor:v0.60.5",
 ]
 ENV_PATCH_SCRIPT = "\n".join(
     [
@@ -263,6 +263,7 @@ done
 
 APP_SERVICES=""
 MONITORING_SERVICES=""
+MONITORING_STACK="prometheus grafana loki alloy node-exporter cadvisor blackbox-exporter"
 for svc in $SERVICES; do
   case "$svc" in
     prometheus|grafana|loki|alloy|node-exporter|cadvisor|blackbox-exporter)
@@ -281,6 +282,9 @@ fi
 if [ -n "$MONITORING_SERVICES" ]; then
   docker compose "${{COMPOSE_ARGS[@]}}" up -d --force-recreate $MONITORING_SERVICES
 fi
+
+echo "Ensuring complete monitoring stack: $MONITORING_STACK"
+docker compose "${{COMPOSE_ARGS[@]}}" up -d $MONITORING_STACK
 
 echo "Verifying release health..."
 bash "$REMOTE_DIR/deploy/scripts/verify_release_health.sh"

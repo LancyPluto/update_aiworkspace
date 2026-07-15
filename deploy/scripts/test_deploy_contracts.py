@@ -62,6 +62,12 @@ class DeployContractTests(unittest.TestCase):
             self.assertNotIn("OPTIONAL_MONITORING_SERVICES", deploy)
             self.assertNotIn("monitoring stack update failed", deploy)
             self.assertIn("verify_release_health.sh", deploy)
+            self.assertIn("Ensuring complete monitoring stack", deploy)
+            self.assertIn("prometheus grafana loki alloy node-exporter cadvisor blackbox-exporter", deploy)
+            self.assertLess(
+                deploy.index("Ensuring complete monitoring stack"),
+                deploy.index("verify_release_health.sh"),
+            )
 
     def test_release_gate_requires_fresh_monitoring_metrics(self) -> None:
         health = self.read("deploy/scripts/verify_release_health.sh")
@@ -172,7 +178,7 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("verify_release_health.sh", rollback)
 
     def test_deploy_and_rollback_pin_reachable_cadvisor_registry(self) -> None:
-        image = "m.daocloud.io/gcr.io/cadvisor/cadvisor:v0.49.1"
+        image = "m.daocloud.io/ghcr.io/google/cadvisor:v0.60.5"
         linux_deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
         windows_deploy = self.read("deploy/scripts/remote_deploy_production.py")
         rollback = self.read("deploy/scripts/rollback_release.sh")
@@ -217,6 +223,7 @@ class DeployContractTests(unittest.TestCase):
             'up -d --force-recreate "${available_monitoring_services[@]}"',
             rollback,
         )
+        self.assertIn("Restoring complete old revision monitoring stack", rollback)
         self.assertIn('REQUIRE_MONITORING=1 bash "$health_script"', rollback)
         self.assertIn('REQUIRE_MONITORING=0 bash "$health_script"', rollback)
         self.assertIn("compatibility mode", rollback)

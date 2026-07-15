@@ -27,22 +27,17 @@ discovery.relabel "docker_containers" {
     target_label  = "compose_project"
   }
 
-  rule {
-    source_labels = ["__meta_docker_container_id"]
-    target_label  = "__path__"
-    replacement   = "/var/lib/docker/containers/$1/*-json.log"
-  }
 }
 
-loki.source.file "docker_containers" {
-  targets    = discovery.relabel.docker_containers.output
-  forward_to = [loki.process.docker_containers.receiver]
+loki.source.docker "docker_containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.docker_containers.output
+  forward_to       = [loki.process.docker_containers.receiver]
+  refresh_interval = "10s"
 }
 
 loki.process "docker_containers" {
   forward_to = [loki.write.default.receiver]
-
-  stage.docker {}
 
   stage.label_drop {
     values = ["filename"]
