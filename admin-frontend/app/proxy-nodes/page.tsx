@@ -146,7 +146,13 @@ export default function ProxyNodesPage() {
       const config = await updateProxyConfig(proxyFormToUpdate(form))
       setForm(proxyConfigToFormState(config))
       setTestResult(null)
-      setNotice(runtime?.managed ? "代理配置已保存，尚未应用到 Mihomo" : "代理配置已保存")
+      const nextRuntime = await fetchMihomoRuntime()
+      setRuntime(nextRuntime)
+      setNotice(
+        nextRuntime.managed
+          ? "代理配置已保存并应用到 Mihomo"
+          : "代理配置已保存，但当前部署未启用 Mihomo 托管，尚未应用",
+      )
     } catch (saveError) {
       setError(formatError(saveError, "代理配置保存失败"))
     } finally {
