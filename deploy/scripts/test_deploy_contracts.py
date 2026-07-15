@@ -49,6 +49,14 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("verify_media_delivery.py", health)
         self.assertNotIn("http_ok http://127.0.0.1/", health)
 
+    def test_production_secrets_are_normalized_and_checked_before_recreate(self) -> None:
+        deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
+        normalize = 'value[0] == value[-1] and value[0] in ("\'", \'"\')'
+        self.assertGreaterEqual(deploy.count(normalize), 2)
+        self.assertIn("production secret preflight failed", deploy)
+        self.assertIn("differs between .env and deploy/.env", deploy)
+        self.assertLess(deploy.index("production secret preflight passed"), deploy.index("Force-recreating application containers"))
+
     def test_rollback_uses_recorded_previous_revision(self) -> None:
         rollback = self.read("deploy/scripts/rollback_release.sh")
         self.assertIn('get("oldSha", "")', rollback)
