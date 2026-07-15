@@ -13,6 +13,7 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
@@ -23,6 +24,14 @@ class AssetStorageServiceTest {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void recognizesOnlyContentAddressedMediaKeysAsImmutable() {
+        assertTrue(AssetStorageService.isContentAddressed("images/" + "a".repeat(40) + ".png"));
+        assertTrue(AssetStorageService.isContentAddressed("video/" + "b".repeat(40) + ".preview-480p.mp4"));
+        assertFalse(AssetStorageService.isContentAddressed("images/legacy-cover.png"));
+        assertFalse(AssetStorageService.isContentAddressed("images/" + "c".repeat(39) + ".png"));
+    }
 
     @Test
     void storesFileLocallyAndReturnsGeneratedUrl() throws Exception {
@@ -77,7 +86,8 @@ class AssetStorageServiceTest {
                 "wlcloudai-assets-private".equals(request.getSourceBucketName())
                         && "tasks/1/result.png".equals(request.getSourceKey())
                         && "wlcloudai-assets-public".equals(request.getDestinationBucketName())
-                        && "tasks/1/result.png".equals(request.getDestinationKey())));
+                        && "tasks/1/result.png".equals(request.getDestinationKey())
+                        && "public,max-age=300,must-revalidate".equals(request.getNewObjectMetadata().getCacheControl())));
         verify(oss).deleteObject("wlcloudai-assets-private", "tasks/1/result.png");
     }
 

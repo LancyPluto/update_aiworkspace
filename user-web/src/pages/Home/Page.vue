@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-vue-next"
 import ToolComparisonCover from "@/components/ToolComparisonCover.vue"
+import OptimizedImage from "@/components/OptimizedImage.vue"
 import { searchCommunityPosts } from "@/api/communityApi"
 import { fetchTools } from "@/api/toolApi"
 import { fetchTasks } from "@/api/taskApi"
@@ -399,11 +400,11 @@ watch(
                     playsinline
                     preload="metadata"
                   />
-                  <img
+                  <OptimizedImage
                     v-else
                     :src="communityPostMediaUrl(post)"
                     :alt="communityPostTitle(post)"
-                    loading="lazy"
+                    preset="list"
                   />
                   <span class="hero-wall-badge">{{ communityPostKindLabel(post) }}</span>
                 </button>
@@ -441,7 +442,7 @@ watch(
                 playsinline
                 preload="metadata"
               />
-              <img v-else-if="toolCover(entry.tool)" :src="toolCover(entry.tool)" :alt="entry.tool.toolName" loading="lazy" />
+              <OptimizedImage v-else-if="toolCover(entry.tool)" :src="toolCover(entry.tool)" :alt="entry.tool.toolName" preset="card" />
               <WandSparkles v-else class="h-5 w-5 text-white/48" />
             </div>
             <div class="min-w-0 flex-1">
@@ -501,7 +502,7 @@ watch(
                   playsinline
                   preload="metadata"
                 />
-                <img v-else-if="toolCover(tool)" :src="toolCover(tool)" :alt="tool.toolName" loading="lazy" />
+                <OptimizedImage v-else-if="toolCover(tool)" :src="toolCover(tool)" :alt="tool.toolName" preset="card" />
                 <div v-else class="tool-cover-empty">
                   <WandSparkles class="h-10 w-10 text-white/48" />
                 </div>

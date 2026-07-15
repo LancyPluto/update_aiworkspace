@@ -71,6 +71,9 @@ app:
     oss-access-key-secret: ${OSS_ACCESS_KEY_SECRET:${ALIYUN_ACCESS_KEY_SECRET:${ALIYUN_CAPTCHA_ACCESS_KEY_SECRET:}}}
     oss-key-prefix: ${OSS_KEY_PREFIX:}
     image-transform-options: ${ASSET_STORAGE_IMAGE_TRANSFORM_OPTIONS:}
+    public-cache-control: ${ASSET_PUBLIC_CACHE_CONTROL:public,max-age=31536000,immutable}
+    private-cache-control: ${ASSET_PRIVATE_CACHE_CONTROL:private,max-age=3600}
+    legacy-cache-control: ${ASSET_LEGACY_CACHE_CONTROL:public,max-age=300,must-revalidate}
     cdn-private-base-url: ${CDN_PRIVATE_BASE_URL:}
     cdn-auth-key: ${CDN_AUTH_KEY:}
     cdn-auth-expiration: ${CDN_AUTH_EXPIRATION:3600}

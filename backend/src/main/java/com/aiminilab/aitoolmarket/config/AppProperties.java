@@ -869,6 +869,9 @@ public class AppProperties {
         private String ossKeyPrefix = "";
         /** OSS Image Processing options, e.g. {@code image/format,webp/quality,Q_85}. When set, public image URLs append {@code ?x-oss-process=<options>}. */
         private String imageTransformOptions = "";
+        private String publicCacheControl = "public,max-age=31536000,immutable";
+        private String privateCacheControl = "private,max-age=3600";
+        private String legacyCacheControl = "public,max-age=300,must-revalidate";
         private String cdnPrivateBaseUrl = "";
         private String cdnAuthKey = "";
         private int cdnAuthExpiration = 3600;
@@ -979,6 +982,30 @@ public class AppProperties {
             this.imageTransformOptions = imageTransformOptions;
         }
 
+        public String getPublicCacheControl() {
+            return valueOrDefault(publicCacheControl, "public,max-age=31536000,immutable");
+        }
+
+        public void setPublicCacheControl(String publicCacheControl) {
+            this.publicCacheControl = publicCacheControl;
+        }
+
+        public String getPrivateCacheControl() {
+            return valueOrDefault(privateCacheControl, "private,max-age=3600");
+        }
+
+        public void setPrivateCacheControl(String privateCacheControl) {
+            this.privateCacheControl = privateCacheControl;
+        }
+
+        public String getLegacyCacheControl() {
+            return valueOrDefault(legacyCacheControl, "public,max-age=300,must-revalidate");
+        }
+
+        public void setLegacyCacheControl(String legacyCacheControl) {
+            this.legacyCacheControl = legacyCacheControl;
+        }
+
         public String getCdnPrivateBaseUrl() {
             return cdnPrivateBaseUrl == null ? "" : cdnPrivateBaseUrl.trim();
         }
@@ -1009,6 +1036,10 @@ public class AppProperties {
 
         public boolean isOss() {
             return "oss".equals(getProvider());
+        }
+
+        private static String valueOrDefault(String value, String fallback) {
+            return value == null || value.isBlank() ? fallback : value.trim();
         }
     }
 }

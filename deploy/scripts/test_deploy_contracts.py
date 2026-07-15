@@ -43,6 +43,11 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:5174/admin", health)
         self.assertIn("http://127.0.0.1:8090/health", health)
         self.assertIn("docker logs --tail 80", health)
+        self.assertIn("worker_media_runtime_ready", health)
+        self.assertIn("get_ffmpeg_exe", health)
+        self.assertIn("MEDIA_HEALTHCHECK_URL", health)
+        self.assertIn("verify_media_delivery.py", health)
+        self.assertIn("&& worker_media_runtime_ready", health)
         self.assertNotIn("http_ok http://127.0.0.1/", health)
 
     def test_monitoring_is_blocking_in_every_deploy_entry(self) -> None:
@@ -152,6 +157,14 @@ class DeployContractTests(unittest.TestCase):
         ):
             self.assertIn(container, check)
 
+    def test_production_secrets_are_normalized_and_checked_before_recreate(self) -> None:
+        deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
+        normalize = 'value[0] == value[-1] and value[0] in ("\'", \'"\')'
+        self.assertGreaterEqual(deploy.count(normalize), 2)
+        self.assertIn("production secret preflight failed", deploy)
+        self.assertIn("differs between .env and deploy/.env", deploy)
+        self.assertLess(deploy.index("production secret preflight passed"), deploy.index("Force-recreating application containers"))
+
     def test_rollback_uses_recorded_previous_revision(self) -> None:
         rollback = self.read("deploy/scripts/rollback_release.sh")
         self.assertIn('get("oldSha", "")', rollback)
@@ -203,6 +216,27 @@ class DeployContractTests(unittest.TestCase):
             deploy.index("trap rollback_on_failure ERR"),
             deploy.index('git checkout -B "$GIT_BRANCH" deploy-target -f'),
         )
+
+    def test_media_cache_backfill_is_dry_run_by_default(self) -> None:
+        script = self.read("deploy/scripts/backfill_oss_cache_control.py")
+        self.assertIn('parser.add_argument("--apply", action="store_true"', script)
+        self.assertIn('if args.apply:', script)
+        self.assertIn('bucket.update_object_meta', script)
+        self.assertNotIn("delete_object", script)
+
+    def test_media_delivery_verifies_immutable_cache_and_transform(self) -> None:
+        script = self.read("deploy/scripts/verify_media_delivery.py")
+        self.assertIn("max-age=31536000", script)
+        self.assertIn('("x-oss-process", "image/resize,w_640', script)
+        self.assertIn("etag", script)
+        self.assertIn("image/webp", script)
+
+    def test_nginx_only_marks_content_addressed_generated_media_immutable(self) -> None:
+        config = self.read("deploy/nginx/snippets/app_locations.conf")
+        self.assertIn("[0-9a-f]{40}", config)
+        self.assertIn("max-age=31536000, immutable", config)
+        self.assertIn("max-age=300, must-revalidate", config)
+        self.assertEqual(config.count("proxy_hide_header Cache-Control"), 2)
 
 
 if __name__ == "__main__":

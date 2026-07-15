@@ -46,6 +46,7 @@ const defaults: SettingsMap = {
   "agent.runtime.product_tool_loop_enabled": "true",
   "agent.runtime.product_tool_loop_max_calls": "1",
   "agent.runtime.product_tool_loop_fallback_to_router": "true",
+  "agent.audit.payload_retention_days": "30",
 }
 
 const textKeys = [
@@ -104,6 +105,7 @@ const labels: Record<string, string> = {
   "agent.runtime.product_tool_loop_enabled": "启用产品工具循环",
   "agent.runtime.product_tool_loop_max_calls": "产品工具循环最大调用",
   "agent.runtime.product_tool_loop_fallback_to_router": "产品工具拒绝后回退路由",
+  "agent.audit.payload_retention_days": "Agent 稽查正文保留天数",
 }
 
 const numberConstraints: Record<string, { min: number; max: number; step?: number }> = {
@@ -125,6 +127,7 @@ const numberConstraints: Record<string, { min: number; max: number; step?: numbe
   "agent.runtime.music_tool_execution_timeout_seconds": { min: 10, max: 7200 },
   "agent.runtime.tool_poll_interval_seconds": { min: 0.2, max: 30, step: 0.1 },
   "agent.runtime.product_tool_loop_max_calls": { min: 1, max: 20 },
+  "agent.audit.payload_retention_days": { min: 1, max: 365 },
 }
 
 function asBool(value?: string) {

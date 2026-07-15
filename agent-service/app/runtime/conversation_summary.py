@@ -2,6 +2,7 @@ import logging
 
 from app.core.event_types import CONVERSATION_SUMMARY_UPDATED
 from app.core.schemas import ChatMessage, RunContext, RunEventCreate
+from app.observability.model_request_audit import model_audit_scope
 from app.runtime.context_manager import ContextManager, ROLLING_SUMMARY_PROMPT, token_middle_truncate
 
 logger = logging.getLogger(__name__)
@@ -91,11 +92,12 @@ async def _build_summary(
         f"新增旧消息：\n{candidate_text}"
     )
     try:
-        if hasattr(model, "chat"):
-            summary = await model.chat([ChatMessage(role="system", content=prompt)])
-        else:
-            turn = await model.chat_turn([ChatMessage(role="system", content=prompt)], tools=None)
-            summary = getattr(turn, "content", "")
+        with model_audit_scope("memory.summary"):
+            if hasattr(model, "chat"):
+                summary = await model.chat([ChatMessage(role="system", content=prompt)])
+            else:
+                turn = await model.chat_turn([ChatMessage(role="system", content=prompt)], tools=None)
+                summary = getattr(turn, "content", "")
     except Exception:
         logger.exception("Failed to build rolling conversation summary; using deterministic fallback")
         summary = _fallback_summary(existing_summary, candidate_text)
