@@ -265,12 +265,15 @@ def read_env() -> dict[str, str]:
         if "=" not in line or line.strip().startswith("#"):
             continue
         key, value = line.split("=", 1)
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1].strip()
         out[key.strip()] = value
     return out
 
 def upsert(key: str, value: str) -> None:
     lines = env.read_text(encoding="utf-8", errors="replace").splitlines() if env.exists() else []
-    out = [line for line in lines if not line.startswith(f"{key}=")]
+    out = [line for line in lines if line.split("=", 1)[0].strip() != key]
     out.append(f"{key}={value}")
     env.parent.mkdir(parents=True, exist_ok=True)
     env.write_text("\n".join(out) + "\n", encoding="utf-8")
@@ -315,6 +318,45 @@ if (not model_key or model_key.startswith("replace-with-")) and silicon_key and 
     lines = [line for line in lines if not line.startswith("MODEL_API_KEY=")]
     lines.append(f"MODEL_API_KEY={root['MODEL_API_KEY']}")
     deploy.write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
+
+# Fail before container replacement when production secrets are still placeholders or diverge
+# between the root env_file and Compose interpolation env.
+python3 - <<'PY'
+from pathlib import Path
+
+DEFAULTS = {
+    "JWT_SECRET": {"", "local-dev-secret", "replace-with-a-strong-jwt-secret"},
+    "INTERNAL_API_TOKEN": {"", "local-internal-token", "replace-with-internal-token"},
+}
+MIN_LENGTH = {"JWT_SECRET": 32, "INTERNAL_API_TOKEN": 32}
+
+
+def read_env(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.exists():
+        return values
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "=" not in line or line.lstrip().startswith("#"):
+            continue
+        key, value = line.split("=", 1)
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1].strip()
+        values[key.strip()] = value
+    return values
+
+
+root = read_env(Path("/root/ai_tool_market/.env"))
+deploy = read_env(Path("/root/ai_tool_market/deploy/.env"))
+for key, defaults in DEFAULTS.items():
+    root_value = root.get(key, "")
+    deploy_value = deploy.get(key, "")
+    if root_value in defaults or len(root_value) < MIN_LENGTH[key]:
+        raise SystemExit(f"production secret preflight failed: {key} is missing, default, or too short")
+    if deploy_value != root_value:
+        raise SystemExit(f"production secret preflight failed: {key} differs between .env and deploy/.env")
+print("production secret preflight passed")
 PY
 
 SECRET_SNAPSHOT_AFTER="\$(read_secret_snapshot)"
