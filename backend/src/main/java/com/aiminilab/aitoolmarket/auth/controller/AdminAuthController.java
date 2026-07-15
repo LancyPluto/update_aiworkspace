@@ -7,7 +7,10 @@ import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.auth.security.AuthCookieSupport;
 import com.aiminilab.aitoolmarket.auth.security.JwtTokenProvider;
 import com.aiminilab.aitoolmarket.auth.service.AuthService;
+import com.aiminilab.aitoolmarket.auth.service.AuthSecurityAuditService;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
+import com.aiminilab.aitoolmarket.common.enums.UserType;
+import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.user.dto.UserProfileResponse;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
@@ -27,19 +30,33 @@ public class AdminAuthController {
     private final AuthService authService;
     private final JwtTokenProvider jwtTokenProvider;
     private final AuthCookieSupport authCookieSupport;
+    private final AuthSecurityAuditService authSecurityAuditService;
 
-    public AdminAuthController(AuthService authService, JwtTokenProvider jwtTokenProvider, AuthCookieSupport authCookieSupport) {
+    public AdminAuthController(AuthService authService,
+                               JwtTokenProvider jwtTokenProvider,
+                               AuthCookieSupport authCookieSupport,
+                               AuthSecurityAuditService authSecurityAuditService) {
         this.authService = authService;
         this.jwtTokenProvider = jwtTokenProvider;
         this.authCookieSupport = authCookieSupport;
+        this.authSecurityAuditService = authSecurityAuditService;
     }
 
     @PostMapping("/login")
-    public ResponseEntity<ApiResponse<LoginResponse>> login(@Valid @RequestBody LoginRequest request) {
-        AuthenticatedSession session = authService.login(request, true);
-        return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, authCookieSupport.adminSessionCookie(session.jwt()).toString())
-                .body(ApiResponse.success(session.body()));
+    public ResponseEntity<ApiResponse<LoginResponse>> login(@Valid @RequestBody LoginRequest request,
+                                                            HttpServletRequest servletRequest) {
+        try {
+            AuthenticatedSession session = authService.login(request, true);
+            audit(servletRequest, "ADMIN_LOGIN_PASSWORD", "SUCCESS", "password", UserType.ADMIN.name(),
+                    session.body().user().id(), request.account(), null);
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.SET_COOKIE, authCookieSupport.adminSessionCookie(session.jwt()).toString())
+                    .body(ApiResponse.success(session.body()));
+        } catch (RuntimeException exception) {
+            audit(servletRequest, "ADMIN_LOGIN_PASSWORD", "FAILED", "password", UserType.ADMIN.name(),
+                    null, request.account(), reason(exception));
+            throw exception;
+        }
     }
 
     @GetMapping("/me")
@@ -81,5 +98,23 @@ public class AdminAuthController {
             }
         }
         return java.util.Optional.empty();
+    }
+
+    private void audit(HttpServletRequest request,
+                       String eventType,
+                       String result,
+                       String method,
+                       String userType,
+                       Long userId,
+                       String account,
+                       String reason) {
+        authSecurityAuditService.record(request, eventType, result, method, userType, userId, account, reason);
+    }
+
+    private String reason(RuntimeException exception) {
+        if (exception instanceof BusinessException businessException) {
+            return businessException.getErrorCode().name();
+        }
+        return exception.getClass().getSimpleName();
     }
 }

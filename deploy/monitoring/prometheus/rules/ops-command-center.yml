@@ -1,0 +1,20 @@
+groups:
+  - name: ops-command-center-expected-targets
+    rules:
+      - record: ai_monitoring_expected_target
+        expr: vector(1)
+        labels:
+          component: backend
+          job: backend-actuator
+
+      - record: ai_monitoring_expected_target
+        expr: vector(1)
+        labels:
+          component: agent-service
+          job: agent-service
+
+      - record: ai_monitoring_expected_target
+        expr: vector(1)
+        labels:
+          component: worker
+          job: worker

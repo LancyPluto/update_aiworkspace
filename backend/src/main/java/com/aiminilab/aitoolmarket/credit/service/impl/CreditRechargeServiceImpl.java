@@ -7,6 +7,7 @@ import com.aiminilab.aitoolmarket.credit.alipay.AlipayNotification;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayClient;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayRequest;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayResponse;
+import com.aiminilab.aitoolmarket.credit.alipay.AlipayTradeQueryResult;
 import com.aiminilab.aitoolmarket.credit.dto.AlipayPayDiagnosticResponse;
 import com.aiminilab.aitoolmarket.credit.dto.CreateCustomRechargeOrderRequest;
 import com.aiminilab.aitoolmarket.credit.dto.CreateRechargeOrderRequest;
@@ -17,7 +18,7 @@ import com.aiminilab.aitoolmarket.credit.entity.CreditRechargeOrder;
 import com.aiminilab.aitoolmarket.credit.entity.CreditRechargeOrderItem;
 import com.aiminilab.aitoolmarket.credit.entity.CreditRechargePackage;
 import com.aiminilab.aitoolmarket.credit.entity.GiftCardPackage;
-import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderItemMapper;
+import com.aiminilab.aitoolmarket.credit.entity.UserMembership;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderMapper;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargePackageMapper;
 import com.aiminilab.aitoolmarket.credit.mapper.GiftCardPackageMapper;
@@ -36,6 +37,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -44,10 +46,15 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.UUID;
 
 @Service
@@ -59,7 +66,6 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
     private final CreditRechargePackageMapper packageMapper;
     private final GiftCardPackageMapper giftCardPackageMapper;
     private final CreditRechargeOrderMapper orderMapper;
-    private final CreditRechargeOrderItemMapper orderItemMapper;
     private final CreditService creditService;
     private final ObjectMapper objectMapper;
     private final WechatNativePayClient wechatNativePayClient;
@@ -70,11 +76,12 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
     private final AppProperties appProperties;
     private final CreditRechargeCreditDispatcher creditDispatcher;
     private final BypassCacheService bypassCacheService;
+    private final MembershipService membershipService;
+    private final RechargeOrderReservationService orderReservationService;
 
     public CreditRechargeServiceImpl(CreditRechargePackageMapper packageMapper,
                                      GiftCardPackageMapper giftCardPackageMapper,
                                      CreditRechargeOrderMapper orderMapper,
-                                     CreditRechargeOrderItemMapper orderItemMapper,
                                      CreditService creditService,
                                      ObjectMapper objectMapper,
                                      WechatNativePayClient wechatNativePayClient,
@@ -82,11 +89,12 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
                                      QrCodeDataUriGenerator qrCodeDataUriGenerator,
                                      AppProperties appProperties,
                                      CreditRechargeCreditDispatcher creditDispatcher,
-                                     BypassCacheService bypassCacheService) {
+                                     BypassCacheService bypassCacheService,
+                                     MembershipService membershipService,
+                                     RechargeOrderReservationService orderReservationService) {
         this.packageMapper = packageMapper;
         this.giftCardPackageMapper = giftCardPackageMapper;
         this.orderMapper = orderMapper;
-        this.orderItemMapper = orderItemMapper;
         this.creditService = creditService;
         this.objectMapper = objectMapper;
         this.wechatNativePayClient = wechatNativePayClient;
@@ -97,6 +105,8 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         this.appProperties = appProperties;
         this.creditDispatcher = creditDispatcher;
         this.bypassCacheService = bypassCacheService;
+        this.membershipService = membershipService;
+        this.orderReservationService = orderReservationService;
     }
 
     @Override
@@ -125,21 +135,26 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
     @Override
     public RechargeOrderResponse createOrder(Long userId, CreateRechargeOrderRequest request) {
         String idempotencyKey = normalizeIdempotencyKey(request.clientRequestId());
+        String paymentChannel = normalizePaymentChannel(request.paymentChannel());
+        String requestFingerprint = fingerprint(canonicalRequest(request, paymentChannel));
+        boolean isGiftCard = "GIFT_CARD".equals(request.orderType());
+        if (!isGiftCard) {
+            closeExpiredPendingMembershipOrder(userId);
+        }
         if (idempotencyKey != null) {
             CreditRechargeOrder existing = orderMapper.findByUserAndIdempotencyKey(userId, idempotencyKey);
             if (existing != null) {
+                assertSameFingerprint(existing, requestFingerprint);
                 return responseFrom(existing);
             }
         }
 
-        boolean isGiftCard = "GIFT_CARD".equals(request.orderType());
         String productDescription;
         BigDecimal orderPriceAmount;
         String orderCurrency;
 
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime expiresAt = now.plusMinutes(ORDER_EXPIRE_MINUTES);
-        String paymentChannel = normalizePaymentChannel(request.paymentChannel());
         CreditRechargeOrder order = new CreditRechargeOrder();
         order.setOrderNo(generateOrderNo());
         order.setUserId(userId);
@@ -147,6 +162,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         order.setStatus(RechargeOrderStatus.WAITING_PAYMENT.name());
         order.setStatusReason("waiting for payment");
         order.setIdempotencyKey(idempotencyKey);
+        order.setRequestFingerprint(requestFingerprint);
         order.setExpiresAt(expiresAt);
         order.setCreatedAt(now);
         order.setUpdatedAt(now);
@@ -168,20 +184,33 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
                     : "Gift cards x " + lines.stream().mapToInt(GiftCardOrderLine::quantity).sum();
             orderPriceAmount = order.getPriceAmount();
             orderCurrency = order.getCurrency();
-            orderMapper.insert(order);
-            insertGiftCardOrderItems(order.getId(), lines, now);
+            try {
+                orderReservationService.insertGiftCardOrder(order, buildGiftCardOrderItems(lines, now));
+            } catch (DuplicateKeyException exception) {
+                CreditRechargeOrder existing = orderMapper.findByUserAndIdempotencyKey(userId, idempotencyKey);
+                if (existing == null) {
+                    throw exception;
+                }
+                assertSameFingerprint(existing, requestFingerprint);
+                return responseFrom(existing);
+            }
         } else {
             CreditRechargePackage rechargePackage = activePackageOrThrow(request.packageId());
             order.setPackageId(rechargePackage.getId());
             order.setCredits(rechargePackage.getCredits());
             order.setPriceAmount(rechargePackage.getPriceAmount());
             order.setCurrency(rechargePackage.getCurrency());
-            order.setOrderType("CREDITS");
+            order.setOrderType("MEMBERSHIP");
             order.setGiftCardPackageId(null);
+            order.setPackageCodeSnapshot(rechargePackage.getPackageCode());
+            order.setValidityDaysSnapshot(rechargePackage.getValidityDays());
             productDescription = "AI Tool Market credits recharge - " + rechargePackage.getPackageName();
             orderPriceAmount = rechargePackage.getPriceAmount();
             orderCurrency = rechargePackage.getCurrency();
-            orderMapper.insert(order);
+            CreditRechargeOrder reserved = membershipService.reserveOrder(userId, order, rechargePackage);
+            if (!order.getOrderNo().equals(reserved.getOrderNo())) {
+                return responseFrom(reserved);
+            }
         }
         if ("WECHAT_NATIVE".equals(paymentChannel)) {
             try {
@@ -196,8 +225,12 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
                     throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed before WeChat prepay binding");
                 }
             } catch (BusinessException exception) {
-                orderMapper.transit(order.getId(), RechargeOrderStatus.WAITING_PAYMENT.name(), RechargeOrderStatus.FAILED.name(),
-                        statusReason(exception), LocalDateTime.now());
+                if ("MEMBERSHIP".equals(order.getOrderType())) {
+                    reconcileFailedMembershipWechatPrepay(order, exception);
+                } else {
+                    orderMapper.transit(order.getId(), RechargeOrderStatus.WAITING_PAYMENT.name(),
+                            RechargeOrderStatus.FAILED.name(), statusReason(exception), LocalDateTime.now());
+                }
                 throw exception;
             }
         } else if ("ALIPAY_PAGE".equals(paymentChannel)) {
@@ -225,12 +258,15 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
     }
 
     @Override
-    @Transactional
     public RechargeOrderResponse createCustomOrder(Long userId, CreateCustomRechargeOrderRequest request) {
         String idempotencyKey = normalizeIdempotencyKey(request.clientRequestId());
+        String paymentChannel = normalizePaymentChannel(request.paymentChannel());
+        String requestFingerprint = fingerprint("CREDITS|" + request.amount().stripTrailingZeros().toPlainString()
+                + "|" + paymentChannel);
         if (idempotencyKey != null) {
             CreditRechargeOrder existing = orderMapper.findByUserAndIdempotencyKey(userId, idempotencyKey);
             if (existing != null) {
+                assertSameFingerprint(existing, requestFingerprint);
                 return responseFrom(existing);
             }
         }
@@ -241,7 +277,6 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         }
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime expiresAt = now.plusMinutes(ORDER_EXPIRE_MINUTES);
-        String paymentChannel = normalizePaymentChannel(request.paymentChannel());
         CreditRechargeOrder order = new CreditRechargeOrder();
         order.setOrderNo(generateOrderNo());
         order.setUserId(userId);
@@ -253,12 +288,23 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         order.setStatus(RechargeOrderStatus.WAITING_PAYMENT.name());
         order.setStatusReason("custom recharge");
         order.setIdempotencyKey(idempotencyKey);
+        order.setRequestFingerprint(requestFingerprint);
+        order.setOrderType("CREDITS");
         order.setExpiresAt(expiresAt);
         order.setCreatedAt(now);
         order.setUpdatedAt(now);
         order.setPayUrl(null);
         order.setQrCodeUrl(null);
-        orderMapper.insert(order);
+        try {
+            orderReservationService.insertOrder(order);
+        } catch (DuplicateKeyException exception) {
+            CreditRechargeOrder existing = orderMapper.findByUserAndIdempotencyKey(userId, idempotencyKey);
+            if (existing == null) {
+                throw exception;
+            }
+            assertSameFingerprint(existing, requestFingerprint);
+            return responseFrom(existing);
+        }
         if ("WECHAT_NATIVE".equals(paymentChannel)) {
             try {
                 NativePrepayResponse prepay = wechatNativePayClient.createNativeOrder(new NativePrepayRequest(
@@ -391,7 +437,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         if (RechargeOrderStatus.WAITING_PAYMENT.name().equals(order.getStatus())
                 && order.getExpiresAt() != null
                 && order.getExpiresAt().isBefore(now)) {
-            transitOrCurrent(order, RechargeOrderStatus.CLOSED, "order expired");
+            closeExpiredWechatOrder(order);
             return;
         }
         if (order.getUpdatedAt() != null && order.getUpdatedAt().isAfter(now.minusSeconds(WECHAT_QUERY_THROTTLE_SECONDS))) {
@@ -402,10 +448,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
             orderMapper.touchStatusReason(order.getId(), order.getStatus(), "WeChat order not found yet", now);
             return;
         }
-        validateWechatMerchant(notification);
-        if (!"NATIVE".equals(notification.tradeType())) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "unsupported WeChat trade type");
-        }
+        validateWechatQueryResult(order, notification);
         if ("SUCCESS".equals(notification.tradeState())) {
             applyPaidWechatNotification(order, notification);
             return;
@@ -421,9 +464,99 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         orderMapper.touchStatusReason(order.getId(), order.getStatus(), "WeChat order state " + notification.tradeState(), now);
     }
 
+    private void closeExpiredPendingMembershipOrder(Long userId) {
+        UserMembership membership = membershipService.current(userId);
+        if (membership == null || !"PENDING".equals(membership.getStatus()) || membership.getOrderId() == null) {
+            return;
+        }
+        CreditRechargeOrder order = orderMapper.selectById(membership.getOrderId());
+        if (order == null || !RechargeOrderStatus.WAITING_PAYMENT.name().equals(order.getStatus())
+                || order.getExpiresAt() == null || order.getExpiresAt().isAfter(LocalDateTime.now())) {
+            return;
+        }
+        if ("WECHAT_NATIVE".equals(order.getPaymentChannel()) && closeExpiredWechatOrder(order)) {
+            membershipService.releasePending(userId, order.getId());
+        } else if ("ALIPAY_PAGE".equals(order.getPaymentChannel()) && closeExpiredAlipayOrder(order)) {
+            membershipService.releasePending(userId, order.getId());
+        }
+    }
+
+    private boolean closeExpiredWechatOrder(CreditRechargeOrder order) {
+        WechatPayNotification notification = wechatNativePayClient.queryNativeOrder(order.getOrderNo());
+        if (notification != null) {
+            validateWechatQueryResult(order, notification);
+            if ("SUCCESS".equals(notification.tradeState())) {
+                applyPaidWechatNotification(order, notification);
+                return false;
+            }
+            if ("CLOSED".equals(notification.tradeState()) || "REVOKED".equals(notification.tradeState())) {
+                transitOrCurrent(order, RechargeOrderStatus.CLOSED, "WeChat order " + notification.tradeState());
+                return true;
+            }
+        }
+        if (!wechatNativePayClient.closeNativeOrder(order.getOrderNo())) {
+            return false;
+        }
+        transitOrCurrent(order, RechargeOrderStatus.CLOSED, "WeChat order closed after channel confirmation");
+        return true;
+    }
+
+    private void reconcileFailedMembershipWechatPrepay(CreditRechargeOrder order, BusinessException prepayFailure) {
+        boolean channelClosed = false;
+        String closeFailure = null;
+        try {
+            channelClosed = closeExpiredWechatOrder(order);
+        } catch (RuntimeException exception) {
+            closeFailure = statusReason(exception);
+        }
+        if (channelClosed) {
+            membershipService.releasePending(order.getUserId(), order.getId());
+            return;
+        }
+        String reason = "WeChat prepay failed; channel closure unconfirmed: " + statusReason(prepayFailure);
+        if (closeFailure != null) {
+            reason = reason + "; " + closeFailure;
+        }
+        orderMapper.touchStatusReason(order.getId(), RechargeOrderStatus.WAITING_PAYMENT.name(),
+                reason.length() <= 255 ? reason : reason.substring(0, 252) + "...", LocalDateTime.now());
+    }
+
+    private boolean closeExpiredAlipayOrder(CreditRechargeOrder order) {
+        AlipayTradeQueryResult result = alipayPagePayClient.queryOrder(order.getOrderNo());
+        if (result != null) {
+            validateAlipayQueryResult(order, result);
+        }
+        if (result != null && ("TRADE_SUCCESS".equals(result.tradeStatus())
+                || "TRADE_FINISHED".equals(result.tradeStatus()))) {
+            if (result.tradeNo() == null || result.totalAmount() == null) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "Alipay paid order query result is incomplete");
+            }
+            applyPaidExternalNotification(order, result.tradeNo(), result.totalAmount(),
+                    "Alipay payment confirmed by order query");
+            return false;
+        }
+        if (result != null && "TRADE_CLOSED".equals(result.tradeStatus())) {
+            transitOrCurrent(order, RechargeOrderStatus.CLOSED, "Alipay order already closed");
+            return true;
+        }
+        if (result == null || (!("WAIT_BUYER_PAY".equals(result.tradeStatus()))
+                && !("NOT_FOUND".equals(result.tradeStatus())))) {
+            return false;
+        }
+        if (!alipayPagePayClient.closeOrder(order.getOrderNo())) {
+            return false;
+        }
+        transitOrCurrent(order, RechargeOrderStatus.CLOSED, "Alipay order closed after channel confirmation");
+        return true;
+    }
+
     private void applyPaidWechatNotification(CreditRechargeOrder order, WechatPayNotification notification) {
         if (order == null || !"WECHAT_NATIVE".equals(order.getPaymentChannel())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order not found for WeChat notification");
+        }
+        if (!order.getOrderNo().equals(notification.outTradeNo())
+                || !StringUtils.hasText(notification.transactionId())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat payment transaction is invalid");
         }
         if (RechargeOrderStatus.CREDITED.name().equals(order.getStatus())) {
             return;
@@ -450,6 +583,9 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         if (order == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order not found");
         }
+        if (!StringUtils.hasText(externalTradeNo) || totalAmount == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "payment transaction is incomplete");
+        }
         if (RechargeOrderStatus.CREDITED.name().equals(order.getStatus())) {
             return;
         }
@@ -472,7 +608,9 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         if (RechargeOrderStatus.CREDITED.name().equals(order.getStatus())) {
             return;
         }
-        if (RechargeOrderStatus.WAITING_PAYMENT.name().equals(order.getStatus())) {
+        if (RechargeOrderStatus.WAITING_PAYMENT.name().equals(order.getStatus())
+                || RechargeOrderStatus.CLOSED.name().equals(order.getStatus())
+                || RechargeOrderStatus.FAILED.name().equals(order.getStatus())) {
             transitOrCurrent(order, RechargeOrderStatus.PAID, paidReason);
             order = orderMapper.findByOrderNo(order.getOrderNo());
         }
@@ -496,8 +634,8 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
     private void validateAlipayNotification(AlipayNotification notification) {
         if (notification == null
                 || !alipayProperties.getAppId().equals(notification.appId())
-                || notification.outTradeNo() == null
-                || notification.tradeNo() == null
+                || !StringUtils.hasText(notification.outTradeNo())
+                || !StringUtils.hasText(notification.tradeNo())
                 || notification.totalAmount() == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "Alipay payment notification is invalid");
         }
@@ -560,10 +698,30 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         return normalized;
     }
 
-    private void insertGiftCardOrderItems(Long orderId, List<GiftCardOrderLine> lines, LocalDateTime now) {
+    private String canonicalRequest(CreateRechargeOrderRequest request, String paymentChannel) {
+        if (!"GIFT_CARD".equals(request.orderType())) {
+            return "MEMBERSHIP|" + request.packageId() + "|" + paymentChannel;
+        }
+        Map<Long, Integer> quantities = new TreeMap<>();
+        if (request.giftCardItems() != null && !request.giftCardItems().isEmpty()) {
+            for (CreateRechargeOrderRequest.GiftCardItemRequest item : request.giftCardItems()) {
+                if (item != null && item.giftCardPackageId() != null) {
+                    quantities.merge(item.giftCardPackageId(), normalizeQuantity(item.quantity()), Integer::sum);
+                }
+            }
+        } else if (request.giftCardPackageId() != null) {
+            quantities.put(request.giftCardPackageId(), normalizeQuantity(request.quantity()));
+        }
+        String items = quantities.entrySet().stream()
+                .map(entry -> entry.getKey() + ":" + entry.getValue())
+                .collect(java.util.stream.Collectors.joining(","));
+        return "GIFT_CARD|" + items + "|" + paymentChannel;
+    }
+
+    private List<CreditRechargeOrderItem> buildGiftCardOrderItems(List<GiftCardOrderLine> lines, LocalDateTime now) {
+        List<CreditRechargeOrderItem> items = new ArrayList<>();
         for (GiftCardOrderLine line : lines) {
             CreditRechargeOrderItem item = new CreditRechargeOrderItem();
-            item.setOrderId(orderId);
             item.setGiftCardPackageId(line.pkg().getId());
             item.setQuantity(line.quantity());
             item.setCredits(line.pkg().getCredits());
@@ -571,8 +729,9 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
             item.setItemType("GIFT_CARD");
             item.setCreatedAt(now);
             item.setUpdatedAt(now);
-            orderItemMapper.insert(item);
+            items.add(item);
         }
+        return items;
     }
 
     private CreditRechargeOrder orderOrThrow(Long userId, Long orderId) {
@@ -656,6 +815,40 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
             return null;
         }
         return clientRequestId.trim();
+    }
+
+    private void assertSameFingerprint(CreditRechargeOrder existing, String requestFingerprint) {
+        if (existing.getRequestFingerprint() != null
+                && !existing.getRequestFingerprint().equals(requestFingerprint)) {
+            throw new BusinessException(ErrorCode.IDEMPOTENCY_CONFLICT,
+                    "同一 clientRequestId 不能用于不同的充值请求");
+        }
+    }
+
+    private void validateWechatQueryResult(CreditRechargeOrder order, WechatPayNotification notification) {
+        validateWechatMerchant(notification);
+        if (!order.getOrderNo().equals(notification.outTradeNo())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat order query number mismatch");
+        }
+        if (!"NATIVE".equals(notification.tradeType())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "unsupported WeChat trade type");
+        }
+    }
+
+    private void validateAlipayQueryResult(CreditRechargeOrder order, AlipayTradeQueryResult result) {
+        if (!order.getOrderNo().equals(result.outTradeNo())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Alipay order query number mismatch");
+        }
+    }
+
+    private String fingerprint(String canonicalRequest) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(canonicalRequest.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 unavailable", exception);
+        }
     }
 
     private String statusReason(Exception exception) {

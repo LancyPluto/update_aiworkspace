@@ -9,8 +9,11 @@ import com.aiminilab.aitoolmarket.credit.dto.CreditAccountResponse;
 import com.aiminilab.aitoolmarket.credit.dto.CreditLogResponse;
 import com.aiminilab.aitoolmarket.credit.entity.CreditAccount;
 import com.aiminilab.aitoolmarket.credit.entity.CreditLog;
+import com.aiminilab.aitoolmarket.credit.entity.UserMembership;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditLogMapper;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditMapper;
+import com.aiminilab.aitoolmarket.credit.mapper.UserMembershipMapper;
+import com.aiminilab.aitoolmarket.credit.realtime.CreditChangeNotifier;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -23,14 +26,23 @@ public class CreditServiceImpl implements CreditService {
 
     private final CreditMapper creditMapper;
     private final CreditLogMapper creditLogMapper;
+    private final CreditChangeNotifier creditChangeNotifier;
+    private final UserMembershipMapper membershipMapper;
 
-    public CreditServiceImpl(CreditMapper creditMapper, CreditLogMapper creditLogMapper) {
+    public CreditServiceImpl(CreditMapper creditMapper,
+                             CreditLogMapper creditLogMapper,
+                             CreditChangeNotifier creditChangeNotifier,
+                             UserMembershipMapper membershipMapper) {
         this.creditMapper = creditMapper;
         this.creditLogMapper = creditLogMapper;
+        this.creditChangeNotifier = creditChangeNotifier;
+        this.membershipMapper = membershipMapper;
     }
 
     @Override
+    @Transactional
     public CreditAccountResponse account(Long userId) {
+        expireMembershipIfNeeded(userId);
         return CreditAccountResponse.from(creditMapper.getOrCreateAccount(userId));
     }
 
@@ -40,13 +52,15 @@ public class CreditServiceImpl implements CreditService {
         if (amount <= 0) {
             return;
         }
-        CreditAccount before = creditMapper.getOrCreateAccount(userId);
+        expireMembershipIfNeeded(userId);
+        CreditAccount before = lockedAccount(userId);
         if (before.getBalance() - before.getFrozen() < amount) {
             throw new BusinessException(notEnoughErrorCode(sourceType), sourceLabel(sourceType) + "可用算力不足");
         }
-        if (!creditMapper.freeze(before.getId(), amount)) {
+        if (!allocateFreeze(before, amount)) {
             throw new BusinessException(notEnoughErrorCode(sourceType), sourceLabel(sourceType) + "可用算力不足");
         }
+        creditMapper.updateById(before);
         insertLog(
                 before,
                 taskId(sourceType, sourceId),
@@ -60,6 +74,7 @@ public class CreditServiceImpl implements CreditService {
                 null,
                 sourceLabel(sourceType) + "冻结算力"
         );
+        creditChangeNotifier.notifyAfterCommit(userId);
     }
 
     @Override
@@ -68,10 +83,11 @@ public class CreditServiceImpl implements CreditService {
         if (amount <= 0) {
             return;
         }
-        CreditAccount before = creditMapper.getOrCreateAccount(userId);
-        if (!creditMapper.settle(before.getId(), amount)) {
+        CreditAccount before = lockedAccount(userId);
+        if (!settleFrozen(before, amount)) {
             throw new BusinessException(notEnoughErrorCode(sourceType), sourceLabel(sourceType) + "冻结算力不足，无法扣除");
         }
+        creditMapper.updateById(before);
         insertLog(
                 before,
                 taskId(sourceType, sourceId),
@@ -85,6 +101,7 @@ public class CreditServiceImpl implements CreditService {
                 null,
                 sourceLabel(sourceType) + "成功扣除算力"
         );
+        creditChangeNotifier.notifyAfterCommit(userId);
     }
 
     @Override
@@ -93,8 +110,9 @@ public class CreditServiceImpl implements CreditService {
         if (amount <= 0) {
             return 0;
         }
-        CreditAccount before = creditMapper.getOrCreateAccount(userId);
-        if (creditMapper.settle(before.getId(), amount)) {
+        CreditAccount before = lockedAccount(userId);
+        if (settleFrozen(before, amount)) {
+            creditMapper.updateById(before);
             insertLog(
                     before,
                     taskId(sourceType, sourceId),
@@ -108,11 +126,13 @@ public class CreditServiceImpl implements CreditService {
                     null,
                     sourceLabel(sourceType) + " success credit deduction"
             );
+            creditChangeNotifier.notifyAfterCommit(userId);
             return amount;
         }
 
-        CreditAccount current = creditMapper.getOrCreateAccount(userId);
-        if (creditMapper.deductAvailable(current.getId(), amount)) {
+        CreditAccount current = lockedAccount(userId);
+        if (deductAvailableBuckets(current, amount) == amount) {
+            creditMapper.updateById(current);
             insertLog(
                     current,
                     taskId(sourceType, sourceId),
@@ -126,6 +146,7 @@ public class CreditServiceImpl implements CreditService {
                     null,
                     sourceLabel(sourceType) + " success credit deduction without frozen balance"
             );
+            creditChangeNotifier.notifyAfterCommit(userId);
             return amount;
         }
         return 0;
@@ -137,13 +158,11 @@ public class CreditServiceImpl implements CreditService {
         if (amount <= 0) {
             return 0;
         }
-        CreditAccount before = creditMapper.getOrCreateAccount(userId);
+        expireMembershipIfNeeded(userId);
+        CreditAccount before = lockedAccount(userId);
         int available = before.getBalance() - before.getFrozen();
         int toDeduct = Math.min(available, amount);
         if (toDeduct <= 0) {
-            return 0;
-        }
-        if (!creditMapper.deductAvailable(before.getId(), toDeduct)) {
             return 0;
         }
         insertLog(
@@ -159,6 +178,11 @@ public class CreditServiceImpl implements CreditService {
                 null,
                 sourceLabel(sourceType) + "超预算补扣算力"
         );
+        if (deductAvailableBuckets(before, toDeduct) != toDeduct) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "credit bucket balance is inconsistent");
+        }
+        creditMapper.updateById(before);
+        creditChangeNotifier.notifyAfterCommit(userId);
         return toDeduct;
     }
 
@@ -168,10 +192,11 @@ public class CreditServiceImpl implements CreditService {
         if (amount <= 0) {
             return;
         }
-        CreditAccount before = creditMapper.getOrCreateAccount(userId);
-        if (!creditMapper.release(before.getId(), amount)) {
+        CreditAccount before = lockedAccount(userId);
+        if (!releaseFrozen(before, amount)) {
             return;
         }
+        creditMapper.updateById(before);
         insertLog(
                 before,
                 taskId(sourceType, sourceId),
@@ -185,6 +210,7 @@ public class CreditServiceImpl implements CreditService {
                 null,
                 sourceLabel(sourceType) + "释放冻结算力"
         );
+        creditChangeNotifier.notifyAfterCommit(userId);
     }
 
     @Override
@@ -207,14 +233,16 @@ public class CreditServiceImpl implements CreditService {
                 operatorId,
                 normalizeReason(reason, "后台手动增加算力")
         );
+        creditChangeNotifier.notifyAfterCommit(userId);
         return account(userId);
     }
 
     @Override
     @Transactional
     public CreditAccountResponse manualDeduct(Long userId, int amount, String reason, Long operatorId) {
-        CreditAccount before = creditMapper.getOrCreateAccount(userId);
-        if (before.getBalance() - before.getFrozen() < amount || !creditMapper.manualDeduct(before.getId(), amount)) {
+        expireMembershipIfNeeded(userId);
+        CreditAccount before = lockedAccount(userId);
+        if (before.getBalance() - before.getFrozen() < amount) {
             throw new BusinessException(ErrorCode.CREDIT_NOT_ENOUGH, "可用算力不足");
         }
         insertLog(
@@ -230,6 +258,11 @@ public class CreditServiceImpl implements CreditService {
                 operatorId,
                 normalizeReason(reason, "后台手动扣减算力")
         );
+        if (deductAvailableBuckets(before, amount) != amount) {
+            throw new BusinessException(ErrorCode.CREDIT_NOT_ENOUGH, "可用算力不足");
+        }
+        creditMapper.updateById(before);
+        creditChangeNotifier.notifyAfterCommit(userId);
         return account(userId);
     }
 
@@ -262,6 +295,7 @@ public class CreditServiceImpl implements CreditService {
         if (!creditMapper.rechargeAdd(before.getId(), amount)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "credit account is unavailable");
         }
+        creditChangeNotifier.notifyAfterCommit(userId);
         return account(userId);
     }
 
@@ -297,7 +331,63 @@ public class CreditServiceImpl implements CreditService {
         if (!creditMapper.giftRedeemAdd(before.getId(), amount)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "credit account is unavailable");
         }
+        creditChangeNotifier.notifyAfterCommit(userId);
         return account(userId);
+    }
+
+    @Override
+    @Transactional
+    public CreditAccountResponse membershipRechargeAdd(Long userId, Long rechargeOrderId, int amount, String reason) {
+        if (amount <= 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "membership recharge amount must be positive");
+        }
+        String idempotencyKey = "MEMBERSHIP_ORDER:" + rechargeOrderId;
+        CreditAccount before = creditMapper.getOrCreateAccount(userId);
+        try {
+            insertLog(
+                    before, null, null, CreditLogType.RECHARGE.name(), amount, 0,
+                    before.getBalance() + amount, before.getFrozen(), "PAYMENT", null,
+                    normalizeReason(reason, "Membership credits"), idempotencyKey
+            );
+        } catch (DuplicateKeyException ignored) {
+            return account(userId);
+        }
+        if (!creditMapper.membershipRechargeAdd(before.getId(), amount)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "credit account is unavailable");
+        }
+        creditChangeNotifier.notifyAfterCommit(userId);
+        return account(userId);
+    }
+
+    @Override
+    @Transactional
+    public void expireMembershipIfNeeded(Long userId) {
+        UserMembership observed = membershipMapper.findByUserId(userId);
+        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+        if (observed == null || !"ACTIVE".equals(observed.getStatus())
+                || observed.getExpiresAt() == null || observed.getExpiresAt().isAfter(now)) {
+            return;
+        }
+        UserMembership membership = membershipMapper.lockByUserId(userId);
+        if (membership == null || !"ACTIVE".equals(membership.getStatus())
+                || membership.getExpiresAt() == null || membership.getExpiresAt().isAfter(now)) {
+            return;
+        }
+        CreditAccount account = lockedAccount(userId);
+        int membershipBalance = nz(account.getMembershipBalance());
+        int membershipFrozen = Math.min(membershipBalance, nz(account.getMembershipFrozen()));
+        int expiredAvailable = membershipBalance - membershipFrozen;
+        account.setBalance(nz(account.getBalance()) - expiredAvailable);
+        account.setMembershipBalance(0);
+        account.setMembershipFrozen(0);
+        account.setExpiredMembershipFrozen(nz(account.getExpiredMembershipFrozen()) + membershipFrozen);
+        account.setTotalExpired(nz(account.getTotalExpired()) + membershipBalance);
+        creditMapper.updateById(account);
+
+        membership.setStatus("EXPIRED");
+        membership.setUpdatedAt(now);
+        membershipMapper.updateState(membership);
+        creditChangeNotifier.notifyAfterCommit(userId);
     }
 
     @Override
@@ -310,7 +400,8 @@ public class CreditServiceImpl implements CreditService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order id is required");
         }
         String idempotencyKey = "REFERRAL_REWARD_ORDER:" + rechargeOrderId;
-        CreditAccount before = creditMapper.getOrCreateAccount(userId);
+        expireMembershipIfNeeded(userId);
+        CreditAccount before = lockedAccount(userId);
         try {
             insertLog(
                     before,
@@ -332,6 +423,7 @@ public class CreditServiceImpl implements CreditService {
         if (!creditMapper.referralBonusAdd(before.getId(), amount)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "credit account is unavailable");
         }
+        creditChangeNotifier.notifyAfterCommit(userId);
         return account(userId);
     }
 
@@ -349,6 +441,108 @@ public class CreditServiceImpl implements CreditService {
                 .toList();
         long total = creditLogMapper.countLogs(userId, logType, includeInternal);
         return PageResponse.of(list, total, pageNo, pageSize);
+    }
+
+    private CreditAccount lockedAccount(Long userId) {
+        CreditAccount account = creditMapper.getOrCreateAccount(userId);
+        CreditAccount locked = creditMapper.lockById(account.getId());
+        if (locked == null) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "credit account lock unavailable");
+        }
+        return locked;
+    }
+
+    private boolean allocateFreeze(CreditAccount account, int amount) {
+        int membershipAvailable = nz(account.getMembershipBalance()) - nz(account.getMembershipFrozen());
+        int permanentAvailable = nz(account.getPermanentBalance()) - nz(account.getPermanentFrozen());
+        int giftAvailable = nz(account.getGiftBalance()) - nz(account.getGiftFrozen());
+        if (membershipAvailable + permanentAvailable + giftAvailable < amount) {
+            return false;
+        }
+        int membership = Math.min(amount, membershipAvailable);
+        int remaining = amount - membership;
+        int permanent = Math.min(remaining, permanentAvailable);
+        int gift = remaining - permanent;
+        account.setMembershipFrozen(nz(account.getMembershipFrozen()) + membership);
+        account.setPermanentFrozen(nz(account.getPermanentFrozen()) + permanent);
+        account.setGiftFrozen(nz(account.getGiftFrozen()) + gift);
+        account.setFrozen(nz(account.getFrozen()) + amount);
+        return true;
+    }
+
+    private boolean settleFrozen(CreditAccount account, int amount) {
+        if (nz(account.getFrozen()) < amount || nz(account.getBalance()) < amount) {
+            return false;
+        }
+        int remaining = amount;
+        int expired = Math.min(remaining, nz(account.getExpiredMembershipFrozen()));
+        remaining -= expired;
+        int membership = Math.min(remaining, nz(account.getMembershipFrozen()));
+        remaining -= membership;
+        int permanent = Math.min(remaining, nz(account.getPermanentFrozen()));
+        remaining -= permanent;
+        int gift = Math.min(remaining, nz(account.getGiftFrozen()));
+        remaining -= gift;
+        if (remaining != 0) {
+            return false;
+        }
+        account.setExpiredMembershipFrozen(nz(account.getExpiredMembershipFrozen()) - expired);
+        account.setMembershipFrozen(nz(account.getMembershipFrozen()) - membership);
+        account.setPermanentFrozen(nz(account.getPermanentFrozen()) - permanent);
+        account.setGiftFrozen(nz(account.getGiftFrozen()) - gift);
+        account.setMembershipBalance(nz(account.getMembershipBalance()) - membership);
+        account.setPermanentBalance(nz(account.getPermanentBalance()) - permanent);
+        account.setGiftBalance(nz(account.getGiftBalance()) - gift);
+        account.setBalance(nz(account.getBalance()) - amount);
+        account.setFrozen(nz(account.getFrozen()) - amount);
+        account.setTotalConsumed(nz(account.getTotalConsumed()) + amount);
+        return true;
+    }
+
+    private int deductAvailableBuckets(CreditAccount account, int requested) {
+        int available = nz(account.getBalance()) - nz(account.getFrozen());
+        int amount = Math.min(Math.max(requested, 0), available);
+        int membershipAvailable = nz(account.getMembershipBalance()) - nz(account.getMembershipFrozen());
+        int permanentAvailable = nz(account.getPermanentBalance()) - nz(account.getPermanentFrozen());
+        int membership = Math.min(amount, membershipAvailable);
+        int remaining = amount - membership;
+        int permanent = Math.min(remaining, permanentAvailable);
+        int gift = remaining - permanent;
+        account.setMembershipBalance(nz(account.getMembershipBalance()) - membership);
+        account.setPermanentBalance(nz(account.getPermanentBalance()) - permanent);
+        account.setGiftBalance(nz(account.getGiftBalance()) - gift);
+        account.setBalance(nz(account.getBalance()) - amount);
+        account.setTotalConsumed(nz(account.getTotalConsumed()) + amount);
+        return amount;
+    }
+
+    private boolean releaseFrozen(CreditAccount account, int amount) {
+        if (nz(account.getFrozen()) < amount) {
+            return false;
+        }
+        int remaining = amount;
+        int expired = Math.min(remaining, nz(account.getExpiredMembershipFrozen()));
+        remaining -= expired;
+        int membership = Math.min(remaining, nz(account.getMembershipFrozen()));
+        remaining -= membership;
+        int permanent = Math.min(remaining, nz(account.getPermanentFrozen()));
+        remaining -= permanent;
+        int gift = Math.min(remaining, nz(account.getGiftFrozen()));
+        remaining -= gift;
+        if (remaining != 0) {
+            return false;
+        }
+        account.setExpiredMembershipFrozen(nz(account.getExpiredMembershipFrozen()) - expired);
+        account.setMembershipFrozen(nz(account.getMembershipFrozen()) - membership);
+        account.setPermanentFrozen(nz(account.getPermanentFrozen()) - permanent);
+        account.setGiftFrozen(nz(account.getGiftFrozen()) - gift);
+        account.setBalance(nz(account.getBalance()) - expired);
+        account.setFrozen(nz(account.getFrozen()) - amount);
+        return true;
+    }
+
+    private int nz(Integer value) {
+        return value == null ? 0 : value;
     }
 
     private void insertLog(CreditAccount before, Long taskId, Long agentRunId, String logType, int amount, int frozenAmount,

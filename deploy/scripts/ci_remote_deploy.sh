@@ -97,7 +97,13 @@ print("patched", path)
 PY
 
 cd "$REMOTE_DIR/deploy"
-docker compose -f docker-compose.yml -f docker-compose.nginx.yml up -d --build --force-recreate \
+COMPOSE_ARGS=(--env-file ../.env -f docker-compose.yml -f docker-compose.nginx.yml)
+if grep -Eqi '^MIHOMO_ENABLED=true$' "$REMOTE_DIR/.env"; then
+  COMPOSE_ARGS+=(-f docker-compose.proxy.yml)
+  echo "Mihomo overlay enabled"
+fi
+
+docker compose "${COMPOSE_ARGS[@]}" up -d --build --force-recreate \
   backend worker agent-service admin-frontend user-web nginx
 
 echo "Waiting for user-web health..."
@@ -114,7 +120,7 @@ curl -sf -o /dev/null -w "root:%{http_code}\n" http://127.0.0.1/ || true
 curl -sf -o /dev/null -w "api:%{http_code}\n" http://127.0.0.1/api/health || true
 curl -sf -o /dev/null -w "admin:%{http_code}\n" -L http://127.0.0.1/admin || true
 
-docker compose -f docker-compose.yml -f docker-compose.nginx.yml ps
+docker compose "${COMPOSE_ARGS[@]}" ps
 REMOTE
 
 echo "Production deploy finished."

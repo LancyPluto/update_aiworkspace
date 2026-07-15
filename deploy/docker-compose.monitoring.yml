@@ -15,6 +15,7 @@ services:
       - "127.0.0.1:${PROMETHEUS_PORT:-9091}:9090"
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
       - prometheus_data:/prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -35,8 +36,14 @@ services:
       GF_SECURITY_ALLOW_EMBEDDING: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_DEFAULT_THEME: ${GRAFANA_THEME:-dark}
+      GF_USERS_DEFAULT_LANGUAGE: ${GRAFANA_LANGUAGE:-zh-Hans}
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GRAFANA_MYSQL_HOST: ${GRAFANA_MYSQL_HOST:-mysql:3306}
+      GRAFANA_MYSQL_DATABASE: ${GRAFANA_MYSQL_DATABASE:-ai_supermarket_v1}
+      GRAFANA_MYSQL_USER: ${GRAFANA_MYSQL_USER:-grafana_readonly}
+      GRAFANA_MYSQL_PASSWORD: ${GRAFANA_MYSQL_PASSWORD:-}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -51,6 +58,8 @@ services:
     restart: unless-stopped
     command:
       - -config.file=/etc/loki/config.yml
+    ports:
+      - "127.0.0.1:${LOKI_PORT:-3100}:3100"
     volumes:
       - ./monitoring/loki/config.yml:/etc/loki/config.yml:ro
       - loki_data:/loki
@@ -64,6 +73,8 @@ services:
       - --server.http.listen-addr=0.0.0.0:12345
       - --storage.path=/var/lib/alloy/data
       - /etc/alloy/config.alloy
+    ports:
+      - "127.0.0.1:${ALLOY_PORT:-12345}:12345"
     volumes:
       - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
       - alloy_data:/var/lib/alloy/data
@@ -84,8 +95,8 @@ services:
 
   cadvisor:
     # cAdvisor is not hosted on Docker Hub, so do not prepend DOCKER_REGISTRY here.
-    # If your production network cannot pull from gcr.io, override CADVISOR_IMAGE in deploy/.env.
-    image: ${CADVISOR_IMAGE:-gcr.io/cadvisor/cadvisor:v0.49.1}
+    # Override CADVISOR_IMAGE in deploy/.env when using another verified registry mirror.
+    image: ${CADVISOR_IMAGE:-m.daocloud.io/gcr.io/cadvisor/cadvisor:v0.49.1}
     container_name: ai-supermarket-cadvisor
     restart: unless-stopped
     privileged: true

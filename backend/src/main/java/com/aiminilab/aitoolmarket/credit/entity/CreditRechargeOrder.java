@@ -23,8 +23,11 @@ public class CreditRechargeOrder {
     private String qrCodeUrl;
     private String externalTradeNo;
     private String idempotencyKey;
+    private String requestFingerprint;
     private String orderType;
     private Long giftCardPackageId;
+    private String packageCodeSnapshot;
+    private Integer validityDaysSnapshot;
     private LocalDateTime paidAt;
     private LocalDateTime creditedAt;
     private LocalDateTime closedAt;
@@ -60,10 +63,16 @@ public class CreditRechargeOrder {
     public void setExternalTradeNo(String externalTradeNo) { this.externalTradeNo = externalTradeNo; }
     public String getIdempotencyKey() { return idempotencyKey; }
     public void setIdempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; }
+    public String getRequestFingerprint() { return requestFingerprint; }
+    public void setRequestFingerprint(String requestFingerprint) { this.requestFingerprint = requestFingerprint; }
     public String getOrderType() { return orderType; }
     public void setOrderType(String orderType) { this.orderType = orderType; }
     public Long getGiftCardPackageId() { return giftCardPackageId; }
     public void setGiftCardPackageId(Long giftCardPackageId) { this.giftCardPackageId = giftCardPackageId; }
+    public String getPackageCodeSnapshot() { return packageCodeSnapshot; }
+    public void setPackageCodeSnapshot(String packageCodeSnapshot) { this.packageCodeSnapshot = packageCodeSnapshot; }
+    public Integer getValidityDaysSnapshot() { return validityDaysSnapshot; }
+    public void setValidityDaysSnapshot(Integer validityDaysSnapshot) { this.validityDaysSnapshot = validityDaysSnapshot; }
     public LocalDateTime getPaidAt() { return paidAt; }
     public void setPaidAt(LocalDateTime paidAt) { this.paidAt = paidAt; }
     public LocalDateTime getCreditedAt() { return creditedAt; }

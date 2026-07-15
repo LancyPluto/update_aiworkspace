@@ -34,7 +34,7 @@ add_monitoring_services() {
   add prometheus
   add grafana
   add loki
-  add promtail
+  add alloy
   add node-exporter
   add cadvisor
   add blackbox-exporter
@@ -49,7 +49,7 @@ else
 fi
 
 if [ "${#files[@]}" -eq 0 ] || [ -z "${files[0]:-}" ]; then
-  echo "backend worker agent-service admin-frontend user-web nginx prometheus grafana loki promtail node-exporter cadvisor blackbox-exporter"
+  echo "backend worker agent-service admin-frontend user-web nginx prometheus grafana loki alloy node-exporter cadvisor blackbox-exporter"
   exit 0
 fi
 
@@ -86,7 +86,7 @@ for f in "${files[@]}"; do
 done
 
 if [ "${#services[@]}" -eq 0 ]; then
-  echo "backend worker agent-service admin-frontend user-web nginx prometheus grafana loki promtail node-exporter cadvisor blackbox-exporter"
+  echo "backend worker agent-service admin-frontend user-web nginx prometheus grafana loki alloy node-exporter cadvisor blackbox-exporter"
 else
   echo "${services[*]}"
 fi

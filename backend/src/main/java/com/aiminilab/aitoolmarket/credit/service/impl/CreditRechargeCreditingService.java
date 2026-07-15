@@ -23,17 +23,20 @@ public class CreditRechargeCreditingService {
     private final CreditService creditService;
     private final GiftCardService giftCardService;
     private final ReferralService referralService;
+    private final MembershipService membershipService;
 
     public CreditRechargeCreditingService(CreditRechargeOrderMapper orderMapper,
                                           CreditRechargeOrderItemMapper orderItemMapper,
                                           CreditService creditService,
                                           GiftCardService giftCardService,
-                                          ReferralService referralService) {
+                                          ReferralService referralService,
+                                          MembershipService membershipService) {
         this.orderMapper = orderMapper;
         this.orderItemMapper = orderItemMapper;
         this.creditService = creditService;
         this.giftCardService = giftCardService;
         this.referralService = referralService;
+        this.membershipService = membershipService;
     }
 
     @Transactional
@@ -58,8 +61,14 @@ public class CreditRechargeCreditingService {
                 giftCardService.createGiftCardsFromOrderItems(order.getUserId(), order.getId(), items);
             }
         } else {
-            creditService.rechargeAdd(order.getUserId(), order.getId(), order.getCredits(),
-                    (reason == null || reason.isBlank() ? "Recharge order " + order.getOrderNo() : reason));
+            if ("MEMBERSHIP".equals(order.getOrderType())) {
+                creditService.membershipRechargeAdd(order.getUserId(), order.getId(), order.getCredits(),
+                        (reason == null || reason.isBlank() ? "Membership order " + order.getOrderNo() : reason));
+                membershipService.activate(order);
+            } else {
+                creditService.rechargeAdd(order.getUserId(), order.getId(), order.getCredits(),
+                        (reason == null || reason.isBlank() ? "Recharge order " + order.getOrderNo() : reason));
+            }
             referralService.rewardRechargeIfNeeded(order);
         }
 

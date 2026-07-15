@@ -1601,6 +1601,50 @@ class AgentApiTest {
     }
 
     @Test
+    void internalRunContextResolvesPrivateReferenceImagesForAgentDownload() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_private_reference_user");
+        String token = login("agent_private_reference_user");
+        String uploadResponse = mockMvc.perform(multipart("/api/v1/tool-upload")
+                        .file(new MockMultipartFile("file", "reference.png", "image/png", new byte[]{1, 2, 3}))
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String privateUrl = objectMapper.readTree(uploadResponse).path("data").path("url").asText();
+        assertThat(privateUrl).startsWith("/generated/uploads/");
+
+        Long sessionId = createSession(token, "Private image context");
+        String requestBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "content", "识别这张图片",
+                "clientRequestId", java.util.UUID.randomUUID().toString(),
+                "referenceMentions", java.util.List.of(java.util.Map.of(
+                        "token", "@image1",
+                        "refLabel", "@image1",
+                        "url", privateUrl,
+                        "kind", "image"
+                ))
+        ));
+        String sendResponse = mockMvc.perform(post("/api/v1/agent/sessions/{sessionId}/messages", sessionId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        Long runId = objectMapper.readTree(sendResponse).path("data").path("runId").asLong();
+
+        String contextResponse = mockMvc.perform(signed(get("/api/internal/v1/agent/runs/{runId}/context", runId), "GET",
+                        "/api/internal/v1/agent/runs/%d/context".formatted(runId), ""))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String resolvedUrl = objectMapper.readTree(contextResponse)
+                .path("data").path("referenceMentions").get(0).path("url").asText();
+
+        assertThat(resolvedUrl).doesNotContain("/api/v1/assets/private/");
+        assertThat(resolvedUrl).startsWith("http://");
+        assertThat(resolvedUrl).contains("/generated/uploads/");
+    }
+
+    @Test
     void editRegenerateTruncatesLaterTurns() throws Exception {
         mockExternalAuthDependencies();
         register("agent_edit_truncate_user");

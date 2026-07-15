@@ -394,14 +394,6 @@ class AgentExecutor:
                     eventJson=memory_context_trace_payload(memory_context, source="agent_executor", items=memory_items),
                 ),
             )
-        elif context.workspaceId is not None:
-            await self.backend.append_event(
-                context.runId,
-                RunEventCreate(
-                    eventType=MEMORY_CONTEXT_FROZEN,
-                    eventJson=memory_context_trace_payload("", source="agent_executor", items=[]),
-                ),
-            )
         context_manager = ContextManager.from_settings(settings, context.runtimeSettings)
         summary_message = context_manager.format_conversation_summary(context.conversationSummary)
         if summary_message:

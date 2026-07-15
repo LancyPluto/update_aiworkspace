@@ -1,0 +1,66 @@
+services:
+  mihomo-init:
+    image: ${MIHOMO_INIT_IMAGE:-alpine:3.20}
+    restart: "no"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if [ ! -s /config/config.yaml ]; then
+          cp /seed/config.yaml /config/config.yaml
+        fi
+    volumes:
+      - ./mihomo/config.base.yaml:/seed/config.yaml:ro
+      - mihomo_config:/config
+
+  mihomo:
+    image: ${MIHOMO_IMAGE:-metacubex/mihomo:latest}
+    container_name: ai-supermarket-mihomo
+    restart: unless-stopped
+    depends_on:
+      mihomo-init:
+        condition: service_completed_successfully
+    command:
+      - -d
+      - /root/.config/mihomo
+      - -f
+      - /root/.config/mihomo/config.yaml
+      - -ext-ctl
+      - 0.0.0.0:9090
+      - -secret
+      - ${MIHOMO_CONTROLLER_SECRET:?MIHOMO_CONTROLLER_SECRET is required when Mihomo is enabled}
+    ports:
+      - "127.0.0.1:${MIHOMO_PROXY_PORT:-7890}:7890"
+    volumes:
+      - mihomo_config:/root/.config/mihomo
+
+  backend:
+    depends_on:
+      mihomo:
+        condition: service_started
+    environment:
+      MIHOMO_RUNTIME_ENABLED: "true"
+      MIHOMO_CONTROLLER_URL: http://mihomo:9090
+      MIHOMO_CONTROLLER_SECRET: ${MIHOMO_CONTROLLER_SECRET:?MIHOMO_CONTROLLER_SECRET is required when Mihomo is enabled}
+      MIHOMO_CONFIG_PATH: /data/mihomo/config.yaml
+      MIHOMO_RELOAD_PATH: /root/.config/mihomo/config.yaml
+      HTTP_PROXY: http://mihomo:7890
+      HTTPS_PROXY: http://mihomo:7890
+      NO_PROXY: ${CONTAINER_NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,mihomo,host.docker.internal}
+    volumes:
+      - mihomo_config:/data/mihomo
+
+  worker:
+    environment:
+      HTTP_PROXY: http://mihomo:7890
+      HTTPS_PROXY: http://mihomo:7890
+      NO_PROXY: ${CONTAINER_NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,mihomo,host.docker.internal}
+
+  agent-service:
+    environment:
+      HTTP_PROXY: http://mihomo:7890
+      HTTPS_PROXY: http://mihomo:7890
+      NO_PROXY: ${CONTAINER_NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,mihomo,host.docker.internal}
+
+volumes:
+  mihomo_config:

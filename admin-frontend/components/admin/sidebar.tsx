@@ -9,6 +9,8 @@ import {
   Images,
   LayoutDashboard,
   ListTodo,
+  Menu,
+  Network,
   ReceiptText,
   Activity,
   Settings,
@@ -23,6 +25,8 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { Button } from "@/components/ui/button"
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
 
 type NavLink = {
@@ -60,6 +64,7 @@ const navigation: (NavLink | NavGroup)[] = [
   { type: "link", name: "系统监控", href: "/monitoring", icon: Activity },
   { type: "link", name: "定价配置", href: "/pricing", icon: SlidersHorizontal },
   { type: "link", name: "会员算力", href: "/credits", icon: CreditPowerIcon },
+  { type: "link", name: "代理节点", href: "/proxy-nodes", icon: Network },
   { type: "link", name: "系统配置", href: "/settings", icon: Settings },
 ]
 
@@ -74,7 +79,15 @@ function isGroupActive(pathname: string, group: NavGroup) {
   return group.children.some((child) => isPathActive(pathname, child.href))
 }
 
-function NavGroupItem({ group, pathname }: { group: NavGroup; pathname: string }) {
+function NavGroupItem({
+  group,
+  pathname,
+  onNavigate,
+}: {
+  group: NavGroup
+  pathname: string
+  onNavigate?: () => void
+}) {
   const groupActive = isGroupActive(pathname, group)
   const [open, setOpen] = useState(groupActive)
 
@@ -137,6 +150,7 @@ function NavGroupItem({ group, pathname }: { group: NavGroup; pathname: string }
               <li key={child.href}>
                 <Link
                   href={child.href}
+                  onClick={onNavigate}
                   className={cn(
                     "block rounded-lg py-2 pl-3 pr-2 text-[13px] font-medium transition-all duration-200",
                     childActive
@@ -155,13 +169,12 @@ function NavGroupItem({ group, pathname }: { group: NavGroup; pathname: string }
   )
 }
 
-export function AdminSidebar() {
+function SidebarPanel({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
   const basePath = (process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || "").replace(/\/$/, "")
 
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-border bg-sidebar">
-      <div className="flex h-full flex-col">
+      <div className="flex h-full flex-col bg-sidebar">
         <div className="relative isolate flex h-[92px] items-center overflow-hidden border-b border-sidebar-border px-6 pb-4 pt-6">
           <div
             aria-hidden="true"
@@ -171,7 +184,7 @@ export function AdminSidebar() {
                 "radial-gradient(ellipse 178px 112px at 42px 34px, rgb(34 211 238 / 0.46) 0%, rgb(52 211 153 / 0.28) 38%, transparent 74%), radial-gradient(ellipse 164px 108px at 134px 52px, rgb(59 130 246 / 0.24) 0%, rgb(99 102 241 / 0.12) 44%, transparent 78%)",
             }}
           />
-          <Link href="/" className="relative z-10 flex min-w-0 flex-col items-start">
+          <Link href="/" onClick={onNavigate} className="relative z-10 flex min-w-0 flex-col items-start">
             <img
               src={`${basePath}/logo.png`}
               alt="科创点AI"
@@ -184,7 +197,7 @@ export function AdminSidebar() {
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
           {navigation.map((item) => {
             if (item.type === "group") {
-              return <NavGroupItem key={item.id} group={item} pathname={pathname} />
+              return <NavGroupItem key={item.id} group={item} pathname={pathname} onNavigate={onNavigate} />
             }
 
             const isActive = isPathActive(pathname, item.href)
@@ -192,6 +205,7 @@ export function AdminSidebar() {
               <Link
                 key={item.name}
                 href={item.href}
+                onClick={onNavigate}
                 className={cn(
                   "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
                   isActive
@@ -218,6 +232,31 @@ export function AdminSidebar() {
           </div>
         </div>
       </div>
+  )
+}
+
+export function AdminSidebar() {
+  return (
+    <aside className="fixed left-0 top-0 z-40 hidden h-screen w-64 border-r border-border bg-sidebar lg:block">
+      <SidebarPanel />
     </aside>
+  )
+}
+
+export function AdminMobileNavigation() {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger asChild>
+        <Button variant="ghost" size="icon" className="shrink-0 lg:hidden" aria-label="打开管理导航">
+          <Menu className="h-5 w-5" />
+        </Button>
+      </SheetTrigger>
+      <SheetContent side="left" className="w-64 gap-0 p-0 sm:max-w-64">
+        <SheetTitle className="sr-only">管理导航</SheetTitle>
+        <SidebarPanel onNavigate={() => setOpen(false)} />
+      </SheetContent>
+    </Sheet>
   )
 }

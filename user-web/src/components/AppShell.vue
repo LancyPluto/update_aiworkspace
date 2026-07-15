@@ -34,7 +34,7 @@ import {
 import { ref, onMounted, onUnmounted, computed, watch } from "vue"
 import { useGlobalSearch, type GlobalSearchResultItem, type GlobalSearchScope } from "@/composables/useGlobalSearch"
 import { BRAND_LOGO_URL } from "@/config/brand"
-import { fetchCreditAccount } from "@/api/creditApi"
+import { fetchCreditAccount, getCreditEventsUrl } from "@/api/creditApi"
 import { fetchCustomerServiceSettings } from "@/api/settingsApi"
 import type { CustomerServiceSettings } from "@/api/settingsApi"
 import type { CreditAccount } from "@/api/types"
@@ -43,6 +43,7 @@ import { useAuthStore } from "@/store/authStore"
 import UserAvatar from "@/components/UserAvatar.vue"
 import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import { safeDisplayName } from "@/utils/displayName"
+import { createCreditRealtime } from "@/utils/creditRealtime"
 import {
   applyAppTheme,
   applyBrandAccent,
@@ -263,16 +264,21 @@ function handleCreditsUpdated(event: Event) {
 }
 
 async function loadCreditAccount() {
-  if (!auth.isLoggedIn || !auth.token) {
+  if (!auth.isLoggedIn) {
     credit.value = null
     return
   }
   try {
-    credit.value = await fetchCreditAccount({ token: auth.token })
+    credit.value = await fetchCreditAccount()
   } catch {
     // 静默处理
   }
 }
+
+const creditRealtime = createCreditRealtime({
+  url: getCreditEventsUrl(),
+  refresh: loadCreditAccount,
+})
 
 const customerServiceQrBroken = ref(false)
 
@@ -352,8 +358,13 @@ async function loadCustomerServiceSettings() {
 watch(
   () => auth.isLoggedIn,
   (loggedIn) => {
-    if (loggedIn) void loadCreditAccount()
-    else credit.value = null
+    if (loggedIn) {
+      void loadCreditAccount()
+      creditRealtime.start()
+    } else {
+      creditRealtime.stop()
+      credit.value = null
+    }
   },
 )
 
@@ -376,9 +387,11 @@ onMounted(async () => {
   window.addEventListener("credits:updated", handleCreditsUpdated)
   document.addEventListener("mousedown", onDocumentPointerDown)
   await Promise.all([loadCreditAccount(), loadCustomerServiceSettings()])
+  if (auth.isLoggedIn) creditRealtime.start()
 })
 
 onUnmounted(() => {
+  creditRealtime.stop()
   window.removeEventListener("credits:updated", handleCreditsUpdated)
   document.removeEventListener("mousedown", onDocumentPointerDown)
   clearSearchDebounce()

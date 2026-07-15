@@ -196,9 +196,16 @@ CREATE TABLE credit_accounts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   user_id BIGINT NOT NULL UNIQUE,
   balance INT NOT NULL DEFAULT 0,
+  permanent_balance INT NOT NULL DEFAULT 0,
   membership_balance INT NOT NULL DEFAULT 0,
   gift_balance INT NOT NULL DEFAULT 0,
   frozen INT NOT NULL DEFAULT 0,
+  permanent_frozen INT NOT NULL DEFAULT 0,
+  membership_frozen INT NOT NULL DEFAULT 0,
+  gift_frozen INT NOT NULL DEFAULT 0,
+  expired_membership_frozen INT NOT NULL DEFAULT 0,
+  total_expired INT NOT NULL DEFAULT 0,
+  bucket_schema_version INT NOT NULL DEFAULT 2,
   total_granted INT NOT NULL DEFAULT 0,
   total_consumed INT NOT NULL DEFAULT 0,
   status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
@@ -258,8 +265,11 @@ CREATE TABLE credit_recharge_orders (
   qr_code_url VARCHAR(512),
   external_trade_no VARCHAR(128),
   idempotency_key VARCHAR(128),
+  request_fingerprint VARCHAR(64),
   order_type VARCHAR(32) NOT NULL DEFAULT 'CREDITS',
   gift_card_package_id BIGINT,
+  package_code_snapshot VARCHAR(64),
+  validity_days_snapshot INT,
   paid_at DATETIME,
   credited_at DATETIME,
   closed_at DATETIME,
@@ -269,6 +279,19 @@ CREATE TABLE credit_recharge_orders (
 );
 CREATE UNIQUE INDEX uk_recharge_user_idem ON credit_recharge_orders(user_id, idempotency_key);
 CREATE UNIQUE INDEX uk_recharge_external_trade_no ON credit_recharge_orders(external_trade_no);
+
+CREATE TABLE user_memberships (
+  user_id BIGINT PRIMARY KEY,
+  status VARCHAR(16) NOT NULL DEFAULT 'NONE',
+  package_id BIGINT,
+  package_code VARCHAR(64),
+  order_id BIGINT,
+  started_at DATETIME,
+  expires_at DATETIME,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_user_membership_order (order_id)
+);
 
 CREATE TABLE credit_recharge_order_items (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -1119,6 +1142,7 @@ CREATE TABLE IF NOT EXISTS gift_cards (
   credits INT NOT NULL,
   status VARCHAR(32) NOT NULL DEFAULT 'UNUSED',
   recharge_order_id BIGINT,
+  issuance_key VARCHAR(128) UNIQUE,
   redeemed_at DATETIME NULL,
   gifted_from_user_id BIGINT NULL,
   gifted_at DATETIME NULL,
@@ -1142,5 +1166,26 @@ CREATE TABLE admin_operation_logs (
   content_json CLOB,
   reason VARCHAR(512),
   ip_address VARCHAR(64),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE auth_security_events (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  event_type VARCHAR(64) NOT NULL,
+  result VARCHAR(16) NOT NULL,
+  method VARCHAR(32),
+  user_type VARCHAR(16),
+  user_id BIGINT,
+  account_hash VARCHAR(64),
+  account_masked VARCHAR(64),
+  failure_reason VARCHAR(128),
+  ip_address VARCHAR(64),
+  user_agent VARCHAR(512),
+  trace_id VARCHAR(64),
+  country VARCHAR(64),
+  region VARCHAR(64),
+  city VARCHAR(64),
+  latitude DECIMAL(10,6),
+  longitude DECIMAL(10,6),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

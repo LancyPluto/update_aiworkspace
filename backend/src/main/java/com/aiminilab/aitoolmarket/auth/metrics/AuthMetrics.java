@@ -30,6 +30,17 @@ public class AuthMetrics {
         ).increment();
     }
 
+    public void recordSecurityEvent(String result, String eventType, String method, String userType, String reason) {
+        meterRegistry.counter(
+                "auth_security_events_total",
+                "result", normalize(result, "unknown"),
+                "event_type", normalize(eventType, "unknown"),
+                "method", normalize(method, "unknown"),
+                "user_type", normalize(userType, "unknown"),
+                "reason", normalize(reason, "none")
+        ).increment();
+    }
+
     private String normalize(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
     }

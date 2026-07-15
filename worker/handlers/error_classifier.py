@@ -8,6 +8,8 @@ def classify_model_error(message: str) -> str:
         return "MODEL_RISK_CONTROL_REJECTED"
     if _is_credit_error(normalized):
         return "MODEL_CREDIT_INSUFFICIENT"
+    if _is_capability_disabled(normalized):
+        return "MODEL_CAPABILITY_DISABLED"
     if _is_auth_error(normalized):
         return "MODEL_AUTH_FAILED"
     if _is_rate_limited(normalized):
@@ -43,6 +45,16 @@ def _is_auth_error(text: str) -> bool:
         or "invalid token" in text
         or "unauthorized" in text
         or "api key" in text
+    )
+
+
+def _is_capability_disabled(text: str) -> bool:
+    return (
+        "image generation is not enabled" in text
+        or "not enabled for this group" in text
+        or "image generation disabled" in text
+        or "model capability disabled" in text
+        or ("permission_error" in text and "image generation" in text)
     )
 
 

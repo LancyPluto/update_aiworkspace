@@ -1,0 +1,388 @@
+{
+  "uid": "ops-command-center-cn",
+  "title": "生产运维驾驶舱",
+  "tags": ["ai-tool-market", "生产运维", "驾驶舱", "只读"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "15s",
+  "time": { "from": "now-1h", "to": "now" },
+  "links": [
+    { "type": "link", "title": "基础设施总览", "url": "/d/ai-tool-market-overview", "keepTime": true, "includeVars": true },
+    { "type": "link", "title": "生产可靠性", "url": "/d/ai-tool-market-reliability-cn", "keepTime": true, "includeVars": true },
+    { "type": "link", "title": "容器日志", "url": "/d/production-container-logs-cn", "keepTime": true, "includeVars": true },
+    { "type": "link", "title": "认证安全", "url": "/d/auth-security-geomap-cn", "keepTime": true, "includeVars": true }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "component",
+        "type": "custom",
+        "label": "组件",
+        "query": "backend,agent-service,worker",
+        "current": { "text": "All", "value": "$__all" },
+        "includeAll": true,
+        "allValue": ".*"
+      },
+      {
+        "name": "uri",
+        "type": "query",
+        "label": "核心 API",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\"}, uri)",
+        "definition": "label_values(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\"}, uri)",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "refresh": 2,
+        "current": { "text": "全部", "value": ".*" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "总体状态 / 状态来源",
+      "description": "综合关键链路与黄金指标；明确 down 为故障，采集或序列缺失为无数据。",
+      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "expr": "(((((min(up{job=~\"backend-actuator|agent-service|worker\",job=~\".*${component:regex}.*\"}) == bool 0) or on() vector(0)) + ((min(up{job=~\"cadvisor|alloy|loki\"}) == bool 0) or on() vector(0)) + ((min(probe_success{job=\"blackbox-http-public\"}) == bool 0) or on() vector(0))) > bool 0)) * 3 + (1 - (((((min(up{job=~\"backend-actuator|agent-service|worker\",job=~\".*${component:regex}.*\"}) == bool 0) or on() vector(0)) + ((min(up{job=~\"cadvisor|alloy|loki\"}) == bool 0) or on() vector(0)) + ((min(probe_success{job=\"blackbox-http-public\"}) == bool 0) or on() vector(0))) > bool 0))) * ((((count(ai_monitoring_expected_target{component=~\"${component:regex}\"}) or on() vector(0)) == bool 0) + ((((count(prometheus_sd_discovered_targets{config=~\"backend-actuator|agent-service|worker\"}) or on() vector(0)) < bool (count(ai_monitoring_expected_target{component=~\"${component:regex}\"}) or on() vector(0))) + ((count(ai_monitoring_expected_target{component=~\"${component:regex}\"}) or on() vector(0)) > bool (count(prometheus_sd_discovered_targets{config=~\"backend-actuator|agent-service|worker\",config=~\".*${component:regex}.*\"}) or on() vector(0)))) > bool 0) + ((((count(up{job=~\"backend-actuator|agent-service|worker\"}) or on() vector(0)) < bool (count(ai_monitoring_expected_target{component=~\"${component:regex}\"}) or on() vector(0))) + ((count(ai_monitoring_expected_target{component=~\"${component:regex}\"}) or on() vector(0)) > bool (count(up{job=~\"backend-actuator|agent-service|worker\",job=~\".*${component:regex}.*\"}) or on() vector(0)))) > bool 0) + (((count(up{job=~\"cadvisor|alloy|loki\"}) or on() vector(0)) + (count(probe_success{job=\"blackbox-http-public\"}) or on() vector(0))) < bool 4)) > bool 0) * 1",
+          "legendFormat": "关键链路"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "expr": "(((100 * (1 - sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\",status=~\"5..\"}[$__rate_interval])) / sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval]))) and on() (sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) > 0)) < bool 99.5) * 3 + ((100 * (1 - sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\",status=~\"5..\"}[$__rate_interval])) / sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval]))) and on() (sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) > 0)) >= bool 99.5) * ((100 * (1 - sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\",status=~\"5..\"}[$__rate_interval])) / sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval]))) and on() (sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) > 0)) < bool 99.9) * 2) or on() vector(1)",
+          "legendFormat": "API成功率"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "expr": "(((100 * sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\",status=~\"5..\"}[$__rate_interval])) / sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) and on() (sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) > 0)) >= bool 5) * 3 + ((100 * sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\",status=~\"5..\"}[$__rate_interval])) / sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) and on() (sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) > 0)) >= bool 1) * ((100 * sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\",status=~\"5..\"}[$__rate_interval])) / sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) and on() (sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) > 0)) < bool 5) * 2) or on() vector(1)",
+          "legendFormat": "API 5xx"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "expr": "(((max(histogram_quantile(0.95, sum by (le, method, uri) (rate(http_server_requests_seconds_bucket{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])))) and on() (sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) > 0)) >= bool 5) * 3 + ((max(histogram_quantile(0.95, sum by (le, method, uri) (rate(http_server_requests_seconds_bucket{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])))) and on() (sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) > 0)) >= bool 2) * ((max(histogram_quantile(0.95, sum by (le, method, uri) (rate(http_server_requests_seconds_bucket{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])))) and on() (sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) > 0)) < bool 5) * 2) or on() vector(1)",
+          "legendFormat": "API P95"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "expr": "((max(tomcat_threads_busy_threads / clamp_min(tomcat_threads_config_max_threads, 1) * 100) >= bool 85) * 3 + (max(tomcat_threads_busy_threads / clamp_min(tomcat_threads_config_max_threads, 1) * 100) >= bool 70) * (max(tomcat_threads_busy_threads / clamp_min(tomcat_threads_config_max_threads, 1) * 100) < bool 85) * 2) or on() vector(1)",
+          "legendFormat": "Tomcat线程"
+        },
+        {
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "expr": "(((100 * sum(increase({__name__=~\"ai_task_total(_total)?\",status=\"SUCCESS\"}[1h])) / sum(increase({__name__=~\"ai_task_total(_total)?\"}[1h])) and on() (sum(increase({__name__=~\"ai_task_total(_total)?\"}[1h])) > 0)) < bool 95) * 3 + ((100 * sum(increase({__name__=~\"ai_task_total(_total)?\",status=\"SUCCESS\"}[1h])) / sum(increase({__name__=~\"ai_task_total(_total)?\"}[1h])) and on() (sum(increase({__name__=~\"ai_task_total(_total)?\"}[1h])) > 0)) >= bool 95) * ((100 * sum(increase({__name__=~\"ai_task_total(_total)?\",status=\"SUCCESS\"}[1h])) / sum(increase({__name__=~\"ai_task_total(_total)?\"}[1h])) and on() (sum(increase({__name__=~\"ai_task_total(_total)?\"}[1h])) > 0)) < bool 98) * 2) or on() vector(1)",
+          "legendFormat": "AI任务成功率"
+        },
+        {
+          "refId": "G",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "expr": "((max(sum by (name) (rate(container_cpu_usage_seconds_total{job=\"cadvisor\",name=~\"ai-supermarket-.*${component:regex}.*\",image!=\"\"}[5m])) * 100) >= bool 90) * 3 + (max(sum by (name) (rate(container_cpu_usage_seconds_total{job=\"cadvisor\",name=~\"ai-supermarket-.*${component:regex}.*\",image!=\"\"}[5m])) * 100) >= bool 80) * (max(sum by (name) (rate(container_cpu_usage_seconds_total{job=\"cadvisor\",name=~\"ai-supermarket-.*${component:regex}.*\",image!=\"\"}[5m])) * 100) < bool 90) * 2) or on() vector(1)",
+          "legendFormat": "容器CPU"
+        },
+        {
+          "refId": "H",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "expr": "((100 * sum(container_memory_working_set_bytes{job=\"cadvisor\",name=~\"ai-supermarket-.*${component:regex}.*\",image!=\"\"}) / scalar(max(node_memory_MemTotal_bytes{job=\"node-exporter\"})) >= bool 90) * 3 + (100 * sum(container_memory_working_set_bytes{job=\"cadvisor\",name=~\"ai-supermarket-.*${component:regex}.*\",image!=\"\"}) / scalar(max(node_memory_MemTotal_bytes{job=\"node-exporter\"})) >= bool 80) * (100 * sum(container_memory_working_set_bytes{job=\"cadvisor\",name=~\"ai-supermarket-.*${component:regex}.*\",image!=\"\"}) / scalar(max(node_memory_MemTotal_bytes{job=\"node-exporter\"})) < bool 90) * 2) or on() vector(1)",
+          "legendFormat": "容器内存"
+        },
+        {
+          "refId": "I",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "expr": "((max(100 * (1 - node_filesystem_avail_bytes{job=\"node-exporter\",fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{job=\"node-exporter\",fstype!~\"tmpfs|overlay|squashfs\"})) >= bool 90) * 3 + (max(100 * (1 - node_filesystem_avail_bytes{job=\"node-exporter\",fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{job=\"node-exporter\",fstype!~\"tmpfs|overlay|squashfs\"})) >= bool 75) * (max(100 * (1 - node_filesystem_avail_bytes{job=\"node-exporter\",fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{job=\"node-exporter\",fstype!~\"tmpfs|overlay|squashfs\"})) < bool 90) * 2) or on() vector(1)",
+          "legendFormat": "文件系统与卷"
+        },
+        {
+          "refId": "J",
+          "datasource": {
+            "type": "__expr__",
+            "uid": "__expr__"
+          },
+          "type": "math",
+          "expression": "3 * (($A == 3) || ($B == 3) || ($C == 3) || ($D == 3) || ($E == 3) || ($F == 3) || ($G == 3) || ($H == 3) || ($I == 3)) + 2 * (1 - (($A == 3) || ($B == 3) || ($C == 3) || ($D == 3) || ($E == 3) || ($F == 3) || ($G == 3) || ($H == 3) || ($I == 3))) * (($A == 2) || ($B == 2) || ($C == 2) || ($D == 2) || ($E == 2) || ($F == 2) || ($G == 2) || ($H == 2) || ($I == 2)) + (1 - (($A == 3) || ($B == 3) || ($C == 3) || ($D == 3) || ($E == 3) || ($F == 3) || ($G == 3) || ($H == 3) || ($I == 3))) * (1 - (($A == 2) || ($B == 2) || ($C == 2) || ($D == 2) || ($E == 2) || ($F == 2) || ($G == 2) || ($H == 2) || ($I == 2))) * (($A == 1) || ($B == 1) || ($C == 1) || ($D == 1) || ($E == 1) || ($F == 1) || ($G == 1) || ($H == 1) || ($I == 1))",
+          "legendFormat": "总体状态"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "正常", "color": "green" }, "1": { "text": "无数据", "color": "yellow" }, "2": { "text": "风险", "color": "orange" }, "3": { "text": "故障", "color": "red" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "orange", "value": 2 }, { "color": "red", "value": 3 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "textMode": "value_and_name", "wideLayout": true }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "当前流量",
+      "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval]))", "legendFormat": "API QPS" },
+        { "refId": "B", "expr": "sum(rate(worker_tasks_claim_total{result=\"claimed\"}[$__rate_interval]))", "legendFormat": "任务领取/s" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "horizontal", "textMode": "value_and_name" }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "核心API成功率（全局）",
+      "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "100 * (1 - sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\",status=~\"5..\"}[$__rate_interval])) / sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval]))) and on() (sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) > 0)", "legendFormat": "成功率" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 2, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 99.5 }, { "color": "green", "value": 99.9 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "核心API 5xx错误率（全局）",
+      "gridPos": { "x": 16, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "100 * sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\",status=~\"5..\"}[$__rate_interval])) / sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) and on() (sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) > 0)", "legendFormat": "5xx" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 2, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 5 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "核心API P95（全局）",
+      "gridPos": { "x": 20, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "max(histogram_quantile(0.95, sum by (le, method, uri) (rate(http_server_requests_seconds_bucket{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])))) and on() (sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) > 0)", "legendFormat": "全局最高 P95" }],
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 2, "links": [{ "title": "查看可靠性详情", "url": "/d/ai-tool-market-reliability-cn?${__url_time_range}" }], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 2 }, { "color": "red", "value": 5 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "value_and_name" }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "登录成功率（全局，1小时）",
+      "gridPos": { "x": 8, "y": 4, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "100 * sum(increase({__name__=~\"auth_login_attempts_total(_total)?\",result=\"success\"}[1h])) / sum(increase({__name__=~\"auth_login_attempts_total(_total)?\"}[1h])) and on() (sum(increase({__name__=~\"auth_login_attempts_total(_total)?\"}[1h])) > 0)", "legendFormat": "登录成功率" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "links": [{ "title": "查看认证安全详情", "url": "/d/auth-security-geomap-cn?${__url_time_range}" }], "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 90 }, { "color": "green", "value": 98 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "AI任务成功率（全局，1小时）",
+      "gridPos": { "x": 12, "y": 4, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "100 * sum(increase({__name__=~\"ai_task_total(_total)?\",status=\"SUCCESS\"}[1h])) / sum(increase({__name__=~\"ai_task_total(_total)?\"}[1h])) and on() (sum(increase({__name__=~\"ai_task_total(_total)?\"}[1h])) > 0)", "legendFormat": "任务成功率" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 95 }, { "color": "green", "value": 98 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "任务队列与租约",
+      "gridPos": { "x": 16, "y": 4, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rabbitmq_queue_messages_ready)", "legendFormat": "ready" },
+        { "refId": "B", "expr": "sum(rabbitmq_queue_messages_unacked)", "legendFormat": "unacked" },
+        { "refId": "C", "expr": "sum(increase(worker_tasks_claim_total{result!=\"claimed\"}[15m]))", "legendFormat": "领取异常/15m" },
+        { "refId": "D", "expr": "sum(increase(worker_lease_renew_total{status!=\"success\"}[15m]))", "legendFormat": "租约异常/15m" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "links": [{ "title": "查看可靠性详情", "url": "/d/ai-tool-market-reliability-cn?${__url_time_range}" }] }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "textMode": "value_and_name" }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Tomcat线程利用率",
+      "gridPos": { "x": 20, "y": 4, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "max(tomcat_threads_busy_threads / clamp_min(tomcat_threads_config_max_threads, 1) * 100)", "legendFormat": "线程利用率" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "links": [{ "title": "查看可靠性详情", "url": "/d/ai-tool-market-reliability-cn?${__url_time_range}" }], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 70 }, { "color": "red", "value": 85 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "黄金指标时间线",
+      "gridPos": { "x": 0, "y": 8, "w": 16, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval]))", "legendFormat": "QPS" },
+        { "refId": "B", "expr": "100 * sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\",status=~\"5..\"}[$__rate_interval])) / sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) and on() (sum(rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])) > 0)", "legendFormat": "5xx错误率" },
+        { "refId": "C", "expr": "max(histogram_quantile(0.95, sum by (le, method, uri) (rate(http_server_requests_seconds_bucket{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval]))))", "legendFormat": "P95 {{method}} {{uri}}" }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never" } },
+        "overrides": [
+          { "matcher": { "id": "byQuery", "options": "A" }, "properties": [{ "id": "unit", "value": "reqps" }] },
+          { "matcher": { "id": "byQuery", "options": "B" }, "properties": [{ "id": "unit", "value": "percent" }] },
+          { "matcher": { "id": "byQuery", "options": "C" }, "properties": [{ "id": "unit", "value": "s" }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "当前失败Target",
+      "gridPos": { "x": 16, "y": 8, "w": 8, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "up{job=~\".*${component:regex}.*\"} == 0", "format": "table", "instant": true }],
+      "transformations": [
+        { "id": "labelsToFields", "options": {} },
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true, "__name__": true }, "indexByName": { "job": 0, "instance": 1, "service": 2 }, "renameByName": { "job": "任务", "instance": "实例", "service": "服务" } } }
+      ],
+      "fieldConfig": { "defaults": { "links": [{ "title": "查看基础设施总览", "url": "/d/ai-tool-market-overview?${__url_time_range}" }], "custom": { "align": "auto", "cellOptions": { "type": "auto" } } }, "overrides": [] },
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "最近错误日志",
+      "gridPos": { "x": 16, "y": 12, "w": 8, "h": 4 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "refId": "A", "expr": "sum(count_over_time({container=~\"ai-supermarket-.*${component:regex}.*\"} |~ \"(?i)(error|exception|failed|timeout|warn)\" [5m]))", "queryType": "instant" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "links": [{ "title": "查看容器日志", "url": "/d/production-container-logs-cn?${__url_time_range}" }], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 20 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "horizontal", "textMode": "auto" }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "容器CPU",
+      "gridPos": { "x": 0, "y": 16, "w": 3, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "max(sum by (name) (rate(container_cpu_usage_seconds_total{job=\"cadvisor\",name=~\"ai-supermarket-.*${component:regex}.*\",image!=\"\"}[5m])) * 100)", "legendFormat": "最高使用率" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "links": [{ "title": "查看基础设施总览", "url": "/d/ai-tool-market-overview?${__url_time_range}" }], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 80 }, { "color": "red", "value": 90 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "容器内存",
+      "gridPos": { "x": 3, "y": 16, "w": 3, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "100 * sum(container_memory_working_set_bytes{job=\"cadvisor\",name=~\"ai-supermarket-.*${component:regex}.*\",image!=\"\"}) / scalar(max(node_memory_MemTotal_bytes{job=\"node-exporter\"}))", "legendFormat": "使用率" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "links": [{ "title": "查看基础设施总览", "url": "/d/ai-tool-market-overview?${__url_time_range}" }], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 80 }, { "color": "red", "value": 90 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "MySQL",
+      "gridPos": { "x": 6, "y": 16, "w": 3, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "probe_success{job=\"blackbox-tcp\",instance=\"mysql:3306\"}", "legendFormat": "连通性" }],
+      "fieldConfig": { "defaults": { "mappings": [{ "type": "value", "options": { "0": { "text": "异常", "color": "red" }, "1": { "text": "正常", "color": "green" } } }], "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Redis",
+      "gridPos": { "x": 9, "y": 16, "w": 3, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "probe_success{job=\"blackbox-tcp\",instance=\"redis:6379\"}", "legendFormat": "连通性" }],
+      "fieldConfig": { "defaults": { "mappings": [{ "type": "value", "options": { "0": { "text": "异常", "color": "red" }, "1": { "text": "正常", "color": "green" } } }], "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "RabbitMQ",
+      "gridPos": { "x": 12, "y": 16, "w": 3, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "probe_success{job=\"blackbox-tcp\",instance=\"rabbitmq:5672\"}", "legendFormat": "连通性" }],
+      "fieldConfig": { "defaults": { "mappings": [{ "type": "value", "options": { "0": { "text": "异常", "color": "red" }, "1": { "text": "正常", "color": "green" } } }], "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "cAdvisor",
+      "gridPos": { "x": 15, "y": 16, "w": 3, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "up{job=\"cadvisor\"}", "legendFormat": "采集状态" }],
+      "fieldConfig": { "defaults": { "links": [{ "title": "查看基础设施总览", "url": "/d/ai-tool-market-overview?${__url_time_range}" }], "mappings": [{ "type": "value", "options": { "0": { "text": "异常", "color": "red" }, "1": { "text": "正常", "color": "green" } } }], "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+    },
+    {
+      "id": 19,
+      "type": "stat",
+      "title": "Alloy / Loki",
+      "gridPos": { "x": 18, "y": 16, "w": 3, "h": 4 },
+      "datasource": { "type": "mixed", "uid": "-- Mixed --" },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "up{job=\"alloy\"}", "legendFormat": "Alloy" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "up{job=\"loki\"}", "legendFormat": "Loki" },
+        { "refId": "C", "datasource": { "type": "loki", "uid": "loki" }, "expr": "sum(count_over_time({container=~\"ai-supermarket-.+\"}[5m]))", "legendFormat": "日志/5m", "queryType": "instant" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "links": [{ "title": "查看容器日志", "url": "/d/production-container-logs-cn?${__url_time_range}" }] },
+        "overrides": [
+          { "matcher": { "id": "byQuery", "options": "A" }, "properties": [{ "id": "mappings", "value": [{ "type": "value", "options": { "0": { "text": "异常", "color": "red" }, "1": { "text": "正常", "color": "green" } } }] }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }] },
+          { "matcher": { "id": "byQuery", "options": "B" }, "properties": [{ "id": "mappings", "value": [{ "type": "value", "options": { "0": { "text": "异常", "color": "red" }, "1": { "text": "正常", "color": "green" } } }] }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }] }
+        ]
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "textMode": "value_and_name" }
+    },
+    {
+      "id": 20,
+      "type": "stat",
+      "title": "文件系统与卷",
+      "description": "只读展示文件系统与卷使用率。",
+      "gridPos": { "x": 21, "y": 16, "w": 3, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "max(100 * (1 - node_filesystem_avail_bytes{job=\"node-exporter\",fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{job=\"node-exporter\",fstype!~\"tmpfs|overlay|squashfs\"}))", "legendFormat": "最高使用率" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "links": [{ "title": "查看基础设施总览", "url": "/d/ai-tool-market-overview?${__url_time_range}" }], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 75 }, { "color": "red", "value": 90 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+    }
+  ]
+}

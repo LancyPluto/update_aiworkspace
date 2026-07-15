@@ -31,6 +31,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
@@ -398,6 +402,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         }
         baseUrl = VolcengineEndpointSupport.normalizeProviderBaseUrl(merged.provider(), baseUrl);
         MediaGatewayProbeResult probe = probeMediaGateway(baseUrl, executable.getApiKey(), merged.modelName(), true);
+        if (probe.success() && requiresOpenAiImagesGenerationProbe(provider)) {
+            probe = probeOpenAiImagesGenerationEndpoint(baseUrl, executable.getApiKey(), executable.getExtraAuthJson());
+        }
         long latencyMs = Math.max(0L, System.currentTimeMillis() - startedAt);
         return new AgentModelConfigTestResponse(
                 probe.success(),
@@ -437,6 +444,105 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             String detail = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
             return new MediaGatewayProbeResult(false, "网关连接失败：" + detail);
         }
+    }
+
+    private boolean requiresOpenAiImagesGenerationProbe(ModelProviderDefinition provider) {
+        if (provider == null) {
+            return false;
+        }
+        return "openai_images".equalsIgnoreCase(provider.providerProtocol())
+                || "ofox_openai_images".equalsIgnoreCase(provider.code())
+                || "openai_images_gateway".equalsIgnoreCase(provider.code())
+                || "agnes_images".equalsIgnoreCase(provider.code());
+    }
+
+    private MediaGatewayProbeResult probeOpenAiImagesGenerationEndpoint(String baseUrl, String apiKey, String extraAuthJson) {
+        String probeUrl = resolveOpenAiImagesGenerationUrl(baseUrl, extraAuthJson);
+        try {
+            HttpClient client = com.aiminilab.aitoolmarket.agent.support.OutboundHttpClientFactory
+                    .create(java.time.Duration.ofSeconds(8));
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(probeUrl))
+                    .timeout(java.time.Duration.ofSeconds(12))
+                    .header("Accept", "application/json")
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + apiKey.trim())
+                    // Deliberately omit prompt. A 400 validation error proves the image
+                    // generation endpoint was reached without spending image quota.
+                    .POST(HttpRequest.BodyPublishers.ofString("{\"model\":\"__probe__\"}"))
+                    .build();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            int status = response.statusCode();
+            String body = response.body() == null ? "" : response.body();
+            if (status == 401 || status == 403 || isImageGenerationDisabled(body)) {
+                return new MediaGatewayProbeResult(
+                        false,
+                        "图片生成接口权限未开通或凭据无权调用（HTTP " + status + "）："
+                                + limitProbeMessage(body)
+                );
+            }
+            if (status >= 200 && status < 300) {
+                return new MediaGatewayProbeResult(true, "图片生成接口探活通过");
+            }
+            if (status >= 400 && status < 500) {
+                return new MediaGatewayProbeResult(true, "图片生成接口可达，已进入参数校验（HTTP " + status + "）");
+            }
+            return new MediaGatewayProbeResult(false, "图片生成接口不可达（HTTP " + status + "）：" + limitProbeMessage(body));
+        } catch (Exception exception) {
+            String detail = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
+            return new MediaGatewayProbeResult(false, "图片生成接口连接失败：" + detail);
+        }
+    }
+
+    private String resolveOpenAiImagesGenerationUrl(String baseUrl, String extraAuthJson) {
+        String normalized = com.aiminilab.aitoolmarket.agent.support.OpenAiCompatibleEndpointSupport
+                .normalizedBaseUrl(baseUrl);
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        String endpointPath = extraAuthText(extraAuthJson, "endpointPath");
+        if (endpointPath == null || endpointPath.isBlank()) {
+            endpointPath = "/images/generations";
+        }
+        if (!endpointPath.startsWith("/")) {
+            endpointPath = "/" + endpointPath;
+        }
+        if (normalized.endsWith("/v1") || normalized.endsWith("/api/v3") || normalized.endsWith("/compatible-mode/v1")) {
+            return normalized + endpointPath;
+        }
+        return normalized + "/v1" + endpointPath;
+    }
+
+    private String extraAuthText(String extraAuthJson, String field) {
+        if (extraAuthJson == null || extraAuthJson.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(extraAuthJson);
+            JsonNode value = root.get(field);
+            return value != null && value.isTextual() ? value.asText().trim() : null;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private boolean isImageGenerationDisabled(String body) {
+        if (body == null) {
+            return false;
+        }
+        String normalized = body.toLowerCase();
+        return normalized.contains("image generation is not enabled")
+                || normalized.contains("not enabled for this group")
+                || normalized.contains("image generation disabled")
+                || (normalized.contains("permission_error") && normalized.contains("image generation"));
+    }
+
+    private String limitProbeMessage(String body) {
+        if (body == null || body.isBlank()) {
+            return "";
+        }
+        String trimmed = body.trim();
+        return trimmed.length() <= 240 ? trimmed : trimmed.substring(0, 240);
     }
 
     private MediaGatewayProbeResult verifyGatewayModelName(String body, String modelName, int status) {

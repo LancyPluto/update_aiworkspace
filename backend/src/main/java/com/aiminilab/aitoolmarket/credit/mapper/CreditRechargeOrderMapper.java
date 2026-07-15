@@ -57,7 +57,11 @@ public interface CreditRechargeOrderMapper extends BaseMapper<CreditRechargeOrde
                 status_reason = #{reason},
                 paid_at = CASE WHEN #{toStatus} = 'PAID' AND paid_at IS NULL THEN #{eventAt} ELSE paid_at END,
                 credited_at = CASE WHEN #{toStatus} = 'CREDITED' AND credited_at IS NULL THEN #{eventAt} ELSE credited_at END,
-                closed_at = CASE WHEN #{toStatus} IN ('CLOSED', 'FAILED') AND closed_at IS NULL THEN #{eventAt} ELSE closed_at END,
+                closed_at = CASE
+                    WHEN #{toStatus} = 'PAID' THEN NULL
+                    WHEN #{toStatus} IN ('CLOSED', 'FAILED') AND closed_at IS NULL THEN #{eventAt}
+                    ELSE closed_at
+                END,
                 updated_at = #{eventAt}
             WHERE id = #{orderId}
               AND status = #{fromStatus}

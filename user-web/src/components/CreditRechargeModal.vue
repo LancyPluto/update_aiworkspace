@@ -30,10 +30,12 @@ const showPayModal = ref(false)
 const pendingPackage = ref<RechargePackage | null>(null)
 const activeOrder = ref<RechargeOrder | null>(null)
 const paymentResult = ref<"success" | "fail" | null>(null)
+const paymentAttemptId = ref<string | null>(null)
 let pollingTimer: ReturnType<typeof setInterval> | null = null
 
 const selectedPackage = computed(() => packages.value.find((item) => item.id === selectedId.value) ?? null)
 const displayedPackages = computed<RechargePackage[]>(() => pickDisplayPackages(packages.value))
+const hasActiveMembership = computed(() => auth.user?.membershipStatus === "ACTIVE")
 
 const paymentOptions = computed(() =>
   DEFAULT_RECHARGE_PAYMENT_CHANNELS.map((option) => ({
@@ -97,6 +99,7 @@ function closeChannelModal() {
   if (ordering.value) return
   showChannelModal.value = false
   pendingPackage.value = null
+  paymentAttemptId.value = null
 }
 
 function closePayModal() {
@@ -154,6 +157,7 @@ async function pollOrder(orderId: number) {
   if (order.status === "CREDITED") {
     paymentResult.value = "success"
     clearPolling()
+    await auth.fetchCurrentUser({ clearOnFailure: false })
     emit("creditsUpdated")
   } else if (order.status === "FAILED" || order.status === "CLOSED") {
     paymentResult.value = "fail"
@@ -169,9 +173,11 @@ function startPolling(orderId: number) {
 }
 
 function openPaymentChoice(pkg: RechargePackage) {
+  if (hasActiveMembership.value) return
   pendingPackage.value = pkg
   selectedId.value = pkg.id
   paymentResult.value = null
+  paymentAttemptId.value = crypto.randomUUID()
   showChannelModal.value = true
 }
 
@@ -184,7 +190,7 @@ async function createOrder(channel: PaymentChannel) {
       {
         packageId: pkg.id,
         paymentChannel: channel,
-        clientRequestId: `agent-recharge-${pkg.id}-${channel}-${Date.now()}`,
+        clientRequestId: paymentAttemptId.value ??= crypto.randomUUID(),
       },
       { token: auth.token },
     )
@@ -266,10 +272,10 @@ onUnmounted(clearPolling)
         <button
           type="button"
           class="credit-modal-buy"
-          :disabled="!selectedPackage || ordering || loadingPackages"
+          :disabled="!selectedPackage || ordering || loadingPackages || hasActiveMembership"
           @click="selectedPackage && openPaymentChoice(selectedPackage)"
         >
-          {{ ordering ? "处理中…" : "立即购买" }}
+          {{ hasActiveMembership ? "会员有效期内不可续费" : ordering ? "处理中…" : "立即购买" }}
         </button>
       </div>
     </div>

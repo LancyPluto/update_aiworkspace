@@ -5,5 +5,7 @@ public interface WechatNativePayClient {
 
     WechatPayNotification queryNativeOrder(String orderNo);
 
+    boolean closeNativeOrder(String orderNo);
+
     WechatPayNotification parseNotification(WechatPayCallbackHeaders headers, String body);
 }

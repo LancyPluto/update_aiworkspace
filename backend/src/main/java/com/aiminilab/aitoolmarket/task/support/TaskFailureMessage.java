@@ -12,6 +12,7 @@ public final class TaskFailureMessage {
         return switch (errorCode) {
             case "MODEL_RISK_CONTROL_REJECTED" -> "您的提示词包含违禁词";
             case "MODEL_AUTH_FAILED" -> "模型认证失败，请联系管理员检查 API Key";
+            case "MODEL_CAPABILITY_DISABLED" -> "模型账户未开通当前模型能力，请联系管理员更换账户或开通图片生成权限";
             case "MODEL_CREDIT_INSUFFICIENT" -> "模型账户余额不足，请联系管理员充值";
             case "MODEL_RATE_LIMITED" -> "请求过于频繁，请稍后重试";
             case "MODEL_TIMEOUT" -> "模型响应超时，请稍后重试";

@@ -36,8 +36,8 @@ public class WechatPayNotifyController {
             return ResponseEntity.ok(Map.of("code", "SUCCESS", "message", "OK"));
         } catch (Exception exception) {
             log.warn("WeChat Native payment notification failed, serial={}, message={}", serial, exception.getMessage(), exception);
-            // WeChat Pay v3: returning FAIL (HTTP 200) will trigger retries from platform.
-            return ResponseEntity.ok(Map.of("code", "FAIL", "message", "FAILED"));
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("code", "FAIL", "message", "FAILED"));
         }
     }
 }

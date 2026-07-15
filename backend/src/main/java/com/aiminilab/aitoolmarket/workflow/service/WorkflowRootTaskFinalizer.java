@@ -66,6 +66,11 @@ public class WorkflowRootTaskFinalizer {
 
     @Transactional
     public void finalizeSuccess(Long rootTaskId, String markdown) {
+        finalizeSuccess(rootTaskId, "MARKDOWN", markdown);
+    }
+
+    @Transactional
+    public void finalizeSuccess(Long rootTaskId, String resourceType, String contentText) {
         AiTask task = taskMapper.findById(rootTaskId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TASK_NOT_FOUND, "任务不存在"));
         if (TaskStatus.SUCCESS.name().equals(task.getStatus())) {
@@ -113,9 +118,11 @@ public class WorkflowRootTaskFinalizer {
                 }
             }
         }
-        taskMapper.insertResult(rootTaskId, task.getUserId(), "MARKDOWN", markdown);
+        String finalResourceType = resourceType == null || resourceType.isBlank() ? "MARKDOWN" : resourceType.trim().toUpperCase();
+        String finalContentText = contentText == null ? "" : contentText;
+        taskMapper.insertResult(rootTaskId, task.getUserId(), finalResourceType, finalContentText);
         try {
-            communityService.autoPublishTask(taskMapper.findById(rootTaskId).orElse(task), "MARKDOWN", markdown);
+            communityService.autoPublishTask(taskMapper.findById(rootTaskId).orElse(task), finalResourceType, finalContentText);
         } catch (Exception exception) {
             LOGGER.warn("community auto-publish skipped after workflow root success taskId={}", rootTaskId, exception);
         }

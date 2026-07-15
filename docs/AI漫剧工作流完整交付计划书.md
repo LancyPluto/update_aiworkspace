@@ -12,8 +12,8 @@
 
 参考来源：
 
-- CSDN《AI短剧/漫剧制作教程：从零到一的完整创作指南》：https://blog.csdn.net/wangzhae/article/details/160806037
-- 知乎专栏链接：https://zhuanlan.zhihu.com/p/1990797931272491458。当前页面在抓取环境下不可稳定读取，计划中仅使用其主题方向，并以可访问教程与本项目现有架构做落地设计。
+- CSDN《AI短剧/漫剧制作教程：从零到一的完整创作指南》：[https://blog.csdn.net/wangzhae/article/details/160806037](https://blog.csdn.net/wangzhae/article/details/160806037)
+- 知乎专栏链接：[https://zhuanlan.zhihu.com/p/1990797931272491458。当前页面在抓取环境下不可稳定读取，计划中仅使用其主题方向，并以可访问教程与本项目现有架构做落地设计。](https://zhuanlan.zhihu.com/p/1990797931272491458。当前页面在抓取环境下不可稳定读取，计划中仅使用其主题方向，并以可访问教程与本项目现有架构做落地设计。)
 
 从可访问教程中提炼出的关键方法：
 
@@ -640,3 +640,4 @@ MVP 验收：
 - 工作流模板：AI_COMIC_DRAMA_STANDARD。
 - 输出粒度：策划案、分镜脚本、角色卡、图生视频 Prompt。
 - 后续升级：一键样片、单集成片、多集工业化。
+

@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.credit.entity.CreditAccount;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 import org.springframework.dao.DuplicateKeyException;
 
@@ -22,9 +23,16 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
         CreditAccount account = new CreditAccount();
         account.setUserId(userId);
         account.setBalance(DEFAULT_GRANTED_CREDITS);
-        account.setMembershipBalance(DEFAULT_GRANTED_CREDITS);
+        account.setPermanentBalance(DEFAULT_GRANTED_CREDITS);
+        account.setMembershipBalance(0);
         account.setGiftBalance(0);
         account.setFrozen(0);
+        account.setPermanentFrozen(0);
+        account.setMembershipFrozen(0);
+        account.setGiftFrozen(0);
+        account.setExpiredMembershipFrozen(0);
+        account.setTotalExpired(0);
+        account.setBucketSchemaVersion(2);
         account.setTotalGranted(DEFAULT_GRANTED_CREDITS);
         account.setTotalConsumed(0);
         account.setStatus("ACTIVE");
@@ -44,60 +52,8 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
 
     @Update("""
             UPDATE credit_accounts
-            SET frozen = frozen + #{amount}, updated_at = CURRENT_TIMESTAMP
-            WHERE id = #{accountId} AND balance - frozen >= #{amount} AND status = 'ACTIVE'
-            """)
-    int freezeRows(@Param("accountId") Long accountId, @Param("amount") int amount);
-
-    default boolean freeze(Long accountId, int amount) {
-        return freezeRows(accountId, amount) == 1;
-    }
-
-    @Update("""
-            UPDATE credit_accounts
-            SET balance = balance - #{amount},
-                frozen = frozen - #{amount},
-                membership_balance = membership_balance - LEAST(#{amount}, membership_balance),
-                gift_balance = gift_balance - GREATEST(0, #{amount} - LEAST(#{amount}, membership_balance)),
-                total_consumed = total_consumed + #{amount},
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = #{accountId} AND frozen >= #{amount} AND balance >= #{amount} AND status = 'ACTIVE'
-            """)
-    int settleRows(@Param("accountId") Long accountId, @Param("amount") int amount);
-
-    default boolean settle(Long accountId, int amount) {
-        return settleRows(accountId, amount) == 1;
-    }
-
-    @Update("""
-            UPDATE credit_accounts
-            SET balance = balance - #{amount},
-                membership_balance = membership_balance - LEAST(#{amount}, membership_balance),
-                gift_balance = gift_balance - GREATEST(0, #{amount} - LEAST(#{amount}, membership_balance)),
-                total_consumed = total_consumed + #{amount},
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = #{accountId} AND balance - frozen >= #{amount} AND status = 'ACTIVE'
-            """)
-    int deductAvailableRows(@Param("accountId") Long accountId, @Param("amount") int amount);
-
-    default boolean deductAvailable(Long accountId, int amount) {
-        return deductAvailableRows(accountId, amount) == 1;
-    }
-
-    @Update("""
-            UPDATE credit_accounts
-            SET frozen = frozen - #{amount}, updated_at = CURRENT_TIMESTAMP
-            WHERE id = #{accountId} AND frozen >= #{amount} AND status = 'ACTIVE'
-            """)
-    int releaseRows(@Param("accountId") Long accountId, @Param("amount") int amount);
-
-    default boolean release(Long accountId, int amount) {
-        return releaseRows(accountId, amount) == 1;
-    }
-
-    @Update("""
-            UPDATE credit_accounts
             SET balance = balance + #{amount},
+                permanent_balance = permanent_balance + #{amount},
                 total_granted = total_granted + #{amount},
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{accountId} AND status = 'ACTIVE'
@@ -111,7 +67,7 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
     @Update("""
             UPDATE credit_accounts
             SET balance = balance + #{amount},
-                membership_balance = membership_balance + #{amount},
+                permanent_balance = permanent_balance + #{amount},
                 total_granted = total_granted + #{amount},
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{accountId} AND status = 'ACTIVE'
@@ -120,6 +76,20 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
 
     default boolean rechargeAdd(Long accountId, int amount) {
         return rechargeAddRows(accountId, amount) == 1;
+    }
+
+    @Update("""
+            UPDATE credit_accounts
+            SET balance = balance + #{amount},
+                membership_balance = membership_balance + #{amount},
+                total_granted = total_granted + #{amount},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND status = 'ACTIVE'
+            """)
+    int membershipRechargeAddRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+
+    default boolean membershipRechargeAdd(Long accountId, int amount) {
+        return membershipRechargeAddRows(accountId, amount) == 1;
     }
 
     @Update("""
@@ -136,10 +106,13 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
         return giftRedeemAddRows(accountId, amount) == 1;
     }
 
+    @Select("SELECT * FROM credit_accounts WHERE id = #{accountId} FOR UPDATE")
+    CreditAccount lockById(@Param("accountId") Long accountId);
+
     @Update("""
             UPDATE credit_accounts
             SET balance = balance + #{amount},
-                gift_balance = gift_balance + #{amount},
+                permanent_balance = permanent_balance + #{amount},
                 total_granted = total_granted + #{amount},
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{accountId} AND status = 'ACTIVE'
@@ -150,17 +123,4 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
         return referralBonusAddRows(accountId, amount) == 1;
     }
 
-    @Update("""
-            UPDATE credit_accounts
-            SET balance = balance - #{amount},
-                membership_balance = membership_balance - LEAST(#{amount}, membership_balance),
-                gift_balance = gift_balance - GREATEST(0, #{amount} - LEAST(#{amount}, membership_balance)),
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = #{accountId} AND balance - frozen >= #{amount} AND status = 'ACTIVE'
-            """)
-    int manualDeductRows(@Param("accountId") Long accountId, @Param("amount") int amount);
-
-    default boolean manualDeduct(Long accountId, int amount) {
-        return manualDeductRows(accountId, amount) == 1;
-    }
 }

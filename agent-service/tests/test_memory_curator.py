@@ -239,6 +239,7 @@ def test_memory_trace_items_are_safe_and_compact():
 class FakeMemoryBackend:
     def __init__(self):
         self.events = []
+        self.memory_requests = []
         self.created_memories = []
         self.updated_memories = []
         self.candidates = []
@@ -247,6 +248,10 @@ class FakeMemoryBackend:
         self.events.append((run_id, event))
 
     async def retrieve_workspace_memory(self, workspace_id, query, limit, view=None, memory_ids=None, session_id=None):
+        self.memory_requests.append((workspace_id, query, limit, view, tuple(memory_ids or ()), session_id))
+        failures = getattr(self, "memory_failures", [])
+        if failures:
+            raise failures.pop(0)
         return getattr(self, "memory_items", [])
 
     async def create_workspace_memory(self, **kwargs):
@@ -368,3 +373,78 @@ async def test_memory_retrieved_event_contains_trace_items():
     assert event.eventJson["items"][0]["id"] == 31
     assert event.eventJson["items"][0]["title"] == "GPT 生图质量"
     assert "low quality" in event.eventJson["items"][0]["preview"]
+
+
+@pytest.mark.asyncio
+async def test_workspace_memory_runtime_reuses_identical_query_in_one_run():
+    backend = FakeMemoryBackend()
+    backend.memory_items = [
+        WorkspaceMemoryItem(id=41, title="Preference", content="Use concise answers.", memoryType="preference", score=2)
+    ]
+    runtime = WorkspaceMemoryRuntime(backend)
+    context = RunContext(runId=51, sessionId=2, userId=3, workspaceId=1, message="continue")
+
+    first = await runtime.fetch_items(context)
+    second = await runtime.fetch_items(context)
+
+    assert first == second
+    assert len(backend.memory_requests) == 1
+    assert len([event for _, event in backend.events if event.eventType == "memory.retrieved"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_workspace_memory_runtime_caches_empty_results():
+    backend = FakeMemoryBackend()
+    runtime = WorkspaceMemoryRuntime(backend)
+    context = RunContext(runId=52, sessionId=2, userId=3, workspaceId=1, message="continue")
+
+    assert await runtime.fetch_items(context) == []
+    assert await runtime.fetch_items(context) == []
+
+    assert len(backend.memory_requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_workspace_memory_runtime_keeps_query_views_isolated():
+    backend = FakeMemoryBackend()
+    runtime = WorkspaceMemoryRuntime(backend)
+    context = RunContext(runId=53, sessionId=2, userId=3, workspaceId=1, message="continue")
+
+    await runtime.fetch_items(context)
+    await runtime.fetch_tool_items(context)
+    await runtime.fetch_tool_items(context, prompt_mode="default")
+
+    assert [request[3] for request in backend.memory_requests] == ["chat", "tool"]
+
+
+@pytest.mark.asyncio
+async def test_workspace_memory_runtime_keeps_query_session_and_explicit_ids_isolated():
+    backend = FakeMemoryBackend()
+    runtime = WorkspaceMemoryRuntime(backend)
+
+    await runtime.fetch_items(RunContext(runId=55, sessionId=2, userId=3, workspaceId=1, message="first"))
+    await runtime.fetch_items(RunContext(runId=55, sessionId=2, userId=3, workspaceId=1, message="second"))
+    await runtime.fetch_items(RunContext(runId=55, sessionId=4, userId=3, workspaceId=1, message="second"))
+    await runtime.fetch_tool_items(RunContext(runId=55, sessionId=4, userId=3, workspaceId=1, message="use #16"))
+    await runtime.fetch_tool_items(RunContext(runId=55, sessionId=4, userId=3, workspaceId=1, message="use #17"))
+
+    assert len(backend.memory_requests) == 5
+    assert [request[1] for request in backend.memory_requests[:3]] == ["first", "second", "second"]
+    assert [request[5] for request in backend.memory_requests[:3]] == [2, 2, 4]
+    assert [request[4] for request in backend.memory_requests[3:]] == [(16,), (17,)]
+
+
+@pytest.mark.asyncio
+async def test_workspace_memory_runtime_does_not_cache_failures():
+    backend = FakeMemoryBackend()
+    backend.memory_failures = [RuntimeError("temporary failure")]
+    backend.memory_items = [
+        WorkspaceMemoryItem(id=42, title="Preference", content="Use concise answers.", memoryType="preference", score=2)
+    ]
+    runtime = WorkspaceMemoryRuntime(backend)
+    context = RunContext(runId=54, sessionId=2, userId=3, workspaceId=1, message="continue")
+
+    assert await runtime.fetch_items(context) == []
+    assert await runtime.fetch_items(context) == backend.memory_items
+
+    assert len(backend.memory_requests) == 2

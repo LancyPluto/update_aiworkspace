@@ -10,6 +10,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -55,6 +56,9 @@ class AuthApiTest {
 
     @Autowired
     private StringRedisTemplate redisTemplate;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void clearSmsState() {
@@ -453,6 +457,77 @@ class AuthApiTest {
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+    }
+
+    @Test
+    void authSecurityAuditRecordsPasswordLoginSuccessAndFailureWithoutPlainPhone() throws Exception {
+        String phone = uniquePhone();
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "phone": "%s",
+                                  "password": "123456"
+                                }
+                                """.formatted(phone)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .header("X-Forwarded-For", "8.8.8.8")
+                        .header("User-Agent", "AuthApiTest/1.0")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "account": "%s",
+                                  "password": "123456"
+                                }
+                                """.formatted(phone)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .header("X-Forwarded-For", "8.8.8.8")
+                        .header("User-Agent", "AuthApiTest/1.0")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "account": "%s",
+                                  "password": "wrong-password"
+                                }
+                                """.formatted(phone)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+
+        String maskedPhone = phone.substring(0, 3) + "****" + phone.substring(7);
+        Integer successCount = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM auth_security_events
+                WHERE event_type = 'LOGIN_PASSWORD'
+                  AND result = 'SUCCESS'
+                  AND account_masked = ?
+                  AND account_hash IS NOT NULL
+                  AND ip_address = '8.8.8.8'
+                """, Integer.class, maskedPhone);
+        Integer failureCount = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM auth_security_events
+                WHERE event_type = 'LOGIN_PASSWORD'
+                  AND result = 'FAILED'
+                  AND account_masked = ?
+                  AND failure_reason = 'UNAUTHORIZED'
+                  AND account_hash IS NOT NULL
+                  AND ip_address = '8.8.8.8'
+                """, Integer.class, maskedPhone);
+        Integer plainPhoneCount = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM auth_security_events
+                WHERE account_masked = ?
+                """, Integer.class, phone);
+
+        org.junit.jupiter.api.Assertions.assertTrue(successCount != null && successCount >= 1);
+        org.junit.jupiter.api.Assertions.assertTrue(failureCount != null && failureCount >= 1);
+        org.junit.jupiter.api.Assertions.assertEquals(0, plainPhoneCount);
     }
 
     @Test

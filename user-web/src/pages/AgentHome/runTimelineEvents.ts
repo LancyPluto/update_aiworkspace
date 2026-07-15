@@ -1,5 +1,12 @@
 import type { AgentRunEvent } from "@/api/types"
 
+export function memoryEventTitle(payload: Record<string, unknown>) {
+  if (payload.memoryInjectionSkipped === true) return "已跳过工具记忆注入"
+  if (payload.error === "retrieve_failed") return "长期记忆读取失败"
+  const count = typeof payload.count === "number" ? payload.count : Array.isArray(payload.items) ? payload.items.length : 0
+  return count > 0 ? `已读取 ${count} 条长期记忆` : "本次无相关长期记忆"
+}
+
 /** 面向用户的进度；记忆事件保留可见，方便确认工具调用实际使用了哪些长期记忆。 */
 export const USER_FACING_EVENT_TYPES = [
   "memory.retrieved",

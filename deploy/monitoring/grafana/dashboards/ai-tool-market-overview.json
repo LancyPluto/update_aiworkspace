@@ -1,102 +1,102 @@
 {
   "uid": "ai-tool-market-overview",
-  "title": "AI Tool Market Overview",
+  "title": "AI Tool Market 基础设施总览",
   "tags": ["ai-tool-market", "docker", "infra"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "15s",
   "time": { "from": "now-1h", "to": "now" },
   "templating": { "list": [] },
   "panels": [
     {
-      "id": 1,
-      "type": "stat",
-      "title": "Prometheus Targets Up",
+      "id": 1, "type": "stat", "title": "Prometheus Target 健康度",
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
-      "targets": [
-        { "expr": "sum(up)", "legendFormat": "up" }
-      ],
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 6 }] } }, "overrides": [] },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "auto", "textMode": "auto", "colorMode": "background", "graphMode": "none", "justifyMode": "auto" }
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(up) / clamp_min(count(up), 1) * 100", "legendFormat": "%" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 90 }, { "color": "green", "value": 100 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
     },
     {
-      "id": 2,
-      "type": "stat",
-      "title": "HTTP Probe Success",
+      "id": 2, "type": "stat", "title": "HTTP 探测成功率",
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
-      "targets": [
-        { "expr": "sum(probe_success{job=\"blackbox-http\"}) / count(probe_success{job=\"blackbox-http\"}) * 100", "legendFormat": "%" }
-      ],
-      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 0, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 80 }, { "color": "green", "value": 100 }] } }, "overrides": [] },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(probe_success{job=~\"blackbox-http.*\"}) / clamp_min(count(probe_success{job=~\"blackbox-http.*\"}), 1) * 100", "legendFormat": "%" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 90 }, { "color": "green", "value": 100 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
     },
     {
-      "id": 3,
-      "type": "stat",
-      "title": "TCP Probe Success",
+      "id": 3, "type": "stat", "title": "TCP 探测成功率",
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
-      "targets": [
-        { "expr": "sum(probe_success{job=\"blackbox-tcp\"}) / count(probe_success{job=\"blackbox-tcp\"}) * 100", "legendFormat": "%" }
-      ],
-      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 0, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 80 }, { "color": "green", "value": 100 }] } }, "overrides": [] },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(probe_success{job=\"blackbox-tcp\"}) / clamp_min(count(probe_success{job=\"blackbox-tcp\"}), 1) * 100", "legendFormat": "%" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 90 }, { "color": "green", "value": 100 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
     },
     {
-      "id": 4,
-      "type": "stat",
-      "title": "Host Disk Free",
+      "id": 4, "type": "stat", "title": "主机磁盘最低可用率",
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
-      "targets": [
-        { "expr": "min(node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay|squashfs\"} * 100)", "legendFormat": "%" }
-      ],
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "min(node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay|squashfs\"} * 100)", "legendFormat": "%" }],
       "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 15 }, { "color": "green", "value": 30 }] } }, "overrides": [] },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
     },
     {
-      "id": 5,
-      "type": "timeseries",
-      "title": "HTTP Probe Duration",
+      "id": 5, "type": "timeseries", "title": "HTTP 探测耗时",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
-      "targets": [
-        { "expr": "probe_duration_seconds{job=\"blackbox-http\"}", "legendFormat": "{{instance}}" }
-      ],
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "probe_duration_seconds{job=~\"blackbox-http.*\"}", "legendFormat": "{{job}} {{instance}}" }],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 12, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
     },
     {
-      "id": 6,
-      "type": "timeseries",
-      "title": "Container CPU %",
+      "id": 6, "type": "timeseries", "title": "容器 CPU 使用率",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
-      "targets": [
-        { "expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"ai-supermarket-.*\", image!=\"\"}[2m])) * 100", "legendFormat": "{{name}}" }
-      ],
-      "fieldConfig": { "defaults": { "unit": "percent", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"ai-supermarket-.*\",image!=\"\"}[2m])) * 100", "legendFormat": "{{name}}" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 12, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
     },
     {
-      "id": 7,
-      "type": "timeseries",
-      "title": "Container Memory",
+      "id": 7, "type": "timeseries", "title": "容器内存工作集",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
-      "targets": [
-        { "expr": "container_memory_working_set_bytes{name=~\"ai-supermarket-.*\", image!=\"\"}", "legendFormat": "{{name}}" }
-      ],
-      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "container_memory_working_set_bytes{name=~\"ai-supermarket-.*\",image!=\"\"}", "legendFormat": "{{name}}" }],
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 12, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
     },
     {
-      "id": 8,
-      "type": "timeseries",
-      "title": "Host CPU / Memory",
+      "id": 8, "type": "timeseries", "title": "主机 CPU / 内存使用率",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
-        { "expr": "(1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[2m]))) * 100", "legendFormat": "CPU used %" },
-        { "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100", "legendFormat": "Memory used %" }
+        { "refId": "A", "expr": "(1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[2m]))) * 100", "legendFormat": "CPU" },
+        { "refId": "B", "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100", "legendFormat": "内存" }
       ],
-      "fieldConfig": { "defaults": { "unit": "percent", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
+      "fieldConfig": { "defaults": { "unit": "percent", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 12, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 9, "type": "table", "title": "当前失败 Target",
+      "gridPos": { "h": 8, "w": 10, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "up == 0", "format": "table", "instant": true }],
+      "transformations": [
+        { "id": "labelsToFields", "options": {} },
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true, "__name__": true }, "indexByName": { "job": 0, "instance": 1, "service": 2 }, "renameByName": { "job": "任务", "instance": "实例", "service": "服务" } } }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" } } }, "overrides": [] },
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } }
+    },
+    {
+      "id": 10, "type": "table", "title": "文件系统 / 卷挂载使用率",
+      "description": "只展示容量与挂载使用率指标，不浏览卷内文件内容。",
+      "gridPos": { "h": 8, "w": 14, "x": 10, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "100 * (1 - node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay|squashfs\"})", "format": "table", "instant": true }],
+      "transformations": [{ "id": "labelsToFields", "options": {} }, { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true }, "renameByName": { "device": "设备/卷", "mountpoint": "挂载点", "fstype": "文件系统", "Value": "使用率" } } }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 75 }, { "color": "red", "value": 90 }] }, "custom": { "align": "auto", "cellOptions": { "type": "color-text" } } }, "overrides": [] },
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } }
     }
   ]
 }

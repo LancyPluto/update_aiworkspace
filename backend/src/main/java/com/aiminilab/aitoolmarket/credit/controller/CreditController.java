@@ -17,6 +17,7 @@ import com.aiminilab.aitoolmarket.credit.dto.GiftCardTransferRequest;
 import com.aiminilab.aitoolmarket.credit.dto.RechargeOrderResponse;
 import com.aiminilab.aitoolmarket.credit.dto.RechargePackageResponse;
 import com.aiminilab.aitoolmarket.credit.dto.RechargePaymentOptionsResponse;
+import com.aiminilab.aitoolmarket.credit.realtime.CreditEventStreamService;
 import com.aiminilab.aitoolmarket.credit.service.CreditRechargeService;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.credit.service.GiftCardService;
@@ -28,6 +29,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
@@ -39,20 +45,33 @@ public class CreditController {
     private final CreditRechargeService creditRechargeService;
     private final BillingService billingService;
     private final GiftCardService giftCardService;
+    private final CreditEventStreamService creditEventStreamService;
 
     public CreditController(CreditService creditService,
                             CreditRechargeService creditRechargeService,
                             BillingService billingService,
-                            GiftCardService giftCardService) {
+                            GiftCardService giftCardService,
+                            CreditEventStreamService creditEventStreamService) {
         this.creditService = creditService;
         this.creditRechargeService = creditRechargeService;
         this.billingService = billingService;
         this.giftCardService = giftCardService;
+        this.creditEventStreamService = creditEventStreamService;
     }
 
     @GetMapping("/account")
     public ApiResponse<CreditAccountResponse> account() {
         return ApiResponse.success(creditService.account(AuthContext.get().userId()));
+    }
+
+    @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<SseEmitter> events() {
+        SseEmitter emitter = creditEventStreamService.subscribe(AuthContext.get().userId());
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .header(HttpHeaders.CONNECTION, "keep-alive")
+                .header("X-Accel-Buffering", "no")
+                .body(emitter);
     }
 
     @GetMapping("/logs")

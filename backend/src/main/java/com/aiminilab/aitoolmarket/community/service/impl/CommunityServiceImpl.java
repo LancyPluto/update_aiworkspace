@@ -731,6 +731,10 @@ public class CommunityServiceImpl implements CommunityService {
             AudioMediaRefs audioMedia = extractAudioMedia(resultText);
             post.setCoverUrl(audioMedia.coverUrl() != null ? audioMedia.coverUrl() : audioMedia.mediaUrl());
             post.setMediaUrl(audioMedia.mediaUrl());
+        } else if ("VIDEO".equalsIgnoreCase(modality)) {
+            VideoMediaRefs videoMedia = extractVideoMedia(resultText);
+            post.setCoverUrl(videoMedia.coverUrl() != null ? videoMedia.coverUrl() : videoMedia.mediaUrl());
+            post.setMediaUrl(videoMedia.mediaUrl());
         } else {
             post.setCoverUrl(extractCoverUrl(resultText));
             post.setMediaUrl(null);
@@ -1666,6 +1670,8 @@ public class CommunityServiceImpl implements CommunityService {
 
     private record AudioMediaRefs(String coverUrl, String mediaUrl) {}
 
+    private record VideoMediaRefs(String coverUrl, String mediaUrl) {}
+
     private AudioMediaRefs extractAudioMedia(String contentText) {
         if (contentText == null || contentText.isBlank()) {
             return new AudioMediaRefs(null, null);
@@ -1695,6 +1701,39 @@ public class CommunityServiceImpl implements CommunityService {
         return new AudioMediaRefs(coverUrl, audioUrl);
     }
 
+    private VideoMediaRefs extractVideoMedia(String contentText) {
+        if (contentText == null || contentText.isBlank()) {
+            return new VideoMediaRefs(null, null);
+        }
+        try {
+            JsonNode root = objectMapper.readTree(contentText);
+            String videoUrl = firstVideoUrl(root, "finalVideoUrl", "videoUrl", "mediaUrl", "url", "src");
+            if (videoUrl == null) {
+                JsonNode segments = root.path("segments");
+                if (segments.isArray()) {
+                    for (JsonNode segment : segments) {
+                        videoUrl = firstVideoUrl(segment, "videoUrl", "mediaUrl", "url", "src");
+                        if (videoUrl != null) {
+                            break;
+                        }
+                    }
+                }
+            }
+            String coverUrl = firstImageUrl(root, "coverUrl", "cover_url", "imageUrl", "image_url", "posterUrl", "poster_url");
+            if (coverUrl == null) {
+                coverUrl = findFirstImageUrl(root);
+            }
+            if (videoUrl != null || coverUrl != null) {
+                return new VideoMediaRefs(coverUrl, videoUrl);
+            }
+        } catch (Exception ignored) {
+            // Fall back to regex extraction below.
+        }
+        String videoUrl = findFirstUrlByPredicate(contentText, this::looksLikeVideoUrl);
+        String coverUrl = findFirstUrlByPredicate(contentText, this::looksLikeImageUrl);
+        return new VideoMediaRefs(coverUrl, videoUrl);
+    }
+
     private String firstMediaUrl(JsonNode node, String... keys) {
         if (node == null || node.isMissingNode() || node.isNull()) {
             return null;
@@ -1703,6 +1742,22 @@ public class CommunityServiceImpl implements CommunityService {
             JsonNode child = node.path(key);
             if (child.isTextual() && looksLikeMediaUrl(child.asText())) {
                 return trimUrl(child.asText());
+            }
+        }
+        return null;
+    }
+
+    private String firstVideoUrl(JsonNode node, String... keys) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        for (String key : keys) {
+            JsonNode child = node.path(key);
+            if (child.isTextual()) {
+                String value = trimUrl(child.asText());
+                if (value != null && looksLikeVideoUrl(value)) {
+                    return value;
+                }
             }
         }
         return null;
@@ -1811,6 +1866,38 @@ public class CommunityServiceImpl implements CommunityService {
         return null;
     }
 
+    private String findFirstImageUrl(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (node.isTextual()) {
+            String value = trimUrl(node.asText());
+            return value != null && looksLikeImageUrl(value) ? value : null;
+        }
+        if (node.isObject()) {
+            String direct = firstImageUrl(node, "coverUrl", "cover_url", "imageUrl", "image_url", "posterUrl", "poster_url", "url", "src");
+            if (direct != null) {
+                return direct;
+            }
+            var fields = node.fields();
+            while (fields.hasNext()) {
+                String found = findFirstImageUrl(fields.next().getValue());
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                String found = findFirstImageUrl(child);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
     private String findUrl(JsonNode node) {
         if (node == null || node.isMissingNode() || node.isNull()) {
             return null;
@@ -1850,7 +1937,7 @@ public class CommunityServiceImpl implements CommunityService {
     private boolean looksLikeImageUrl(String value) {
         if (value == null) return false;
         String normalized = value.trim().toLowerCase(Locale.ROOT);
-        return (normalized.startsWith("http://") || normalized.startsWith("https://") || normalized.startsWith("/generated/"))
+        return isSupportedMediaUrlPrefix(normalized)
                 && (normalized.contains(".png") || normalized.contains(".jpg") || normalized.contains(".jpeg")
                 || normalized.contains(".webp") || normalized.contains(".gif"));
     }
@@ -1858,16 +1945,23 @@ public class CommunityServiceImpl implements CommunityService {
     private boolean looksLikeVideoUrl(String value) {
         if (value == null) return false;
         String normalized = value.trim().toLowerCase(Locale.ROOT);
-        return (normalized.startsWith("http://") || normalized.startsWith("https://") || normalized.startsWith("/generated/"))
+        return isSupportedMediaUrlPrefix(normalized)
                 && (normalized.contains(".mp4") || normalized.contains(".webm"));
     }
 
     private boolean looksLikeAudioUrl(String value) {
         if (value == null) return false;
         String normalized = value.trim().toLowerCase(Locale.ROOT);
-        return (normalized.startsWith("http://") || normalized.startsWith("https://") || normalized.startsWith("/generated/"))
+        return isSupportedMediaUrlPrefix(normalized)
                 && (normalized.contains(".mp3") || normalized.contains(".wav") || normalized.contains(".m4a")
                 || normalized.contains(".flac") || normalized.contains(".ogg") || normalized.contains(".aac"));
+    }
+
+    private boolean isSupportedMediaUrlPrefix(String normalized) {
+        return normalized.startsWith("http://")
+                || normalized.startsWith("https://")
+                || normalized.startsWith("/generated/")
+                || normalized.startsWith("/api/v1/assets/");
     }
 
     private String trimUrl(String value) {

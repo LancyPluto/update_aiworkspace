@@ -6,6 +6,6 @@ providers:
     folder: AI Tool Market
     type: file
     disableDeletion: false
-    editable: true
+    allowUiUpdates: false
     options:
       path: /var/lib/grafana/dashboards

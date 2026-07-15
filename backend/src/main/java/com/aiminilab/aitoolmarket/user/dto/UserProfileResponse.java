@@ -1,6 +1,9 @@
 package com.aiminilab.aitoolmarket.user.dto;
 
 import com.aiminilab.aitoolmarket.user.entity.User;
+import com.aiminilab.aitoolmarket.credit.entity.UserMembership;
+
+import java.time.LocalDateTime;
 
 public record UserProfileResponse(
         Long id,
@@ -14,13 +17,20 @@ public record UserProfileResponse(
         String status,
         String phone,
         String email,
-        String membershipPlan
+        String membershipPlan,
+        String membershipStatus,
+        LocalDateTime membershipStartedAt,
+        LocalDateTime membershipExpiresAt,
+        Long pendingMembershipOrderId
 ) {
     public static UserProfileResponse from(User user) {
         return from(user, null);
     }
 
-    public static UserProfileResponse from(User user, String membershipPlan) {
+    public static UserProfileResponse from(User user, UserMembership membership) {
+        String membershipStatus = membership == null ? "NONE" : membership.getStatus();
+        boolean active = "ACTIVE".equals(membershipStatus);
+        boolean pending = "PENDING".equals(membershipStatus);
         return new UserProfileResponse(
                 user.getId(),
                 user.getUsername(),
@@ -33,7 +43,11 @@ public record UserProfileResponse(
                 user.getStatus(),
                 user.getPhone(),
                 user.getEmail(),
-                membershipPlan
+                active ? membership.getPackageCode() : null,
+                membershipStatus,
+                membership == null ? null : membership.getStartedAt(),
+                membership == null ? null : membership.getExpiresAt(),
+                pending ? membership.getOrderId() : null
         );
     }
 }

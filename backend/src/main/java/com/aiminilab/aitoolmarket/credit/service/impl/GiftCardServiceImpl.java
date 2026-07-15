@@ -151,24 +151,19 @@ public class GiftCardServiceImpl implements GiftCardService {
     @Override
     @Transactional
     public void createGiftCardFromOrder(Long userId, Long orderId, Long giftCardPackageId, int credits) {
-        if (orderId != null && giftCardMapper.countByRechargeOrderId(orderId) > 0) {
-            return;
-        }
         GiftCardPackage pkg = packageMapper.selectById(giftCardPackageId);
         if (pkg == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "礼品卡套餐不存在");
         }
 
-        createGiftCard(userId, orderId, giftCardPackageId, credits);
+        createGiftCard(userId, orderId, giftCardPackageId, credits,
+                "ORDER:" + orderId + ":LEGACY:0");
     }
 
     @Override
     @Transactional
     public void createGiftCardsFromOrderItems(Long userId, Long orderId, List<CreditRechargeOrderItem> items) {
         if (items == null || items.isEmpty()) {
-            return;
-        }
-        if (giftCardMapper.countByRechargeOrderId(orderId) > 0) {
             return;
         }
         for (CreditRechargeOrderItem item : items) {
@@ -181,12 +176,13 @@ public class GiftCardServiceImpl implements GiftCardService {
                 continue;
             }
             for (int i = 0; i < quantity; i++) {
-                createGiftCard(userId, orderId, item.getGiftCardPackageId(), item.getCredits());
+                createGiftCard(userId, orderId, item.getGiftCardPackageId(), item.getCredits(),
+                        "ORDER:" + orderId + ":ITEM:" + item.getId() + ":" + i);
             }
         }
     }
 
-    private void createGiftCard(Long userId, Long orderId, Long giftCardPackageId, int credits) {
+    private void createGiftCard(Long userId, Long orderId, Long giftCardPackageId, int credits, String issuanceKey) {
         LocalDateTime now = LocalDateTime.now();
         GiftCard card = new GiftCard();
         card.setCardCode(generateCardCode());
@@ -196,12 +192,13 @@ public class GiftCardServiceImpl implements GiftCardService {
         card.setCredits(credits);
         card.setStatus("UNUSED");
         card.setRechargeOrderId(orderId);
+        card.setIssuanceKey(issuanceKey);
         card.setRedeemedAt(null);
         card.setGiftedFromUserId(null);
         card.setGiftedAt(null);
         card.setCreatedAt(now);
         card.setUpdatedAt(now);
-        giftCardMapper.insert(card);
+        giftCardMapper.insertIssuanceIfAbsent(card);
     }
 
     private Map<Long, GiftCardPackage> loadPackageMap(List<GiftCard> cards) {

@@ -1282,18 +1282,18 @@ class DeepAgentsRuntimeEngine:
                 content=f"<!-- frozen memory snapshot -->\n{workspace_memory_context}",
             ))
 
-        # Emit frozen event so frontend/tracing can see the snapshot state
-        await self.backend.append_event(
-            context.runId,
-            RunEventCreate(
-                eventType=MEMORY_CONTEXT_FROZEN,
-                eventJson=memory_context_trace_payload(
-                    workspace_memory_context,
-                    source="chat",
-                    items=workspace_memory_items,
+        if workspace_memory_context:
+            await self.backend.append_event(
+                context.runId,
+                RunEventCreate(
+                    eventType=MEMORY_CONTEXT_FROZEN,
+                    eventJson=memory_context_trace_payload(
+                        workspace_memory_context,
+                        source="chat",
+                        items=workspace_memory_items,
+                    ),
                 ),
-            ),
-        )
+            )
 
         context_manager = _context_manager(context)
         summary_message = context_manager.format_conversation_summary(context.conversationSummary)
@@ -1757,20 +1757,21 @@ class DeepAgentsRuntimeEngine:
         memory_injection_skipped: bool = False,
     ) -> str:
         workspace_memory_context = self._format_tool_memory_context(context, memory_items)
-        await self.backend.append_event(
-            context.runId,
-            RunEventCreate(
-                eventType=MEMORY_CONTEXT_FROZEN,
-                eventJson=memory_context_trace_payload(
-                    workspace_memory_context,
-                    source="tool_use",
-                    items=memory_items,
-                    prompt_mode=prompt_mode,
-                    policy="skipped" if memory_injection_skipped else ("safe_tool" if memory_items else "empty"),
-                    memory_injection_skipped=memory_injection_skipped,
+        if workspace_memory_context:
+            await self.backend.append_event(
+                context.runId,
+                RunEventCreate(
+                    eventType=MEMORY_CONTEXT_FROZEN,
+                    eventJson=memory_context_trace_payload(
+                        workspace_memory_context,
+                        source="tool_use",
+                        items=memory_items,
+                        prompt_mode=prompt_mode,
+                        policy="safe_tool",
+                        memory_injection_skipped=memory_injection_skipped,
+                    ),
                 ),
-            ),
-        )
+            )
         return workspace_memory_context
 
     async def _fetch_workspace_memory_context(self, context: RunContext) -> str:

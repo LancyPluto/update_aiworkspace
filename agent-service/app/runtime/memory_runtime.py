@@ -29,17 +29,23 @@ class WorkspaceMemoryRuntime:
         self.backend = backend
         self.curator = curator or MemoryCuratorService()
         self.model_client = model_client
+        self._retrieval_cache: dict[tuple[Any, ...], list[WorkspaceMemoryItem]] = {}
 
     async def fetch_items(self, context: RunContext) -> list[WorkspaceMemoryItem]:
         workspace_id = context.workspaceId
         if workspace_id is None:
             return []
+        view = memory_view_for_context(context)
+        limit = memory_retrieval_limit(context)
+        cache_key = self._retrieval_cache_key(context, view=view, limit=limit)
+        cached = self._retrieval_cache.get(cache_key)
+        if cached is not None:
+            return list(cached)
         try:
-            view = memory_view_for_context(context)
             items = await self.backend.retrieve_workspace_memory(
                 workspace_id=workspace_id,
                 query=context.message,
-                limit=memory_retrieval_limit(context),
+                limit=limit,
                 view=view,
                 session_id=context.sessionId,
             )
@@ -56,8 +62,19 @@ class WorkspaceMemoryRuntime:
                     },
                 ),
             )
-            return items
+            self._retrieval_cache[cache_key] = list(items)
+            return list(items)
         except Exception:
+            try:
+                await self.backend.append_event(
+                    context.runId,
+                    RunEventCreate(
+                        eventType=MEMORY_RETRIEVED,
+                        eventJson={"count": 0, "view": view, "items": [], "error": "retrieve_failed"},
+                    ),
+                )
+            except Exception:
+                pass
             return []
 
     async def fetch_tool_items(
@@ -79,11 +96,21 @@ class WorkspaceMemoryRuntime:
         explicit_ids = explicit_memory_ids_from_context(context)
         explicit_request = looks_like_explicit_project_memory_request(context.message) or bool(explicit_ids)
         view = "tool_explicit" if explicit_request else "tool"
+        limit = memory_retrieval_limit(context)
+        cache_key = self._retrieval_cache_key(
+            context,
+            view=view,
+            limit=limit,
+            memory_ids=explicit_ids,
+        )
+        cached = self._retrieval_cache.get(cache_key)
+        if cached is not None:
+            return list(cached)
         try:
             items = await self.backend.retrieve_workspace_memory(
                 workspace_id=workspace_id,
                 query=context.message,
-                limit=memory_retrieval_limit(context),
+                limit=limit,
                 view=view,
                 memory_ids=explicit_ids or None,
                 session_id=context.sessionId,
@@ -105,7 +132,8 @@ class WorkspaceMemoryRuntime:
                     },
                 ),
             )
-            return items
+            self._retrieval_cache[cache_key] = list(items)
+            return list(items)
         except Exception:
             try:
                 await self.backend.append_event(
@@ -118,6 +146,24 @@ class WorkspaceMemoryRuntime:
             except Exception:
                 pass
             return []
+
+    @staticmethod
+    def _retrieval_cache_key(
+        context: RunContext,
+        *,
+        view: str,
+        limit: int,
+        memory_ids: list[int] | None = None,
+    ) -> tuple[Any, ...]:
+        return (
+            context.runId,
+            context.workspaceId,
+            context.sessionId,
+            context.message,
+            view,
+            limit,
+            tuple(memory_ids or ()),
+        )
 
     async def _emit_tool_memory_skipped(self, context: RunContext, *, prompt_mode: str | None = None) -> None:
         await self.backend.append_event(

@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.credit.entity.GiftCard;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
@@ -11,6 +12,20 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 public interface GiftCardMapper extends BaseMapper<GiftCard> {
+
+    @Insert("""
+            INSERT INTO gift_cards(
+                card_code, package_id, owner_user_id, original_user_id, credits, status,
+                recharge_order_id, issuance_key, redeemed_at, gifted_from_user_id, gifted_at,
+                created_at, updated_at
+            ) VALUES (
+                #{card.cardCode}, #{card.packageId}, #{card.ownerUserId}, #{card.originalUserId},
+                #{card.credits}, #{card.status}, #{card.rechargeOrderId}, #{card.issuanceKey},
+                #{card.redeemedAt}, #{card.giftedFromUserId}, #{card.giftedAt},
+                #{card.createdAt}, #{card.updatedAt}
+            ) ON DUPLICATE KEY UPDATE issuance_key = issuance_key
+            """)
+    int insertIssuanceIfAbsent(@Param("card") GiftCard card);
 
     default List<GiftCard> findByOwnerAndStatus(Long userId, String status) {
         LambdaQueryWrapper<GiftCard> wrapper = new LambdaQueryWrapper<GiftCard>()

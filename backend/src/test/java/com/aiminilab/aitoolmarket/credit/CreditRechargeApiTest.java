@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.credit.alipay.AlipayNotification;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayClient;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayRequest;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayResponse;
+import com.aiminilab.aitoolmarket.credit.alipay.AlipayTradeQueryResult;
 import com.aiminilab.aitoolmarket.credit.wechat.NativePrepayRequest;
 import com.aiminilab.aitoolmarket.credit.wechat.NativePrepayResponse;
 import com.aiminilab.aitoolmarket.credit.wechat.WechatNativePayClient;
@@ -15,11 +16,18 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.LocalDateTime;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -62,6 +70,480 @@ class CreditRechargeApiTest {
 
     @MockBean
     private AlipayPagePayClient alipayPagePayClient;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Test
+    void membershipOrderRequiresClientRequestId() throws Exception {
+        String userToken = register("membership_idempotency_required");
+
+        mockMvc.perform(post("/api/v1/credits/recharge-orders")
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "packageId": 1,
+                                  "paymentChannel": "WECHAT_NATIVE"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void sameMembershipAndChannelReusePendingOrderAcrossDevices() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=membership-pending"));
+        String userToken = register("membership_pending_reuse");
+
+        String first = createMembershipOrder(userToken, "WECHAT_NATIVE", "membership-device-a");
+        String second = createMembershipOrder(userToken, "WECHAT_NATIVE", "membership-device-b");
+
+        assertThatJsonOrderId(second, extractOrderId(first));
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM credit_recharge_orders WHERE user_id = (SELECT id FROM users WHERE username = ?)",
+                Integer.class,
+                "membership_pending_reuse"
+        )).isEqualTo(1);
+    }
+
+    @Test
+    void currentUserExposesPendingMembershipWithoutActivePlan() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=membership-profile-pending"));
+        String userToken = register("membership_profile_pending");
+        Long orderId = extractOrderId(createMembershipOrder(
+                userToken, "WECHAT_NATIVE", "membership-profile-pending"));
+
+        mockMvc.perform(get("/api/v1/users/me")
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.membershipStatus").value("PENDING"))
+                .andExpect(jsonPath("$.data.pendingMembershipOrderId").value(orderId.intValue()))
+                .andExpect(jsonPath("$.data.membershipPlan").doesNotExist())
+                .andExpect(jsonPath("$.data.membershipStartedAt").doesNotExist())
+                .andExpect(jsonPath("$.data.membershipExpiresAt").doesNotExist());
+    }
+
+    @Test
+    void sameIdempotencyKeyWithDifferentPayloadIsRejected() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=membership-fingerprint"));
+        when(alipayPagePayClient.createPagePayOrder(any(AlipayPagePayRequest.class)))
+                .thenReturn(AlipayPagePayResponse.pageRedirect("/api/v1/pay/alipay/page/launch?orderNo=idem-conflict"));
+        String userToken = register("membership_idempotency_conflict");
+
+        createMembershipOrder(userToken, "WECHAT_NATIVE", "membership-same-key");
+
+        mockMvc.perform(post("/api/v1/credits/recharge-orders")
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "packageId": 1,
+                                  "paymentChannel": "ALIPAY_PAGE",
+                                  "clientRequestId": "membership-same-key"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_CONFLICT"));
+    }
+
+    @Test
+    void verifiedPaymentRecoversLocallyClosedOrder() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=late-payment"));
+        String userToken = register("membership_late_payment");
+        String orderResponse = createMembershipOrder(userToken, "WECHAT_NATIVE", "membership-late-payment");
+        Long orderId = extractOrderId(orderResponse);
+        String orderNo = extractOrderNo(orderResponse);
+        jdbcTemplate.update("UPDATE credit_recharge_orders SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP WHERE id = ?", orderId);
+
+        when(wechatNativePayClient.parseNotification(any(WechatPayCallbackHeaders.class), anyString()))
+                .thenReturn(new WechatPayNotification(
+                        "wx-test", "mch-test", orderNo, "4200000000000000888",
+                        "NATIVE", "SUCCESS", 1000, "CNY"
+                ));
+
+        postWechatNotify();
+
+        mockMvc.perform(get("/api/v1/credits/recharge-orders/{orderId}", orderId)
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CREDITED"));
+    }
+
+    @Test
+    void wechatNotificationFailureReturnsHttpErrorForPlatformRetry() throws Exception {
+        when(wechatNativePayClient.parseNotification(any(WechatPayCallbackHeaders.class), anyString()))
+                .thenThrow(new IllegalStateException("temporary database failure"));
+
+        mockMvc.perform(post("/api/v1/pay/wechat/native/notify")
+                        .header("Wechatpay-Serial", "PUB_KEY_ID_TEST")
+                        .header("Wechatpay-Signature", "signature")
+                        .header("Wechatpay-Timestamp", "1710000000")
+                        .header("Wechatpay-Nonce", "nonce")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"EV-RETRY\"}"))
+                .andExpect(status().is5xxServerError())
+                .andExpect(jsonPath("$.code").value("FAIL"));
+    }
+
+    @Test
+    void activeMembershipBlocksAnotherPurchaseUntilExpiration() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=membership-active"));
+        String userToken = register("membership_active_block");
+        String orderResponse = createMembershipOrder(userToken, "WECHAT_NATIVE", "membership-active-first");
+
+        when(wechatNativePayClient.parseNotification(any(WechatPayCallbackHeaders.class), anyString()))
+                .thenReturn(new WechatPayNotification(
+                        "wx-test", "mch-test", extractOrderNo(orderResponse), "4200000000000000661",
+                        "NATIVE", "SUCCESS", 1000, "CNY"
+                ));
+        postWechatNotify();
+
+        mockMvc.perform(get("/api/v1/users/me")
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.membershipStatus").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.membershipPlan").value("ci_recharge_1000"))
+                .andExpect(jsonPath("$.data.membershipStartedAt").exists())
+                .andExpect(jsonPath("$.data.membershipExpiresAt").exists())
+                .andExpect(jsonPath("$.data.pendingMembershipOrderId").doesNotExist());
+
+        mockMvc.perform(post("/api/v1/credits/recharge-orders")
+                        .header("Authorization", "Bearer " + userToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "packageId": 1,
+                                  "paymentChannel": "WECHAT_NATIVE",
+                                  "clientRequestId": "membership-active-second"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MEMBERSHIP_ACTIVE"))
+                .andExpect(jsonPath("$.data.expiresAt").exists());
+    }
+
+    @Test
+    void expiredMembershipAllowsNewPurchaseAndClearsOnlyMembershipCredits() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=membership-renew"));
+        RegisteredUser user = registerUser("membership_expired_renew");
+        String orderResponse = createMembershipOrder(user.token(), "WECHAT_NATIVE", "membership-expired-first");
+
+        when(wechatNativePayClient.parseNotification(any(WechatPayCallbackHeaders.class), anyString()))
+                .thenReturn(new WechatPayNotification(
+                        "wx-test", "mch-test", extractOrderNo(orderResponse), "4200000000000000662",
+                        "NATIVE", "SUCCESS", 1000, "CNY"
+                ));
+        postWechatNotify();
+        jdbcTemplate.update("UPDATE user_memberships SET expires_at = ? WHERE user_id = ?",
+                LocalDateTime.now().minusMinutes(1), user.userId());
+
+        createMembershipOrder(user.token(), "WECHAT_NATIVE", "membership-expired-second");
+
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM credit_recharge_orders WHERE user_id = ? AND order_type = 'MEMBERSHIP'",
+                Integer.class, user.userId())).isEqualTo(2);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT membership_balance FROM credit_accounts WHERE user_id = ?",
+                Integer.class, user.userId())).isZero();
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT permanent_balance FROM credit_accounts WHERE user_id = ?",
+                Integer.class, user.userId())).isEqualTo(200);
+    }
+
+    @Test
+    void expiredPendingWechatMembershipMustCloseAtChannelBeforeNewOrder() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=membership-channel-close"));
+        RegisteredUser user = registerUser("membership_channel_close");
+        String first = createMembershipOrder(user.token(), "WECHAT_NATIVE", "membership-close-first");
+        Long firstOrderId = extractOrderId(first);
+        String firstOrderNo = extractOrderNo(first);
+        jdbcTemplate.update("UPDATE credit_recharge_orders SET expires_at = ? WHERE id = ?",
+                LocalDateTime.now().minusMinutes(1), firstOrderId);
+        when(wechatNativePayClient.queryNativeOrder(firstOrderNo))
+                .thenReturn(new WechatPayNotification(
+                        "wx-test", "mch-test", firstOrderNo, "", "NATIVE", "NOTPAY", 1000, "CNY"));
+        when(wechatNativePayClient.closeNativeOrder(firstOrderNo)).thenReturn(true);
+
+        String second = createMembershipOrder(user.token(), "WECHAT_NATIVE", "membership-close-second");
+
+        org.assertj.core.api.Assertions.assertThat(extractOrderId(second)).isNotEqualTo(firstOrderId);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM credit_recharge_orders WHERE id = ?", String.class, firstOrderId))
+                .isEqualTo("CLOSED");
+        verify(wechatNativePayClient).closeNativeOrder(firstOrderNo);
+    }
+
+    @Test
+    void expiredPendingAlipayMembershipMustCloseAtChannelBeforeNewOrder() throws Exception {
+        when(alipayPagePayClient.createPagePayOrder(any(AlipayPagePayRequest.class)))
+                .thenReturn(AlipayPagePayResponse.pageRedirect("/api/v1/pay/alipay/page/launch?orderNo=close-test"));
+        RegisteredUser user = registerUser("membership_alipay_channel_close");
+        String first = createMembershipOrder(user.token(), "ALIPAY_PAGE", "membership-alipay-close-first");
+        Long firstOrderId = extractOrderId(first);
+        String firstOrderNo = extractOrderNo(first);
+        jdbcTemplate.update("UPDATE credit_recharge_orders SET expires_at = ? WHERE id = ?",
+                LocalDateTime.now().minusMinutes(1), firstOrderId);
+        when(alipayPagePayClient.queryOrder(firstOrderNo))
+                .thenReturn(new AlipayTradeQueryResult(firstOrderNo, null, "WAIT_BUYER_PAY", null));
+        when(alipayPagePayClient.closeOrder(firstOrderNo)).thenReturn(true);
+
+        String second = createMembershipOrder(user.token(), "ALIPAY_PAGE", "membership-alipay-close-second");
+
+        org.assertj.core.api.Assertions.assertThat(extractOrderId(second)).isNotEqualTo(firstOrderId);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM credit_recharge_orders WHERE id = ?", String.class, firstOrderId))
+                .isEqualTo("CLOSED");
+        verify(alipayPagePayClient).closeOrder(firstOrderNo);
+    }
+
+    @Test
+    void mismatchedWechatQueryOrderNumberCannotReleaseMembershipSlot() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=wechat-mismatch"));
+        RegisteredUser user = registerUser("membership_wechat_query_mismatch");
+        String first = createMembershipOrder(user.token(), "WECHAT_NATIVE", "membership-wechat-mismatch-first");
+        Long firstOrderId = extractOrderId(first);
+        String firstOrderNo = extractOrderNo(first);
+        jdbcTemplate.update("UPDATE credit_recharge_orders SET expires_at = ? WHERE id = ?",
+                LocalDateTime.now().minusMinutes(1), firstOrderId);
+        when(wechatNativePayClient.queryNativeOrder(firstOrderNo))
+                .thenReturn(new WechatPayNotification(
+                        "wx-test", "mch-test", "OTHER-ORDER", "", "NATIVE", "CLOSED", 1000, "CNY"));
+
+        mockMvc.perform(post("/api/v1/credits/recharge-orders")
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "packageId": 1,
+                                  "paymentChannel": "WECHAT_NATIVE",
+                                  "clientRequestId": "membership-wechat-mismatch-second"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM credit_recharge_orders WHERE id = ?", String.class, firstOrderId))
+                .isEqualTo("WAITING_PAYMENT");
+    }
+
+    @Test
+    void mismatchedAlipayQueryOrderNumberCannotReleaseMembershipSlot() throws Exception {
+        when(alipayPagePayClient.createPagePayOrder(any(AlipayPagePayRequest.class)))
+                .thenReturn(AlipayPagePayResponse.pageRedirect("/api/v1/pay/alipay/page/launch?orderNo=mismatch"));
+        RegisteredUser user = registerUser("membership_alipay_query_mismatch");
+        String first = createMembershipOrder(user.token(), "ALIPAY_PAGE", "membership-alipay-mismatch-first");
+        Long firstOrderId = extractOrderId(first);
+        String firstOrderNo = extractOrderNo(first);
+        jdbcTemplate.update("UPDATE credit_recharge_orders SET expires_at = ? WHERE id = ?",
+                LocalDateTime.now().minusMinutes(1), firstOrderId);
+        when(alipayPagePayClient.queryOrder(firstOrderNo))
+                .thenReturn(new AlipayTradeQueryResult("OTHER-ORDER", null, "TRADE_CLOSED", null));
+
+        mockMvc.perform(post("/api/v1/credits/recharge-orders")
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "packageId": 1,
+                                  "paymentChannel": "ALIPAY_PAGE",
+                                  "clientRequestId": "membership-alipay-mismatch-second"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM credit_recharge_orders WHERE id = ?", String.class, firstOrderId))
+                .isEqualTo("WAITING_PAYMENT");
+    }
+
+    @Test
+    void uncertainWechatPrepayFailureKeepsTheMembershipSlot() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenThrow(new com.aiminilab.aitoolmarket.common.exception.BusinessException(
+                        com.aiminilab.aitoolmarket.common.enums.ErrorCode.PARAM_ERROR, "gateway timeout"));
+        RegisteredUser user = registerUser("membership_wechat_prepay_uncertain");
+
+        mockMvc.perform(post("/api/v1/credits/recharge-orders")
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "packageId": 1,
+                                  "paymentChannel": "WECHAT_NATIVE",
+                                  "clientRequestId": "membership-prepay-uncertain-first"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+        Long firstOrderId = jdbcTemplate.queryForObject(
+                "SELECT id FROM credit_recharge_orders WHERE user_id = ?", Long.class, user.userId());
+
+        String retry = createMembershipOrder(
+                user.token(), "WECHAT_NATIVE", "membership-prepay-uncertain-second");
+
+        org.assertj.core.api.Assertions.assertThat(extractOrderId(retry)).isEqualTo(firstOrderId);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM credit_recharge_orders WHERE id = ?", String.class, firstOrderId))
+                .isEqualTo("WAITING_PAYMENT");
+    }
+
+    @Test
+    void failedWechatPrepayReleasesMembershipOnlyAfterConfirmedChannelClose() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenThrow(new com.aiminilab.aitoolmarket.common.exception.BusinessException(
+                        com.aiminilab.aitoolmarket.common.enums.ErrorCode.PARAM_ERROR, "gateway timeout"))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=prepay-retry"));
+        when(wechatNativePayClient.queryNativeOrder(anyString()))
+                .thenAnswer(invocation -> new WechatPayNotification(
+                        "wx-test", "mch-test", invocation.getArgument(0), "",
+                        "NATIVE", "NOTPAY", 1000, "CNY"));
+        when(wechatNativePayClient.closeNativeOrder(anyString())).thenReturn(true);
+        RegisteredUser user = registerUser("membership_wechat_prepay_closed");
+
+        mockMvc.perform(post("/api/v1/credits/recharge-orders")
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "packageId": 1,
+                                  "paymentChannel": "WECHAT_NATIVE",
+                                  "clientRequestId": "membership-prepay-close-first"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+        Long firstOrderId = jdbcTemplate.queryForObject(
+                "SELECT id FROM credit_recharge_orders WHERE user_id = ?", Long.class, user.userId());
+        String firstOrderNo = jdbcTemplate.queryForObject(
+                "SELECT order_no FROM credit_recharge_orders WHERE id = ?", String.class, firstOrderId);
+
+        String retry = createMembershipOrder(
+                user.token(), "WECHAT_NATIVE", "membership-prepay-close-second");
+
+        org.assertj.core.api.Assertions.assertThat(extractOrderId(retry)).isNotEqualTo(firstOrderId);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM credit_recharge_orders WHERE id = ?", String.class, firstOrderId))
+                .isEqualTo("CLOSED");
+        verify(wechatNativePayClient).closeNativeOrder(firstOrderNo);
+    }
+
+    @Test
+    void pendingMembershipRejectsDifferentPackage() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=membership-package-conflict"));
+        RegisteredUser user = registerUser("membership_pending_package_conflict");
+        jdbcTemplate.update("""
+                INSERT INTO credit_recharge_packages(
+                    package_code, package_name, credits, price_amount, currency, validity_days,
+                    benefits_json, recommended, sort_order, status
+                ) VALUES (?, ?, 2500, 20.00, 'CNY', 60, '[]', 0, 20, 'ACTIVE')
+                """, "ci_recharge_2500_" + user.userId(), "60-day membership");
+        Long otherPackageId = jdbcTemplate.queryForObject(
+                "SELECT id FROM credit_recharge_packages WHERE package_code = ?", Long.class,
+                "ci_recharge_2500_" + user.userId());
+
+        Long pendingOrderId = extractOrderId(
+                createMembershipOrder(user.token(), "WECHAT_NATIVE", "membership-package-first"));
+
+        mockMvc.perform(post("/api/v1/credits/recharge-orders")
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "packageId": %d,
+                                  "paymentChannel": "WECHAT_NATIVE",
+                                  "clientRequestId": "membership-package-second"
+                                }
+                                """.formatted(otherPackageId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MEMBERSHIP_ORDER_PENDING"))
+                .andExpect(jsonPath("$.data.orderId").value(pendingOrderId.intValue()));
+    }
+
+    @Test
+    void concurrentMembershipRequestsCreateOnlyOneOrder() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=membership-concurrent"));
+        RegisteredUser user = registerUser("membership_concurrent_devices");
+
+        CompletableFuture<String> deviceA = CompletableFuture.supplyAsync(
+                () -> createMembershipOrderUnchecked(user.token(), "membership-concurrent-a"));
+        CompletableFuture<String> deviceB = CompletableFuture.supplyAsync(
+                () -> createMembershipOrderUnchecked(user.token(), "membership-concurrent-b"));
+        String first = deviceA.get(10, TimeUnit.SECONDS);
+        String second = deviceB.get(10, TimeUnit.SECONDS);
+
+        assertThatJsonOrderId(second, extractOrderId(first));
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM credit_recharge_orders WHERE user_id = ? AND order_type = 'MEMBERSHIP'",
+                Integer.class, user.userId())).isEqualTo(1);
+        verify(wechatNativePayClient, times(1)).createNativeOrder(any(NativePrepayRequest.class));
+    }
+
+    @Test
+    void concurrentCustomRechargeWithSameKeyReusesOneOrder() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=custom-concurrent"));
+        RegisteredUser user = registerUser("custom_recharge_concurrent");
+
+        CompletableFuture<String> deviceA = CompletableFuture.supplyAsync(
+                () -> createCustomOrderUnchecked(user.token(), "custom-concurrent-key"));
+        CompletableFuture<String> deviceB = CompletableFuture.supplyAsync(
+                () -> createCustomOrderUnchecked(user.token(), "custom-concurrent-key"));
+        String first = deviceA.get(10, TimeUnit.SECONDS);
+        String second = deviceB.get(10, TimeUnit.SECONDS);
+
+        assertThatJsonOrderId(second, extractOrderId(first));
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM credit_recharge_orders WHERE user_id = ? AND order_type = 'CREDITS'",
+                Integer.class, user.userId())).isEqualTo(1);
+        verify(wechatNativePayClient, times(1)).createNativeOrder(any(NativePrepayRequest.class));
+    }
+
+    @Test
+    void giftCardFingerprintIgnoresItemOrder() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=gift-fingerprint"));
+        RegisteredUser user = registerUser("gift_card_fingerprint_order");
+
+        String first = createGiftCardOrder(user.token(), "gift-fingerprint-key", false);
+        String second = createGiftCardOrder(user.token(), "gift-fingerprint-key", true);
+
+        assertThatJsonOrderId(second, extractOrderId(first));
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM credit_recharge_orders WHERE user_id = ? AND order_type = 'GIFT_CARD'",
+                Integer.class, user.userId())).isEqualTo(1);
+    }
+
+    @Test
+    void concurrentGiftCardOrderWithSameKeyPersistsOneCompleteOrder() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=gift-concurrent"));
+        RegisteredUser user = registerUser("gift_card_order_concurrent");
+
+        CompletableFuture<String> deviceA = CompletableFuture.supplyAsync(
+                () -> createGiftCardOrderUnchecked(user.token(), "gift-concurrent-key"));
+        CompletableFuture<String> deviceB = CompletableFuture.supplyAsync(
+                () -> createGiftCardOrderUnchecked(user.token(), "gift-concurrent-key"));
+        String first = deviceA.get(10, TimeUnit.SECONDS);
+        String second = deviceB.get(10, TimeUnit.SECONDS);
+
+        Long orderId = extractOrderId(first);
+        assertThatJsonOrderId(second, orderId);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM credit_recharge_orders WHERE user_id = ? AND order_type = 'GIFT_CARD'",
+                Integer.class, user.userId())).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM credit_recharge_order_items WHERE order_id = ?",
+                Integer.class, orderId)).isEqualTo(2);
+        verify(wechatNativePayClient, times(1)).createNativeOrder(any(NativePrepayRequest.class));
+    }
 
     @Test
     void invitedUserRechargeGrantsReferralBonusOnce() throws Exception {
@@ -405,6 +887,93 @@ class CreditRechargeApiTest {
                 .andExpect(jsonPath("$.data.paymentChannel").value("ALIPAY_PAGE"))
                 .andExpect(jsonPath("$.data.payUrl").value("/api/v1/pay/alipay/page/launch?orderNo=R202606050001"))
                 .andExpect(jsonPath("$.data.qrCodeUrl").doesNotExist());
+    }
+
+    private String createMembershipOrder(String token, String channel, String clientRequestId) throws Exception {
+        return mockMvc.perform(post("/api/v1/credits/recharge-orders")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "packageId": 1,
+                                  "paymentChannel": "%s",
+                                  "clientRequestId": "%s"
+                                }
+                                """.formatted(channel, clientRequestId)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+    }
+
+    private String createMembershipOrderUnchecked(String token, String clientRequestId) {
+        try {
+            return createMembershipOrder(token, "WECHAT_NATIVE", clientRequestId);
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private String createCustomOrderUnchecked(String token, String clientRequestId) {
+        try {
+            return mockMvc.perform(post("/api/v1/credits/recharge-orders/custom")
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "amount": 10.00,
+                                      "paymentChannel": "WECHAT_NATIVE",
+                                      "clientRequestId": "%s"
+                                    }
+                                    """.formatted(clientRequestId)))
+                    .andExpect(status().isOk())
+                    .andReturn()
+                    .getResponse()
+                    .getContentAsString();
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private String createGiftCardOrder(String token, String clientRequestId, boolean reverseItems) throws Exception {
+        String items = reverseItems
+                ? "[{\"giftCardPackageId\":2,\"quantity\":1},{\"giftCardPackageId\":1,\"quantity\":2}]"
+                : "[{\"giftCardPackageId\":1,\"quantity\":2},{\"giftCardPackageId\":2,\"quantity\":1}]";
+        return mockMvc.perform(post("/api/v1/credits/recharge-orders")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "orderType": "GIFT_CARD",
+                                  "giftCardItems": %s,
+                                  "paymentChannel": "WECHAT_NATIVE",
+                                  "clientRequestId": "%s"
+                                }
+                                """.formatted(items, clientRequestId)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+    }
+
+    private String createGiftCardOrderUnchecked(String token, String clientRequestId) {
+        try {
+            return createGiftCardOrder(token, clientRequestId, false);
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private Long extractOrderId(String response) {
+        return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+
+    private String extractOrderNo(String response) {
+        return response.replaceAll("(?s).*\\\"orderNo\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
+    }
+
+    private void assertThatJsonOrderId(String response, Long expectedOrderId) {
+        org.assertj.core.api.Assertions.assertThat(extractOrderId(response)).isEqualTo(expectedOrderId);
     }
 
     private void postWechatNotify() throws Exception {

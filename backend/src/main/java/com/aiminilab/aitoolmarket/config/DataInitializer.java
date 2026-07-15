@@ -634,6 +634,32 @@ public class DataInitializer implements CommandLineRunner {
                 """);
         ensureIndex("admin_operation_logs", "idx_admin_operation_logs_created_at", "CREATE INDEX idx_admin_operation_logs_created_at ON admin_operation_logs(created_at)");
         ensureIndex("admin_operation_logs", "idx_admin_operation_logs_admin_id", "CREATE INDEX idx_admin_operation_logs_admin_id ON admin_operation_logs(admin_id)");
+        ensureTable("auth_security_events", """
+                CREATE TABLE auth_security_events (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  event_type VARCHAR(64) NOT NULL,
+                  result VARCHAR(16) NOT NULL,
+                  method VARCHAR(32) NULL,
+                  user_type VARCHAR(16) NULL,
+                  user_id BIGINT NULL,
+                  account_hash VARCHAR(64) NULL,
+                  account_masked VARCHAR(64) NULL,
+                  failure_reason VARCHAR(128) NULL,
+                  ip_address VARCHAR(64) NULL,
+                  user_agent VARCHAR(512) NULL,
+                  trace_id VARCHAR(64) NULL,
+                  country VARCHAR(64) NULL,
+                  region VARCHAR(64) NULL,
+                  city VARCHAR(64) NULL,
+                  latitude DECIMAL(10,6) NULL,
+                  longitude DECIMAL(10,6) NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
+        ensureIndex("auth_security_events", "idx_auth_security_events_created_at", "CREATE INDEX idx_auth_security_events_created_at ON auth_security_events(created_at)");
+        ensureIndex("auth_security_events", "idx_auth_security_events_type_result", "CREATE INDEX idx_auth_security_events_type_result ON auth_security_events(event_type, result, created_at)");
+        ensureIndex("auth_security_events", "idx_auth_security_events_geo", "CREATE INDEX idx_auth_security_events_geo ON auth_security_events(latitude, longitude, created_at)");
+        ensureIndex("auth_security_events", "idx_auth_security_events_ip_time", "CREATE INDEX idx_auth_security_events_ip_time ON auth_security_events(ip_address, created_at)");
         ensureColumn("users", "avatar_url", "ALTER TABLE users ADD COLUMN avatar_url VARCHAR(512) NULL");
         ensureColumn("users", "bio", "ALTER TABLE users ADD COLUMN bio VARCHAR(280) NULL");
         ensureColumn("users", "auto_publish_assets", "ALTER TABLE users ADD COLUMN auto_publish_assets TINYINT NOT NULL DEFAULT 1");
@@ -927,6 +953,63 @@ public class DataInitializer implements CommandLineRunner {
                   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """);
+        ensureTable("gift_card_packages", """
+                CREATE TABLE gift_card_packages (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  package_code VARCHAR(64) NOT NULL UNIQUE,
+                  package_name VARCHAR(128) NOT NULL,
+                  credits INT NOT NULL,
+                  price_amount DECIMAL(18,2) NOT NULL,
+                  currency VARCHAR(8) NOT NULL DEFAULT 'CNY',
+                  card_theme VARCHAR(32) NOT NULL DEFAULT 'classic',
+                  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+                  sort_order INT NOT NULL DEFAULT 0,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
+        ensureTable("gift_cards", """
+                CREATE TABLE gift_cards (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  card_code VARCHAR(64) NOT NULL UNIQUE,
+                  package_id BIGINT NOT NULL,
+                  owner_user_id BIGINT NOT NULL,
+                  original_user_id BIGINT NOT NULL,
+                  credits INT NOT NULL,
+                  status VARCHAR(32) NOT NULL DEFAULT 'UNUSED',
+                  recharge_order_id BIGINT NULL,
+                  issuance_key VARCHAR(128) NULL,
+                  redeemed_at DATETIME NULL,
+                  gifted_from_user_id BIGINT NULL,
+                  gifted_at DATETIME NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  KEY idx_gift_cards_owner (owner_user_id, status),
+                  KEY idx_gift_cards_code (card_code)
+                )
+                """);
+        ensureColumn("credit_accounts", "membership_balance", "ALTER TABLE credit_accounts ADD COLUMN membership_balance INT NOT NULL DEFAULT 0 AFTER balance");
+        ensureColumn("credit_accounts", "gift_balance", "ALTER TABLE credit_accounts ADD COLUMN gift_balance INT NOT NULL DEFAULT 0 AFTER membership_balance");
+        ensureColumn("credit_accounts", "permanent_balance", "ALTER TABLE credit_accounts ADD COLUMN permanent_balance INT NOT NULL DEFAULT 0 AFTER balance");
+        ensureColumn("credit_accounts", "permanent_frozen", "ALTER TABLE credit_accounts ADD COLUMN permanent_frozen INT NOT NULL DEFAULT 0 AFTER frozen");
+        ensureColumn("credit_accounts", "membership_frozen", "ALTER TABLE credit_accounts ADD COLUMN membership_frozen INT NOT NULL DEFAULT 0 AFTER permanent_frozen");
+        ensureColumn("credit_accounts", "gift_frozen", "ALTER TABLE credit_accounts ADD COLUMN gift_frozen INT NOT NULL DEFAULT 0 AFTER membership_frozen");
+        ensureColumn("credit_accounts", "expired_membership_frozen", "ALTER TABLE credit_accounts ADD COLUMN expired_membership_frozen INT NOT NULL DEFAULT 0 AFTER gift_frozen");
+        ensureColumn("credit_accounts", "total_expired", "ALTER TABLE credit_accounts ADD COLUMN total_expired INT NOT NULL DEFAULT 0 AFTER total_consumed");
+        ensureColumn("credit_accounts", "bucket_schema_version", "ALTER TABLE credit_accounts ADD COLUMN bucket_schema_version INT NOT NULL DEFAULT 1 AFTER total_expired");
+        assertNoPaidMembershipOrdersBeforeBucketMigration();
+        executeSql("""
+                UPDATE credit_accounts
+                SET permanent_balance = CASE
+                        WHEN membership_balance = 0 AND gift_balance = 0 THEN balance
+                        ELSE membership_balance
+                    END,
+                    permanent_frozen = frozen,
+                    membership_balance = 0,
+                    membership_frozen = 0,
+                    bucket_schema_version = 2
+                WHERE bucket_schema_version < 2
+                """);
         ensureTable("credit_recharge_packages", """
                 CREATE TABLE credit_recharge_packages (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -972,11 +1055,36 @@ public class DataInitializer implements CommandLineRunner {
         executeSqlIgnore("ALTER TABLE credit_recharge_orders MODIFY COLUMN package_id BIGINT NULL");
         ensureColumn("credit_recharge_orders", "order_type", "ALTER TABLE credit_recharge_orders ADD COLUMN order_type VARCHAR(32) NOT NULL DEFAULT 'CREDITS'");
         ensureColumn("credit_recharge_orders", "gift_card_package_id", "ALTER TABLE credit_recharge_orders ADD COLUMN gift_card_package_id BIGINT NULL");
+        ensureColumn("credit_recharge_orders", "request_fingerprint", "ALTER TABLE credit_recharge_orders ADD COLUMN request_fingerprint VARCHAR(64) NULL AFTER idempotency_key");
+        ensureColumn("credit_recharge_orders", "package_code_snapshot", "ALTER TABLE credit_recharge_orders ADD COLUMN package_code_snapshot VARCHAR(64) NULL AFTER gift_card_package_id");
+        ensureColumn("credit_recharge_orders", "validity_days_snapshot", "ALTER TABLE credit_recharge_orders ADD COLUMN validity_days_snapshot INT NULL AFTER package_code_snapshot");
+        ensureColumn("gift_cards", "issuance_key", "ALTER TABLE gift_cards ADD COLUMN issuance_key VARCHAR(128) NULL AFTER recharge_order_id");
+        ensureIndex("gift_cards", "uk_gift_cards_issuance_key", "CREATE UNIQUE INDEX uk_gift_cards_issuance_key ON gift_cards(issuance_key)");
         ensureIndex(
                 "credit_recharge_orders",
                 "uk_recharge_user_idem",
                 "CREATE UNIQUE INDEX uk_recharge_user_idem ON credit_recharge_orders(user_id, idempotency_key)"
         );
+        ensureIndex(
+                "credit_recharge_orders",
+                "uk_recharge_external_trade_no",
+                "CREATE UNIQUE INDEX uk_recharge_external_trade_no ON credit_recharge_orders(external_trade_no)"
+        );
+        ensureTable("user_memberships", """
+                CREATE TABLE user_memberships (
+                  user_id BIGINT PRIMARY KEY,
+                  status VARCHAR(16) NOT NULL DEFAULT 'NONE',
+                  package_id BIGINT NULL,
+                  package_code VARCHAR(64) NULL,
+                  order_id BIGINT NULL,
+                  started_at DATETIME NULL,
+                  expires_at DATETIME NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_user_membership_order (order_id),
+                  KEY idx_user_membership_status_expires (status, expires_at)
+                )
+                """);
         ensureTable("credit_recharge_order_items", """
                 CREATE TABLE credit_recharge_order_items (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -1482,6 +1590,32 @@ public class DataInitializer implements CommandLineRunner {
             }
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to ensure database table " + tableName, exception);
+        }
+    }
+
+    private void assertNoPaidMembershipOrdersBeforeBucketMigration() {
+        try (Connection connection = dataSource.getConnection()) {
+            if (!tableExists(connection, "credit_accounts")
+                    || !tableExists(connection, "credit_recharge_orders")
+                    || !columnExists(connection, "credit_accounts", "bucket_schema_version")) {
+                return;
+            }
+            try (ResultSet result = connection.createStatement().executeQuery("""
+                    SELECT COUNT(*)
+                    FROM credit_recharge_orders
+                    WHERE package_id IS NOT NULL
+                      AND status IN ('PAID', 'CREDITED')
+                      AND EXISTS (
+                        SELECT 1 FROM credit_accounts WHERE bucket_schema_version < 2
+                      )
+                    """)) {
+                if (result.next() && result.getLong(1) > 0) {
+                    throw new IllegalStateException(
+                            "Membership balance migration aborted: paid membership orders exist");
+                }
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to validate membership balance migration", exception);
         }
     }
 
