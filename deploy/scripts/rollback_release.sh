@@ -38,6 +38,62 @@ git cat-file -e "$old_sha^{commit}"
 echo "Rolling application code back to $old_sha"
 git reset --hard "$old_sha"
 
+python3 - <<'PY'
+import os
+from pathlib import Path
+
+root_path = Path("/root/ai_tool_market/.env")
+deploy_path = Path("/root/ai_tool_market/deploy/.env")
+
+
+def read_env(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.exists():
+        return values
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "=" not in line or line.lstrip().startswith("#"):
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
+root = read_env(root_path)
+deploy = read_env(deploy_path)
+merged = {**deploy, **root}
+merged["CADVISOR_IMAGE"] = os.environ["CADVISOR_IMAGE"]
+
+critical_keys = (
+    "JWT_SECRET",
+    "INTERNAL_API_TOKEN",
+    "GRAFANA_ADMIN_PASSWORD",
+    "CADVISOR_IMAGE",
+)
+for key in critical_keys:
+    if key == "CADVISOR_IMAGE":
+        continue
+    if root.get(key):
+        merged[key] = root[key]
+
+invalid = {
+    "JWT_SECRET": {"", "local-dev-secret", "replace-with-a-strong-jwt-secret"},
+    "INTERNAL_API_TOKEN": {"", "local-internal-token", "replace-with-internal-token"},
+}
+minimum_length = {"JWT_SECRET": 32, "INTERNAL_API_TOKEN": 32}
+for key, defaults in invalid.items():
+    value = merged.get(key, "").strip().strip('"').strip("'")
+    if value in defaults or len(value) < minimum_length[key]:
+        raise SystemExit(f"rollback env restore failed: {key} is missing, default, or too short")
+
+lines = deploy_path.read_text(encoding="utf-8", errors="replace").splitlines() if deploy_path.exists() else []
+keys = set(merged)
+out = [line for line in lines if line.split("=", 1)[0].strip() not in keys]
+out.extend(f"{key}={value}" for key, value in merged.items())
+deploy_path.parent.mkdir(parents=True, exist_ok=True)
+deploy_path.write_text("\n".join(out) + "\n", encoding="utf-8")
+print("restored production env for rollback")
+PY
+
 cd "$REMOTE_DIR/deploy"
 compose_args=(-f docker-compose.yml -f docker-compose.nginx.yml)
 if [ -f docker-compose.monitoring.yml ]; then

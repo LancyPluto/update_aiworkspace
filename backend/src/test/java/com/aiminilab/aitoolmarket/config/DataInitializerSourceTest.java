@@ -46,10 +46,14 @@ class DataInitializerSourceTest {
     }
 
     @Test
-    void membershipMigrationUsesExplicitSqlSignalGuard() throws Exception {
+    void membershipMigrationOnlyGuardsActualMembershipOrders() throws Exception {
         String migration = Files.readString(Path.of("../sql/087_membership_and_recharge_idempotency.sql"));
+        String source = Files.readString(Path.of("src/main/java/com/aiminilab/aitoolmarket/config/DataInitializer.java"));
 
         assertThat(migration).contains("SIGNAL SQLSTATE '45000'");
+        assertThat(migration).contains("order_type = 'MEMBERSHIP'");
+        assertThat(source).contains("order_type = 'MEMBERSHIP'");
+        assertThat(migration).doesNotContain("WHERE package_id IS NOT NULL\n    AND status IN ('PAID', 'CREDITED')");
         assertThat(migration).doesNotContain("CREATE TEMPORARY TABLE membership_migration_guard");
     }
 }

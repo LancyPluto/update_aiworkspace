@@ -184,6 +184,23 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn(f"CADVISOR_IMAGE:-{image}", rollback)
         self.assertIn("export CADVISOR_IMAGE", rollback)
 
+    def test_rollback_restores_production_env_after_git_reset(self) -> None:
+        rollback = self.read("deploy/scripts/rollback_release.sh")
+        reset = rollback.index('git reset --hard "$old_sha"')
+        restore = rollback.index("restored production env for rollback")
+        compose = rollback.index('docker compose "${compose_args[@]}" config --services')
+
+        self.assertLess(reset, restore)
+        self.assertLess(restore, compose)
+        for key in (
+            "JWT_SECRET",
+            "INTERNAL_API_TOKEN",
+            "GRAFANA_ADMIN_PASSWORD",
+            "CADVISOR_IMAGE",
+        ):
+            self.assertIn(key, rollback)
+        self.assertIn("rollback env restore failed", rollback)
+
     def test_monitoring_rollback_recreates_old_revision_stack(self) -> None:
         rollback = self.read("deploy/scripts/rollback_release.sh")
         self.assertIn(

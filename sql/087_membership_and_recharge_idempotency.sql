@@ -9,7 +9,7 @@ BEGIN
 
   SELECT COUNT(*) INTO paid_membership_orders
   FROM credit_recharge_orders
-  WHERE package_id IS NOT NULL
+  WHERE order_type = 'MEMBERSHIP'
     AND status IN ('PAID', 'CREDITED');
 
   IF paid_membership_orders > 0 THEN

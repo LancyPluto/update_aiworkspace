@@ -1603,7 +1603,7 @@ public class DataInitializer implements CommandLineRunner {
             try (ResultSet result = connection.createStatement().executeQuery("""
                     SELECT COUNT(*)
                     FROM credit_recharge_orders
-                    WHERE package_id IS NOT NULL
+                    WHERE order_type = 'MEMBERSHIP'
                       AND status IN ('PAID', 'CREDITED')
                       AND EXISTS (
                         SELECT 1 FROM credit_accounts WHERE bucket_schema_version < 2
