@@ -234,6 +234,9 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn('alloy) container="ai-supermarket-alloy"', rollback)
         self.assertIn('cadvisor) container="ai-supermarket-cadvisor"', rollback)
         self.assertIn('docker rm -f "$container"', rollback)
+        self.assertIn("monitoring_health_contract_supported", rollback)
+        self.assertIn('docker port "$container" "${container_port}/tcp"', rollback)
+        self.assertIn("old revision lacks loopback monitoring endpoints", rollback)
 
     def test_default_and_nginx_only_rollback_restore_nginx(self) -> None:
         rollback = self.read("deploy/scripts/rollback_release.sh")
@@ -270,10 +273,22 @@ class DeployContractTests(unittest.TestCase):
 
     def test_nginx_only_marks_content_addressed_generated_media_immutable(self) -> None:
         config = self.read("deploy/nginx/snippets/app_locations.conf")
-        self.assertIn("[0-9a-f]{40}", config)
+        self.assertIn(
+            'location ~* "^/generated/(?:.*/)?[0-9a-f]{40}'
+            '(?:\\.[a-z0-9]+)?(?:\\.[a-z0-9-]+\\.[a-z0-9]+)?$" {',
+            config,
+        )
         self.assertIn("max-age=31536000, immutable", config)
         self.assertIn("max-age=300, must-revalidate", config)
         self.assertEqual(config.count("proxy_hide_header Cache-Control"), 2)
+
+    def test_deploy_contracts_run_real_nginx_syntax_validation(self) -> None:
+        workflow = self.read(".github/workflows/dev-delivery.yml")
+        self.assertIn("nginx -t", workflow)
+        self.assertIn('cert_dir="$(mktemp -d)"', workflow)
+        self.assertIn("--add-host backend:127.0.0.1", workflow)
+        self.assertIn("--add-host admin-frontend:127.0.0.1", workflow)
+        self.assertNotIn("deploy/nginx/wlcloudai.com.key", workflow)
 
 
 if __name__ == "__main__":

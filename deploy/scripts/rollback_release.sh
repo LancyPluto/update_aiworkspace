@@ -165,6 +165,25 @@ remove_failed_monitoring_container() {
   fi
 }
 
+monitoring_loopback_endpoint_available() {
+  local container="$1"
+  local container_port="$2"
+  local binding
+  while IFS= read -r binding; do
+    case "$binding" in
+      127.0.0.1:*|\[::1\]:*) return 0 ;;
+    esac
+  done < <(docker port "$container" "${container_port}/tcp" 2>/dev/null || true)
+  return 1
+}
+
+monitoring_health_contract_supported() {
+  monitoring_loopback_endpoint_available ai-supermarket-grafana 3000 \
+    && monitoring_loopback_endpoint_available ai-supermarket-prometheus 9090 \
+    && monitoring_loopback_endpoint_available ai-supermarket-loki 3100 \
+    && monitoring_loopback_endpoint_available ai-supermarket-alloy 12345
+}
+
 require_monitoring=1
 if [ "${#missing_monitoring_services[@]}" -gt 0 ]; then
   require_monitoring=0
@@ -196,6 +215,11 @@ if [ "$require_monitoring" -eq 1 ]; then
 elif [ "$monitoring_requested" = true ] && [ "${#available_monitoring_services[@]}" -gt 0 ]; then
   echo "Restoring old revision monitoring stack: ${available_monitoring_services[*]}"
   docker compose "${compose_args[@]}" up -d --force-recreate "${available_monitoring_services[@]}"
+fi
+
+if [ "$require_monitoring" -eq 1 ] && ! monitoring_health_contract_supported; then
+  require_monitoring=0
+  echo "Monitoring compatibility mode: old revision lacks loopback monitoring endpoints required by the current verifier" >&2
 fi
 
 if [ "$require_monitoring" -eq 1 ]; then
