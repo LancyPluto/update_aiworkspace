@@ -280,6 +280,10 @@ class MonitoringContractTests(unittest.TestCase):
             )
 
         panel_1 = self.panel(dashboard, 1)
+        panel_1_description = panel_1.get("description", "")
+        self.assertIn("明确 down 为故障", panel_1_description)
+        self.assertIn("采集或序列缺失为无数据", panel_1_description)
+        self.assertNotIn("依赖缺失按故障处理", panel_1_description)
         panel_1_prometheus_targets = [
             target
             for target in panel_1.get("targets", [])
@@ -367,11 +371,32 @@ class MonitoringContractTests(unittest.TestCase):
             'min(up{job="backend-actuator"}) or on() vector(0)',
             chain_expression,
         )
-        self.assertRegex(compact_chain_expression, r"==bool0\).*?\*3")
-        self.assertRegex(
-            compact_chain_expression,
-            r"<bool.*?prometheus_sd_discovered_targets.*?\).*?\*1",
+        expected_target_selector = (
+            'ai_monitoring_expected_target{component=~"${component:regex}"}'
         )
+        self.assertGreaterEqual(chain_expression.count(expected_target_selector), 2)
+        expected_count_with_fallback = (
+            f"(count({expected_target_selector})oron()vector(0))"
+        )
+        discovered_count_with_fallback = (
+            "(count(prometheus_sd_discovered_targets{"
+            'config=~"backend-actuator|agent-service|worker"})'
+            "oron()vector(0))"
+        )
+        up_count_with_fallback = (
+            '(count(up{job=~"backend-actuator|agent-service|worker"})'
+            "oron()vector(0))"
+        )
+        self.assertIn(
+            f"{discovered_count_with_fallback}<bool"
+            f"{expected_count_with_fallback}",
+            compact_chain_expression,
+        )
+        self.assertIn(
+            f"{up_count_with_fallback}<bool{expected_count_with_fallback}",
+            compact_chain_expression,
+        )
+        self.assertRegex(compact_chain_expression, r"==bool0\).*?\*3")
         self.assertRegex(compact_chain_expression, r"<bool4\).*?\*1")
 
         panel_5_p95_targets = [
@@ -677,6 +702,69 @@ class MonitoringContractTests(unittest.TestCase):
             r'      - targets: \["loki:3100"\][ \t]*\r?\n'
             r"        labels:[ \t]*\r?\n"
             r"          service: loki[ \t]*$",
+        )
+
+    def test_ops_command_center_declares_expected_core_targets(self) -> None:
+        rules_path = (
+            ROOT
+            / "deploy/monitoring/prometheus/rules/ops-command-center.yml"
+        )
+        self.assertTrue(
+            rules_path.exists(),
+            "ops command center expected-target rules file missing",
+        )
+        rules = rules_path.read_text(encoding="utf-8")
+        self.assertNotIn("alert:", rules)
+        all_record_keys = re.findall(
+            r"(?m)^[ \t]*(?:-[ \t]*)?record[ \t]*:",
+            rules,
+        )
+        self.assertEqual(3, len(all_record_keys))
+        record_blocks = re.findall(
+            r"(?ms)^[ \t]*-[ \t]*record:[ \t]*"
+            r"ai_monitoring_expected_target[ \t]*$"
+            r".*?(?=^[ \t]*-[ \t]*(?:record|alert):|\Z)",
+            rules,
+        )
+        self.assertEqual(3, len(record_blocks))
+        actual_target_pairs = set()
+        for block in record_blocks:
+            expressions = re.findall(
+                r"(?m)^[ \t]+expr:[ \t]*(\S(?:.*\S)?)[ \t]*$",
+                block,
+            )
+            self.assertEqual(["vector(1)"], expressions)
+            components = re.findall(
+                r"(?m)^[ \t]+component:[ \t]*(\S+)[ \t]*$",
+                block,
+            )
+            jobs = re.findall(
+                r"(?m)^[ \t]+job:[ \t]*(\S+)[ \t]*$",
+                block,
+            )
+            self.assertEqual(1, len(components))
+            self.assertEqual(1, len(jobs))
+            actual_target_pairs.add((components[0], jobs[0]))
+        self.assertEqual(
+            {
+                ("backend", "backend-actuator"),
+                ("agent-service", "agent-service"),
+                ("worker", "worker"),
+            },
+            actual_target_pairs,
+        )
+
+        prometheus = self.read("deploy/monitoring/prometheus/prometheus.yml")
+        self.assertRegex(
+            prometheus,
+            r"(?m)^rule_files:[ \t]*\r?\n"
+            r"[ \t]+-[ \t]+/etc/prometheus/rules/\*\.yml[ \t]*$",
+        )
+        compose = self.read("deploy/docker-compose.monitoring.yml")
+        self.assertRegex(
+            compose,
+            r"(?m)^[ \t]+-[ \t]+\./monitoring/prometheus/rules:"
+            r"/etc/prometheus/rules:ro[ \t]*$",
         )
 
     def test_container_logs_dashboard_supports_all_filters_and_empty_service(self) -> None:
