@@ -84,13 +84,16 @@ class ProxyConfigServiceTest {
 
         ArgumentCaptor<Map<String, String>> captor = ArgumentCaptor.forClass(Map.class);
         verify(systemSettingService).updateSettings(captor.capture(), org.mockito.ArgumentMatchers.eq(8L));
-        assertThat(captor.getValue()).containsEntry(
-                "outbound.proxy.url",
-                "socks5://proxy%20user:p%40ss%20word@8.8.8.8:1080"
-        );
+        assertThat(captor.getValue())
+                .containsEntry("outbound.proxy.url", "http://host.docker.internal:7890")
+                .containsEntry("outbound.proxy.manualProtocol", "SOCKS5")
+                .containsEntry("outbound.proxy.manualHost", "8.8.8.8")
+                .containsEntry("outbound.proxy.manualPort", "1080")
+                .containsEntry("outbound.proxy.manualUsername", "proxy user")
+                .containsEntry("outbound.proxy.manualPassword", "p@ss word");
         assertThat(response.manualPasswordConfigured()).isTrue();
         assertThat(response.manualUsernameMasked()).isEqualTo("pr***er");
-        assertThat(response.proxyUrlMasked()).isEqualTo("socks5://pr***er:***@8.8.8.8:1080");
+        assertThat(response.proxyUrlMasked()).isEqualTo("http://host.docker.internal:7890");
     }
 
     @Test

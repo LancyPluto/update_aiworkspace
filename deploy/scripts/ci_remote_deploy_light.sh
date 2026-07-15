@@ -100,7 +100,7 @@ read_secret_snapshot() {
   python3 - <<'PY'
 from pathlib import Path
 
-SECRET_KEYS = ("JWT_SECRET", "INTERNAL_API_TOKEN")
+SECRET_KEYS = ("JWT_SECRET", "INTERNAL_API_TOKEN", "MIHOMO_CONTROLLER_SECRET")
 root = Path("/root/ai_tool_market")
 merged: dict[str, str] = {}
 for rel in (".env", "deploy/.env"):
@@ -140,12 +140,13 @@ ASSET_PRIVATE_CACHE_CONTROL=private,max-age=3600
 ASSET_LEGACY_CACHE_CONTROL=public,max-age=300,must-revalidate
 MEDIA_VIDEO_PREVIEW_ENABLED=true
 VITE_MEDIA_DELIVERY_OPTIMIZATION=true
+MIHOMO_ENABLED=true
 HTTP_PROXY=http://host.docker.internal:7890
 HTTPS_PROXY=http://host.docker.internal:7890
 CONTAINER_HTTP_PROXY=http://host.docker.internal:7890
 CONTAINER_HTTPS_PROXY=http://host.docker.internal:7890
-NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat
-CONTAINER_NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat
+NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,.klingai.com,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat
+CONTAINER_NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,.klingai.com,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat
 OSS_ENDPOINT=oss-cn-guangzhou.aliyuncs.com
 OSS_PUBLIC_BUCKET=wlcloudai-assets-public
 OSS_PRIVATE_BUCKET=wlcloudai-assets-private
@@ -283,6 +284,7 @@ data = read_env()
 jwt = data.get("JWT_SECRET", "")
 internal = data.get("INTERNAL_API_TOKEN", "")
 grafana_password = data.get("GRAFANA_ADMIN_PASSWORD", "")
+mihomo_secret = data.get("MIHOMO_CONTROLLER_SECRET", "")
 if jwt in ("", DEFAULT_JWT) or len(jwt) < MIN_JWT_LEN:
     upsert("JWT_SECRET", secrets.token_urlsafe(48))
     print("bootstrapped JWT_SECRET for production")
@@ -292,12 +294,15 @@ if internal in ("", DEFAULT_INTERNAL):
 if grafana_password in ("", DEFAULT_GRAFANA_PASSWORD):
     upsert("GRAFANA_ADMIN_PASSWORD", INITIAL_GRAFANA_PASSWORD)
     print("initialized GRAFANA_ADMIN_PASSWORD for production")
+if not mihomo_secret:
+    upsert("MIHOMO_CONTROLLER_SECRET", secrets.token_urlsafe(32))
+    print("bootstrapped MIHOMO_CONTROLLER_SECRET for production")
 
 # docker compose interpolates JWT_SECRET from deploy/.env — mirror secrets there.
 root = read_env()
 deploy = Path("/root/ai_tool_market/deploy/.env")
 lines = deploy.read_text(encoding="utf-8", errors="replace").splitlines() if deploy.exists() else []
-for key in ("JWT_SECRET", "INTERNAL_API_TOKEN", "GRAFANA_ADMIN_PASSWORD"):
+for key in ("JWT_SECRET", "INTERNAL_API_TOKEN", "GRAFANA_ADMIN_PASSWORD", "MIHOMO_CONTROLLER_SECRET"):
     value = root.get(key)
     if not value:
         continue
@@ -329,8 +334,9 @@ from pathlib import Path
 DEFAULTS = {
     "JWT_SECRET": {"", "local-dev-secret", "replace-with-a-strong-jwt-secret"},
     "INTERNAL_API_TOKEN": {"", "local-internal-token", "replace-with-internal-token"},
+    "MIHOMO_CONTROLLER_SECRET": {""},
 }
-MIN_LENGTH = {"JWT_SECRET": 32, "INTERNAL_API_TOKEN": 32}
+MIN_LENGTH = {"JWT_SECRET": 32, "INTERNAL_API_TOKEN": 32, "MIHOMO_CONTROLLER_SECRET": 32}
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -393,6 +399,10 @@ fi
 
 cd "\$REMOTE_DIR/deploy"
 COMPOSE_ARGS=(-f docker-compose.yml -f docker-compose.nginx.yml)
+if grep -Eqi '^MIHOMO_ENABLED=true$' "\$REMOTE_DIR/.env"; then
+  COMPOSE_ARGS+=(-f docker-compose.proxy.yml)
+  echo "Mihomo overlay enabled"
+fi
 if [ -f docker-compose.monitoring.yml ]; then
   COMPOSE_ARGS+=(-f docker-compose.monitoring.yml)
 fi
@@ -411,6 +421,15 @@ rollback_on_failure() {
   exit "\$status"
 }
 trap rollback_on_failure ERR
+
+if docker inspect ai-supermarket-mihomo >/dev/null 2>&1; then
+  mihomo_config_files="\$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' ai-supermarket-mihomo 2>/dev/null || true)"
+  if [[ "\$mihomo_config_files" != *docker-compose.proxy.yml* ]]; then
+    echo "Removing legacy Mihomo container before managed overlay startup"
+    docker rm -f ai-supermarket-mihomo
+  fi
+fi
+docker compose "\${COMPOSE_ARGS[@]}" up -d mihomo
 
 echo "DEPLOY_SERVICES=\$DEPLOY_SERVICES" | tee -a "\$REMOTE_DIR/deploy/logs/deploy-history.log"
 

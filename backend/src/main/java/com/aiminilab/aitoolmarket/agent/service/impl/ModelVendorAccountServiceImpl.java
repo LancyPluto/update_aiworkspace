@@ -235,7 +235,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
 
     private boolean isOpenAiLikeVendor(ModelVendorAccount account) {
         String vendor = account == null || account.getVendorCode() == null ? "" : account.getVendorCode().trim().toLowerCase(Locale.ROOT);
-        return "openai".equals(vendor) || "openai_gateway".equals(vendor);
+        return "openai".equals(vendor) || "openai_gateway".equals(vendor) || "minimax".equals(vendor);
     }
 
     private AgentModelConfig selectLinkedModelForAccountTest(ModelVendorAccount account) {
@@ -846,6 +846,9 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
             int status = response.statusCode();
             if (status == 401 || status == 403) {
                 return new MediaGatewayProbeResult(false, "API Key 无效或权限不足（HTTP " + status + "）");
+            }
+            if (status == 404 || status == 405) {
+                return new MediaGatewayProbeResult(true, "网关可达，但未提供 /models（HTTP " + status + "）");
             }
             if (status >= 200 && status < 500) {
                 return new MediaGatewayProbeResult(true, "网关鉴权通过（HTTP " + status + "）");

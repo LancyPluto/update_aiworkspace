@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 class CreditEventStreamServiceTest {
 
@@ -55,6 +56,20 @@ class CreditEventStreamServiceTest {
         assertThat(service.connectionCount(7L)).isZero();
     }
 
+    @Test
+    void doesNotCompleteWithErrorAfterContainerReportsBroadcastFailure() {
+        CreditEventStreamService service = new CreditEventStreamService(
+                10,
+                60_000L,
+                RacingErrorEmitter::new
+        );
+        service.subscribe(7L);
+
+        assertThatCode(() -> service.publishAccountChanged(7L))
+                .doesNotThrowAnyException();
+        assertThat(service.connectionCount(7L)).isZero();
+    }
+
     private static final class TrackingEmitter extends SseEmitter {
         private final AtomicInteger completed;
 
@@ -84,6 +99,28 @@ class CreditEventStreamServiceTest {
                 throw new IOException("connection closed");
             }
             super.send(builder);
+        }
+    }
+
+    private static final class RacingErrorEmitter extends SseEmitter {
+        private int sendCount;
+
+        private RacingErrorEmitter(Long timeout) {
+            super(timeout);
+        }
+
+        @Override
+        public void send(SseEventBuilder builder) throws IOException {
+            sendCount++;
+            if (sendCount > 1) {
+                throw new IOException("connection closed");
+            }
+            super.send(builder);
+        }
+
+        @Override
+        public synchronized void completeWithError(Throwable ex) {
+            throw new IllegalStateException("AsyncContext cannot be used after onError");
         }
     }
 }

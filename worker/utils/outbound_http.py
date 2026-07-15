@@ -11,6 +11,7 @@ from requests import PreparedRequest, Request
 
 
 DEFAULT_NO_PROXY_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "backend", "host.docker.internal"}
+PLATFORM_MEDIA_HOSTS = {"cdn.wlcloudai.com"}
 
 
 @dataclass(frozen=True)
@@ -63,7 +64,7 @@ class OutboundRequestsClient:
 
     def _should_bypass_proxy(self, url: str) -> bool:
         hostname = (urlparse(url).hostname or "").lower()
-        return not hostname or hostname in self.policy.no_proxy_hosts
+        return not hostname or hostname in self.policy.no_proxy_hosts or hostname in PLATFORM_MEDIA_HOSTS
 
 
 def resolve_outbound_proxy_policy(model_config: dict[str, Any] | None = None, *, extra_auth_json: str | None = None) -> OutboundProxyPolicy:

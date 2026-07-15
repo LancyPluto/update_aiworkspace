@@ -73,7 +73,6 @@ public class ModelVendorAccountMigrationServiceImpl implements ModelVendorAccoun
         upgradeBalanceQueryModes();
         downgradeOpenAiRestBalanceModes();
         downgradeUnsupportedRestBalanceModes();
-        consolidateDuplicateAccounts();
     }
 
     private void downgradeOpenAiRestBalanceModes() {

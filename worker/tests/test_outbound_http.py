@@ -77,3 +77,31 @@ def test_outbound_client_bypasses_proxy_for_ipv6_loopback_by_default():
 
     assert session.trust_env is False
     assert session.proxies == {}
+
+
+def test_outbound_client_bypasses_proxy_for_platform_media_host():
+    client = OutboundRequestsClient.from_model_config(
+        {
+            "proxyPolicy": {
+                "enabled": True,
+                "proxyUrl": "socks5://proxy.example:1080",
+                "noProxyHosts": ["localhost", "backend"],
+            }
+        }
+    )
+
+    with patch("utils.outbound_http.requests.Session") as session_factory:
+        session = session_factory.return_value.__enter__.return_value
+        session.proxies = {}
+        session.request.return_value = FakeResponse()
+
+        client.get("https://cdn.wlcloudai.com/images/reference.png")
+
+    assert session.trust_env is False
+    assert session.proxies == {}
+
+
+def test_worker_requests_dependency_includes_socks_support():
+    requirements = (WORKER_ROOT / "requirements.txt").read_text(encoding="utf-8").lower().splitlines()
+
+    assert any(line.strip().startswith("requests[socks]") for line in requirements)
