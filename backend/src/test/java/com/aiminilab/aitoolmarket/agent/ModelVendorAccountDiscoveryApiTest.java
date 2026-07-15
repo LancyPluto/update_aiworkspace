@@ -73,6 +73,52 @@ class ModelVendorAccountDiscoveryApiTest {
     }
 
     @Test
+    void minimaxAccountUsesModelsProbeInsteadOfSendingAChatRequest() throws Exception {
+        HttpServer server = modelsServer("""
+                {
+                  "object": "list",
+                  "data": [
+                    {"id": "MiniMax-M2.7", "object": "model"}
+                  ]
+                }
+                """);
+        try {
+            String adminToken = loginAdmin();
+            Long accountId = createVendorAccount(adminToken, "minimax", "MiniMax models probe",
+                    "http://127.0.0.1:%d/v1".formatted(server.getAddress().getPort()));
+
+            mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
+                            .header("Authorization", "Bearer " + adminToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.success").value(true))
+                    .andExpect(jsonPath("$.data.provider").value("minimax"))
+                    .andExpect(jsonPath("$.data.modelName").value("MiniMax-M2.7"))
+                    .andExpect(jsonPath("$.data.account.healthStatus").value("OK"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void minimaxAccountReportsReachableWhenLegacyGatewayHasNoModelsEndpoint() throws Exception {
+        HttpServer server = statusServer(404, "<html><body>404 Not Found</body></html>");
+        try {
+            String adminToken = loginAdmin();
+            Long accountId = createVendorAccount(adminToken, "minimax", "MiniMax legacy gateway",
+                    "http://127.0.0.1:%d".formatted(server.getAddress().getPort()));
+
+            mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
+                            .header("Authorization", "Bearer " + adminToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.success").value(true))
+                    .andExpect(jsonPath("$.data.message").value(org.hamcrest.Matchers.containsString("未提供 /models")))
+                    .andExpect(jsonPath("$.data.account.healthStatus").value("OK"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void accountProbeReportsCredentialFailureForUnauthorizedGateway() throws Exception {
         HttpServer server = statusServer(401, "{\"error\":\"unauthorized\"}");
         try {

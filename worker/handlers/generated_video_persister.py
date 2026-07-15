@@ -53,10 +53,15 @@ class GeneratedVideoPersister:
     _PREVIEW_TARGET_WIDTH = 480
     _PREVIEW_CRF = 28
     _PREVIEW_SLOTS = threading.BoundedSemaphore(value=2)
+    _MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
+    _MAX_DOWNLOAD_ATTEMPTS = 3
+    _RETRY_BASE_DELAY_SECONDS = 0.5
 
     def __init__(self) -> None:
         self.output_dir = asset_storage.local_root
         self.timeout = (10, 300)
+        self.session = requests.Session()
+        self.session.trust_env = False
 
     def persist_video_url(self, *, task_id: int, source_url: str, index: int = 1) -> dict[str, str]:
         video_bytes, content_type = self._download(source_url)
@@ -197,19 +202,58 @@ class GeneratedVideoPersister:
         return None
 
     def _download(self, source_url: str) -> tuple[bytes, str | None]:
-        try:
-            with safe_get(source_url, stream=True, timeout=self.timeout) as response:
-                response.raise_for_status()
-                content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
-                chunks: list[bytes] = []
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    if chunk:
+        for attempt in range(1, self._MAX_DOWNLOAD_ATTEMPTS + 1):
+            try:
+                with safe_get(
+                    source_url,
+                    session=self.session,
+                    stream=True,
+                    timeout=self.timeout,
+                ) as response:
+                    response.raise_for_status()
+                    content_length = self._content_length(response.headers.get("Content-Length"))
+                    if content_length is not None and content_length > self._MAX_DOWNLOAD_BYTES:
+                        raise GeneratedVideoPersistError("generated video exceeds 50MB download limit")
+                    content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+                    chunks: list[bytes] = []
+                    total_bytes = 0
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if not chunk:
+                            continue
+                        total_bytes += len(chunk)
+                        if total_bytes > self._MAX_DOWNLOAD_BYTES:
+                            raise GeneratedVideoPersistError("generated video exceeds 50MB download limit")
                         chunks.append(chunk)
-        except UrlSecurityError as exc:
-            raise GeneratedVideoPersistError(f"video URL rejected for security: {exc}") from exc
-        except requests.RequestException as exc:
-            raise GeneratedVideoPersistError(f"download generated video failed: {exc}") from exc
-        return b"".join(chunks), content_type or None
+                return b"".join(chunks), content_type or None
+            except UrlSecurityError as exc:
+                raise GeneratedVideoPersistError(f"video URL rejected for security: {exc}") from exc
+            except GeneratedVideoPersistError:
+                raise
+            except (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError) as exc:
+                if attempt >= self._MAX_DOWNLOAD_ATTEMPTS:
+                    raise GeneratedVideoPersistError(f"download generated video failed: {exc}") from exc
+                delay = self._RETRY_BASE_DELAY_SECONDS * attempt
+                logger.warning(
+                    "Generated video download interrupted, retrying attempt=%s/%s delay=%.1fs: %s",
+                    attempt,
+                    self._MAX_DOWNLOAD_ATTEMPTS,
+                    delay,
+                    exc,
+                )
+                time.sleep(delay)
+            except requests.RequestException as exc:
+                raise GeneratedVideoPersistError(f"download generated video failed: {exc}") from exc
+        raise GeneratedVideoPersistError("download generated video failed")
+
+    @staticmethod
+    def _content_length(value: str | None) -> int | None:
+        if not value:
+            return None
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed >= 0 else None
 
     def _resolve_extension(self, source_url: str, content_type: str | None) -> str:
         if content_type:

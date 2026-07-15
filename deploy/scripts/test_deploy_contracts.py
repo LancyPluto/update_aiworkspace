@@ -69,6 +69,19 @@ class DeployContractTests(unittest.TestCase):
                 deploy.index("verify_release_health.sh"),
             )
 
+    def test_mihomo_is_managed_in_every_production_deploy_entry(self) -> None:
+        deploys = (
+            self.read("deploy/scripts/ci_remote_deploy_light.sh"),
+            self.read("deploy/scripts/ci_remote_deploy.sh"),
+            self.read("deploy/scripts/remote_deploy_production.py"),
+        )
+        for deploy in deploys:
+            self.assertIn("MIHOMO_ENABLED=true", deploy)
+            self.assertIn("MIHOMO_CONTROLLER_SECRET", deploy)
+            self.assertIn("docker-compose.proxy.yml", deploy)
+            self.assertIn("Removing legacy Mihomo container", deploy)
+            self.assertIn("up -d mihomo", deploy)
+
     def test_release_gate_requires_fresh_monitoring_metrics(self) -> None:
         health = self.read("deploy/scripts/verify_release_health.sh")
         self.assertIn('REQUIRE_MONITORING="${REQUIRE_MONITORING:-1}"', health)

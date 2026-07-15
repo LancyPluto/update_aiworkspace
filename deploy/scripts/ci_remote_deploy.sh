@@ -56,6 +56,7 @@ restore_file ".env"
 restore_file "engines/banana-slides/.env"
 
 python3 - <<'PY'
+import secrets
 from pathlib import Path
 
 path = Path("/root/ai_tool_market/.env")
@@ -66,12 +67,13 @@ VITE_DEV_PROXY_TARGET=http://backend:8080
 ADMIN_NEXT_PUBLIC_API_BASE_URL=
 ADMIN_NEXT_PUBLIC_API_PROXY_TARGET=http://backend:8080
 CORS_ALLOWED_ORIGINS=http://wlcloudai.com,http://www.wlcloudai.com,http://8.134.93.203
+MIHOMO_ENABLED=true
 HTTP_PROXY=http://host.docker.internal:7890
 HTTPS_PROXY=http://host.docker.internal:7890
 CONTAINER_HTTP_PROXY=http://host.docker.internal:7890
 CONTAINER_HTTPS_PROXY=http://host.docker.internal:7890
-NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat
-CONTAINER_NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat
+NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,.klingai.com,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat
+CONTAINER_NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,.klingai.com,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat
 """.strip().splitlines()
 
 patch = {}
@@ -82,6 +84,14 @@ for line in patch_lines:
     patch[key] = value
 
 lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.exists() else []
+existing = {}
+for line in lines:
+    if "=" not in line or line.lstrip().startswith("#"):
+        continue
+    key, value = line.split("=", 1)
+    existing[key.strip()] = value.strip().strip('"').strip("'")
+if not existing.get("MIHOMO_CONTROLLER_SECRET"):
+    patch["MIHOMO_CONTROLLER_SECRET"] = secrets.token_urlsafe(32)
 keys = set(patch)
 out = []
 for line in lines:
@@ -102,6 +112,15 @@ if grep -Eqi '^MIHOMO_ENABLED=true$' "$REMOTE_DIR/.env"; then
   COMPOSE_ARGS+=(-f docker-compose.proxy.yml)
   echo "Mihomo overlay enabled"
 fi
+
+if docker inspect ai-supermarket-mihomo >/dev/null 2>&1; then
+  mihomo_config_files="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' ai-supermarket-mihomo 2>/dev/null || true)"
+  if [[ "$mihomo_config_files" != *docker-compose.proxy.yml* ]]; then
+    echo "Removing legacy Mihomo container before managed overlay startup"
+    docker rm -f ai-supermarket-mihomo
+  fi
+fi
+docker compose "${COMPOSE_ARGS[@]}" up -d mihomo
 
 docker compose "${COMPOSE_ARGS[@]}" up -d --build --force-recreate \
   backend worker agent-service admin-frontend user-web nginx

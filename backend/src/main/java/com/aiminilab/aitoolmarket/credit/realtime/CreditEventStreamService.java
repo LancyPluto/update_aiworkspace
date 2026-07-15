@@ -53,7 +53,6 @@ public class CreditEventStreamService {
             emitter.send(SseEmitter.event().name("connected").data("ok"));
         } catch (IOException | IllegalStateException exception) {
             remove(userId, emitter);
-            emitter.completeWithError(exception);
         }
         return emitter;
     }
@@ -69,7 +68,6 @@ public class CreditEventStreamService {
                 emitter.send(SseEmitter.event().name("credit-account-changed").data(event));
             } catch (IOException | IllegalStateException exception) {
                 remove(userId, emitter);
-                emitter.completeWithError(exception);
             }
         }
     }

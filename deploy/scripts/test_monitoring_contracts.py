@@ -455,6 +455,24 @@ class MonitoringContractTests(unittest.TestCase):
             "panel 10 refId C must reduce all URI series to one global P95 value",
         )
 
+        self.assertNotIn('"id": "byQuery"', dashboard_text)
+        expected_frame_overrides = {
+            10: {"A", "B", "C"},
+            19: {"A", "B"},
+        }
+        for panel_id, expected_ref_ids in expected_frame_overrides.items():
+            overrides = self.panel(dashboard, panel_id)["fieldConfig"]["overrides"]
+            self.assertEqual(expected_ref_ids, {
+                override["matcher"]["options"] for override in overrides
+            })
+            self.assertTrue(
+                all(
+                    override["matcher"]["id"] == "byFrameRefID"
+                    for override in overrides
+                ),
+                f"panel {panel_id} must use Grafana 11.4 frame matchers",
+            )
+
         panel_9_expressions = self.expressions(
             {"panels": [self.panel(dashboard, 9)]}
         )

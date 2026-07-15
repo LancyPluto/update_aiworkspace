@@ -21,12 +21,13 @@ _ENV_PATCH_LINES = [
     "ADMIN_NEXT_PUBLIC_API_BASE_URL=",
     "ADMIN_NEXT_PUBLIC_API_PROXY_TARGET=http://backend:8080",
     "CORS_ALLOWED_ORIGINS=http://wlcloudai.com,http://www.wlcloudai.com,http://8.134.93.203,https://wlcloudai.com,https://www.wlcloudai.com,https://8.134.93.203",
+    "MIHOMO_ENABLED=true",
     "HTTP_PROXY=http://host.docker.internal:7890",
     "HTTPS_PROXY=http://host.docker.internal:7890",
     "CONTAINER_HTTP_PROXY=http://host.docker.internal:7890",
     "CONTAINER_HTTPS_PROXY=http://host.docker.internal:7890",
-    "NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat",
-    "CONTAINER_NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat",
+    "NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,.klingai.com,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat",
+    "CONTAINER_NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,.klingai.com,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat",
     "PROMETHEUS_PORT=9091",
     "GRAFANA_PORT=3001",
     "GRAFANA_ROOT_URL=https://wlcloudai.com/grafana/",
@@ -37,6 +38,7 @@ _ENV_PATCH_LINES = [
 ENV_PATCH_SCRIPT = "\n".join(
     [
         "python3 - <<'PY'",
+        "import secrets",
         "from pathlib import Path",
         'path = Path("/root/ai_tool_market/.env")',
         f"patch_lines = {repr(_ENV_PATCH_LINES)}",
@@ -65,6 +67,11 @@ ENV_PATCH_SCRIPT = "\n".join(
         '        continue',
         '    key, value = line.split("=", 1)',
         '    data[key.strip()] = value',
+        'if not data.get("MIHOMO_CONTROLLER_SECRET", "").strip():',
+        '    lines = [line for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if not line.startswith("MIHOMO_CONTROLLER_SECRET=")]',
+        '    lines.append(f"MIHOMO_CONTROLLER_SECRET={secrets.token_urlsafe(32)}")',
+        '    path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")',
+        '    print("bootstrapped MIHOMO_CONTROLLER_SECRET for production")',
         'if data.get("GRAFANA_ADMIN_PASSWORD", "") in ("", "admin123456"):',
         '    lines = [line for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if not line.startswith("GRAFANA_ADMIN_PASSWORD=")]',
         '    lines.append("GRAFANA_ADMIN_PASSWORD=123456")',
@@ -248,6 +255,16 @@ fi
 if echo "$SERVICES" | grep -qw banana-slides; then
   COMPOSE_ARGS+=(--profile banana-slides)
 fi
+
+if docker inspect ai-supermarket-mihomo >/dev/null 2>&1; then
+  mihomo_config_files="$(docker inspect --format '{{{{ index .Config.Labels \"com.docker.compose.project.config_files\" }}}}' ai-supermarket-mihomo 2>/dev/null || true)"
+  if [[ "$mihomo_config_files" != *docker-compose.proxy.yml* ]]; then
+    echo "Removing legacy Mihomo container before managed overlay startup"
+    docker rm -f ai-supermarket-mihomo
+  fi
+fi
+docker compose "${{COMPOSE_ARGS[@]}}" up -d mihomo
+SERVICES="$(bash "$REMOTE_DIR/deploy/scripts/merge_deploy_services.sh" "$SERVICES" backend worker agent-service)"
 
 for svc in $SERVICES; do
   case "$svc" in

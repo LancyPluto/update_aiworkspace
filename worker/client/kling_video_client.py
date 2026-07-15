@@ -36,6 +36,9 @@ class KlingVideoClient:
     configurable so official or proxy gateways can share this adapter.
     """
 
+    _MAX_TRANSPORT_ATTEMPTS = 3
+    _RETRY_BASE_DELAY_SECONDS = 0.5
+
     def __init__(
         self,
         *,
@@ -66,6 +69,8 @@ class KlingVideoClient:
         self.timeout_seconds = timeout_seconds or settings.kling_timeout_seconds
         self.timeout = (10, 300)
         self.session = requests.Session()
+        # Kling's Beijing endpoint is domestic and should not inherit the global Mihomo proxy.
+        self.session.trust_env = False
         self.max_input_image_bytes = 20 * 1024 * 1024
 
     def generate_video(
@@ -861,18 +866,32 @@ class KlingVideoClient:
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) if payload is not None else ""
-        try:
-            response = self.session.request(
-                method,
-                f"{self.base_url}{path}",
-                data=body.encode("utf-8") if body else None,
-                headers=self._headers(),
-                timeout=self.timeout,
-            )
-        except requests.Timeout as exc:
-            raise KlingVideoTimeoutError("kling request timed out") from exc
-        except requests.RequestException as exc:
-            raise KlingVideoError(f"kling request failed: {exc}") from exc
+        for attempt in range(1, self._MAX_TRANSPORT_ATTEMPTS + 1):
+            try:
+                response = self.session.request(
+                    method,
+                    f"{self.base_url}{path}",
+                    data=body.encode("utf-8") if body else None,
+                    headers=self._headers(),
+                    timeout=self.timeout,
+                )
+                break
+            except requests.Timeout as exc:
+                raise KlingVideoTimeoutError("kling request timed out") from exc
+            except requests.ConnectionError as exc:
+                if attempt >= self._MAX_TRANSPORT_ATTEMPTS:
+                    raise KlingVideoError(f"kling request failed: {exc}") from exc
+                delay = self._RETRY_BASE_DELAY_SECONDS * attempt
+                LOGGER.warning(
+                    "kling transient connection failure, retrying attempt=%s/%s delay=%.1fs: %s",
+                    attempt,
+                    self._MAX_TRANSPORT_ATTEMPTS,
+                    delay,
+                    exc,
+                )
+                time.sleep(delay)
+            except requests.RequestException as exc:
+                raise KlingVideoError(f"kling request failed: {exc}") from exc
 
         try:
             response.raise_for_status()

@@ -8,6 +8,8 @@ import com.aiminilab.aitoolmarket.admin.proxy.MihomoRuntimeResponse;
 import com.aiminilab.aitoolmarket.admin.proxy.MihomoRuntimeService;
 import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
+import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
+import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -36,7 +38,15 @@ public class AdminProxyConfigController {
 
     @PutMapping
     public ApiResponse<ProxyConfigResponse> update(@RequestBody ProxyConfigRequest request) {
-        return ApiResponse.success(proxyConfigService.update(request, AuthContext.get().userId()));
+        ProxyConfigResponse saved = proxyConfigService.update(request, AuthContext.get().userId());
+        MihomoRuntimeResponse runtime = mihomoRuntimeService.apply();
+        if (runtime.managed() && !runtime.available()) {
+            throw new BusinessException(
+                    ErrorCode.SYSTEM_ERROR,
+                    "Proxy settings were saved, but Mihomo apply failed: " + runtime.message()
+            );
+        }
+        return ApiResponse.success(saved);
     }
 
     @PostMapping("/test")

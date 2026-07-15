@@ -68,14 +68,11 @@ public class ProxyConfigService {
                 "代理端口需在 1 到 65535 之间");
         String manualUsername = preserveSecret(request.manualUsername(), current.get(MANUAL_USERNAME_KEY));
 
-        String proxyUrl;
+        validateProxyEndpoint(mihomoEndpoint);
         if (SOURCE_SUBSCRIPTION.equals(sourceType)) {
             validateSubscriptionUrl(required(subscriptionUrl, "请输入机场订阅地址"));
-            validateProxyEndpoint(mihomoEndpoint);
-            proxyUrl = mihomoEndpoint;
         } else {
             validatePublicIp(manualHost);
-            proxyUrl = buildManualProxyUrl(manualProtocol, manualHost, manualPort, manualUsername, manualPassword);
         }
 
         Map<String, String> saved = new LinkedHashMap<>();
@@ -89,7 +86,7 @@ public class ProxyConfigService {
         saved.put(MANUAL_PORT_KEY, String.valueOf(manualPort));
         saved.put(MANUAL_USERNAME_KEY, manualUsername);
         saved.put(MANUAL_PASSWORD_KEY, manualPassword);
-        saved.put(AgentOutboundProxySettings.PROXY_URL_KEY, proxyUrl);
+        saved.put(AgentOutboundProxySettings.PROXY_URL_KEY, mihomoEndpoint);
         saved.put(AgentOutboundProxySettings.ENABLED_BY_DEFAULT_KEY, String.valueOf(request.enabled()));
         saved.put(AgentOutboundProxySettings.NO_PROXY_HOSTS_KEY, noProxyHosts);
         systemSettingService.updateSettings(saved, operatorId);

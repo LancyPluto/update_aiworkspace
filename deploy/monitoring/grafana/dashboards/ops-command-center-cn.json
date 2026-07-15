@@ -262,9 +262,9 @@
       "fieldConfig": {
         "defaults": { "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never" } },
         "overrides": [
-          { "matcher": { "id": "byQuery", "options": "A" }, "properties": [{ "id": "unit", "value": "reqps" }] },
-          { "matcher": { "id": "byQuery", "options": "B" }, "properties": [{ "id": "unit", "value": "percent" }] },
-          { "matcher": { "id": "byQuery", "options": "C" }, "properties": [{ "id": "unit", "value": "s" }] }
+          { "matcher": { "id": "byFrameRefID", "options": "A" }, "properties": [{ "id": "unit", "value": "reqps" }] },
+          { "matcher": { "id": "byFrameRefID", "options": "B" }, "properties": [{ "id": "unit", "value": "percent" }] },
+          { "matcher": { "id": "byFrameRefID", "options": "C" }, "properties": [{ "id": "unit", "value": "s" }] }
         ]
       },
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
@@ -367,8 +367,8 @@
       "fieldConfig": {
         "defaults": { "unit": "short", "links": [{ "title": "查看容器日志", "url": "/d/production-container-logs-cn?${__url_time_range}" }] },
         "overrides": [
-          { "matcher": { "id": "byQuery", "options": "A" }, "properties": [{ "id": "mappings", "value": [{ "type": "value", "options": { "0": { "text": "异常", "color": "red" }, "1": { "text": "正常", "color": "green" } } }] }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }] },
-          { "matcher": { "id": "byQuery", "options": "B" }, "properties": [{ "id": "mappings", "value": [{ "type": "value", "options": { "0": { "text": "异常", "color": "red" }, "1": { "text": "正常", "color": "green" } } }] }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }] }
+          { "matcher": { "id": "byFrameRefID", "options": "A" }, "properties": [{ "id": "mappings", "value": [{ "type": "value", "options": { "0": { "text": "异常", "color": "red" }, "1": { "text": "正常", "color": "green" } } }] }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }] },
+          { "matcher": { "id": "byFrameRefID", "options": "B" }, "properties": [{ "id": "mappings", "value": [{ "type": "value", "options": { "0": { "text": "异常", "color": "red" }, "1": { "text": "正常", "color": "green" } } }] }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }] }
         ]
       },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "textMode": "value_and_name" }
