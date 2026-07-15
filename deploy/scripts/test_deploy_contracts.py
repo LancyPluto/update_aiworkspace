@@ -171,6 +171,19 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn('git reset --hard "$old_sha"', rollback)
         self.assertIn("verify_release_health.sh", rollback)
 
+    def test_deploy_and_rollback_pin_reachable_cadvisor_registry(self) -> None:
+        image = "m.daocloud.io/gcr.io/cadvisor/cadvisor:v0.49.1"
+        linux_deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
+        windows_deploy = self.read("deploy/scripts/remote_deploy_production.py")
+        rollback = self.read("deploy/scripts/rollback_release.sh")
+        tracked_env = self.read("deploy/.env")
+
+        self.assertIn(f"CADVISOR_IMAGE={image}", linux_deploy)
+        self.assertIn(f'"CADVISOR_IMAGE={image}"', windows_deploy)
+        self.assertIn(f"CADVISOR_IMAGE={image}", tracked_env)
+        self.assertIn(f"CADVISOR_IMAGE:-{image}", rollback)
+        self.assertIn("export CADVISOR_IMAGE", rollback)
+
     def test_monitoring_rollback_recreates_old_revision_stack(self) -> None:
         rollback = self.read("deploy/scripts/rollback_release.sh")
         self.assertIn(
