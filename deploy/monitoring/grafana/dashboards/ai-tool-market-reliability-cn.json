@@ -96,7 +96,7 @@
       "title": "后端接口 P95 延迟",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket{job=\"backend-actuator\"}[5m])))", "legendFormat": "{{uri}}" }],
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, method, uri) (rate(http_server_requests_seconds_bucket{job=\"backend-actuator\",uri!~\"/actuator.*\"}[5m])))", "legendFormat": "{{method}} {{uri}}" }],
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
     },
@@ -182,21 +182,44 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
     },
     {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Tomcat 工作线程 / 最大线程",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "tomcat_threads_busy_threads", "legendFormat": "busy {{name}}" },
+        { "refId": "B", "expr": "tomcat_threads_config_max_threads", "legendFormat": "max {{name}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 12, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Tomcat 线程利用率",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "tomcat_threads_busy_threads / clamp_min(tomcat_threads_config_max_threads, 1) * 100", "legendFormat": "{{name}}" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "min": 0, "max": 100, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 70 }, { "color": "red", "value": 90 }] }, "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 16, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
       "id": 15,
       "type": "logs",
       "title": "TraceId 跨服务日志查询",
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 36 },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 44 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{container=~\"ai-supermarket-(backend|worker|agent-service|mysql|rabbitmq|nginx|admin-frontend|user-web).*\"} |= \"${traceId}\"", "refId": "A" }],
+      "targets": [{ "expr": "{container=~\".+\"} |= ${traceId:doublequote}", "refId": "A" }],
       "options": { "showTime": true, "showLabels": true, "wrapLogMessage": true, "sortOrder": "Descending" }
     },
     {
       "id": 16,
       "type": "logs",
       "title": "最近错误日志",
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 45 },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 53 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{container=~\"ai-supermarket-(backend|worker|agent-service|mysql|rabbitmq|nginx|admin-frontend|user-web).*\"} |~ \"(?i)(error|exception|failed|timeout|warn)\"", "refId": "A" }],
+      "targets": [{ "expr": "{container=~\".+\"} |~ \"(?i)(error|exception|failed|timeout|warn)\"", "refId": "A" }],
       "options": { "showTime": true, "showLabels": true, "wrapLogMessage": true, "sortOrder": "Descending" }
     }
   ]

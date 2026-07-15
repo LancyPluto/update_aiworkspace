@@ -148,6 +148,10 @@ export interface UserProfile {
   email?: string | null
   status: UserAccountStatus
   membershipPlan?: string | null
+  membershipStatus?: "NONE" | "PENDING" | "ACTIVE" | "EXPIRED"
+  membershipStartedAt?: string | null
+  membershipExpiresAt?: string | null
+  pendingMembershipOrderId?: number | null
 }
 
 export interface UpdateUserProfileRequest {

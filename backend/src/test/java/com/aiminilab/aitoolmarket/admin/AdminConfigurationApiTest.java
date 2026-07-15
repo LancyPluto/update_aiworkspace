@@ -123,6 +123,55 @@ class AdminConfigurationApiTest {
     }
 
     @Test
+    void adminCanManageProxyConfigWithoutReadingSubscriptionSecret() throws Exception {
+        String adminToken = loginAdmin();
+
+        mockMvc.perform(put("/api/admin/v1/proxy-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "enabled": true,
+                                  "sourceType": "SUBSCRIPTION",
+                                  "displayName": "Overseas primary",
+                                  "subscriptionUrl": "https://example.com/subscribe?token=top-secret",
+                                  "subscriptionUpdateIntervalMinutes": 360,
+                                  "mihomoEndpoint": "http://host.docker.internal:7890",
+                                  "manualProtocol": "HTTP",
+                                  "manualHost": "",
+                                  "manualPort": 7890,
+                                  "manualUsername": "",
+                                  "manualPassword": "",
+                                  "noProxyHosts": "localhost,backend"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.enabled").value(true))
+                .andExpect(jsonPath("$.data.sourceType").value("SUBSCRIPTION"))
+                .andExpect(jsonPath("$.data.subscriptionConfigured").value(true))
+                .andExpect(jsonPath("$.data.subscriptionUrlMasked").value("https://example.com/***?token=***"))
+                .andExpect(jsonPath("$.data.proxyUrlMasked").value("http://host.docker.internal:7890"));
+
+        mockMvc.perform(get("/api/admin/v1/proxy-config")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.displayName").value("Overseas primary"))
+                .andExpect(jsonPath("$.data.subscriptionUrl").doesNotExist())
+                .andExpect(jsonPath("$.data.subscriptionUrlMasked").value("https://example.com/***?token=***"));
+
+        mockMvc.perform(get("/api/admin/v1/proxy-config/runtime")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.managed").value(false))
+                .andExpect(jsonPath("$.data.available").value(false));
+
+        mockMvc.perform(post("/api/admin/v1/proxy-config/apply")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.managed").value(false));
+    }
+
+    @Test
     void adminSettingPromptVersionsCanBeQueriedAndRestored() throws Exception {
         String adminToken = loginAdmin();
 

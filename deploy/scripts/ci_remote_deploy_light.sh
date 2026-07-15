@@ -414,7 +414,7 @@ APP_SERVICES=""
 MONITORING_SERVICES=""
 for svc in \$DEPLOY_SERVICES; do
   case "\$svc" in
-    prometheus|grafana|loki|promtail|node-exporter|cadvisor|blackbox-exporter)
+    prometheus|grafana|loki|alloy|node-exporter|cadvisor|blackbox-exporter)
       MONITORING_SERVICES="\$MONITORING_SERVICES \$svc"
       ;;
     *)
@@ -430,24 +430,7 @@ fi
 
 if [ -n "\$MONITORING_SERVICES" ]; then
   echo "Starting/updating monitoring containers:\$MONITORING_SERVICES"
-  CORE_MONITORING_SERVICES=""
-  OPTIONAL_MONITORING_SERVICES=""
-  for svc in \$MONITORING_SERVICES; do
-    case "\$svc" in
-      cadvisor) OPTIONAL_MONITORING_SERVICES="\$OPTIONAL_MONITORING_SERVICES \$svc" ;;
-      *) CORE_MONITORING_SERVICES="\$CORE_MONITORING_SERVICES \$svc" ;;
-    esac
-  done
-  if [ -n "\$CORE_MONITORING_SERVICES" ]; then
-    if ! docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate \$CORE_MONITORING_SERVICES; then
-      echo "::warning::Core monitoring stack update failed; application deploy continues." >&2
-    fi
-  fi
-  if [ -n "\$OPTIONAL_MONITORING_SERVICES" ]; then
-    if ! docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate \$OPTIONAL_MONITORING_SERVICES; then
-      echo "::warning::Optional monitoring service update failed:\$OPTIONAL_MONITORING_SERVICES" >&2
-    fi
-  fi
+  docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate \$MONITORING_SERVICES
 fi
 
 # nginx 反代静态资源；任意前端/配置变更后都 reload，避免 user_web_dist 已更新但 nginx 仍握旧连接。

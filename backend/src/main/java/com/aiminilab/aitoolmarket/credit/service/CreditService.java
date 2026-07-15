@@ -53,6 +53,10 @@ public interface CreditService {
 
     CreditAccountResponse rechargeAdd(Long userId, Long rechargeOrderId, int amount, String reason);
 
+    CreditAccountResponse membershipRechargeAdd(Long userId, Long rechargeOrderId, int amount, String reason);
+
+    void expireMembershipIfNeeded(Long userId);
+
     CreditAccountResponse giftRedeemAdd(Long userId, Long giftCardId, int amount, String reason);
 
     CreditAccountResponse referralBonusAdd(Long userId, Long rechargeOrderId, int amount, String reason);

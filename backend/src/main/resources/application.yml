@@ -1,6 +1,9 @@
 server:
   port: ${SERVER_PORT:8080}
   forward-headers-strategy: native
+  tomcat:
+    mbeanregistry:
+      enabled: true
   servlet:
     encoding:
       charset: UTF-8
@@ -144,6 +147,12 @@ app:
   model-vendor-balance:
     scheduled-enabled: ${MODEL_VENDOR_BALANCE_SCHEDULED:false}
     scheduled-interval-ms: ${MODEL_VENDOR_BALANCE_SCHEDULED_INTERVAL_MS:600000}
+  mihomo:
+    enabled: ${MIHOMO_RUNTIME_ENABLED:false}
+    controller-url: ${MIHOMO_CONTROLLER_URL:http://mihomo:9090}
+    controller-secret: ${MIHOMO_CONTROLLER_SECRET:}
+    config-path: ${MIHOMO_CONFIG_PATH:/data/mihomo/config.yaml}
+    reload-path: ${MIHOMO_RELOAD_PATH:/root/.config/mihomo/config.yaml}
 
 ppt:
   engine:
@@ -168,6 +177,10 @@ mybatis-plus:
       id-type: auto
 
 management:
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
   endpoints:
     web:
       exposure:

@@ -1,9 +1,13 @@
-import { apiRequest } from "./client"
+import { apiRequest, getRequestBaseUrl } from "./client"
 import type { BillingUsageLog, CreditAccount, PageResult, CreditLog, GiftCard, GiftCardPackage, RechargeOrder, RechargePackage } from "./types"
 
 /** GET /api/v1/credits/account */
 export async function fetchCreditAccount(options?: { token?: string | null }): Promise<CreditAccount> {
   return apiRequest<CreditAccount>("GET", "/api/v1/credits/account", { token: options?.token })
+}
+
+export function getCreditEventsUrl(): string {
+  return new URL("/api/v1/credits/events", getRequestBaseUrl()).toString()
 }
 
 /** GET /api/v1/credits/logs —— 算力流水（分页） */
@@ -35,7 +39,7 @@ export async function createRechargeOrder(
   body: {
     packageId?: number | null
     paymentChannel?: string
-    clientRequestId?: string
+    clientRequestId: string
     orderType?: string
     giftCardPackageId?: number
     giftCardItems?: Array<{ giftCardPackageId: number; quantity: number }>
@@ -49,7 +53,7 @@ export async function createRechargeOrder(
 }
 
 export async function createCustomRechargeOrder(
-  body: { amount: number; paymentChannel?: string; clientRequestId?: string },
+  body: { amount: number; paymentChannel?: string; clientRequestId: string },
   options?: { token?: string | null },
 ): Promise<RechargeOrder> {
   return apiRequest<RechargeOrder>("POST", "/api/v1/credits/recharge-orders/custom", {

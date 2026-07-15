@@ -23,20 +23,14 @@ discovery.relabel "docker_containers" {
   }
 
   rule {
-    source_labels = ["__meta_docker_container_id"]
-    target_label  = "container_id"
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
   }
 
   rule {
     source_labels = ["__meta_docker_container_id"]
     target_label  = "__path__"
     replacement   = "/var/lib/docker/containers/$1/*-json.log"
-  }
-
-  rule {
-    source_labels = ["__meta_docker_container_name"]
-    regex         = "/ai-supermarket-(backend|worker|agent-service|mysql|rabbitmq|nginx|admin-frontend|user-web).*"
-    action        = "keep"
   }
 }
 
@@ -49,6 +43,10 @@ loki.process "docker_containers" {
   forward_to = [loki.write.default.receiver]
 
   stage.docker {}
+
+  stage.label_drop {
+    values = ["filename"]
+  }
 }
 
 loki.write "default" {

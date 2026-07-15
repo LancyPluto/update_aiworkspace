@@ -1,219 +1,125 @@
 {
   "uid": "auth-security-geomap-cn",
-  "title": "登录注册审计地球地图",
-  "tags": ["ai-tool-market", "认证审计", "登录注册", "地球地图"],
+  "title": "认证安全地图态势",
+  "description": "基于认证审计事件的只读 2D 地理态势；地图仅展示地域聚合结果，不展示单个 IP。",
+  "tags": ["ai-tool-market", "认证审计", "登录注册", "geomap", "risk"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "30s",
   "time": { "from": "now-24h", "to": "now" },
   "templating": {
     "list": [
       {
-        "name": "eventType",
-        "type": "custom",
-        "label": "事件类型",
+        "name": "eventType", "type": "custom", "label": "事件类型",
         "query": "ALL,LOGIN_PASSWORD,REGISTER_PASSWORD,LOGIN_SMS,REGISTER_SMS,SEND_SMS_CODE,RESET_PASSWORD,ADMIN_LOGIN_PASSWORD",
-        "current": { "text": "ALL", "value": "ALL" },
-        "includeAll": false,
-        "hide": 0
+        "current": { "text": "ALL", "value": "ALL" }, "includeAll": false
       },
       {
-        "name": "result",
-        "type": "custom",
-        "label": "结果",
-        "query": "ALL,SUCCESS,FAILED",
-        "current": { "text": "ALL", "value": "ALL" },
-        "includeAll": false,
-        "hide": 0
+        "name": "result", "type": "custom", "label": "结果",
+        "query": "ALL,SUCCESS,FAILED", "current": { "text": "ALL", "value": "ALL" }, "includeAll": false
+      },
+      {
+        "name": "country", "type": "query", "label": "国家/地区",
+        "datasource": { "type": "mysql", "uid": "mysql-auth-audit" },
+        "query": "SELECT DISTINCT COALESCE(NULLIF(country, ''), '未知') AS __text, COALESCE(NULLIF(country, ''), '未知') AS __value FROM auth_security_events ORDER BY __text",
+        "definition": "SELECT DISTINCT COALESCE(NULLIF(country, ''), '未知') AS __text, COALESCE(NULLIF(country, ''), '未知') AS __value FROM auth_security_events ORDER BY __text",
+        "current": { "text": "全部", "value": "$__all" }, "includeAll": true, "allValue": "ALL", "refresh": 2
+      },
+      {
+        "name": "region", "type": "query", "label": "省/地区",
+        "datasource": { "type": "mysql", "uid": "mysql-auth-audit" },
+        "query": "SELECT DISTINCT COALESCE(NULLIF(region, ''), '未知') AS __text, COALESCE(NULLIF(region, ''), '未知') AS __value FROM auth_security_events WHERE (${country:sqlstring} = 'ALL' OR COALESCE(NULLIF(country, ''), '未知') = ${country:sqlstring}) ORDER BY __text",
+        "definition": "SELECT DISTINCT COALESCE(NULLIF(region, ''), '未知') AS __text, COALESCE(NULLIF(region, ''), '未知') AS __value FROM auth_security_events WHERE (${country:sqlstring} = 'ALL' OR COALESCE(NULLIF(country, ''), '未知') = ${country:sqlstring}) ORDER BY __text",
+        "current": { "text": "全部", "value": "$__all" }, "includeAll": true, "allValue": "ALL", "refresh": 2
       }
     ]
   },
   "panels": [
     {
-      "id": 1,
-      "type": "geomap",
-      "title": "登录/注册来源地球地图",
-      "description": "数据来自 MySQL auth_security_events。只有配置 AUTH_GEOIP_DATABASE_PATH 并解析出经纬度后，地图才会出现点位。",
-      "gridPos": { "h": 14, "w": 16, "x": 0, "y": 0 },
+      "id": 1, "type": "geomap", "title": "全球认证风险态势",
+      "description": "点大小表示事件总量，颜色表示失败率；需要认证事件已完成 GeoIP 经纬度解析。",
+      "gridPos": { "h": 15, "w": 24, "x": 0, "y": 0 },
       "datasource": { "type": "mysql", "uid": "mysql-auth-audit" },
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawSql": "SELECT MAX(created_at) AS time, latitude, longitude, COALESCE(NULLIF(country, ''), '未知') AS country, COALESCE(NULLIF(region, ''), '未知') AS region, COALESCE(NULLIF(city, ''), '未知') AS city, event_type, result, COUNT(*) AS count FROM auth_security_events WHERE $__timeFilter(created_at) AND latitude IS NOT NULL AND longitude IS NOT NULL AND ('$eventType' = 'ALL' OR event_type = '$eventType') AND ('$result' = 'ALL' OR result = '$result') GROUP BY latitude, longitude, country, region, city, event_type, result ORDER BY count DESC LIMIT 1000"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {},
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 20 },
-              { "color": "red", "value": 100 }
-            ]
-          }
-        },
-        "overrides": []
-      },
+      "targets": [{
+        "refId": "A", "format": "table",
+        "rawSql": "SELECT MAX(created_at) AS time, latitude, longitude, COALESCE(NULLIF(country, ''), '未知') AS country, COALESCE(NULLIF(region, ''), '未知') AS region, COALESCE(NULLIF(city, ''), '未知') AS city, COUNT(*) AS total_count, SUM(CASE WHEN result = 'FAILED' THEN 1 ELSE 0 END) AS failed_count, ROUND(100.0 * SUM(CASE WHEN result = 'FAILED' THEN 1 ELSE 0 END) / COUNT(*), 2) AS failure_rate FROM auth_security_events WHERE $__timeFilter(created_at) AND latitude IS NOT NULL AND longitude IS NOT NULL AND (${eventType:sqlstring} = 'ALL' OR event_type = ${eventType:sqlstring}) AND (${result:sqlstring} = 'ALL' OR result = ${result:sqlstring}) AND (${country:sqlstring} = 'ALL' OR COALESCE(NULLIF(country, ''), '未知') = ${country:sqlstring}) AND (${region:sqlstring} = 'ALL' OR COALESCE(NULLIF(region, ''), '未知') = ${region:sqlstring}) GROUP BY latitude, longitude, country, region, city ORDER BY total_count DESC LIMIT 1000"
+      }],
+      "fieldConfig": { "defaults": { "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 20 }, { "color": "red", "value": 50 }] } }, "overrides": [] },
       "options": {
-        "view": { "id": "coords", "lat": 30.0, "lon": 104.0, "zoom": 3 },
+        "view": { "id": "fit", "lat": 30, "lon": 104, "zoom": 3 },
         "basemap": { "type": "default", "config": {} },
-        "controls": {
-          "showZoom": true,
-          "mouseWheelZoom": true,
-          "showAttribution": true,
-          "showScale": false,
-          "showDebug": false
-        },
+        "controls": { "showZoom": true, "mouseWheelZoom": true, "showAttribution": true, "showScale": true, "showDebug": false },
         "tooltip": { "mode": "details" },
-        "layers": [
-          {
-            "type": "markers",
-            "name": "认证事件",
-            "config": {
-              "showLegend": true,
-              "style": {
-                "size": { "field": "count", "fixed": 6, "min": 4, "max": 24 },
-                "color": { "field": "count", "fixed": "dark-green" },
-                "opacity": 0.75,
-                "symbol": { "mode": "fixed", "fixed": "img/icons/marker/circle.svg" },
-                "textConfig": { "fontSize": 12, "textAlign": "center", "textBaseline": "middle", "offsetX": 0, "offsetY": 0 }
-              },
-              "location": { "mode": "coords", "latitude": "latitude", "longitude": "longitude" }
-            }
+        "layers": [{
+          "type": "markers", "name": "认证事件聚合点",
+          "config": {
+            "showLegend": true,
+            "style": {
+              "size": { "field": "total_count", "fixed": 6, "min": 5, "max": 34 },
+              "color": { "field": "failure_rate", "fixed": "dark-green" },
+              "opacity": 0.82,
+              "symbol": { "mode": "fixed", "fixed": "img/icons/marker/circle.svg" },
+              "textConfig": { "fontSize": 12, "textAlign": "center", "textBaseline": "middle", "offsetX": 0, "offsetY": 0 }
+            },
+            "location": { "mode": "coords", "latitude": "latitude", "longitude": "longitude" }
           }
-        ]
+        }]
       }
     },
     {
-      "id": 2,
-      "type": "timeseries",
-      "title": "认证事件趋势",
-      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (event_type, result, user_type) (increase(auth_security_events_total[5m]))",
-          "legendFormat": "{{event_type}} {{result}} {{user_type}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 12, "showPoints": "never" } },
-        "overrides": []
-      },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
-    },
-    {
-      "id": 3,
-      "type": "stat",
-      "title": "失败率(1小时)",
-      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 7 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum(increase(auth_security_events_total{result=\"FAILED\"}[1h])) / clamp_min(sum(increase(auth_security_events_total[1h])), 1) * 100",
-          "legendFormat": "失败率"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "decimals": 1,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 10 },
-              { "color": "red", "value": 30 }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "textMode": "auto" }
-    },
-    {
-      "id": 4,
-      "type": "table",
-      "title": "TOP 失败 IP",
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 14 },
+      "id": 2, "type": "timeseries", "title": "认证事件趋势",
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 15 },
       "datasource": { "type": "mysql", "uid": "mysql-auth-audit" },
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawSql": "SELECT ip_address, COUNT(*) AS failed_count, COUNT(DISTINCT account_hash) AS account_count, MAX(created_at) AS last_seen, SUBSTRING(GROUP_CONCAT(DISTINCT failure_reason ORDER BY failure_reason SEPARATOR ', '), 1, 160) AS failure_reasons FROM auth_security_events WHERE $__timeFilter(created_at) AND result = 'FAILED' AND ip_address IS NOT NULL AND ('$eventType' = 'ALL' OR event_type = '$eventType') GROUP BY ip_address ORDER BY failed_count DESC LIMIT 50"
-        }
-      ],
+      "targets": [{ "refId": "A", "format": "time_series", "rawSql": "SELECT $__timeGroupAlias(created_at, '5m'), CONCAT(event_type, ' / ', result) AS metric, COUNT(*) AS value FROM auth_security_events WHERE $__timeFilter(created_at) AND (${eventType:sqlstring} = 'ALL' OR event_type = ${eventType:sqlstring}) AND (${result:sqlstring} = 'ALL' OR result = ${result:sqlstring}) AND (${country:sqlstring} = 'ALL' OR COALESCE(NULLIF(country, ''), '未知') = ${country:sqlstring}) AND (${region:sqlstring} = 'ALL' OR COALESCE(NULLIF(region, ''), '未知') = ${region:sqlstring}) GROUP BY 1, event_type, result ORDER BY 1" }],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 16, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 3, "type": "stat", "title": "最近 1 小时失败率",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 15 },
+      "datasource": { "type": "mysql", "uid": "mysql-auth-audit" },
+      "targets": [{ "refId": "A", "format": "table", "rawSql": "SELECT ROUND(100.0 * SUM(CASE WHEN result = 'FAILED' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS failure_rate FROM auth_security_events WHERE $__timeFilter(created_at) AND created_at >= NOW() - INTERVAL 1 HOUR AND (${eventType:sqlstring} = 'ALL' OR event_type = ${eventType:sqlstring}) AND (${result:sqlstring} = 'ALL' OR result = ${result:sqlstring}) AND (${country:sqlstring} = 'ALL' OR COALESCE(NULLIF(country, ''), '未知') = ${country:sqlstring}) AND (${region:sqlstring} = 'ALL' OR COALESCE(NULLIF(region, ''), '未知') = ${region:sqlstring})" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 10 }, { "color": "red", "value": 30 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "textMode": "auto" }
+    },
+    {
+      "id": 4, "type": "table", "title": "高风险来源 IP",
+      "description": "点击 IP 跳转管理端执行人工风控。",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 23 },
+      "datasource": { "type": "mysql", "uid": "mysql-auth-audit" },
+      "targets": [{
+        "refId": "A", "format": "table",
+        "rawSql": "SELECT ip_address, COALESCE(NULLIF(country, ''), '未知') AS country, COALESCE(NULLIF(region, ''), '未知') AS region, COALESCE(NULLIF(city, ''), '未知') AS city, COUNT(*) AS failed_count, COUNT(DISTINCT account_hash) AS account_count, MAX(created_at) AS last_seen, SUBSTRING(GROUP_CONCAT(DISTINCT failure_reason ORDER BY failure_reason SEPARATOR ', '), 1, 160) AS failure_reasons FROM auth_security_events WHERE $__timeFilter(created_at) AND result = 'FAILED' AND ip_address IS NOT NULL AND (${eventType:sqlstring} = 'ALL' OR event_type = ${eventType:sqlstring}) AND (${result:sqlstring} = 'ALL' OR result = ${result:sqlstring}) AND (${country:sqlstring} = 'ALL' OR COALESCE(NULLIF(country, ''), '未知') = ${country:sqlstring}) AND (${region:sqlstring} = 'ALL' OR COALESCE(NULLIF(region, ''), '未知') = ${region:sqlstring}) GROUP BY ip_address, country, region, city ORDER BY failed_count DESC LIMIT 50"
+      }],
       "fieldConfig": {
         "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" } } },
-        "overrides": [
-          {
-            "matcher": { "id": "byName", "options": "ip_address" },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  { "title": "跳转管理后台封禁", "url": "/admin/security/ip-blocks/new?ip=${__data.fields.ip_address}" }
-                ]
-              }
-            ]
-          }
-        ]
+        "overrides": [{
+          "matcher": { "id": "byName", "options": "ip_address" },
+          "properties": [{ "id": "links", "value": [{ "title": "在管理端进行 IP 风控", "url": "/admin/monitoring?ip=${__data.fields.ip_address:percentencode}" }] }]
+        }]
       },
       "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } }
     },
     {
-      "id": 5,
-      "type": "table",
-      "title": "TOP 城市/地区",
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 14 },
+      "id": 5, "type": "table", "title": "地域风险排行",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 23 },
       "datasource": { "type": "mysql", "uid": "mysql-auth-audit" },
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawSql": "SELECT COALESCE(NULLIF(country, ''), '未知') AS country, COALESCE(NULLIF(region, ''), '未知') AS region, COALESCE(NULLIF(city, ''), '未知') AS city, COUNT(*) AS total_count, SUM(CASE WHEN result = 'FAILED' THEN 1 ELSE 0 END) AS failed_count, COUNT(DISTINCT ip_address) AS ip_count, COUNT(DISTINCT account_hash) AS account_count FROM auth_security_events WHERE $__timeFilter(created_at) AND ('$eventType' = 'ALL' OR event_type = '$eventType') AND ('$result' = 'ALL' OR result = '$result') GROUP BY country, region, city ORDER BY total_count DESC LIMIT 50"
-        }
-      ],
-      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" } } }, "overrides": [] },
+      "targets": [{
+        "refId": "A", "format": "table",
+        "rawSql": "SELECT COALESCE(NULLIF(country, ''), '未知') AS country, COALESCE(NULLIF(region, ''), '未知') AS region, COALESCE(NULLIF(city, ''), '未知') AS city, COUNT(*) AS total_count, SUM(CASE WHEN result = 'FAILED' THEN 1 ELSE 0 END) AS failed_count, ROUND(100.0 * SUM(CASE WHEN result = 'FAILED' THEN 1 ELSE 0 END) / COUNT(*), 2) AS failure_rate, COUNT(DISTINCT ip_address) AS ip_count FROM auth_security_events WHERE $__timeFilter(created_at) AND (${eventType:sqlstring} = 'ALL' OR event_type = ${eventType:sqlstring}) AND (${result:sqlstring} = 'ALL' OR result = ${result:sqlstring}) AND (${country:sqlstring} = 'ALL' OR COALESCE(NULLIF(country, ''), '未知') = ${country:sqlstring}) AND (${region:sqlstring} = 'ALL' OR COALESCE(NULLIF(region, ''), '未知') = ${region:sqlstring}) GROUP BY country, region, city ORDER BY failed_count DESC, total_count DESC LIMIT 50"
+      }],
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" } } }, "overrides": [{ "matcher": { "id": "byName", "options": "failure_rate" }, "properties": [{ "id": "unit", "value": "percent" }, { "id": "decimals", "value": 1 }] }] },
       "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } }
     },
     {
-      "id": 6,
-      "type": "table",
-      "title": "管理端失败登录",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "id": 6, "type": "table", "title": "最近认证事件",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 33 },
       "datasource": { "type": "mysql", "uid": "mysql-auth-audit" },
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawSql": "SELECT created_at AS time, account_masked, ip_address, COALESCE(NULLIF(country, ''), '未知') AS country, COALESCE(NULLIF(city, ''), '未知') AS city, failure_reason, trace_id FROM auth_security_events WHERE $__timeFilter(created_at) AND event_type = 'ADMIN_LOGIN_PASSWORD' AND result = 'FAILED' ORDER BY created_at DESC LIMIT 100"
-        }
-      ],
-      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" } } }, "overrides": [] },
-      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } }
-    },
-    {
-      "id": 7,
-      "type": "table",
-      "title": "最近认证事件",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
-      "datasource": { "type": "mysql", "uid": "mysql-auth-audit" },
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawSql": "SELECT created_at AS time, event_type, result, user_type, method, account_masked, ip_address, COALESCE(NULLIF(country, ''), '未知') AS country, COALESCE(NULLIF(city, ''), '未知') AS city, failure_reason, trace_id FROM auth_security_events WHERE $__timeFilter(created_at) AND ('$eventType' = 'ALL' OR event_type = '$eventType') AND ('$result' = 'ALL' OR result = '$result') ORDER BY created_at DESC LIMIT 200"
-        }
-      ],
+      "targets": [{
+        "refId": "A", "format": "table",
+        "rawSql": "SELECT created_at AS time, event_type, result, user_type, method, account_masked, ip_address, COALESCE(NULLIF(country, ''), '未知') AS country, COALESCE(NULLIF(region, ''), '未知') AS region, COALESCE(NULLIF(city, ''), '未知') AS city, failure_reason, trace_id FROM auth_security_events WHERE $__timeFilter(created_at) AND (${eventType:sqlstring} = 'ALL' OR event_type = ${eventType:sqlstring}) AND (${result:sqlstring} = 'ALL' OR result = ${result:sqlstring}) AND (${country:sqlstring} = 'ALL' OR COALESCE(NULLIF(country, ''), '未知') = ${country:sqlstring}) AND (${region:sqlstring} = 'ALL' OR COALESCE(NULLIF(region, ''), '未知') = ${region:sqlstring}) ORDER BY created_at DESC LIMIT 200"
+      }],
       "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" } } }, "overrides": [] },
       "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } }
     }

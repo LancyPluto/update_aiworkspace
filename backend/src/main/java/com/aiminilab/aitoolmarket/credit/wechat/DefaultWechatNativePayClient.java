@@ -113,6 +113,37 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
     }
 
     @Override
+    public boolean closeNativeOrder(String orderNo) {
+        ensureEnabled();
+        try {
+            String path = ORDER_QUERY_PATH_PREFIX + URLEncoder.encode(orderNo, StandardCharsets.UTF_8) + "/close";
+            String body = objectMapper.writeValueAsString(Map.of("mchid", properties.getMchid()));
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(properties.getApiBaseUrl() + path))
+                    .header("Accept", "application/json")
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", authorization(METHOD, path, body))
+                    .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                    .build();
+            HttpResponse<String> response = httpClient.send(request,
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() == 204) {
+                return true;
+            }
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                verifyHttpResponseSignature(response);
+                return true;
+            }
+            return false;
+        } catch (IOException exception) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native order close failed");
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native order close interrupted");
+        }
+    }
+
+    @Override
     public WechatPayNotification parseNotification(WechatPayCallbackHeaders headers, String body) {
         ensureEnabled();
         verifyCallbackSignature(headers, body);

@@ -17,7 +17,7 @@ import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.UserStatus;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
-import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderMapper;
+import com.aiminilab.aitoolmarket.credit.service.impl.MembershipService;
 import com.aiminilab.aitoolmarket.credit.service.ReferralService;
 import com.aiminilab.aitoolmarket.user.dto.UserProfileResponse;
 import com.aiminilab.aitoolmarket.user.entity.User;
@@ -41,7 +41,7 @@ public class AuthServiceImpl implements AuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final SmsCodeService smsCodeService;
     private final HumanCaptchaService humanCaptchaService;
-    private final CreditRechargeOrderMapper creditRechargeOrderMapper;
+    private final MembershipService membershipService;
     private final ReferralService referralService;
     private final AuthMetrics authMetrics;
 
@@ -50,7 +50,7 @@ public class AuthServiceImpl implements AuthService {
                            JwtTokenProvider jwtTokenProvider,
                            SmsCodeService smsCodeService,
                            HumanCaptchaService humanCaptchaService,
-                           CreditRechargeOrderMapper creditRechargeOrderMapper,
+                           MembershipService membershipService,
                            ReferralService referralService,
                            AuthMetrics authMetrics) {
         this.userMapper = userMapper;
@@ -58,7 +58,7 @@ public class AuthServiceImpl implements AuthService {
         this.jwtTokenProvider = jwtTokenProvider;
         this.smsCodeService = smsCodeService;
         this.humanCaptchaService = humanCaptchaService;
-        this.creditRechargeOrderMapper = creditRechargeOrderMapper;
+        this.membershipService = membershipService;
         this.referralService = referralService;
         this.authMetrics = authMetrics;
     }
@@ -240,40 +240,12 @@ public class AuthServiceImpl implements AuthService {
     public UserProfileResponse currentUser(Long userId) {
         User user = userMapper.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "用户不存在"));
-        String packageCode = creditRechargeOrderMapper.findCurrentPackageCodeByUserId(userId);
-        return new UserProfileResponse(
-                user.getId(),
-                user.getUsername(),
-                user.getNickname(),
-                user.getAvatarUrl(),
-                user.getBio(),
-                user.getAutoPublishAssets(),
-                user.getPromptPublicByDefault(),
-                user.getUserType(),
-                user.getStatus(),
-                user.getPhone(),
-                user.getEmail(),
-                packageCode
-        );
+        return UserProfileResponse.from(user, membershipService.current(userId));
     }
 
     private AuthenticatedSession buildLoginResponse(User user) {
         String token = jwtTokenProvider.createToken(new AuthUser(user.getId(), user.getUsername(), user.getUserType()));
-        String packageCode = creditRechargeOrderMapper.findCurrentPackageCodeByUserId(user.getId());
-        UserProfileResponse profile = new UserProfileResponse(
-                user.getId(),
-                user.getUsername(),
-                user.getNickname(),
-                user.getAvatarUrl(),
-                user.getBio(),
-                user.getAutoPublishAssets(),
-                user.getPromptPublicByDefault(),
-                user.getUserType(),
-                user.getStatus(),
-                user.getPhone(),
-                user.getEmail(),
-                packageCode
-        );
+        UserProfileResponse profile = UserProfileResponse.from(user, membershipService.current(user.getId()));
         return new AuthenticatedSession(token, new LoginResponse(token, profile));
     }
 

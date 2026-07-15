@@ -21,4 +21,35 @@ class DataInitializerSourceTest {
         assertThat(defaultImageToolSource).contains("input_modality = 'MULTIMODAL'");
         assertThat(defaultImageToolSource).contains("未上传图片走文生图，上传图片走图文生图");
     }
+
+    @Test
+    void legacyCreditBucketsAreCreatedBeforePermanentBucketMigration() throws Exception {
+        String source = Files.readString(Path.of("src/main/java/com/aiminilab/aitoolmarket/config/DataInitializer.java"));
+        int membershipColumn = source.indexOf("ensureColumn(\"credit_accounts\", \"membership_balance\"");
+        int giftColumn = source.indexOf("ensureColumn(\"credit_accounts\", \"gift_balance\"");
+        int permanentMigration = source.indexOf("SET permanent_balance = CASE");
+
+        assertThat(membershipColumn).isGreaterThanOrEqualTo(0);
+        assertThat(giftColumn).isGreaterThan(membershipColumn);
+        assertThat(permanentMigration).isGreaterThan(giftColumn);
+        assertThat(source).contains("WHEN membership_balance = 0 AND gift_balance = 0 THEN balance");
+    }
+
+    @Test
+    void giftCardTableIsCreatedBeforeAddingIssuanceKey() throws Exception {
+        String source = Files.readString(Path.of("src/main/java/com/aiminilab/aitoolmarket/config/DataInitializer.java"));
+        int giftCardTable = source.indexOf("ensureTable(\"gift_cards\"");
+        int issuanceKeyColumn = source.indexOf("ensureColumn(\"gift_cards\", \"issuance_key\"");
+
+        assertThat(giftCardTable).isGreaterThanOrEqualTo(0);
+        assertThat(issuanceKeyColumn).isGreaterThan(giftCardTable);
+    }
+
+    @Test
+    void membershipMigrationUsesExplicitSqlSignalGuard() throws Exception {
+        String migration = Files.readString(Path.of("../sql/087_membership_and_recharge_idempotency.sql"));
+
+        assertThat(migration).contains("SIGNAL SQLSTATE '45000'");
+        assertThat(migration).doesNotContain("CREATE TEMPORARY TABLE membership_migration_guard");
+    }
 }

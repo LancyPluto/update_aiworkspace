@@ -62,8 +62,8 @@ services:
       dockerfile: backend/Dockerfile
       args:
         DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.1ms.run/}
-        HTTP_PROXY: ${CONTAINER_HTTP_PROXY:-http://host.docker.internal:7890}
-        HTTPS_PROXY: ${CONTAINER_HTTPS_PROXY:-http://host.docker.internal:7890}
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
       extra_hosts:
         - "host.docker.internal:host-gateway"
     image: deploy-backend

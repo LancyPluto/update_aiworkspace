@@ -58,6 +58,7 @@ import com.aiminilab.aitoolmarket.admin.service.BillingService;
 import com.aiminilab.aitoolmarket.admin.service.SystemSettingService;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.AgentRateLimitService;
+import com.aiminilab.aitoolmarket.agent.service.AgentReferenceAssetResolver;
 import com.aiminilab.aitoolmarket.agent.service.AgentFileService;
 import com.aiminilab.aitoolmarket.agent.service.AgentRunService;
 import com.aiminilab.aitoolmarket.agent.service.AgentSkillBundleService;
@@ -134,6 +135,7 @@ public class AgentRunServiceImpl implements AgentRunService {
     private final AgentModelConfigMapper agentModelConfigMapper;
     private final AgentPendingToolContextMapper agentPendingToolContextMapper;
     private final AgentRateLimitService agentRateLimitService;
+    private final AgentReferenceAssetResolver agentReferenceAssetResolver;
     private final AgentToolDescriptorService agentToolDescriptorService;
     private final AgentSkillBundleService agentSkillBundleService;
     private final AgentToolPreferenceService agentToolPreferenceService;
@@ -161,6 +163,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             AgentModelConfigMapper agentModelConfigMapper,
             AgentPendingToolContextMapper agentPendingToolContextMapper,
             AgentRateLimitService agentRateLimitService,
+            AgentReferenceAssetResolver agentReferenceAssetResolver,
             AgentToolDescriptorService agentToolDescriptorService,
             AgentSkillBundleService agentSkillBundleService,
             AgentToolPreferenceService agentToolPreferenceService,
@@ -187,6 +190,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.agentPendingToolContextMapper = agentPendingToolContextMapper;
         this.agentRateLimitService = agentRateLimitService;
+        this.agentReferenceAssetResolver = agentReferenceAssetResolver;
         this.agentToolDescriptorService = agentToolDescriptorService;
         this.agentSkillBundleService = agentSkillBundleService;
         this.agentToolPreferenceService = agentToolPreferenceService;
@@ -489,7 +493,10 @@ public class AgentRunServiceImpl implements AgentRunService {
         );
         Map<Long, String> filenames = readyFiles.stream()
                 .collect(java.util.stream.Collectors.toMap(AgentFile::getId, AgentFile::getOriginalFilename));
-        List<InternalReferenceMentionResponse> referenceMentions = referenceMentionContexts(userMessage);
+        List<InternalReferenceMentionResponse> referenceMentions = agentReferenceAssetResolver.resolve(
+                run.getUserId(),
+                referenceMentionContexts(userMessage)
+        );
         List<Object> globalFileIds = globalFileIdsFromMessage(userMessage);
         List<Map<String, Object>> contentParts = contentPartsFromMessage(userMessage);
         String positionalPrompt = positionalPromptFromMessage(userMessage);

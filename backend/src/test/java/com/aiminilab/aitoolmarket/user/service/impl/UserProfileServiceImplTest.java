@@ -3,7 +3,7 @@ package com.aiminilab.aitoolmarket.user.service.impl;
 import com.aiminilab.aitoolmarket.auth.service.SmsCodeService;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.community.mapper.CommunityPostMapper;
-import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderMapper;
+import com.aiminilab.aitoolmarket.credit.service.impl.MembershipService;
 import com.aiminilab.aitoolmarket.storage.AssetStorageService;
 import com.aiminilab.aitoolmarket.user.dto.CancelAccountRequest;
 import com.aiminilab.aitoolmarket.user.dto.UpdateUserProfileRequest;
@@ -42,7 +42,7 @@ class UserProfileServiceImplTest {
         smsCodeService = mock(SmsCodeService.class);
         AccountDataCleanupMapper accountDataCleanupMapper = mock(AccountDataCleanupMapper.class);
         communityPostMapper = mock(CommunityPostMapper.class);
-        CreditRechargeOrderMapper creditRechargeOrderMapper = mock(CreditRechargeOrderMapper.class);
+        MembershipService membershipService = mock(MembershipService.class);
 
         when(assetStorageService.getPublicBaseUrl()).thenReturn(publicBaseUrl);
 
@@ -56,10 +56,10 @@ class UserProfileServiceImplTest {
         when(userMapper.findById(USER_ID)).thenReturn(Optional.of(existing));
         when(userMapper.updateProfile(eq(USER_ID), anyString(), any())).thenReturn(1);
         when(userMapper.cancelAccount(eq(USER_ID), anyString(), anyString())).thenReturn(1);
-        when(creditRechargeOrderMapper.findCurrentPackageCodeByUserId(USER_ID)).thenReturn(null);
+        when(membershipService.current(USER_ID)).thenReturn(null);
 
         return new UserProfileServiceImpl(userMapper, assetStorageService, smsCodeService,
-                accountDataCleanupMapper, communityPostMapper, creditRechargeOrderMapper);
+                accountDataCleanupMapper, communityPostMapper, membershipService);
     }
 
     @Test

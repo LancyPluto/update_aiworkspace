@@ -12,4 +12,8 @@ public interface AlipayPagePayClient {
     AlipayPayDiagnosticResponse buildDiagnostic(AlipayPagePayRequest request);
 
     AlipayNotification parseNotification(Map<String, String> params);
+
+    AlipayTradeQueryResult queryOrder(String orderNo);
+
+    boolean closeOrder(String orderNo);
 }

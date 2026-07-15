@@ -16,6 +16,7 @@ public class GiftCard {
     private Integer credits;
     private String status;
     private Long rechargeOrderId;
+    private String issuanceKey;
     private LocalDateTime redeemedAt;
     private Long giftedFromUserId;
     private LocalDateTime giftedAt;
@@ -38,6 +39,8 @@ public class GiftCard {
     public void setStatus(String status) { this.status = status; }
     public Long getRechargeOrderId() { return rechargeOrderId; }
     public void setRechargeOrderId(Long rechargeOrderId) { this.rechargeOrderId = rechargeOrderId; }
+    public String getIssuanceKey() { return issuanceKey; }
+    public void setIssuanceKey(String issuanceKey) { this.issuanceKey = issuanceKey; }
     public LocalDateTime getRedeemedAt() { return redeemedAt; }
     public void setRedeemedAt(LocalDateTime redeemedAt) { this.redeemedAt = redeemedAt; }
     public Long getGiftedFromUserId() { return giftedFromUserId; }

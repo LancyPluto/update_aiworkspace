@@ -8,7 +8,7 @@ datasources:
     url: ${GRAFANA_MYSQL_HOST}
     user: ${GRAFANA_MYSQL_USER}
     database: ${GRAFANA_MYSQL_DATABASE}
-    editable: true
+    editable: false
     jsonData:
       maxOpenConns: 5
       maxIdleConns: 2

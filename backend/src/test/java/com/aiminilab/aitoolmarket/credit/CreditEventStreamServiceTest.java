@@ -71,13 +71,19 @@ class CreditEventStreamServiceTest {
     }
 
     private static final class FailingEmitter extends SseEmitter {
+        private int sendCount;
+
         private FailingEmitter(Long timeout) {
             super(timeout);
         }
 
         @Override
         public void send(SseEventBuilder builder) throws IOException {
-            throw new IOException("connection closed");
+            sendCount++;
+            if (sendCount > 1) {
+                throw new IOException("connection closed");
+            }
+            super.send(builder);
         }
     }
 }

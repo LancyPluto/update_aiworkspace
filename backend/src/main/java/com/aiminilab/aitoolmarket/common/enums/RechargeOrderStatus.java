@@ -22,7 +22,8 @@ public enum RechargeOrderStatus {
         return switch (this) {
             case WAITING_PAYMENT -> next == PAID || next == CLOSED || next == FAILED;
             case PAID -> next == CREDITED || next == FAILED;
-            case CREDITED, CLOSED, FAILED -> false;
+            case CLOSED, FAILED -> next == PAID;
+            case CREDITED -> false;
         };
     }
 }

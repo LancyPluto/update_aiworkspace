@@ -49,6 +49,8 @@ const showChannelModal = ref(false)
 const showPayModal = ref(false)
 const activeOrder = ref<RechargeOrder | null>(null)
 const paymentResult = ref<"success" | "fail" | null>(null)
+const membershipPaymentAttemptId = ref<string | null>(null)
+const giftCardPaymentAttemptId = ref<string | null>(null)
 let pollingTimer: ReturnType<typeof setInterval> | null = null
 
 // 模式切换：会员计划 / 礼品卡
@@ -61,14 +63,24 @@ const pendingGiftCardItems = ref<Array<{ pkg: GiftCardPackage; quantity: number 
 // 用户当前会员等级（0-3），-1表示未开通会员
 // 基于后端返回的 membershipPlan（用户最近一次CREDITED订单的套餐代码）
 const userMemberLevel = computed(() => getUserMemberLevel(auth.user?.membershipPlan))
+const hasActiveMembership = computed(() => auth.user?.membershipStatus === "ACTIVE")
+const hasPendingMembership = computed(() =>
+  auth.user?.membershipStatus === "PENDING" && Boolean(auth.user.pendingMembershipOrderId),
+)
 
 const TRIAL_PLAN_NAME = "体验版"
 const TRIAL_GRANTED_CREDITS = 200
 
-const membershipStatus = computed(() => ({
-  planName: TRIAL_PLAN_NAME,
-  availableDisplay: props.account ? props.account.available.toLocaleString() : "--",
-}))
+const membershipStatus = computed(() => {
+  const plan = packages.value.find((item) => item.packageCode === auth.user?.membershipPlan)
+  return {
+    planName: hasActiveMembership.value
+      ? localizePackageName(plan?.packageName ?? auth.user?.membershipPlan ?? "会员")
+      : hasPendingMembership.value ? "待支付会员订单" : TRIAL_PLAN_NAME,
+    availableDisplay: props.account ? props.account.available.toLocaleString() : "--",
+    expiresDisplay: auth.user?.membershipExpiresAt ? formatDateTime(auth.user.membershipExpiresAt) : null,
+  }
+})
 
 const TIER_META: Record<string, { label: string; subtitle: string; featured?: boolean }> = {
   starter: { label: "标准版", subtitle: "适合轻度创作者" },
@@ -149,6 +161,14 @@ function redirectToAlipayCheckout(order: RechargeOrder) {
 function formatMoney(value: number | string | undefined | null) {
   const amount = Number(value ?? 0)
   return Number.isInteger(amount) ? String(amount) : amount.toFixed(2)
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+  }).format(date)
 }
 
 const GIFT_CARD_THEMES: Record<string, string> = {
@@ -277,6 +297,8 @@ function closeChannelModal() {
   pendingPackage.value = null
   pendingGiftCardPackage.value = null
   pendingGiftCardItems.value = []
+  membershipPaymentAttemptId.value = null
+  giftCardPaymentAttemptId.value = null
 }
 
 function closePayModal() {
@@ -307,6 +329,7 @@ async function pollOrder(orderId: number) {
     if (order.status === "CREDITED") {
       paymentResult.value = "success"
       clearPolling()
+      await auth.fetchCurrentUser({ clearOnFailure: false })
       emit("creditsUpdated")
     } else if (order.status === "FAILED" || order.status === "CLOSED") {
       paymentResult.value = "fail"
@@ -325,9 +348,24 @@ function startPolling(orderId: number) {
   }, 1500)
 }
 
-function openPaymentChoice(pkg: RechargePackage) {
+async function openPaymentChoice(pkg: RechargePackage) {
+  if (hasActiveMembership.value) return
+  if (hasPendingMembership.value && auth.user?.pendingMembershipOrderId) {
+    ordering.value = true
+    error.value = ""
+    try {
+      const order = await fetchRechargeOrder(auth.user.pendingMembershipOrderId, { token: auth.token })
+      openPayModalForOrder(order, order.paymentChannel as PaymentChannel)
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : "恢复待支付订单失败"
+    } finally {
+      ordering.value = false
+    }
+    return
+  }
   pendingPackage.value = pkg
   selectedId.value = pkg.id
+  membershipPaymentAttemptId.value = crypto.randomUUID()
   paymentResult.value = null
   error.value = ""
   showChannelModal.value = true
@@ -363,7 +401,7 @@ async function createOrder(pkg: RechargePackage, channel: PaymentChannel) {
       {
         packageId: pkg.id,
         paymentChannel: channel,
-        clientRequestId: `recharge-${pkg.id}-${channel}-${Date.now()}`,
+        clientRequestId: membershipPaymentAttemptId.value ??= crypto.randomUUID(),
       },
       { token: auth.token },
     )
@@ -395,6 +433,7 @@ function openGiftCardPayment(items: Array<{ pkg: GiftCardPackage; quantity: numb
   pendingPackage.value = null
   pendingGiftCardPackage.value = normalized[0].pkg
   pendingGiftCardItems.value = normalized
+  giftCardPaymentAttemptId.value = crypto.randomUUID()
   paymentResult.value = null
   error.value = ""
   showChannelModal.value = true
@@ -409,7 +448,7 @@ async function createGiftCardOrder(items: Array<{ pkg: GiftCardPackage; quantity
       {
         packageId: null,
         paymentChannel: channel,
-        clientRequestId: `giftcard-${items.map((item) => `${item.pkg.id}x${item.quantity}`).join("-")}-${channel}-${Date.now()}`,
+        clientRequestId: giftCardPaymentAttemptId.value ??= crypto.randomUUID(),
         orderType: 'GIFT_CARD',
         giftCardPackageId: items[0].pkg.id,
         giftCardItems: items.map((item) => ({
@@ -451,7 +490,11 @@ onUnmounted(clearPolling)
           <span class="membership-status-card__divider">·</span>
           体验额度 {{ TRIAL_GRANTED_CREDITS }}
         </p>
-        <p class="membership-status-card__hint">未开通连续订阅，选择下方套餐即可升级会员</p>
+        <p v-if="membershipStatus.expiresDisplay" class="membership-status-card__hint">
+          到期时间 {{ membershipStatus.expiresDisplay }}
+        </p>
+        <p v-else-if="hasPendingMembership" class="membership-status-card__hint">已有待支付订单，可继续完成支付</p>
+        <p v-else class="membership-status-card__hint">选择下方套餐即可开通会员</p>
       </div>
     </article>
 
@@ -584,10 +627,10 @@ onUnmounted(clearPolling)
           <button
             type="button"
             class="mt-5 w-full rounded-xl bg-gradient-to-r from-sky-400 to-blue-500 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-sky-500/20 transition-all hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
-            :disabled="ordering"
+            :disabled="ordering || hasActiveMembership"
             @click.stop="openPaymentChoice(pkg)"
           >
-            {{ ordering && orderingPackageId === pkg.id ? "下单中..." : "立即开通" }}
+            {{ hasActiveMembership ? "会员有效期内不可续费" : hasPendingMembership ? "继续待支付订单" : ordering && orderingPackageId === pkg.id ? "下单中..." : "立即开通" }}
           </button>
 
           <ul class="mt-5 flex-1 space-y-2 border-t border-slate-800 pt-4">
@@ -924,5 +967,3 @@ onUnmounted(clearPolling)
   }
 }
 </style>
-
-

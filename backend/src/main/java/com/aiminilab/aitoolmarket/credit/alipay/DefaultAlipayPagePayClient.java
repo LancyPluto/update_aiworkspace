@@ -4,6 +4,8 @@ import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.credit.dto.AlipayPayDiagnosticResponse;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
@@ -50,6 +52,46 @@ public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
         requireEnabled();
         String launchPath = "/api/v1/pay/alipay/page/launch?orderNo=" + url(request.outTradeNo());
         return AlipayPagePayResponse.pageRedirect(launchPath);
+    }
+
+    @Override
+    public AlipayTradeQueryResult queryOrder(String orderNo) {
+        requireEnabled();
+        try {
+            JsonNode response = invokeTradeApi("alipay.trade.query", orderNo)
+                    .path("alipay_trade_query_response");
+            if ("10000".equals(response.path("code").asText())) {
+                String amount = response.path("total_amount").asText("");
+                return new AlipayTradeQueryResult(
+                        response.path("out_trade_no").asText(orderNo),
+                        textOrNull(response, "trade_no"),
+                        response.path("trade_status").asText("UNKNOWN"),
+                        amount.isBlank() ? null : new BigDecimal(amount)
+                );
+            }
+            if ("ACQ.TRADE_NOT_EXIST".equals(response.path("sub_code").asText())) {
+                return new AlipayTradeQueryResult(orderNo, null, "NOT_FOUND", null);
+            }
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "Alipay order query failed: " + response.path("sub_msg").asText("unknown error"));
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Alipay order query failed: " + exception.getMessage());
+        }
+    }
+
+    @Override
+    public boolean closeOrder(String orderNo) {
+        requireEnabled();
+        try {
+            JsonNode response = invokeTradeApi("alipay.trade.close", orderNo)
+                    .path("alipay_trade_close_response");
+            return "10000".equals(response.path("code").asText())
+                    || "ACQ.TRADE_HAS_CLOSE".equals(response.path("sub_code").asText());
+        } catch (Exception exception) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Alipay order close failed: " + exception.getMessage());
+        }
     }
 
     @Override
@@ -148,11 +190,15 @@ public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
     }
 
     private JsonNode probePermission(String outTradeNo) throws Exception {
+        return invokeTradeApi(PERMISSION_PROBE_METHOD, outTradeNo);
+    }
+
+    private JsonNode invokeTradeApi(String method, String outTradeNo) throws Exception {
         Map<String, String> bizContent = new TreeMap<>();
         bizContent.put("out_trade_no", outTradeNo);
         Map<String, String> params = new TreeMap<>();
         params.put("app_id", properties.getAppId());
-        params.put("method", PERMISSION_PROBE_METHOD);
+        params.put("method", method);
         params.put("format", "JSON");
         params.put("charset", "UTF-8");
         params.put("sign_type", "RSA2");
@@ -161,7 +207,11 @@ public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
         params.put("biz_content", objectMapper.writeValueAsString(bizContent));
         params.put("sign", sign(canonicalPayload(params), privateKey()));
         String responseBody = postForm(properties.getGatewayUrl(), encode(params));
-        return objectMapper.readTree(responseBody);
+        JsonNode root = objectMapper.readTree(responseBody);
+        String expectedResponseField = method.replace('.', '_') + "_response";
+        String responseField = root.has(expectedResponseField) ? expectedResponseField : "error_response";
+        verifyGatewayResponseSignature(root, extractSignedResponsePayload(responseBody, responseField));
+        return root;
     }
 
     @Override
@@ -194,11 +244,54 @@ public class DefaultAlipayPagePayClient implements AlipayPagePayClient {
         if (!StringUtils.hasText(sign)) {
             return false;
         }
+        return verifySignature(canonicalPayload(params), sign);
+    }
+
+    private void verifyGatewayResponseSignature(JsonNode root, String payload) {
+        String signature = root.path("sign").asText("");
+        if (!StringUtils.hasText(payload) || !StringUtils.hasText(signature)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "Alipay gateway response signature verification failed");
+        }
+        if (!verifySignature(payload, signature)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "Alipay gateway response signature verification failed");
+        }
+    }
+
+    private String extractSignedResponsePayload(String responseBody, String responseField) {
+        try (JsonParser parser = objectMapper.getFactory().createParser(responseBody)) {
+            if (parser.nextToken() != JsonToken.START_OBJECT) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "Alipay gateway response is invalid");
+            }
+            while (parser.nextToken() != JsonToken.END_OBJECT) {
+                String fieldName = parser.currentName();
+                parser.nextToken();
+                if (responseField.equals(fieldName)) {
+                    long start = parser.currentTokenLocation().getCharOffset();
+                    parser.skipChildren();
+                    long end = parser.currentLocation().getCharOffset();
+                    if (start >= 0 && end > start && end <= responseBody.length()) {
+                        return responseBody.substring((int) start, (int) end);
+                    }
+                    break;
+                }
+                parser.skipChildren();
+            }
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Alipay gateway response is invalid");
+        }
+        throw new BusinessException(ErrorCode.PARAM_ERROR, "Alipay gateway response is invalid");
+    }
+
+    private boolean verifySignature(String payload, String signature) {
         try {
             Signature verifier = Signature.getInstance("SHA256withRSA");
             verifier.initVerify(publicKey());
-            verifier.update(canonicalPayload(params).getBytes(StandardCharsets.UTF_8));
-            return verifier.verify(Base64.getDecoder().decode(sign));
+            verifier.update(payload.getBytes(StandardCharsets.UTF_8));
+            return verifier.verify(Base64.getDecoder().decode(signature));
         } catch (Exception exception) {
             return false;
         }

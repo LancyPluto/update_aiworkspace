@@ -73,7 +73,9 @@ public class ReferralServiceImpl implements ReferralService {
         if (order.getCredits() == null || order.getCredits() <= 0) {
             return;
         }
-        if (order.getOrderType() != null && !"CREDITS".equals(order.getOrderType())) {
+        if (order.getOrderType() != null
+                && !"CREDITS".equals(order.getOrderType())
+                && !"MEMBERSHIP".equals(order.getOrderType())) {
             return;
         }
         UserReferral referral = referralMapper.findByInviteeUserId(order.getUserId());

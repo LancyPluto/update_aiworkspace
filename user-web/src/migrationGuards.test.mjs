@@ -154,6 +154,18 @@ test("community actions use Cookie-backed login state instead of requiring a bea
   }
 })
 
+test("app shell manages Cookie-backed realtime credit refresh lifecycle", async () => {
+  const shell = await readSource("components/AppShell.vue")
+  const creditApi = await readSource("api/creditApi.ts")
+
+  assert.match(shell, /createCreditRealtime/)
+  assert.match(shell, /creditRealtime\.start\(\)/)
+  assert.match(shell, /creditRealtime\.stop\(\)/)
+  assert.match(shell, /getCreditEventsUrl\(\)/)
+  assert.match(creditApi, /\/api\/v1\/credits\/events/)
+  assert.doesNotMatch(creditApi, /credits\/events[^\n]*(?:token|accessToken)/)
+})
+
 test("asset replay and community same-style creation share the dashboard flow", async () => {
   const replay = await readSource("utils/assetReplay.ts")
   const gallery = await readSource("components/community/CommunityGallery.vue")

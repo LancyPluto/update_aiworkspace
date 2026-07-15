@@ -191,9 +191,32 @@ if ! git fetch "$BUNDLE" "$GIT_REF:refs/heads/deploy-target" 2>/dev/null; then
     git fetch "$BUNDLE" "refs/remotes/origin/$GIT_BRANCH:refs/heads/deploy-target"
   fi
 fi
+NEW_SHA="$(git rev-parse deploy-target)"
+DEPLOYED_AT="$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S%z')"
+cat > "$REMOTE_DIR/deploy/logs/last-deploy.json" <<EOF
+{{
+  "deployedAt": "$DEPLOYED_AT",
+  "oldSha": "$OLD_SHA",
+  "newSha": "$NEW_SHA",
+  "event": "manual",
+  "branch": "$GIT_BRANCH"
+}}
+EOF
+
+rollback_on_failure() {{
+  status=$?
+  trap - ERR
+  echo "::error::Release failed; starting rollback to $OLD_SHA." >&2
+  if ! REMOTE_DIR="$REMOTE_DIR" DEPLOY_SERVICES="$SERVICES" \
+      bash "$REMOTE_DIR/deploy/scripts/rollback_release.sh"; then
+    echo "::error::Automatic rollback also failed; manual intervention is required." >&2
+  fi
+  exit "$status"
+}}
+trap rollback_on_failure ERR
+
 git checkout -B "$GIT_BRANCH" deploy-target -f
 git reset --hard deploy-target
-NEW_SHA="$(git rev-parse HEAD)"
 echo "Synced $OLD_SHA -> $NEW_SHA"
 
 for rel in .env engines/banana-slides/.env; do
@@ -213,7 +236,11 @@ rm -f "$BUNDLE"
 {ENV_PATCH_SCRIPT}
 
 cd "$REMOTE_DIR/deploy"
-COMPOSE_ARGS=(-f docker-compose.yml -f docker-compose.nginx.yml)
+COMPOSE_ARGS=(--env-file ../.env -f docker-compose.yml -f docker-compose.nginx.yml)
+if grep -Eqi '^MIHOMO_ENABLED=true$' "$REMOTE_DIR/.env"; then
+  COMPOSE_ARGS+=(-f docker-compose.proxy.yml)
+  echo "Mihomo overlay enabled"
+fi
 if [ -f docker-compose.monitoring.yml ]; then
   COMPOSE_ARGS+=(-f docker-compose.monitoring.yml)
 fi
@@ -237,7 +264,7 @@ APP_SERVICES=""
 MONITORING_SERVICES=""
 for svc in $SERVICES; do
   case "$svc" in
-    prometheus|grafana|loki|promtail|node-exporter|cadvisor|blackbox-exporter)
+    prometheus|grafana|loki|alloy|node-exporter|cadvisor|blackbox-exporter)
       MONITORING_SERVICES="$MONITORING_SERVICES $svc"
       ;;
     *)
@@ -251,40 +278,13 @@ if [ -n "$APP_SERVICES" ]; then
 fi
 
 if [ -n "$MONITORING_SERVICES" ]; then
-  CORE_MONITORING_SERVICES=""
-  OPTIONAL_MONITORING_SERVICES=""
-  for svc in $MONITORING_SERVICES; do
-    case "$svc" in
-      cadvisor) OPTIONAL_MONITORING_SERVICES="$OPTIONAL_MONITORING_SERVICES $svc" ;;
-      *) CORE_MONITORING_SERVICES="$CORE_MONITORING_SERVICES $svc" ;;
-    esac
-  done
-  if [ -n "$CORE_MONITORING_SERVICES" ]; then
-    if ! docker compose "${{COMPOSE_ARGS[@]}}" up -d --force-recreate $CORE_MONITORING_SERVICES; then
-      echo "::warning::Core monitoring stack update failed; application deploy continues." >&2
-    fi
-  fi
-  if [ -n "$OPTIONAL_MONITORING_SERVICES" ]; then
-    if ! docker compose "${{COMPOSE_ARGS[@]}}" up -d --force-recreate $OPTIONAL_MONITORING_SERVICES; then
-      echo "::warning::Optional monitoring service update failed:$OPTIONAL_MONITORING_SERVICES" >&2
-    fi
-  fi
+  docker compose "${{COMPOSE_ARGS[@]}}" up -d --force-recreate $MONITORING_SERVICES
 fi
 
-echo "Waiting for user-web health..."
-for i in $(seq 1 36); do
-  health="$(docker inspect --format '{{{{.State.Health.Status}}}}' ai-supermarket-user-web 2>/dev/null || echo missing)"
-  echo "  attempt $i: user-web=$health"
-  if [[ "$health" == "healthy" ]]; then
-    break
-  fi
-  sleep 10
-done
-
-curl -sf -o /dev/null -w "root:%{{http_code}}\\n" http://127.0.0.1/ || true
-curl -sf -o /dev/null -w "api:%{{http_code}}\\n" http://127.0.0.1/api/health || true
-curl -sf -o /dev/null -w "admin:%{{http_code}}\\n" -L http://127.0.0.1/admin || true
+echo "Verifying release health..."
+bash "$REMOTE_DIR/deploy/scripts/verify_release_health.sh"
 docker compose "${{COMPOSE_ARGS[@]}}" ps
+trap - ERR
 echo "Deploy complete: $NEW_SHA"
 """
         _, stdout, stderr = ssh.exec_command(remote_script, timeout=1800)
