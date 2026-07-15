@@ -6,7 +6,7 @@ DEPLOY_SERVICES="${DEPLOY_SERVICES:-${*:-}}"
 MANIFEST="$REMOTE_DIR/deploy/logs/last-deploy.json"
 # Keep rollback independent of the checked-out revision's registry default.
 # A private ACR mirror can override this through the deployment environment.
-CADVISOR_IMAGE="${CADVISOR_IMAGE:-m.daocloud.io/gcr.io/cadvisor/cadvisor:v0.49.1}"
+CADVISOR_IMAGE="${CADVISOR_IMAGE:-m.daocloud.io/ghcr.io/google/cadvisor:v0.60.5}"
 export CADVISOR_IMAGE
 
 if [ ! -f "$MANIFEST" ]; then
@@ -190,7 +190,10 @@ if [ "$nginx_requested" = true ]; then
   docker compose "${compose_args[@]}" up -d --force-recreate nginx
 fi
 
-if [ "$monitoring_requested" = true ] && [ "${#available_monitoring_services[@]}" -gt 0 ]; then
+if [ "$require_monitoring" -eq 1 ]; then
+  echo "Restoring complete old revision monitoring stack: ${available_monitoring_services[*]}"
+  docker compose "${compose_args[@]}" up -d --force-recreate "${available_monitoring_services[@]}"
+elif [ "$monitoring_requested" = true ] && [ "${#available_monitoring_services[@]}" -gt 0 ]; then
   echo "Restoring old revision monitoring stack: ${available_monitoring_services[*]}"
   docker compose "${compose_args[@]}" up -d --force-recreate "${available_monitoring_services[@]}"
 fi
@@ -204,7 +207,7 @@ rolled_back_services=("${app_services[@]}")
 if [ "$nginx_requested" = true ]; then
   rolled_back_services+=(nginx)
 fi
-if [ "$monitoring_requested" = true ]; then
+if [ "$monitoring_requested" = true ] || [ "$require_monitoring" -eq 1 ]; then
   rolled_back_services+=("${available_monitoring_services[@]}")
 fi
 printf '[%s] rollback to %s services=%s\n' "$(date -Iseconds)" "$old_sha" "${rolled_back_services[*]}" \

@@ -156,7 +156,7 @@ GRAFANA_PORT=3001
 GRAFANA_ROOT_URL=https://wlcloudai.com/grafana/
 PROMETHEUS_RETENTION=15d
 GRAFANA_ADMIN_USER=admin
-CADVISOR_IMAGE=m.daocloud.io/gcr.io/cadvisor/cadvisor:v0.49.1
+CADVISOR_IMAGE=m.daocloud.io/ghcr.io/google/cadvisor:v0.60.5
 """.strip().splitlines()
 
 patch = {}
@@ -460,6 +460,7 @@ fi
 
 APP_SERVICES=""
 MONITORING_SERVICES=""
+MONITORING_STACK="prometheus grafana loki alloy node-exporter cadvisor blackbox-exporter"
 for svc in \$DEPLOY_SERVICES; do
   case "\$svc" in
     prometheus|grafana|loki|alloy|node-exporter|cadvisor|blackbox-exporter)
@@ -480,6 +481,9 @@ if [ -n "\$MONITORING_SERVICES" ]; then
   echo "Starting/updating monitoring containers:\$MONITORING_SERVICES"
   docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate \$MONITORING_SERVICES
 fi
+
+echo "Ensuring complete monitoring stack: \$MONITORING_STACK"
+docker compose "\${COMPOSE_ARGS[@]}" up -d \$MONITORING_STACK
 
 # nginx 反代静态资源；任意前端/配置变更后都 reload，避免 user_web_dist 已更新但 nginx 仍握旧连接。
 docker compose "\${COMPOSE_ARGS[@]}" restart nginx
