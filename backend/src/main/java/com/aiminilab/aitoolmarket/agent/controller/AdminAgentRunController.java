@@ -16,15 +16,26 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import jakarta.validation.Valid;
+import com.aiminilab.aitoolmarket.agent.service.AgentAuditService;
+import com.aiminilab.aitoolmarket.agent.dto.AgentRunAuditResponse;
+import com.aiminilab.aitoolmarket.agent.dto.AgentModelRequestSnapshotResponse;
+import com.aiminilab.aitoolmarket.agent.dto.AgentRunAuditReviewResponse;
+import com.aiminilab.aitoolmarket.agent.dto.UpdateAgentRunAuditReviewRequest;
+import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 
 @RestController
 @RequestMapping("/api/admin/v1/agent/runs")
 public class AdminAgentRunController {
 
     private final AdminAgentRunService adminAgentRunService;
+    private final AgentAuditService agentAuditService;
 
-    public AdminAgentRunController(AdminAgentRunService adminAgentRunService) {
+    public AdminAgentRunController(AdminAgentRunService adminAgentRunService, AgentAuditService agentAuditService) {
         this.adminAgentRunService = adminAgentRunService;
+        this.agentAuditService = agentAuditService;
     }
 
     @GetMapping
@@ -56,5 +67,24 @@ public class AdminAgentRunController {
     @PostMapping("/{runId}/cancel")
     public ApiResponse<AgentRunResponse> cancel(@PathVariable Long runId) {
         return ApiResponse.success(adminAgentRunService.cancel(runId));
+    }
+
+    @GetMapping("/{runId}/audit")
+    public ApiResponse<AgentRunAuditResponse> audit(@PathVariable Long runId) {
+        return ApiResponse.success(agentAuditService.audit(runId));
+    }
+
+    @GetMapping("/{runId}/model-requests")
+    public ApiResponse<List<AgentModelRequestSnapshotResponse>> modelRequests(
+            @PathVariable Long runId,
+            @RequestParam(required = false) Long afterId,
+            @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(agentAuditService.modelRequests(runId, afterId, pageSize));
+    }
+
+    @PutMapping("/{runId}/audit-review")
+    public ApiResponse<AgentRunAuditReviewResponse> review(@PathVariable Long runId,
+                                                           @Valid @RequestBody UpdateAgentRunAuditReviewRequest request) {
+        return ApiResponse.success(agentAuditService.review(runId, AuthContext.get().userId(), request));
     }
 }

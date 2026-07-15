@@ -26,6 +26,9 @@ class AssetStorage:
     public_base_url: str
     private_base_url: str
     image_transform_options: str
+    public_cache_control: str
+    private_cache_control: str
+    legacy_cache_control: str
     oss_endpoint: str
     oss_bucket_name: str
     oss_public_bucket_name: str
@@ -59,6 +62,9 @@ class AssetStorage:
             public_base_url=public_base_url,
             private_base_url=private_base_url,
             image_transform_options=(os.getenv("ASSET_STORAGE_IMAGE_TRANSFORM_OPTIONS") or "").strip(),
+            public_cache_control=(os.getenv("ASSET_PUBLIC_CACHE_CONTROL") or "public,max-age=31536000,immutable").strip(),
+            private_cache_control=(os.getenv("ASSET_PRIVATE_CACHE_CONTROL") or "private,max-age=3600").strip(),
+            legacy_cache_control=(os.getenv("ASSET_LEGACY_CACHE_CONTROL") or "public,max-age=300,must-revalidate").strip(),
             oss_endpoint=(os.getenv("OSS_ENDPOINT") or "").strip(),
             oss_bucket_name=(
                 os.getenv("OSS_PRIVATE_BUCKET")
@@ -148,6 +154,7 @@ class AssetStorage:
         headers = {}
         if content_type:
             headers["Content-Type"] = content_type
+        headers["Cache-Control"] = self.private_cache_control
         try:
             self._bucket_client.put_object(object_key, data, headers=headers or None)
         except Exception as exc:  # pragma: no cover - network
@@ -161,6 +168,9 @@ class AssetStorage:
         headers = {}
         if content_type:
             headers["Content-Type"] = content_type
+        headers["Cache-Control"] = (
+            self.public_cache_control if self._is_content_addressed(relative_key) else self.legacy_cache_control
+        )
         try:
             bucket.put_object(object_key, data, headers=headers or None)
         except Exception as exc:  # pragma: no cover - network
@@ -203,6 +213,12 @@ class AssetStorage:
         if dot < 0 or dot == len(key) - 1:
             return False
         return key[dot + 1:].lower() in _IMAGE_EXTENSIONS
+
+    @staticmethod
+    def _is_content_addressed(key: str) -> bool:
+        filename = key.replace("\\", "/").rsplit("/", 1)[-1]
+        stem = filename.split(".", 1)[0]
+        return len(stem) == 40 and all(char in "0123456789abcdefABCDEF" for char in stem)
 
     @staticmethod
     def _normalize_relative_key(relative_key: str) -> str:

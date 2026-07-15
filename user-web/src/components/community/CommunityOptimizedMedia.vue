@@ -2,11 +2,16 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue"
 import { ImageOff } from "lucide-vue-next"
 import {
-  normalizeCommunityMediaUrl,
-  resolveCommunityDerivativeUrl,
-  resolveOssVideoPosterUrl,
   type CommunityMediaKind,
 } from "@/utils/communityPostMedia"
+import {
+  buildImageCandidateChain,
+  buildImageLqip,
+  buildVideoCandidateChain,
+  buildVideoPosterUrl,
+  mediaDeliveryOptimizationEnabled,
+} from "@/utils/mediaDelivery"
+import { recordMediaDeliveryEvent } from "@/utils/mediaTelemetry"
 
 const props = defineProps<{
   kind: CommunityMediaKind
@@ -21,33 +26,26 @@ const emit = defineEmits<{
 
 const imageLoaded = ref(false)
 const imageFailed = ref(false)
+const imageCandidateIndex = ref(0)
 const lqipFailed = ref(false)
 const posterLoaded = ref(false)
 const posterFailed = ref(false)
 const videoReady = ref(false)
 const videoPreviewFailed = ref(false)
+const videoCandidateIndex = ref(0)
 const hoverActive = ref(false)
 const videoMounted = ref(false)
 const videoRef = ref<HTMLVideoElement | null>(null)
 let hoverTimer: number | null = null
 
-const rawOptimizationFlag = String(import.meta.env.VITE_COMMUNITY_MEDIA_OPTIMIZATION ?? "").toLowerCase()
-const useDerivativeMedia =
-  ["1", "true", "yes", "on"].includes(rawOptimizationFlag) ||
-  (import.meta.env.PROD && !["0", "false", "no", "off"].includes(rawOptimizationFlag))
+const useDerivativeMedia = mediaDeliveryOptimizationEnabled()
 
-const normalizedSourceUrl = computed(() => normalizeCommunityMediaUrl(props.sourceUrl))
-const imageThumbUrl = computed(() =>
-  useDerivativeMedia ? resolveCommunityDerivativeUrl(props.sourceUrl, "image-thumb") : normalizedSourceUrl.value,
-)
-const imageLqipUrl = computed(() =>
-  useDerivativeMedia ? resolveCommunityDerivativeUrl(props.sourceUrl, "image-lqip") : "",
-)
-const videoPosterUrl = computed(() => resolveOssVideoPosterUrl(props.sourceUrl))
-const videoPreviewUrl = computed(() => {
-  if (videoPreviewFailed.value) return normalizedSourceUrl.value
-  return useDerivativeMedia ? resolveCommunityDerivativeUrl(props.sourceUrl, "video-preview") : normalizedSourceUrl.value
-})
+const imageCandidates = computed(() => buildImageCandidateChain(props.sourceUrl, "card", useDerivativeMedia))
+const imageThumbUrl = computed(() => imageCandidates.value[imageCandidateIndex.value] || "")
+const imageLqipUrl = computed(() => buildImageLqip(props.sourceUrl, useDerivativeMedia))
+const videoPosterUrl = computed(() => buildVideoPosterUrl(props.sourceUrl, useDerivativeMedia))
+const videoCandidates = computed(() => buildVideoCandidateChain(props.sourceUrl, useDerivativeMedia))
+const videoPreviewUrl = computed(() => videoCandidates.value[videoCandidateIndex.value] || "")
 const isImage = computed(() => props.kind === "image")
 const isVideo = computed(() => props.kind === "video")
 const hasImageLqip = computed(() => Boolean(imageLqipUrl.value) && !lqipFailed.value)
@@ -95,14 +93,36 @@ function onPointerLeave() {
 
 function onVideoCanPlay() {
   videoReady.value = true
+  recordMediaDeliveryEvent("video", videoCandidateIndex.value === 0 && videoCandidates.value.length > 1 ? "preview" : "original", "loaded")
   if (hoverActive.value) void videoRef.value?.play().catch(() => undefined)
 }
 
 function onVideoError() {
-  if (!videoPreviewFailed.value) {
-    videoPreviewFailed.value = true
+  if (videoCandidateIndex.value + 1 < videoCandidates.value.length) {
+    videoCandidateIndex.value += 1
     videoReady.value = false
+    recordMediaDeliveryEvent("video", "preview", "fallback")
+    return
   }
+  videoPreviewFailed.value = true
+  recordMediaDeliveryEvent("video", "original", "failed")
+}
+
+function onImageLoad() {
+  imageLoaded.value = true
+  recordMediaDeliveryEvent("image", imageCandidateIndex.value === 0 && imageCandidates.value.length > 1 ? "derivative" : "original", "loaded")
+  emit("loaded")
+}
+
+function onImageError() {
+  if (imageCandidateIndex.value + 1 < imageCandidates.value.length) {
+    imageCandidateIndex.value += 1
+    imageLoaded.value = false
+    recordMediaDeliveryEvent("image", "derivative", "fallback")
+    return
+  }
+  imageFailed.value = true
+  recordMediaDeliveryEvent("image", "original", "failed")
 }
 
 watch(
@@ -110,11 +130,13 @@ watch(
   () => {
     imageLoaded.value = false
     imageFailed.value = false
+    imageCandidateIndex.value = 0
     lqipFailed.value = false
     posterLoaded.value = false
     posterFailed.value = false
     videoReady.value = false
     videoPreviewFailed.value = false
+    videoCandidateIndex.value = 0
     hoverActive.value = false
     videoMounted.value = false
     clearHoverTimer()
@@ -160,8 +182,8 @@ onBeforeUnmount(() => {
         :style="{ opacity: imageLoaded ? 1 : 0 }"
         loading="lazy"
         decoding="async"
-        @load="imageLoaded = true; emit('loaded')"
-        @error="imageFailed = true"
+        @load="onImageLoad"
+        @error="onImageError"
       />
     </template>
 

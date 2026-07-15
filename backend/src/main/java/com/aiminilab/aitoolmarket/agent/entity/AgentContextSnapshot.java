@@ -24,6 +24,7 @@ public class AgentContextSnapshot {
     private Integer memoryItemCount;
     private Integer estimatedInputTokens;
     private String snapshotJson;
+    private String payloadSha256;
     private LocalDateTime createdAt;
 
     public Long getId() { return id; }
@@ -58,6 +59,8 @@ public class AgentContextSnapshot {
     public void setEstimatedInputTokens(Integer estimatedInputTokens) { this.estimatedInputTokens = estimatedInputTokens; }
     public String getSnapshotJson() { return snapshotJson; }
     public void setSnapshotJson(String snapshotJson) { this.snapshotJson = snapshotJson; }
+    public String getPayloadSha256() { return payloadSha256; }
+    public void setPayloadSha256(String payloadSha256) { this.payloadSha256 = payloadSha256; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }

@@ -43,6 +43,10 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:5174/admin", health)
         self.assertIn("http://127.0.0.1:8090/health", health)
         self.assertIn("docker logs --tail 80", health)
+        self.assertIn("worker_media_runtime_ready", health)
+        self.assertIn("get_ffmpeg_exe", health)
+        self.assertIn("MEDIA_HEALTHCHECK_URL", health)
+        self.assertIn("verify_media_delivery.py", health)
         self.assertNotIn("http_ok http://127.0.0.1/", health)
 
     def test_monitoring_is_blocking_in_every_deploy_entry(self) -> None:

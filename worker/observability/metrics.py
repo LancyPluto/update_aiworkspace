@@ -15,6 +15,15 @@ BACKEND_REQUESTS = Counter("worker_backend_requests_total", "Worker backend requ
 BACKEND_DURATION = Histogram("worker_backend_request_duration_seconds", "Worker backend request duration.", ["method", "path"])
 STATUS_UPDATES = Counter("worker_task_status_updates_total", "Worker task status callbacks.", ["status"])
 LEASE_RENEW = Counter("worker_lease_renew_total", "Worker lease renew results.", ["status"])
+MEDIA_PERSISTED = Counter("worker_media_persist_total", "Media persistence results.", ["kind", "outcome"])
+MEDIA_BYTES = Histogram("worker_media_bytes", "Media bytes persisted.", ["kind", "variant"])
+MEDIA_DERIVATIVE_DURATION = Histogram(
+    "worker_media_derivative_duration_seconds", "Media derivative processing duration.", ["kind", "outcome"]
+)
+MEDIA_COMPRESSION_RATIO = Histogram(
+    "worker_media_compression_ratio", "Derivative bytes divided by original bytes.", ["kind"]
+)
+VIDEO_PREVIEW = Counter("worker_video_preview_total", "Video preview generation results.", ["outcome", "reason"])
 
 
 def normalize(value: object | None, fallback: str = "unknown", limit: int = 80) -> str:
@@ -50,6 +59,26 @@ def record_status_update(status: str) -> None:
 
 def record_lease_renew(status: str) -> None:
     LEASE_RENEW.labels(normalize(status, limit=32)).inc()
+
+
+def record_media_persist(kind: str, outcome: str, byte_count: int = 0) -> None:
+    normalized_kind = normalize(kind, "unknown", 16)
+    MEDIA_PERSISTED.labels(normalized_kind, normalize(outcome, "unknown", 24)).inc()
+    if byte_count > 0:
+        MEDIA_BYTES.labels(normalized_kind, "original").observe(byte_count)
+
+
+def record_media_derivative(kind: str, outcome: str, duration: float, original_bytes: int, derivative_bytes: int) -> None:
+    normalized_kind = normalize(kind, "unknown", 16)
+    MEDIA_DERIVATIVE_DURATION.labels(normalized_kind, normalize(outcome, "unknown", 24)).observe(max(duration, 0.0))
+    if derivative_bytes > 0:
+        MEDIA_BYTES.labels(normalized_kind, "derivative").observe(derivative_bytes)
+    if original_bytes > 0 and derivative_bytes >= 0:
+        MEDIA_COMPRESSION_RATIO.labels(normalized_kind).observe(derivative_bytes / original_bytes)
+
+
+def record_video_preview(outcome: str, reason: str = "none") -> None:
+    VIDEO_PREVIEW.labels(normalize(outcome, "unknown", 24), normalize(reason, "none", 32)).inc()
 
 
 @contextmanager

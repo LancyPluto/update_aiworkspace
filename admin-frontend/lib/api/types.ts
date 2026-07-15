@@ -820,11 +820,86 @@ export interface AdminAgentFileSnapshot {
 }
 
 export interface AdminAgentRunContextSnapshot {
+  snapshotId?: number | null
   sessionId: number
-  workspaceId: number
+  workspaceId?: number | null
   userId: number
   userMessage: string
   agentFiles: AdminAgentFileSnapshot[]
+  strategy?: string | null
+  historyMessageCount?: number | null
+  fileChunkCount?: number | null
+  memoryItemCount?: number | null
+  estimatedInputTokens?: number | null
+  payloadSha256?: string | null
+  snapshot?: Record<string, unknown> | null
+}
+
+export type AgentAuditCategory =
+  | "CONTEXT_INCOMPLETE"
+  | "TOOL_NOT_VISIBLE"
+  | "DISCLOSURE_MISS"
+  | "SKILL_MISSING"
+  | "TOOL_SELECTION_MISMATCH"
+  | "ARGUMENT_SCHEMA_ERROR"
+  | "EXECUTION_FAILURE"
+  | "UNDETERMINED"
+
+export interface AgentAuditEvidenceEvent {
+  id: number
+  eventType: string
+  payload?: Record<string, unknown> | null
+  createdAt?: string | null
+}
+
+export interface AgentRunAuditReview {
+  id?: number | null
+  runId?: number | null
+  expectedToolCode?: string | null
+  finalCategory?: AgentAuditCategory | null
+  reviewNote?: string | null
+  reviewedBy?: number | null
+  updatedAt?: string | null
+}
+
+export interface AgentRunAudit {
+  runId: number
+  contextSnapshotId?: number | null
+  inputSnapshot?: Record<string, unknown> | null
+  inputSnapshotExpired: boolean
+  diagnosis: { category: AgentAuditCategory; summary: string; evidence: string[] }
+  review?: AgentRunAuditReview | null
+  modelRequestCount: number
+  disclosureEvents: AgentAuditEvidenceEvent[]
+  skillEvents: AgentAuditEvidenceEvent[]
+}
+
+export interface AgentModelRequestSnapshot {
+  id: number
+  runId: number
+  requestSequence: number
+  requestStage: string
+  iterationNo?: number | null
+  modelProviderCode?: string | null
+  modelName?: string | null
+  messageCount: number
+  toolCount: number
+  estimatedInputTokens: number
+  skillCodes: string[]
+  payload?: Record<string, unknown> | null
+  payloadSha256: string
+  payloadExpiresAt?: string | null
+  payloadExpired: boolean
+  createdAt?: string | null
+}
+
+export interface AgentSkillCoverage {
+  skillCode: string
+  displayName: string
+  status: string
+  version?: number | null
+  toolCodes: string[]
+  recentHydrationCount: number
 }
 
 export interface AdminAgentRunDetail {

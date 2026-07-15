@@ -3,6 +3,8 @@ import mimetypes
 import os
 import subprocess
 import tempfile
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -10,6 +12,7 @@ from urllib.parse import urlparse
 import requests
 
 from storage.asset_storage import asset_storage
+from observability.metrics import record_media_derivative, record_media_persist, record_video_preview
 from utils.url_security import safe_get, UrlSecurityError
 
 logger = logging.getLogger(__name__)
@@ -49,6 +52,7 @@ class GeneratedVideoPersister:
     _PREVIEW_MAX_DURATION = 10
     _PREVIEW_TARGET_WIDTH = 480
     _PREVIEW_CRF = 28
+    _PREVIEW_SLOTS = threading.BoundedSemaphore(value=2)
 
     def __init__(self) -> None:
         self.output_dir = asset_storage.local_root
@@ -61,7 +65,9 @@ class GeneratedVideoPersister:
         try:
             url = asset_storage.put_bytes_public(relative_key, video_bytes, content_type)
         except Exception as exc:
+            record_media_persist("video", "failed", len(video_bytes))
             raise GeneratedVideoPersistError(f"write generated video failed: {exc}") from exc
+        record_media_persist("video", "success", len(video_bytes))
         path = asset_storage.local_path(relative_key)
         result = PersistedVideo(
             url=url,
@@ -69,28 +75,59 @@ class GeneratedVideoPersister:
             path=path,
             content_type=content_type,
         ).to_result_item()
-        self._maybe_generate_preview(
+        self._schedule_preview(
             original_url=url,
             original_bytes=video_bytes,
         )
         return result
 
-    def _maybe_generate_preview(self, *, original_url: str, original_bytes: bytes) -> None:
-        if len(original_bytes) <= self._PREVIEW_THRESHOLD_BYTES:
+    def _schedule_preview(self, *, original_url: str, original_bytes: bytes) -> None:
+        if str(os.getenv("MEDIA_VIDEO_PREVIEW_ENABLED", "true")).strip().lower() in {"0", "false", "no", "off"}:
+            record_video_preview("skipped", "disabled")
             return
+        if len(original_bytes) <= self._PREVIEW_THRESHOLD_BYTES:
+            record_video_preview("skipped", "below_threshold")
+            return
+        if not self._PREVIEW_SLOTS.acquire(blocking=False):
+            record_video_preview("skipped", "capacity")
+            return
+        threading.Thread(
+            target=self._generate_preview_in_background,
+            kwargs={"original_url": original_url, "original_bytes": original_bytes},
+            name="media-preview",
+            daemon=True,
+        ).start()
+
+    def _generate_preview_in_background(self, *, original_url: str, original_bytes: bytes) -> None:
+        try:
+            self._maybe_generate_preview(original_url=original_url, original_bytes=original_bytes)
+        finally:
+            self._PREVIEW_SLOTS.release()
+
+    def _maybe_generate_preview(self, *, original_url: str, original_bytes: bytes) -> None:
+        started = time.perf_counter()
         try:
             preview_bytes = self._compress_to_480p(original_bytes)
             if not preview_bytes:
+                record_video_preview("failed", "empty_output")
+                record_media_derivative("video", "failed", time.perf_counter() - started, len(original_bytes), 0)
                 return
             preview_key = self._derive_preview_key(original_url)
             if not preview_key:
+                record_video_preview("failed", "invalid_key")
                 return
             asset_storage.put_bytes_public_raw(preview_key, preview_bytes, "video/mp4")
+            record_video_preview("success")
+            record_media_derivative(
+                "video", "success", time.perf_counter() - started, len(original_bytes), len(preview_bytes)
+            )
             logger.info(
                 "Generated 480p preview: original_size=%d, preview_size=%d",
                 len(original_bytes), len(preview_bytes),
             )
         except Exception as exc:
+            record_video_preview("failed", exc.__class__.__name__)
+            record_media_derivative("video", "failed", time.perf_counter() - started, len(original_bytes), 0)
             logger.warning("Failed to generate 480p video preview: %s", exc)
 
     @staticmethod

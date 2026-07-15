@@ -8,6 +8,7 @@ from typing import Any
 from app.config import settings
 from app.core.event_types import ROUTER_FALLBACK, ROUTER_SELECTED, ROUTER_STARTED
 from app.core.schemas import RunContext, RunEventCreate
+from app.observability.model_request_audit import model_audit_scope
 from app.routing.types import Intent, IntentResult
 from app.routing.v2.router_result import map_chat_turn_to_intent
 from app.routing.v2.router_tools import build_router_tool_defs
@@ -53,7 +54,8 @@ class UnifiedSemanticRouter:
         await self._emit_started(context, prompt_bytes=prompt_bytes, tool_count=len(tool_defs))
 
         try:
-            turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
+            with model_audit_scope("route.selection", 1):
+                turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
         except Exception as exc:
             LOGGER.warning("unified router failed runId=%s error=%s", context.runId, exc)
             await self._emit_fallback(context, str(exc), prompt_bytes=prompt_bytes)
@@ -68,7 +70,8 @@ class UnifiedSemanticRouter:
                     context,
                     expanded_codes={code},
                 )
-                turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
+                with model_audit_scope("route.disclosure_retry", 2):
+                    turn = await chat_turn(messages, tools=tool_defs, tool_choice="auto")
 
         result = map_chat_turn_to_intent(turn, aliases=aliases, tools=context.availableTools)
 

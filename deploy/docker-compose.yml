@@ -183,6 +183,7 @@ services:
       dockerfile: user-web/Dockerfile
       args:
         DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.1ms.run/}
+        VITE_MEDIA_DELIVERY_OPTIMIZATION: ${VITE_MEDIA_DELIVERY_OPTIMIZATION:-true}
     image: deploy-user-web
     container_name: ai-supermarket-user-web
     working_dir: /app
@@ -193,7 +194,8 @@ services:
       # APP_PRODUCTION_MODE 仅由 ../.env 控制；勿在此覆盖（此前 default false 导致生产走 Vite dev 并 403）
       # 留空：浏览器请求走当前页面的 /api，由 nginx 反代到后端
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
-      VITE_COMMUNITY_MEDIA_OPTIMIZATION: "0"
+      VITE_MEDIA_DELIVERY_OPTIMIZATION: ${VITE_MEDIA_DELIVERY_OPTIMIZATION:-true}
+      VITE_COMMUNITY_MEDIA_OPTIMIZATION: ${VITE_COMMUNITY_MEDIA_OPTIMIZATION:-}
       VITE_ALIYUN_CAPTCHA_ENABLED: ${VITE_ALIYUN_CAPTCHA_ENABLED:-false}
       VITE_ALIYUN_CAPTCHA_REGION: ${VITE_ALIYUN_CAPTCHA_REGION:-cn}
       VITE_ALIYUN_CAPTCHA_PREFIX: ${VITE_ALIYUN_CAPTCHA_PREFIX:-}

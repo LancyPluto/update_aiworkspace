@@ -13,19 +13,28 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import com.aiminilab.aitoolmarket.agent.service.AgentAuditService;
+import com.aiminilab.aitoolmarket.agent.dto.AgentSkillCoverageResponse;
 
 @RestController
 @RequestMapping("/api/admin/v1/agent/skills")
 public class AdminAgentSkillController {
     private final AgentSkillBundleService skillBundleService;
+    private final AgentAuditService auditService;
 
-    public AdminAgentSkillController(AgentSkillBundleService skillBundleService) {
+    public AdminAgentSkillController(AgentSkillBundleService skillBundleService, AgentAuditService auditService) {
         this.skillBundleService = skillBundleService;
+        this.auditService = auditService;
     }
 
     @GetMapping
     public ApiResponse<List<AgentSkillBundleResponse>> list() {
         return ApiResponse.success(skillBundleService.listAdmin());
+    }
+
+    @GetMapping("/coverage")
+    public ApiResponse<List<AgentSkillCoverageResponse>> coverage() {
+        return ApiResponse.success(auditService.skillCoverage());
     }
 
     @GetMapping("/{skillCode}")

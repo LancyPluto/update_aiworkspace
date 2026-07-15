@@ -18,6 +18,8 @@ import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import org.springframework.stereotype.Service;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentContextSnapshotMapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.List;
 
@@ -30,15 +32,21 @@ public class AdminAgentRunServiceImpl implements AdminAgentRunService {
     private final AgentRunEventMapper agentRunEventMapper;
     private final AgentToolCallMapper agentToolCallMapper;
     private final AgentRunService agentRunService;
+    private final AgentContextSnapshotMapper contextSnapshotMapper;
+    private final ObjectMapper objectMapper;
 
     public AdminAgentRunServiceImpl(AgentRunMapper agentRunMapper,
                                     AgentRunEventMapper agentRunEventMapper,
                                     AgentToolCallMapper agentToolCallMapper,
-                                    AgentRunService agentRunService) {
+                                    AgentRunService agentRunService,
+                                    AgentContextSnapshotMapper contextSnapshotMapper,
+                                    ObjectMapper objectMapper) {
         this.agentRunMapper = agentRunMapper;
         this.agentRunEventMapper = agentRunEventMapper;
         this.agentToolCallMapper = agentToolCallMapper;
         this.agentRunService = agentRunService;
+        this.contextSnapshotMapper = contextSnapshotMapper;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -59,14 +67,14 @@ public class AdminAgentRunServiceImpl implements AdminAgentRunService {
         AgentRun run = findRun(runId);
         long totalEventCount = agentRunEventMapper.countByRunId(runId);
         List<AgentRunEvent> events = loadRecentEvents(runId, totalEventCount);
-        var context = agentRunService.context(runId);
+        var context = run.getContextSnapshotId() == null ? null : contextSnapshotMapper.selectById(run.getContextSnapshotId());
         return new AdminAgentRunDetailResponse(
                 AgentRunResponse.from(run),
                 events.stream().map(AgentRunEventResponse::from).toList(),
                 agentToolCallMapper.findByRunId(runId).stream()
                         .map(AgentToolCallResponse::from)
                         .toList(),
-                AdminAgentRunContextSnapshotResponse.from(context),
+                AdminAgentRunContextSnapshotResponse.from(context, objectMapper),
                 totalEventCount > events.size(),
                 totalEventCount
         );

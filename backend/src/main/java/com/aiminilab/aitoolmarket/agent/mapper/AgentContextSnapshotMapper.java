@@ -13,12 +13,12 @@ public interface AgentContextSnapshotMapper extends BaseMapper<AgentContextSnaps
             INSERT INTO agent_context_snapshots(run_id, session_id, user_id, workspace_id, model_config_id,
                                                 model_provider_code, model_name, strategy, max_history_messages,
                                                 history_message_count, file_count, file_chunk_count, memory_item_count,
-                                                estimated_input_tokens, snapshot_json, created_at)
+                                                estimated_input_tokens, snapshot_json, payload_sha256, created_at)
             VALUES(#{snapshot.runId}, #{snapshot.sessionId}, #{snapshot.userId}, #{snapshot.workspaceId},
                    #{snapshot.modelConfigId}, #{snapshot.modelProviderCode}, #{snapshot.modelName}, #{snapshot.strategy},
                    #{snapshot.maxHistoryMessages}, #{snapshot.historyMessageCount}, #{snapshot.fileCount},
                    #{snapshot.fileChunkCount}, #{snapshot.memoryItemCount}, #{snapshot.estimatedInputTokens},
-                   #{snapshot.snapshotJson}, #{snapshot.createdAt})
+                   #{snapshot.snapshotJson}, #{snapshot.payloadSha256}, #{snapshot.createdAt})
             """)
     @Options(useGeneratedKeys = true, keyProperty = "snapshot.id")
     void insertSnapshot(@Param("snapshot") AgentContextSnapshot snapshot);

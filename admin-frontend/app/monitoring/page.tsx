@@ -1,15 +1,27 @@
 "use client"
 
+import { useEffect, useState } from "react"
+
 import { AdminHeader } from "@/components/admin/header"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Activity, ArrowUpRight, Gauge, LockKeyhole, Server, ShieldCheck } from "lucide-react"
+import { Activity, AlertTriangle, ArrowUpRight, CheckCircle2, Gauge, Image as ImageIcon, LockKeyhole, Server, ShieldCheck } from "lucide-react"
+import { fetchMediaDeliveryStatus, type MediaDeliveryStatus } from "@/lib/api/media-delivery"
 
 const grafanaPath = "/grafana/"
 
 export default function MonitoringPage() {
+  const [mediaStatus, setMediaStatus] = useState<MediaDeliveryStatus | null>(null)
+  const [mediaError, setMediaError] = useState("")
+
+  useEffect(() => {
+    fetchMediaDeliveryStatus().then(setMediaStatus).catch((error) => {
+      setMediaError(error instanceof Error ? error.message : "媒体交付状态读取失败")
+    })
+  }, [])
+
   return (
     <AdminLayout>
       <AdminHeader
@@ -74,6 +86,45 @@ export default function MonitoringPage() {
           </Card>
         </div>
 
+        <section className="space-y-4" aria-labelledby="media-delivery-title">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 id="media-delivery-title" className="flex items-center gap-2 text-lg font-semibold">
+                <ImageIcon className="h-5 w-5 text-primary" />
+                媒体交付
+              </h2>
+              <p className="text-sm text-muted-foreground">OSS/CDN、派生图片与缓存策略的脱敏运行配置。</p>
+            </div>
+            {mediaStatus ? <Badge variant="outline">策略 {mediaStatus.policyVersion}</Badge> : null}
+          </div>
+
+          {mediaError ? (
+            <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+              <AlertTriangle className="h-4 w-4" /> {mediaError}
+            </div>
+          ) : null}
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MediaStatusCard label="存储模式" value={mediaStatus?.provider || "读取中"} healthy={Boolean(mediaStatus)} />
+            <MediaStatusCard label="公共 CDN" value={mediaStatus?.publicHost || "未配置"} healthy={Boolean(mediaStatus?.publicHost)} />
+            <MediaStatusCard label="图片派生" value={mediaStatus?.imageTransformEnabled ? "已启用" : "未启用"} healthy={Boolean(mediaStatus?.imageTransformEnabled)} />
+            <MediaStatusCard label="私有 CDN 鉴权" value={mediaStatus?.privateCdnAuthConfigured ? "已配置" : "OSS 签名回退"} healthy={Boolean(mediaStatus)} />
+          </div>
+
+          {mediaStatus ? (
+            <div className="grid gap-3 rounded-md border bg-card p-4 text-sm md:grid-cols-3">
+              <CachePolicy label="公共哈希资源" value={mediaStatus.publicCacheControl} />
+              <CachePolicy label="私有资源" value={mediaStatus.privateCacheControl} />
+              <CachePolicy label="历史资源" value={mediaStatus.legacyCacheControl} />
+              {mediaStatus.issues.map((issue) => (
+                <p key={issue} className="flex items-start gap-2 text-amber-600 md:col-span-3">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {issue}
+                </p>
+              ))}
+            </div>
+          ) : null}
+        </section>
+
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -94,4 +145,20 @@ export default function MonitoringPage() {
       </div>
     </AdminLayout>
   )
+}
+
+function MediaStatusCard({ label, value, healthy }: { label: string; value: string; healthy: boolean }) {
+  return (
+    <div className="rounded-md border bg-card p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">{label}</p>
+        {healthy ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <AlertTriangle className="h-4 w-4 text-amber-500" />}
+      </div>
+      <p className="mt-2 break-words font-medium">{value}</p>
+    </div>
+  )
+}
+
+function CachePolicy({ label, value }: { label: string; value: string }) {
+  return <div><p className="text-muted-foreground">{label}</p><code className="mt-1 block break-all text-xs">{value}</code></div>
 }
