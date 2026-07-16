@@ -575,6 +575,53 @@ class AdminAgentApiTest {
     }
 
     @Test
+    void happyHorseCanSwitchBetweenBailianAccountsButNotToAnotherVendor() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long firstBailianAccount = createVendorAccount(
+                adminToken, "qwen", "HappyHorse switch account A", "https://dashscope.aliyuncs.com"
+        );
+        Long secondBailianAccount = createVendorAccount(
+                adminToken, "qwen", "HappyHorse switch account B", "https://dashscope.aliyuncs.com"
+        );
+        Long klingAccount = createVendorAccount(
+                adminToken, "kling", "HappyHorse cross vendor account", "https://api-beijing.klingai.com"
+        );
+
+        String createBody = happyHorseModelBody(firstBailianAccount);
+        String created = mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.provider").value("bailian_happyhorse"))
+                .andExpect(jsonPath("$.data.capabilities[0]").value("VIDEO_GENERATION"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long modelId = Long.parseLong(created.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(
+                                "/api/admin/v1/agent/model-config/{id}", modelId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(happyHorseModelBody(secondBailianAccount)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.vendorAccountId").value(secondBailianAccount.intValue()))
+                .andExpect(jsonPath("$.data.provider").value("bailian_happyhorse"))
+                .andExpect(jsonPath("$.data.capabilities[0]").value("VIDEO_GENERATION"));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(
+                                "/api/admin/v1/agent/model-config/{id}", modelId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(happyHorseModelBody(klingAccount)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
+                .andExpect(jsonPath("$.message").value(containsString("does not belong")));
+    }
+
+    @Test
     void emptyApiKeyUpdateKeepsExistingModelSecret() throws Exception {
         mockExternalAuthDependencies();
         String adminToken = login("/api/admin/v1/auth/login", "admin");
@@ -968,6 +1015,47 @@ class AdminAgentApiTest {
                 .getResponse()
                 .getContentAsString();
         return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+
+    private Long createVendorAccount(String adminToken, String vendorCode, String accountName, String baseUrl) throws Exception {
+        String response = mockMvc.perform(post("/api/admin/v1/model-vendor-accounts")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "vendorCode": "%s",
+                                  "accountName": "%s",
+                                  "baseUrl": "%s",
+                                  "apiKey": "test-account-secret",
+                                  "balanceQueryMode": "MANUAL",
+                                  "enabled": true
+                                }
+                                """.formatted(vendorCode, accountName, baseUrl)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+
+    private String happyHorseModelBody(Long vendorAccountId) {
+        return """
+                {
+                  "vendorAccountId": %d,
+                  "displayName": "HappyHorse account switch test",
+                  "configCode": "happyhorse_account_switch_test",
+                  "provider": "bailian_happyhorse",
+                  "modelName": "happyhorse-1.1-t2v",
+                  "baseUrl": "",
+                  "timeoutSeconds": 60,
+                  "billingUnit": "PER_SECOND",
+                  "unitPrice": 0.9,
+                  "enabled": false,
+                  "agentEnabled": false,
+                  "isDefault": false,
+                  "capabilities": ["VIDEO_GENERATION"]
+                }
+                """.formatted(vendorAccountId);
     }
 
     private Long createTool(String adminToken, String toolCode) throws Exception {

@@ -25,6 +25,7 @@ import {
   updateProxyRoutingConfig,
   type ProxyAutoSettings,
   type ProxyDomainTestResult,
+  type ProxyDomainTestSummary,
 } from "@/lib/api/proxy-config"
 import {
   addProxyDomain,
@@ -45,7 +46,7 @@ const defaultAutoSettings: ProxyAutoSettings = {
 export function ProxyDomainAllowlist({ onApplied }: { onApplied?: () => void }) {
   const [domains, setDomains] = useState<string[]>([])
   const [autoSettings, setAutoSettings] = useState(defaultAutoSettings)
-  const [results, setResults] = useState<Record<string, ProxyDomainTestResult>>({})
+  const [results, setResults] = useState<Record<string, ProxyDomainTestSummary>>({})
   const [newDomain, setNewDomain] = useState("")
   const [loading, setLoading] = useState(true)
   const [testing, setTesting] = useState<string | null>(null)
@@ -60,6 +61,7 @@ export function ProxyDomainAllowlist({ onApplied }: { onApplied?: () => void }) 
       const config = await fetchProxyRoutingConfig()
       setDomains(proxyDomainsFromRules(config.rules))
       setAutoSettings(config.autoSettings || defaultAutoSettings)
+      setResults(config.testResults || {})
     } catch (loadError) {
       setError(formatError(loadError, "网站名单加载失败"))
     } finally {
@@ -91,14 +93,15 @@ export function ProxyDomainAllowlist({ onApplied }: { onApplied?: () => void }) 
     setMessage(null)
     try {
       const result = await testProxyDomain(domain)
+      const effectiveDomain = domains.find((item) => domain === item || domain.endsWith(`.${item}`)) || domain
       if (!result.proxy.success) {
-        setResults((current) => ({ ...current, [domain]: result }))
+        setResults((current) => ({ ...current, [effectiveDomain]: summarizeTest(result) }))
         setError(`未启用 ${domain}：Mihomo 连接测试失败（${result.proxy.error || "连接不可用"}）`)
         return
       }
       const nextDomains = addProxyDomain(domains, domain)
-      const effectiveDomain = nextDomains.find((item) => domain === item || domain.endsWith(`.${item}`)) || domain
-      setResults((current) => ({ ...current, [effectiveDomain]: result }))
+      const savedDomain = nextDomains.find((item) => domain === item || domain.endsWith(`.${item}`)) || domain
+      setResults((current) => ({ ...current, [savedDomain]: summarizeTest(result) }))
       if (JSON.stringify(nextDomains) !== JSON.stringify(domains)) {
         await persist(nextDomains)
       }
@@ -117,7 +120,7 @@ export function ProxyDomainAllowlist({ onApplied }: { onApplied?: () => void }) 
     setMessage(null)
     try {
       const result = await testProxyDomain(domain)
-      setResults((current) => ({ ...current, [domain]: result }))
+      setResults((current) => ({ ...current, [domain]: summarizeTest(result) }))
       if (result.proxy.success) {
         setMessage(`${domain} 连接正常`)
       } else {
@@ -248,7 +251,7 @@ function DomainRow({ domain, result, testing, removing, onTest, onRemove }: Doma
     <TableRow>
       <TableCell className="pl-5 font-mono font-medium">{domain}</TableCell>
       <TableCell><ConnectionBadge result={result} /></TableCell>
-      <TableCell className="font-mono text-xs">{result?.proxy.success ? `${result.proxy.totalMs} ms` : "-"}</TableCell>
+      <TableCell className="font-mono text-xs">{result?.success ? `${result.latencyMs} ms` : "-"}</TableCell>
       <TableCell className="text-xs text-muted-foreground">{result ? formatTime(result.testedAt) : "尚未测试"}</TableCell>
       <TableCell className="pr-5">
         <DomainActions {...{ domain, testing, removing, onTest, onRemove }} />
@@ -268,7 +271,7 @@ function MobileDomainRow({ domain, result, testing, removing, onTest, onRemove }
         <ConnectionBadge result={result} />
       </div>
       <div className="flex items-center justify-between gap-3">
-        <span className="font-mono text-xs text-muted-foreground">{result?.proxy.success ? `${result.proxy.totalMs} ms` : "等待连接测试"}</span>
+        <span className="font-mono text-xs text-muted-foreground">{result?.success ? `${result.latencyMs} ms` : "等待连接测试"}</span>
         <DomainActions {...{ domain, testing, removing, onTest, onRemove }} />
       </div>
     </div>
@@ -277,7 +280,7 @@ function MobileDomainRow({ domain, result, testing, removing, onTest, onRemove }
 
 interface DomainRowProps {
   domain: string
-  result?: ProxyDomainTestResult
+  result?: ProxyDomainTestSummary
   testing: boolean
   removing: boolean
   onTest: () => void
@@ -321,11 +324,19 @@ function DomainActions({ domain, testing, removing, onTest, onRemove }: Omit<Dom
   )
 }
 
-function ConnectionBadge({ result }: { result?: ProxyDomainTestResult }) {
+function ConnectionBadge({ result }: { result?: ProxyDomainTestSummary }) {
   if (!result) return <Badge variant="secondary">待测试</Badge>
-  return result.proxy.success
+  return result.success
     ? <Badge className="bg-emerald-600 hover:bg-emerald-600">可用</Badge>
     : <Badge variant="destructive">不可用</Badge>
+}
+
+function summarizeTest(result: ProxyDomainTestResult): ProxyDomainTestSummary {
+  return {
+    success: result.proxy.success,
+    latencyMs: result.proxy.success ? result.proxy.totalMs : 0,
+    testedAt: result.testedAt,
+  }
 }
 
 function formatTime(value: string) {

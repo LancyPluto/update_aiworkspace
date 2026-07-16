@@ -42,7 +42,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
 @Service
@@ -51,16 +50,6 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     private static final Logger LOGGER = LoggerFactory.getLogger(ModelVendorAccountServiceImpl.class);
 
     private static final Set<String> BALANCE_MODES = Set.of("MANUAL", "REST_API", "NONE", "INFERRED");
-
-    /** 厂商账户连通测试时，优先用可探测的 provider，避免误选 minimax_music 等 agent-service 不支持的模型。 */
-    private static final Map<String, List<String>> ACCOUNT_TEST_PROVIDER_PRIORITY = Map.of(
-            "minimax", List.of("minimax", "anthropic_compatible", "minimax_speech", "minimax_music"),
-            "siliconflow", List.of("siliconflow_images", "siliconflow_speech", "openai_compatible"),
-            "volcengine", List.of("volcengine_images", "seedance", "openai_compatible"),
-            "kling", List.of("kling_video", "openai_compatible"),
-            "qwen", List.of("qwen", "openai_compatible"),
-            "dashscope", List.of("bailian_happyhorse", "openai_compatible")
-    );
 
     private static final int DISCOVER_TIMEOUT_SECONDS = 30;
     private final ModelVendorAccountMapper vendorAccountMapper;
@@ -236,38 +225,6 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     private boolean isOpenAiLikeVendor(ModelVendorAccount account) {
         String vendor = account == null || account.getVendorCode() == null ? "" : account.getVendorCode().trim().toLowerCase(Locale.ROOT);
         return "openai".equals(vendor) || "openai_gateway".equals(vendor) || "minimax".equals(vendor);
-    }
-
-    private AgentModelConfig selectLinkedModelForAccountTest(ModelVendorAccount account) {
-        List<AgentModelConfig> linked = agentModelConfigMapper.findActiveByVendorAccountId(account.getId());
-        if (linked.isEmpty()) {
-            return null;
-        }
-        String vendor = account.getVendorCode() == null ? "" : account.getVendorCode().trim().toLowerCase(Locale.ROOT);
-        List<String> priority = ACCOUNT_TEST_PROVIDER_PRIORITY.getOrDefault(vendor, List.of());
-        for (String provider : priority) {
-            AgentModelConfig enabled = linked.stream()
-                    .filter(config -> provider.equalsIgnoreCase(config.getProvider()))
-                    .filter(config -> Boolean.TRUE.equals(config.getEnabled()))
-                    .findFirst()
-                    .orElse(null);
-            if (enabled != null) {
-                return enabled;
-            }
-        }
-        for (String provider : priority) {
-            AgentModelConfig match = linked.stream()
-                    .filter(config -> provider.equalsIgnoreCase(config.getProvider()))
-                    .findFirst()
-                    .orElse(null);
-            if (match != null) {
-                return match;
-            }
-        }
-        return linked.stream()
-                .filter(config -> config.getProvider() != null && providerRegistry.isSupported(config.getProvider()))
-                .findFirst()
-                .orElse(null);
     }
 
     @Override

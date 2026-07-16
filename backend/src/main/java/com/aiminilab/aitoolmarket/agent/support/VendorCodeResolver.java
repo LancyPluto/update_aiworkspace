@@ -101,6 +101,16 @@ public class VendorCodeResolver {
         return normalizedProvider.isBlank() ? "other" : normalizedProvider;
     }
 
+    public String canonicalVendorCode(String vendorCode) {
+        String normalized = vendorCode == null ? "" : vendorCode.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "dashscope", "aliyun_bailian" -> "qwen";
+            case "openai_gateway" -> "openai";
+            case "suno_music" -> "suno";
+            default -> normalized;
+        };
+    }
+
     public String vendorLabel(String vendorCode) {
         if (vendorCode == null || vendorCode.isBlank()) {
             return "其他";

@@ -5,11 +5,13 @@ import com.aiminilab.aitoolmarket.agent.config.AgentOutboundProxySettings;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
 import java.net.IDN;
 import java.net.URI;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -21,6 +23,7 @@ import java.util.Set;
 
 @Service
 public class ProxyRoutingService {
+    static final String ROUTING_TEST_RESULTS_KEY = "outbound.proxy.routingTestResults";
     private static final Set<String> PATTERN_TYPES = Set.of("EXACT", "SUFFIX", "WILDCARD");
     private static final Set<String> STRATEGIES = Set.of("DIRECT", "PROXY", "AUTO");
     private static final int MAX_RULES = 100;
@@ -48,6 +51,9 @@ public class ProxyRoutingService {
         try {
             Map<String, String> saved = new LinkedHashMap<>();
             saved.put(MihomoConfigRenderer.ROUTING_CONFIG_KEY, objectMapper.writeValueAsString(config));
+            saved.put(ROUTING_TEST_RESULTS_KEY, objectMapper.writeValueAsString(
+                    retainTestResults(readTestResults(current.get(ROUTING_TEST_RESULTS_KEY)), config.rules())
+            ));
             saved.put("outbound.proxy.routingEnabled", String.valueOf(config.rules().stream()
                     .anyMatch(rule -> rule.enabled() && !"DIRECT".equalsIgnoreCase(rule.strategy()))));
             saved.put(AgentOutboundProxySettings.PROXY_URL_KEY, "");
@@ -57,6 +63,37 @@ public class ProxyRoutingService {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "公网分流配置无法序列化");
         }
         return response(config, current, legacySocksConfigured(current) ? "历史全局 SOCKS 配置已迁移，业务任务不再直接读取上游地址" : null);
+    }
+
+    ProxyRoutingConfig currentConfig() {
+        Map<String, String> settings = systemSettingService.settings();
+        return readConfig(settings.get(MihomoConfigRenderer.ROUTING_CONFIG_KEY));
+    }
+
+    synchronized void recordTest(
+            String domain,
+            boolean success,
+            long latencyMs,
+            Instant testedAt,
+            Long operatorId
+    ) {
+        Map<String, String> settings = systemSettingService.settings();
+        Map<String, ProxyDomainTestSummary> results = new LinkedHashMap<>(
+                readTestResults(settings.get(ROUTING_TEST_RESULTS_KEY))
+        );
+        results.put(domain, new ProxyDomainTestSummary(
+                success,
+                success ? Math.max(0, latencyMs) : 0,
+                testedAt.toString()
+        ));
+        try {
+            systemSettingService.updateSettings(
+                    Map.of(ROUTING_TEST_RESULTS_KEY, objectMapper.writeValueAsString(results)),
+                    operatorId
+            );
+        } catch (JsonProcessingException exception) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Proxy domain test history cannot be serialized");
+        }
     }
 
     private ProxyRoutingConfig normalize(ProxyRoutingUpdateRequest request) {
@@ -196,8 +233,48 @@ public class ProxyRoutingService {
                 config.rules(),
                 config.autoSettings(),
                 "DIRECT",
-                List.copyOf(warnings)
+                List.copyOf(warnings),
+                retainTestResults(readTestResults(settings.get(ROUTING_TEST_RESULTS_KEY)), config.rules())
         );
+    }
+
+    private Map<String, ProxyDomainTestSummary> readTestResults(String rawJson) {
+        if (rawJson == null || rawJson.isBlank()) {
+            return Map.of();
+        }
+        try {
+            Map<String, ProxyDomainTestSummary> results = objectMapper.readValue(
+                    rawJson,
+                    new TypeReference<Map<String, ProxyDomainTestSummary>>() { }
+            );
+            return results == null ? Map.of() : results;
+        } catch (Exception exception) {
+            return Map.of();
+        }
+    }
+
+    private Map<String, ProxyDomainTestSummary> retainTestResults(
+            Map<String, ProxyDomainTestSummary> results,
+            List<ProxyRoutingRule> rules
+    ) {
+        Set<String> activeDomains = new HashSet<>();
+        for (ProxyRoutingRule rule : rules) {
+            if (rule.enabled() && !"DIRECT".equalsIgnoreCase(rule.strategy())) {
+                activeDomains.add(testResultDomain(rule));
+            }
+        }
+        Map<String, ProxyDomainTestSummary> retained = new LinkedHashMap<>();
+        results.forEach((domain, result) -> {
+            if (activeDomains.contains(domain) && result != null) {
+                retained.put(domain, result);
+            }
+        });
+        return Map.copyOf(retained);
+    }
+
+    static String testResultDomain(ProxyRoutingRule rule) {
+        String pattern = rule.pattern();
+        return pattern != null && pattern.startsWith("*.") ? pattern.substring(2) : pattern;
     }
 
     private boolean legacySocksConfigured(Map<String, String> settings) {

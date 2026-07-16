@@ -891,6 +891,27 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             if (account == null) {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account not found");
             }
+            validateVendorAccountMatchesModel(request, account);
+        }
+    }
+
+    private void validateVendorAccountMatchesModel(AgentModelConfigRequest request, ModelVendorAccount account) {
+        String modelBaseUrl = blankToNull(request.baseUrl());
+        if (modelBaseUrl == null) {
+            modelBaseUrl = account.getBaseUrl();
+        }
+        String modelVendor = vendorCodeResolver.canonicalVendorCode(vendorCodeResolver.resolveVendorCode(
+                request.provider(),
+                modelBaseUrl,
+                request.displayName(),
+                request.modelName()
+        ));
+        String accountVendor = vendorCodeResolver.canonicalVendorCode(account.getVendorCode());
+        if (!modelVendor.equals(accountVendor)) {
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "vendor account does not belong to the model provider vendor"
+            );
         }
     }
 

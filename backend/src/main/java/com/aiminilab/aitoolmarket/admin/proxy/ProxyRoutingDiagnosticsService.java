@@ -1,9 +1,7 @@
 package com.aiminilab.aitoolmarket.admin.proxy;
 
-import com.aiminilab.aitoolmarket.admin.service.SystemSettingService;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
 import java.net.IDN;
@@ -20,25 +18,22 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class ProxyRoutingDiagnosticsService {
-    private final SystemSettingService systemSettingService;
-    private final ObjectMapper objectMapper;
+    private final ProxyRoutingService routingService;
     private final ProxyPathProbe pathProbe;
     private final Map<String, Deque<Boolean>> history = new ConcurrentHashMap<>();
     private final Map<String, SelectionState> selections = new ConcurrentHashMap<>();
 
     public ProxyRoutingDiagnosticsService(
-            SystemSettingService systemSettingService,
-            ObjectMapper objectMapper,
+            ProxyRoutingService routingService,
             ProxyPathProbe pathProbe
     ) {
-        this.systemSettingService = systemSettingService;
-        this.objectMapper = objectMapper;
+        this.routingService = routingService;
         this.pathProbe = pathProbe;
     }
 
-    public ProxyDomainTestResponse test(ProxyDomainTestRequest request) {
+    public ProxyDomainTestResponse test(ProxyDomainTestRequest request, Long operatorId) {
         String domain = normalizeDomain(request == null ? null : request.domain());
-        ProxyRoutingConfig config = config();
+        ProxyRoutingConfig config = routingService.currentConfig();
         ProxyRoutingRule matched = match(config.rules(), domain);
         String probeUrl = resolveProbeUrl(request, matched, domain);
         int timeout = config.autoSettings().timeoutMs();
@@ -52,7 +47,8 @@ public class ProxyRoutingDiagnosticsService {
         ProxyPathProbeResult direct = withHistory(domain, directFuture.join(), config.autoSettings().sampleSize());
         ProxyPathProbeResult proxy = withHistory(domain, proxyFuture.join(), config.autoSettings().sampleSize());
         ProxyAutoDecision decision = decide(domain, direct, proxy, config.autoSettings());
-        return new ProxyDomainTestResponse(
+        Instant testedAt = Instant.now();
+        ProxyDomainTestResponse response = new ProxyDomainTestResponse(
                 domain,
                 matched == null ? "fallback" : matched.id(),
                 matched == null ? "DIRECT" : matched.strategy(),
@@ -60,8 +56,18 @@ public class ProxyRoutingDiagnosticsService {
                 direct,
                 proxy,
                 decision,
-                Instant.now()
+                testedAt
         );
+        if ((matched != null && !"DIRECT".equalsIgnoreCase(matched.strategy())) || proxy.success()) {
+            routingService.recordTest(
+                    matched == null ? domain : ProxyRoutingService.testResultDomain(matched),
+                    proxy.success(),
+                    proxy.totalMs(),
+                    testedAt,
+                    operatorId
+            );
+        }
+        return response;
     }
 
     private ProxyPathProbeResult withHistory(String domain, ProxyPathProbeResult result, int maxSamples) {
@@ -146,18 +152,6 @@ public class ProxyRoutingDiagnosticsService {
             throw exception;
         } catch (Exception exception) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "探针地址必须是有效的 HTTPS URL");
-        }
-    }
-
-    private ProxyRoutingConfig config() {
-        String json = systemSettingService.settings().get(MihomoConfigRenderer.ROUTING_CONFIG_KEY);
-        if (json == null || json.isBlank()) {
-            return ProxyRoutingConfig.defaults();
-        }
-        try {
-            return objectMapper.readValue(json, ProxyRoutingConfig.class);
-        } catch (Exception exception) {
-            return ProxyRoutingConfig.defaults();
         }
     }
 
