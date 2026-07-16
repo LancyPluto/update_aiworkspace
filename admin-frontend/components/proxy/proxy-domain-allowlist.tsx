@@ -103,9 +103,9 @@ export function ProxyDomainAllowlist({ onApplied }: { onApplied?: () => void }) 
         await persist(nextDomains)
       }
       setNewDomain("")
-      setMessage(`${domain} 已测试并启用`)
+      setMessage(`${domain} 添加成功`)
     } catch (testError) {
-      setError(formatError(testError, "测试并启用失败"))
+      setError(formatError(testError, "添加失败"))
     } finally {
       setTesting(null)
     }
@@ -118,7 +118,11 @@ export function ProxyDomainAllowlist({ onApplied }: { onApplied?: () => void }) 
     try {
       const result = await testProxyDomain(domain)
       setResults((current) => ({ ...current, [domain]: result }))
-      setMessage(result.proxy.success ? `${domain} 连接正常` : `${domain} 连接失败`)
+      if (result.proxy.success) {
+        setMessage(`${domain} 连接正常`)
+      } else {
+        setError(`${domain} 连接失败：${result.proxy.error || "代理节点不可用"}`)
+      }
     } catch (testError) {
       setError(formatError(testError, "连接测试失败"))
     } finally {
@@ -166,7 +170,7 @@ export function ProxyDomainAllowlist({ onApplied }: { onApplied?: () => void }) 
           />
           <Button onClick={() => void testAndEnable()} disabled={Boolean(testing) || !newDomain.trim()} className="shrink-0">
             {testing === normalizeProxyDomain(newDomain) ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            测试并启用
+            添加
           </Button>
         </div>
       </div>

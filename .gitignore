@@ -76,3 +76,5 @@ deploy/scripts/_*
 AGENTS.md
 .agents/skills/clarify-requirements/SKILL.md
 .agents/skills/clarify-requirements/agents/openai.yaml
+.agents/skills/avoid-over-testing/SKILL.md
+.agents/skills/avoid-over-testing/agents/openai.yaml
