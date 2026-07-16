@@ -113,6 +113,10 @@ if grep -Eqi '^MIHOMO_ENABLED=true$' "$REMOTE_DIR/.env"; then
   echo "Mihomo overlay enabled"
 fi
 
+if docker inspect mihomo >/dev/null 2>&1; then
+  echo "ERROR: Found unmanaged Mihomo container named mihomo; run the one-time managed-overlay migration before deployment." >&2
+  exit 1
+fi
 if docker inspect ai-supermarket-mihomo >/dev/null 2>&1; then
   mihomo_config_files="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' ai-supermarket-mihomo 2>/dev/null || true)"
   if [[ "$mihomo_config_files" != *docker-compose.proxy.yml* ]]; then
@@ -122,7 +126,7 @@ if docker inspect ai-supermarket-mihomo >/dev/null 2>&1; then
 fi
 docker compose "${COMPOSE_ARGS[@]}" up -d mihomo
 
-docker compose "${COMPOSE_ARGS[@]}" up -d --build --force-recreate \
+docker compose "${COMPOSE_ARGS[@]}" up -d --build --force-recreate --no-deps \
   backend worker agent-service admin-frontend user-web nginx
 
 echo "Waiting for user-web health..."

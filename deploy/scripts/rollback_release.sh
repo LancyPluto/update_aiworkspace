@@ -111,6 +111,8 @@ for service in $DEPLOY_SERVICES; do
     prometheus|grafana|loki|alloy|node-exporter|cadvisor|blackbox-exporter)
       monitoring_requested=true
       ;;
+    mihomo|mihomo-init)
+      ;;
     nginx) nginx_requested=true ;;
   esac
 done
@@ -195,7 +197,7 @@ fi
 
 if [ "${#app_services[@]}" -gt 0 ]; then
   docker compose "${compose_args[@]}" build "${app_services[@]}"
-  docker compose "${compose_args[@]}" up -d --force-recreate "${app_services[@]}"
+  docker compose "${compose_args[@]}" up -d --force-recreate --no-deps "${app_services[@]}"
   if [ "$nginx_requested" != true ]; then
     docker compose "${compose_args[@]}" restart nginx
   fi
