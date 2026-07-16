@@ -398,7 +398,7 @@ if [ -f "\$REMOTE_DIR/deploy/logs/last-deploy.files.txt" ]; then
 fi
 
 cd "\$REMOTE_DIR/deploy"
-COMPOSE_ARGS=(-f docker-compose.yml -f docker-compose.nginx.yml)
+COMPOSE_ARGS=(--env-file ../.env -f docker-compose.yml -f docker-compose.nginx.yml)
 if grep -Eqi '^MIHOMO_ENABLED=true$' "\$REMOTE_DIR/.env"; then
   COMPOSE_ARGS+=(-f docker-compose.proxy.yml)
   echo "Mihomo overlay enabled"

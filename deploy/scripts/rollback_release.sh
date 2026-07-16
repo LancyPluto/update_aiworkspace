@@ -95,7 +95,7 @@ print("restored production env for rollback")
 PY
 
 cd "$REMOTE_DIR/deploy"
-compose_args=(-f docker-compose.yml -f docker-compose.nginx.yml)
+compose_args=(--env-file ../.env -f docker-compose.yml -f docker-compose.nginx.yml)
 if [ -f docker-compose.monitoring.yml ]; then
   compose_args+=(-f docker-compose.monitoring.yml)
 fi

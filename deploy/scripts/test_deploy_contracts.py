@@ -79,6 +79,7 @@ class DeployContractTests(unittest.TestCase):
             self.assertIn("MIHOMO_ENABLED=true", deploy)
             self.assertIn("MIHOMO_CONTROLLER_SECRET", deploy)
             self.assertIn("docker-compose.proxy.yml", deploy)
+            self.assertIn("--env-file ../.env", deploy)
             self.assertIn("Removing legacy Mihomo container", deploy)
             self.assertIn("up -d mihomo", deploy)
             self.assertIn("docker inspect mihomo", deploy)
@@ -95,6 +96,7 @@ class DeployContractTests(unittest.TestCase):
             'up -d --force-recreate --no-deps "${app_services[@]}"',
             rollback,
         )
+        self.assertIn("--env-file ../.env", rollback)
         self.assertIn("mihomo|mihomo-init)", rollback)
 
     def test_release_gate_requires_fresh_monitoring_metrics(self) -> None:
