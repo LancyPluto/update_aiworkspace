@@ -27,6 +27,9 @@ class MihomoConfigRendererTest {
                 "proxy-providers:",
                 "url: 'https://airport.example.com/sub?token=a''b'",
                 "interval: 1800",
+                "store-selected: true",
+                "name: 'AUTO-NODE'",
+                "type: url-test",
                 "use:\n      - 'subscription'"
         );
         assertThat(yaml).doesNotContain("proxies:\n  - name: 'manual-node'");

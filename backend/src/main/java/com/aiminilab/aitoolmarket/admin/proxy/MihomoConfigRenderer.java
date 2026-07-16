@@ -33,7 +33,9 @@ public class MihomoConfigRenderer {
                 .append("mode: rule\n")
                 .append("log-level: info\n")
                 .append("external-controller: '0.0.0.0:9090'\n")
-                .append("secret: ").append(quote(controllerSecret)).append("\n\n");
+                .append("secret: ").append(quote(controllerSecret)).append("\n")
+                .append("profile:\n")
+                .append("  store-selected: true\n\n");
 
         String sourceType = value(settings, SOURCE_TYPE_KEY, ProxyConfigService.SOURCE_SUBSCRIPTION)
                 .toUpperCase(Locale.ROOT);
@@ -87,8 +89,18 @@ public class MihomoConfigRenderer {
             yaml.append("    proxies:\n")
                     .append("      - 'manual-node'\n");
         } else {
-            yaml.append("    use:\n")
-                    .append("      - 'subscription'\n");
+            yaml.append("    proxies:\n")
+                    .append("      - 'AUTO-NODE'\n")
+                    .append("    use:\n")
+                    .append("      - 'subscription'\n")
+                    .append("  - name: 'AUTO-NODE'\n")
+                    .append("    type: url-test\n")
+                    .append("    use:\n")
+                    .append("      - 'subscription'\n")
+                    .append("    url: 'https://www.gstatic.com/generate_204'\n")
+                    .append("    interval: 300\n")
+                    .append("    tolerance: 50\n")
+                    .append("    lazy: false\n");
         }
         for (ProxyRoutingRule rule : sortedRules(routing)) {
             if (!"AUTO".equalsIgnoreCase(rule.strategy())) {

@@ -114,6 +114,39 @@ export interface ProxyDomainTestResult {
   testedAt: string
 }
 
+export interface MihomoNodeItem {
+  name: string
+  type: string
+  available: boolean
+  latencyMs: number
+  selected: boolean
+}
+
+export interface MihomoNodeList {
+  managed: boolean
+  available: boolean
+  sourceType: ProxySourceType
+  selectionMode: "AUTO" | "MANUAL"
+  selectedNode: string
+  activeNode: string
+  nodes: MihomoNodeItem[]
+  checkedAt: string
+  message: string
+}
+
+export interface MihomoNodeActionResult {
+  success: boolean
+  message: string
+}
+
+export interface MihomoNodeTestResult {
+  nodeName: string
+  available: boolean
+  latencyMs: number
+  testedAt: string
+  message: string
+}
+
 export function fetchProxyConfig() {
   return http.get<ProxyConfig>("/api/admin/v1/proxy-config")
 }
@@ -144,4 +177,24 @@ export function updateProxyRoutingConfig(config: Pick<ProxyRoutingConfig, "rules
 
 export function testProxyDomain(domain: string, probeUrl = "") {
   return http.post<ProxyDomainTestResult>("/api/admin/v1/proxy-config/routing/test", { domain, probeUrl })
+}
+
+export function fetchMihomoNodes() {
+  return http.get<MihomoNodeList>("/api/admin/v1/proxy-config/nodes")
+}
+
+export function refreshMihomoSubscription() {
+  return http.post<MihomoNodeActionResult>("/api/admin/v1/proxy-config/nodes/refresh")
+}
+
+export function testAllMihomoNodes() {
+  return http.post<MihomoNodeActionResult>("/api/admin/v1/proxy-config/nodes/test-all")
+}
+
+export function testMihomoNode(nodeName: string) {
+  return http.post<MihomoNodeTestResult>("/api/admin/v1/proxy-config/nodes/test", { nodeName })
+}
+
+export function selectMihomoNode(mode: "AUTO" | "MANUAL", nodeName = "") {
+  return http.put<MihomoNodeActionResult>("/api/admin/v1/proxy-config/nodes/selection", { mode, nodeName })
 }
