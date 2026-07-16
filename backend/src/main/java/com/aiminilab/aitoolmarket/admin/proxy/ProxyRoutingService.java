@@ -48,6 +48,8 @@ public class ProxyRoutingService {
         try {
             Map<String, String> saved = new LinkedHashMap<>();
             saved.put(MihomoConfigRenderer.ROUTING_CONFIG_KEY, objectMapper.writeValueAsString(config));
+            saved.put("outbound.proxy.routingEnabled", String.valueOf(config.rules().stream()
+                    .anyMatch(rule -> rule.enabled() && !"DIRECT".equalsIgnoreCase(rule.strategy()))));
             saved.put(AgentOutboundProxySettings.PROXY_URL_KEY, "");
             saved.put(AgentOutboundProxySettings.ENABLED_BY_DEFAULT_KEY, "false");
             systemSettingService.updateSettings(saved, operatorId);

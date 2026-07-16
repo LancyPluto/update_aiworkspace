@@ -56,6 +56,7 @@ class ProxyRoutingServiceTest {
             assertThat(rule.pattern()).isEqualTo("api.example.com");
             assertThat(rule.strategy()).isEqualTo("PROXY");
         });
+        assertThat(saved.getValue()).containsEntry("outbound.proxy.routingEnabled", "true");
         assertThat(response.fallbackStrategy()).isEqualTo("DIRECT");
         assertThat(response.warnings()).singleElement().asString()
                 .contains("NO_PROXY")
@@ -111,7 +112,8 @@ class ProxyRoutingServiceTest {
         verify(systemSettingService).updateSettings(saved.capture(), org.mockito.ArgumentMatchers.eq(42L));
         assertThat(saved.getValue())
                 .containsEntry("outbound.proxy.url", "")
-                .containsEntry("outbound.proxy.enabledByDefault", "false");
+                .containsEntry("outbound.proxy.enabledByDefault", "false")
+                .containsEntry("outbound.proxy.routingEnabled", "false");
         assertThat(response.warnings()).singleElement().asString()
                 .contains("历史全局 SOCKS")
                 .doesNotContain("user", "password", "upstream.example");
