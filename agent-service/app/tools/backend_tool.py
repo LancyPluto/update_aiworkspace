@@ -5,7 +5,7 @@ import re
 import time
 from typing import Any
 
-from app.clients.backend_client import BackendBusinessError
+from app.clients.backend_client import BackendBusinessError, WorkflowDelegationUncertainError
 from app.config import settings
 from app.credit_messages import credit_message_from_backend_error
 from app.core.attachment_catalog import build_reference_plan, current_attachment_alias, llm_token_for_mention, readable_positional_prompt, resolve_media_argument_pointers
@@ -252,6 +252,18 @@ class BackendToolBridge:
         task_params = compile_v2_lite_image_task_params(arguments, context=context) if _is_v2_lite_image_schema(tool) else arguments
         task_id: int | None = None
         try:
+            if tool.executionMode.strip().upper() == "WORKFLOW":
+                delegated = await self.backend.delegate_workflow_tool_call(call.id)
+                task_id = delegated.taskId
+                return _delegated_workflow_result(
+                    tool.toolCode,
+                    call.id,
+                    arguments,
+                    delegated.taskId,
+                    delegated.runId,
+                    delegated.status,
+                    delegated.runUrl,
+                )
             task = await self.backend.create_task(
                 TaskCreate(
                     userId=context.userId,
@@ -296,6 +308,14 @@ class BackendToolBridge:
             if "task" in locals():
                 await self._cancel_task(context.userId, task.taskId)
             await self.backend.fail_tool_call(call.id, ToolCallFail(errorCode="TOOL_TASK_FAILED", errorMessage=str(exc)))
+            raise
+        except WorkflowDelegationUncertainError:
+            logger.error(
+                "workflow delegation outcome remains uncertain; preserving tool call state runId=%s toolCallId=%s",
+                context.runId,
+                call.id,
+                exc_info=True,
+            )
             raise
         except BackendBusinessError as exc:
             if task_id is not None:
@@ -1608,6 +1628,35 @@ def _tool_result(
             "contentText": safe_content_text,
         },
         "summary": safe_content_text,
+    }
+
+
+def _delegated_workflow_result(
+    tool_code: str,
+    tool_call_id: int,
+    arguments: dict[str, Any],
+    task_id: int,
+    workflow_run_id: int,
+    workflow_status: str,
+    run_url: str,
+) -> dict[str, Any]:
+    message = "工作流已启动，可在运行页查看进度"
+    return {
+        "success": True,
+        "toolCode": tool_code,
+        "toolCallId": tool_call_id,
+        "taskId": task_id,
+        "status": "DELEGATED",
+        "arguments": arguments,
+        "runUrl": run_url,
+        "message": message,
+        "resultSummary": message,
+        "summary": message,
+        "data": {
+            "runId": workflow_run_id,
+            "status": workflow_status,
+            "runUrl": run_url,
+        },
     }
 
 

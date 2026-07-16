@@ -31,6 +31,34 @@ public interface BillingService {
                      String outcome, String errorCode, String failureStage,
                      String providerErrorCode, String providerRequestId, Boolean providerCharged);
 
+    void recordUsage(String sourceType, Long sourceId, Long userId, AgentModelConfig modelConfig,
+                     Integer promptTokens, Integer completionTokens, Integer billableUnits, Integer chargedCredits,
+                     BigDecimal vendorCostAmount, String providerCostCurrency, BigDecimal markupRatio,
+                     String outcome, String errorCode, String failureStage,
+                     String providerErrorCode, String providerRequestId, Boolean providerCharged);
+
+    Long recordUsageOnce(String idempotencyKey, String sourceType, Long sourceId, Long userId,
+                         AgentModelConfig modelConfig, Integer promptTokens, Integer completionTokens,
+                         Integer billableUnits, Integer chargedCredits, BigDecimal vendorCostAmount,
+                         BigDecimal markupRatio);
+
+    Long recordUsageOnce(String idempotencyKey, String sourceType, Long sourceId, Long userId,
+                         AgentModelConfig modelConfig, Integer promptTokens, Integer completionTokens,
+                         Integer billableUnits, Integer chargedCredits, BigDecimal vendorCostAmount,
+                         BigDecimal markupRatio, String outcome, String errorCode, String failureStage,
+                         String providerErrorCode, String providerRequestId, Boolean providerCharged);
+
+    Long recordUsageOnce(String idempotencyKey, String sourceType, Long sourceId, Long userId,
+                         AgentModelConfig modelConfig, Integer promptTokens, Integer completionTokens,
+                         Integer billableUnits, Integer chargedCredits, BigDecimal vendorCostAmount,
+                         String providerCostCurrency, BigDecimal markupRatio, String outcome,
+                         String errorCode, String failureStage, String providerErrorCode,
+                         String providerRequestId, Boolean providerCharged);
+
+    boolean attachActualProviderAccounting(Long usageId, AgentModelConfig modelConfig,
+                                           BigDecimal providerCostAmount, String providerCostCurrency,
+                                           String providerRequestId);
+
     /** Backward-compatible overload (no explicit vendor cost / markup). */
     default void recordUsage(String sourceType, Long sourceId, Long userId, AgentModelConfig modelConfig,
                              Integer promptTokens, Integer completionTokens, Integer billableUnits, Integer chargedCredits) {

@@ -56,6 +56,6 @@ public class AdminProxyRoutingController {
 
     @PostMapping("/test")
     public ApiResponse<ProxyDomainTestResponse> test(@RequestBody ProxyDomainTestRequest request) {
-        return ApiResponse.success(diagnosticsService.test(request));
+        return ApiResponse.success(diagnosticsService.test(request, AuthContext.get().userId()));
     }
 }

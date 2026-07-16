@@ -32,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -241,6 +242,7 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                         .toList();
 
         boolean autoCallable = ext != null ? Boolean.TRUE.equals(ext.getAgentAutoCallable()) : false;
+        String executionMode = normalizeExecutionMode(tool.getExecutionMode());
 
         return new AgentToolDescriptorResponse(
                 tool.getToolCode(),
@@ -250,8 +252,33 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                 toInputSchema(tool.getToolCode(), fields),
                 autoCallable,
                 fieldDescriptors,
-                loadHints(tool.getToolCode(), ext)
+                loadHints(tool.getToolCode(), ext),
+                executionMode,
+                normalizeBillingMode(tool.getBillingMode(), executionMode),
+                normalizeMinimumRequiredCredits(tool.getMinimumRequiredCredits()),
+                "WORKFLOW".equals(executionMode) ? "/agents/runs/{taskId}" : null,
+                configuredOrDefault(ext == null ? null : ext.getRiskLevel(), "low"),
+                configuredOrDefault(ext == null ? null : ext.getConfirmationPolicy(), "auto")
         );
+    }
+
+    private String normalizeExecutionMode(String executionMode) {
+        return executionMode != null && "WORKFLOW".equalsIgnoreCase(executionMode.trim()) ? "WORKFLOW" : "DIRECT";
+    }
+
+    private String normalizeBillingMode(String billingMode, String executionMode) {
+        if (billingMode != null && !billingMode.isBlank()) {
+            return billingMode.trim().toUpperCase(Locale.ROOT);
+        }
+        return "WORKFLOW".equals(executionMode) ? "WORKFLOW_STEP" : "FIXED";
+    }
+
+    private int normalizeMinimumRequiredCredits(Integer minimumRequiredCredits) {
+        return minimumRequiredCredits == null ? 0 : Math.max(0, minimumRequiredCredits);
+    }
+
+    private String configuredOrDefault(String value, String defaultValue) {
+        return value == null || value.isBlank() ? defaultValue : value.trim();
     }
 
     private Map<String, AgentToolDescriptorExtension> findExtensionsByToolCode(List<AiTool> tools) {

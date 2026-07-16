@@ -215,6 +215,107 @@ async def test_backend_client_binds_tool_call_task():
 
 
 @pytest.mark.asyncio
+async def test_backend_client_delegates_workflow_using_only_persisted_tool_call_identity():
+    seen: list[tuple[str, str, bytes]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path, request.content))
+        return httpx.Response(
+            200,
+            json={
+                "code": "SUCCESS",
+                "message": "ok",
+                "data": {
+                    "taskId": 501,
+                    "runId": 601,
+                    "status": "CANCELLED",
+                    "runUrl": "/agents/runs/501",
+                },
+            },
+        )
+
+    client = BackendClient(
+        Settings(backend_internal_base_url="http://backend"),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    delegated = await client.delegate_workflow_tool_call(99)
+
+    assert delegated.taskId == 501
+    assert delegated.status == "CANCELLED"
+    assert delegated.runUrl == "/agents/runs/501"
+    assert seen == [("POST", "/api/internal/v1/agent/tool-calls/99/delegate-workflow", b"")]
+
+
+@pytest.mark.asyncio
+async def test_backend_client_retries_workflow_delegation_after_response_loss():
+    seen: list[tuple[str, bytes]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, request.content))
+        if len(seen) == 1:
+            raise httpx.ReadTimeout("response lost after backend commit", request=request)
+        return httpx.Response(
+            200,
+            json={
+                "code": "SUCCESS",
+                "message": "ok",
+                "data": {
+                    "taskId": 501,
+                    "runId": 601,
+                    "status": "RUNNING",
+                    "runUrl": "/agents/runs/501",
+                },
+            },
+        )
+
+    client = BackendClient(
+        Settings(backend_internal_base_url="http://backend"),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    delegated = await client.delegate_workflow_tool_call(99)
+
+    assert delegated.taskId == 501
+    assert seen == [
+        ("/api/internal/v1/agent/tool-calls/99/delegate-workflow", b""),
+        ("/api/internal/v1/agent/tool-calls/99/delegate-workflow", b""),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_backend_client_retries_workflow_delegation_after_response_validation_failure():
+    responses = [
+        {"code": "SUCCESS", "message": "ok", "data": {"status": "RUNNING"}},
+        {
+            "code": "SUCCESS",
+            "message": "ok",
+            "data": {
+                "taskId": 502,
+                "runId": 602,
+                "status": "RUNNING",
+                "runUrl": "/agents/runs/502",
+            },
+        },
+    ]
+    seen: list[bytes] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.content)
+        return httpx.Response(200, json=responses[len(seen) - 1])
+
+    client = BackendClient(
+        Settings(backend_internal_base_url="http://backend"),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    delegated = await client.delegate_workflow_tool_call(99)
+
+    assert delegated.taskId == 502
+    assert seen == [b"", b""]
+
+
+@pytest.mark.asyncio
 async def test_backend_client_forwards_trace_id_header():
     seen_headers: list[str | None] = []
 

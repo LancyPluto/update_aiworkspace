@@ -14,6 +14,8 @@ public class CreditLog {
     private Long accountId;
     private Long taskId;
     private Long agentRunId;
+    private String sourceType;
+    private Long sourceRef;
     private String logType;
     private Integer amount;
     private Integer frozenAmount;
@@ -65,6 +67,22 @@ public class CreditLog {
 
     public void setAgentRunId(Long agentRunId) {
         this.agentRunId = agentRunId;
+    }
+
+    public String getSourceType() {
+        return sourceType;
+    }
+
+    public void setSourceType(String sourceType) {
+        this.sourceType = sourceType;
+    }
+
+    public Long getSourceRef() {
+        return sourceRef;
+    }
+
+    public void setSourceRef(Long sourceRef) {
+        this.sourceRef = sourceRef;
     }
 
     public String getLogType() {

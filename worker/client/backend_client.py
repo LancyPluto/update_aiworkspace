@@ -95,6 +95,44 @@ class BackendClient:
         )
         return self._parse_response(response)
 
+    def save_provider_checkpoint(
+        self,
+        task_id: int,
+        checkpoint: dict[str, Any],
+        *,
+        expected_version: int,
+        trace_id: str | None = None,
+        claim_token: str | None = None,
+    ) -> dict[str, Any]:
+        payload = {
+            "checkpoint": checkpoint,
+            "expectedVersion": max(0, int(expected_version)),
+        }
+        self._attach_claim_token(payload, claim_token)
+        path = f"/api/internal/v1/tasks/{task_id}/provider-checkpoint"
+        last_error: requests.RequestException | None = None
+        for attempt in range(3):
+            try:
+                response = self._request(
+                    "POST",
+                    path,
+                    json_body=payload,
+                    timeout=self.timeout,
+                    trace_id=trace_id,
+                )
+                if response.status_code >= 500 and attempt < 2:
+                    time.sleep(0.2 * (attempt + 1))
+                    continue
+                return self._parse_response(response)
+            except requests.RequestException as error:
+                last_error = error
+                if attempt >= 2:
+                    raise
+                time.sleep(0.2 * (attempt + 1))
+        if last_error is not None:
+            raise last_error
+        raise BackendClientError("provider checkpoint retry exhausted")
+
     def mark_success(
         self,
         task_id: int,

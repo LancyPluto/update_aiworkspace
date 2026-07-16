@@ -47,6 +47,7 @@ class WorkflowStepHandler:
     def handle(self, message: dict[str, Any]) -> dict[str, Any]:
         task_id = int(message["taskId"])
         trace_id = message.get("traceId")
+        claim_token = message.get("__claimToken") or message.get("claimToken")
         try:
             context = message.get("__executionContext") or self.backend_client.get_execution_context(task_id, trace_id=trace_id)
             status = str(context.get("status") or "").upper()
@@ -71,20 +72,27 @@ class WorkflowStepHandler:
             elif node_def_type == "TTS_MODEL":
                 output = self._run_tts(form, workflow_inputs, model_config, task_id, trace_id)
             elif node_def_type == "VIDEO_MODEL":
-                output = self._run_video(form, workflow_inputs, model_config, task_id, trace_id)
+                output = self._run_video(
+                    form,
+                    workflow_inputs,
+                    model_config,
+                    task_id,
+                    trace_id,
+                    provider_checkpoint=context.get("providerCheckpoint"),
+                    provider_checkpoint_version=context.get("providerCheckpointVersion"),
+                    claim_token=claim_token,
+                )
             elif node_def_type in {"SUBTITLE", "TOOL_CALL"}:
                 output = self._run_compose(form, workflow_inputs, task_id, trace_id)
             else:
                 raise RuntimeError(f"unsupported workflow node type: {node_def_type}")
 
-            self.backend_client.mark_success(
-                task_id,
-                {
-                    "resourceType": "TEXT",
-                    "contentText": json.dumps(output, ensure_ascii=False),
-                },
-                trace_id=trace_id,
-            )
+            success_payload = {
+                "resourceType": "TEXT",
+                "contentText": json.dumps(output, ensure_ascii=False),
+            }
+            success_payload.update(_provider_accounting_payload(output))
+            self.backend_client.mark_success(task_id, success_payload, trace_id=trace_id)
             return {"status": "SUCCESS", "taskId": task_id, "nodeDefType": node_def_type}
         except Exception as error:
             LOGGER.exception("workflow step failed taskId=%s", task_id)
@@ -338,6 +346,9 @@ class WorkflowStepHandler:
         model_config: dict[str, Any],
         task_id: int,
         trace_id: str | None,
+        provider_checkpoint: dict[str, Any] | None = None,
+        provider_checkpoint_version: int | None = None,
+        claim_token: str | None = None,
     ) -> dict[str, Any]:
         keyframe = _find_upstream(workflow_inputs, "images")
         script = _find_script_payload(workflow_inputs)
@@ -353,9 +364,41 @@ class WorkflowStepHandler:
 
         gen_video = _resolve_video_generator(model_config)
         persister = GeneratedVideoPersister()
+        provider = str(model_config.get("provider") or "seedance")
+        protocol = _provider_protocol(model_config) or provider.lower()
+        model = str(model_config.get("modelName") or "")
+        if _matches_workflow_video_checkpoint(provider_checkpoint, provider, protocol, model):
+            checkpoint = json.loads(json.dumps(provider_checkpoint))
+        else:
+            checkpoint = {
+                "kind": "WORKFLOW_VIDEO",
+                "provider": provider,
+                "protocol": protocol,
+                "model": model,
+                "scenes": {},
+            }
+        checkpoint_version = max(0, int(provider_checkpoint_version or 0))
+        scene_checkpoints = checkpoint.setdefault("scenes", {})
         total = len(scenes)
         clips: list[dict[str, Any]] = []
         for position, scene in enumerate(scenes, start=1):
+            scene_key = str(position)
+            scene_checkpoint = scene_checkpoints.get(scene_key)
+            if not isinstance(scene_checkpoint, dict):
+                scene_checkpoint = {}
+            if (
+                str(scene_checkpoint.get("status") or "").upper() == "COMPLETED"
+                and scene_checkpoint.get("videoUrl")
+                and scene_checkpoint.get("sourceVideoUrl")
+            ):
+                clips.append({
+                    "sceneIndex": position,
+                    "videoUrl": scene_checkpoint["videoUrl"],
+                    "sourceVideoUrl": scene_checkpoint["sourceVideoUrl"],
+                    "referenceImages": scene_checkpoint.get("referenceImages") or [],
+                    **_provider_accounting_payload(scene_checkpoint),
+                })
+                continue
             image_entry = keyframe_images[position - 1] if position <= len(keyframe_images) else keyframe_images[-1]
             image_url = (image_entry or {}).get("imageUrl")
             if not image_url:
@@ -378,26 +421,86 @@ class WorkflowStepHandler:
                 progress_message=f"正在生成分镜视频 {position}/{total}",
                 trace_id=trace_id,
             )
-            result = gen_video(prompt=prompt, image=image_url, reference_images=reference_images)
-            persisted = persister.persist_video_url(task_id=task_id, source_url=result["videoUrl"], index=position)
-            clips.append(
-                {
-                    "sceneIndex": position,
-                    "videoUrl": persisted["url"],
-                    "sourceVideoUrl": result["videoUrl"],
-                    "referenceImages": reference_images,
+            resume = scene_checkpoint if str(scene_checkpoint.get("status") or "").upper() == "SUBMITTED" else None
+
+            def submitted_callback(submission: dict[str, Any]) -> None:
+                nonlocal checkpoint_version
+                submitted = {
+                    **scene_checkpoint,
+                    **(submission or {}),
+                    "status": "SUBMITTED",
                 }
+                scene_checkpoints[scene_key] = submitted
+                saved = self.backend_client.save_provider_checkpoint(
+                    task_id,
+                    checkpoint,
+                    expected_version=checkpoint_version,
+                    trace_id=trace_id,
+                    claim_token=claim_token,
+                )
+                checkpoint_version = int(saved.get("version") or checkpoint_version + 1)
+
+            result = gen_video(
+                prompt=prompt,
+                image=image_url,
+                reference_images=reference_images,
+                resume=resume,
+                submitted_callback=submitted_callback,
             )
+            persisted = persister.persist_video_url(task_id=task_id, source_url=result["videoUrl"], index=position)
+            provider_accounting = _provider_accounting_payload({
+                **scene_checkpoint,
+                **scene_checkpoints.get(scene_key, {}),
+            })
+            provider_accounting.update(_provider_accounting_payload(result))
+            clip = {
+                "sceneIndex": position,
+                "videoUrl": persisted["url"],
+                "sourceVideoUrl": result["videoUrl"],
+                "referenceImages": reference_images,
+                **provider_accounting,
+            }
+            clips.append(clip)
+            scene_checkpoints[scene_key] = {
+                **scene_checkpoint,
+                **scene_checkpoints.get(scene_key, {}),
+                "requestId": (
+                    result.get("requestId")
+                    or scene_checkpoints.get(scene_key, {}).get("requestId")
+                    or scene_checkpoint.get("requestId")
+                ),
+                "status": "COMPLETED",
+                "videoUrl": clip["videoUrl"],
+                "sourceVideoUrl": clip["sourceVideoUrl"],
+                "referenceImages": reference_images,
+                **provider_accounting,
+            }
+            saved = self.backend_client.save_provider_checkpoint(
+                task_id,
+                checkpoint,
+                expected_version=checkpoint_version,
+                trace_id=trace_id,
+                claim_token=claim_token,
+            )
+            checkpoint_version = int(saved.get("version") or checkpoint_version + 1)
         first = clips[0] if clips else {}
-        return {
+        output = {
             "clips": clips,
             "sceneCount": total,
-            "provider": str(model_config.get("provider") or "seedance"),
+            "provider": provider,
             # 向后兼容字段
             "videoUrl": first.get("videoUrl") or "",
             "sourceVideoUrl": first.get("sourceVideoUrl") or "",
         }
-
+        if total == 1:
+            output["providerAccounting"] = _provider_accounting_payload(first)
+        else:
+            output["providerAccounting"] = {
+                "status": "UNKNOWN",
+                "reason": "MULTIPLE_PROVIDER_CALLS_REQUIRE_ITEMIZED_ACCOUNTING",
+                "providerCallCount": total,
+            }
+        return output
     def _run_compose(
         self,
         form: dict[str, Any],
@@ -505,16 +608,19 @@ class WorkflowStepHandler:
 
     def _mark_failed_safe(self, task_id: int, error: Exception, trace_id: str | None = None) -> None:
         try:
+            failure_payload = {
+                "errorCode": classify_model_error(str(error)),
+                "errorMessage": str(error),
+            }
+            failure_payload.update(_provider_failure_accounting_payload(error))
             self.backend_client.mark_failed(
                 task_id,
-                {
-                    "errorCode": classify_model_error(str(error)),
-                    "errorMessage": str(error),
-                },
+                failure_payload,
                 trace_id=trace_id,
             )
         except BackendClientError:
             LOGGER.exception("failed to report workflow step failure taskId=%s", task_id)
+            raise
 
 
 def _normalize_assets(value: Any, asset_type: str) -> list[dict[str, Any]]:
@@ -651,6 +757,22 @@ def _persist_audio_data_url(task_id: int, audio_data_url: str, index: int = 1) -
     return asset_storage.put_bytes(relative_key, audio_bytes, "audio/mpeg")
 
 
+def _matches_workflow_video_checkpoint(
+    checkpoint: dict[str, Any] | None,
+    provider: str,
+    protocol: str,
+    model: str,
+) -> bool:
+    return bool(
+        isinstance(checkpoint, dict)
+        and checkpoint.get("kind") == "WORKFLOW_VIDEO"
+        and str(checkpoint.get("provider") or "") == provider
+        and str(checkpoint.get("protocol") or "") == protocol
+        and str(checkpoint.get("model") or "") == model
+        and isinstance(checkpoint.get("scenes"), dict)
+    )
+
+
 def _merge_form(workflow_inputs: dict[str, Any]) -> dict[str, Any]:
     form: dict[str, Any] = {}
     field_input = workflow_inputs.get("field-input") or {}
@@ -705,40 +827,56 @@ def _find_script_payload(workflow_inputs: dict[str, Any] | None) -> dict[str, An
     return {}
 
 
+def _provider_accounting_payload(output: Any) -> dict[str, Any]:
+    if not isinstance(output, dict):
+        return {}
+    accounting = output.get("providerAccounting")
+    source = accounting if isinstance(accounting, dict) else output
+    request_id = _first_defined(source, "providerRequestId", "provider_request_id", "requestId")
+    cost_amount = _first_defined(source, "providerCostAmount", "provider_cost_amount")
+    currency = _first_defined(source, "providerCostCurrency", "provider_cost_currency")
+    payload: dict[str, Any] = {}
+    if request_id is not None and str(request_id).strip():
+        payload["providerRequestId"] = str(request_id).strip()
+    if cost_amount is not None and str(cost_amount).strip():
+        payload["providerCostAmount"] = cost_amount
+        if currency is not None and str(currency).strip():
+            payload["providerCostCurrency"] = str(currency).strip().upper()
+    return payload
+
+
+def _first_defined(source: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in source and source[key] is not None:
+            return source[key]
+    return None
+
+
+def _provider_failure_accounting_payload(error: Exception) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    attribute_map = {
+        "provider_charged": "providerCharged",
+        "provider_cost_amount": "providerCostAmount",
+        "provider_error_code": "providerErrorCode",
+        "provider_request_id": "providerRequestId",
+        "failure_stage": "failureStage",
+    }
+    for attribute, field in attribute_map.items():
+        value = getattr(error, attribute, None)
+        if value is not None and (not isinstance(value, str) or value.strip()):
+            payload[field] = value.strip() if isinstance(value, str) else value
+    currency = getattr(error, "provider_cost_currency", None)
+    if currency is not None and str(currency).strip():
+        payload["providerCostCurrency"] = str(currency).strip().upper()
+    return payload
+
+
 def _provider_protocol(model_config: dict[str, Any]) -> str:
     provider = str(model_config.get("provider") or "").lower()
     try:
         return str(provider_registry.provider_protocol(provider) or "").lower()
     except Exception:
         return ""
-
-
-def _retry_transient(call, *, attempts: int = 3, backoff: float = 3.0):
-    """对生图/生视频调用做瞬时错误重试。
-
-    本地/生产经代理访问外部媒体网关时偶发连接抖动（Max retries / proxy connection
-    failed）；逐镜生成多次并发会放大该问题。命中连接类错误时重试，避免整条工作流因
-    单次抖动失败。
-    """
-    import time
-
-    last_error: Exception | None = None
-    for attempt in range(1, max(1, attempts) + 1):
-        try:
-            return call()
-        except Exception as error:  # noqa: BLE001 - 需对所有客户端异常统一重试
-            message = str(error).lower()
-            transient = any(
-                token in message
-                for token in ("max retries", "connection", "timed out", "timeout", "proxy", "temporarily", "reset")
-            )
-            last_error = error
-            if not transient or attempt >= attempts:
-                raise
-            LOGGER.warning("transient media call failure (attempt %s/%s): %s", attempt, attempts, message[:160])
-            time.sleep(backoff * attempt)
-    if last_error:
-        raise last_error
 
 
 def _resolve_image_generator(model_config: dict[str, Any]):
@@ -761,9 +899,7 @@ def _resolve_image_generator(model_config: dict[str, Any]):
         )
 
         def _gen(prompt: str) -> str:
-            urls = _retry_transient(
-                lambda: client.generate_images(prompt=prompt, model=model_name, image_size="1024x576", batch_size=1)
-            )
+            urls = client.generate_images(prompt=prompt, model=model_name, image_size="1024x576", batch_size=1)
             return urls[0] if urls else ""
 
         return _gen
@@ -774,9 +910,7 @@ def _resolve_image_generator(model_config: dict[str, Any]):
     )
 
     def _gen(prompt: str) -> str:
-        return _retry_transient(
-            lambda: sf_client.generate_image(prompt=prompt, model=model_name, image_size="1024x576")
-        )
+        return sf_client.generate_image(prompt=prompt, model=model_name, image_size="1024x576")
 
     return _gen
 
@@ -796,25 +930,37 @@ def _resolve_video_generator(model_config: dict[str, Any]):
             timeout_seconds=model_config.get("timeoutSeconds"),
         )
 
-        def _gen(*, prompt: str, image: str, reference_images: list[str] | None = None):
+        def _gen(
+            *,
+            prompt: str,
+            image: str,
+            reference_images: list[str] | None = None,
+            resume: dict[str, Any] | None = None,
+            submitted_callback=None,
+        ):
             images = [image, *(reference_images or [])]
-            return _retry_transient(
-                lambda: client.generate_video(
-                    prompt=prompt, image=image, images=images, model=model_name, image_size="1024x576",
-                    duration=str(SCENE_SECONDS), resolution="480p", aspect_ratio="16:9",
-                )
+            return client.generate_video(
+                prompt=prompt, image=image, images=images, model=model_name, image_size="1024x576",
+                duration=str(SCENE_SECONDS), resolution="480p", aspect_ratio="16:9",
+                resume=resume, submitted_callback=submitted_callback,
             )
 
         return _gen
 
     seedance = SeedanceVideoClient.from_model_config(model_config)
 
-    def _gen(*, prompt: str, image: str, reference_images: list[str] | None = None):
-        return _retry_transient(
-            lambda: seedance.generate_video(
-                prompt=prompt, image=image, model=model_name, duration=str(SCENE_SECONDS),
-                resolution="480p", aspect_ratio="16:9", image_size="1024x576",
-            )
+    def _gen(
+        *,
+        prompt: str,
+        image: str,
+        reference_images: list[str] | None = None,
+        resume: dict[str, Any] | None = None,
+        submitted_callback=None,
+    ):
+        return seedance.generate_video(
+            prompt=prompt, image=image, model=model_name, duration=str(SCENE_SECONDS),
+            resolution="480p", aspect_ratio="16:9", image_size="1024x576",
+            resume=resume, submitted_callback=submitted_callback,
         )
 
     return _gen

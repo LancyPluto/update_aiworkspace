@@ -274,6 +274,36 @@ fi
 docker compose "${{COMPOSE_ARGS[@]}}" up -d mihomo
 SERVICES="$(bash "$REMOTE_DIR/deploy/scripts/merge_deploy_services.sh" "$SERVICES" backend worker agent-service)"
 
+read_env_value() {{
+  local name="$1"
+  awk -v key="$name" 'index($0, key "=") == 1 {{ value=substr($0, length(key) + 2) }} END {{ print value }}' \
+    "$REMOTE_DIR/.env" | tr -d '\r'
+}}
+
+export APP_PRODUCTION_MODE="$(read_env_value APP_PRODUCTION_MODE)"
+export APP_ENV="$(read_env_value APP_ENV)"
+echo "Verifying production environment configuration ..."
+bash "$REMOTE_DIR/deploy/scripts/verify_production_environment.sh"
+
+echo "Starting MySQL for production data gates ..."
+docker compose "${{COMPOSE_ARGS[@]}}" up -d mysql
+export MYSQL_PASS="$(read_env_value MYSQL_ROOT_PASSWORD)"
+export MYSQL_DB="$(read_env_value MYSQL_DATABASE)"
+export BACKUP_ENCRYPTION_PASSWORD="$(read_env_value BACKUP_ENCRYPTION_PASSWORD)"
+export BACKUP_OSS_URI="$(read_env_value BACKUP_OSS_URI)"
+export PRODUCTION_PREFLIGHT_MYSQL_USER="$(read_env_value PRODUCTION_PREFLIGHT_MYSQL_USER)"
+export PRODUCTION_PREFLIGHT_MYSQL_PASSWORD="$(read_env_value PRODUCTION_PREFLIGHT_MYSQL_PASSWORD)"
+MYSQL_PASS="${{MYSQL_PASS:-root123456}}"
+MYSQL_DB="${{MYSQL_DB:-ai_supermarket_v1}}"
+
+echo "Running historical data read-only preflight ..."
+bash "$REMOTE_DIR/deploy/scripts/production_readonly_preflight.sh" historical
+echo "Creating encrypted pre-migration backup ..."
+bash "$REMOTE_DIR/deploy/scripts/backup_mysql.sh"
+bash "$REMOTE_DIR/deploy/scripts/apply_sql_migrations.sh"
+echo "Running post-migration read-only preflight ..."
+bash "$REMOTE_DIR/deploy/scripts/production_readonly_preflight.sh" post-migration
+
 for svc in $SERVICES; do
   case "$svc" in
     backend|worker|agent-service|admin-frontend|user-web|banana-slides) ;;
@@ -312,6 +342,16 @@ fi
 
 echo "Ensuring complete monitoring stack: $MONITORING_STACK"
 docker compose "${{COMPOSE_ARGS[@]}}" up -d $MONITORING_STACK
+
+echo "Waiting for user-web health..."
+for i in $(seq 1 36); do
+  health="$(docker inspect --format '{{{{.State.Health.Status}}}}' ai-supermarket-user-web 2>/dev/null || echo missing)"
+  echo "  attempt $i: user-web=$health"
+  if [[ "$health" == "healthy" ]]; then
+    break
+  fi
+  sleep 10
+done
 
 echo "Verifying release health..."
 bash "$REMOTE_DIR/deploy/scripts/verify_release_health.sh"

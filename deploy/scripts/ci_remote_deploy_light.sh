@@ -439,6 +439,11 @@ docker compose "\${COMPOSE_ARGS[@]}" up -d mihomo
 
 echo "DEPLOY_SERVICES=\$DEPLOY_SERVICES" | tee -a "\$REMOTE_DIR/deploy/logs/deploy-history.log"
 
+export APP_PRODUCTION_MODE="\$(read_env_value APP_PRODUCTION_MODE)"
+export APP_ENV="\$(read_env_value APP_ENV)"
+echo "Verifying production environment configuration ..."
+bash "\$REMOTE_DIR/deploy/scripts/verify_production_environment.sh"
+
 # Apply pending DB migrations BEFORE rebuilding app containers, so the backend
 # always boots against an up-to-date schema. MySQL is long-lived; ensure it is up
 # first. A real migration failure aborts the deploy (set -e) instead of shipping a
@@ -449,8 +454,14 @@ export MYSQL_PASS="\$(read_env_value MYSQL_ROOT_PASSWORD)"
 export MYSQL_DB="\$(read_env_value MYSQL_DATABASE)"
 export BACKUP_ENCRYPTION_PASSWORD="\$(read_env_value BACKUP_ENCRYPTION_PASSWORD)"
 export BACKUP_OSS_URI="\$(read_env_value BACKUP_OSS_URI)"
+export PRODUCTION_PREFLIGHT_MYSQL_USER="\$(read_env_value PRODUCTION_PREFLIGHT_MYSQL_USER)"
+export PRODUCTION_PREFLIGHT_MYSQL_PASSWORD="\$(read_env_value PRODUCTION_PREFLIGHT_MYSQL_PASSWORD)"
 MYSQL_PASS="\${MYSQL_PASS:-root123456}"
 MYSQL_DB="\${MYSQL_DB:-ai_supermarket_v1}"
+if [ "\$APP_PRODUCTION_MODE" = "true" ] || [ "\$APP_ENV" = "production" ]; then
+  echo "Running historical data read-only preflight ..."
+  bash "\$REMOTE_DIR/deploy/scripts/production_readonly_preflight.sh" historical
+fi
 if [ -n "\$BACKUP_ENCRYPTION_PASSWORD" ]; then
   echo "Creating encrypted pre-migration backup ..."
   bash "\$REMOTE_DIR/deploy/scripts/backup_mysql.sh"
@@ -458,6 +469,10 @@ else
   echo "::warning::Pre-migration backup skipped: BACKUP_ENCRYPTION_PASSWORD is not configured. This is allowed for development/internal testing only." >&2
 fi
 bash "\$REMOTE_DIR/deploy/scripts/apply_sql_migrations.sh"
+if [ "\$APP_PRODUCTION_MODE" = "true" ] || [ "\$APP_ENV" = "production" ]; then
+  echo "Running post-migration read-only preflight ..."
+  bash "\$REMOTE_DIR/deploy/scripts/production_readonly_preflight.sh" post-migration
+fi
 
 # Parallel build: launch all builds concurrently, then wait.
 echo "Building services in parallel: \$DEPLOY_SERVICES"

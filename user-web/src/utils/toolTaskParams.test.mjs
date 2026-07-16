@@ -25,7 +25,15 @@ async function importToolTaskParams() {
   return import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`)
 }
 
-const { buildTaskParams } = await importToolTaskParams()
+const { buildAspectRatioTaskParams, buildTaskParams } = await importToolTaskParams()
+
+test("keeps the original dynamic aspect-ratio field key for gateway forms", () => {
+  assert.deepEqual(buildAspectRatioTaskParams(" 1024x1536 ", "size"), {
+    aspectRatio: "1024x1536",
+    imageRatio: "1024x1536",
+    size: "1024x1536",
+  })
+})
 
 test("filters ui-only fields from task params", () => {
   const fields = [

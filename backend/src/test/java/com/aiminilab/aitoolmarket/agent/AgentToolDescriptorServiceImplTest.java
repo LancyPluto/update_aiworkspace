@@ -3,9 +3,11 @@ package com.aiminilab.aitoolmarket.agent;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentToolDescriptorExtensionMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentToolPreferenceMapper;
+import com.aiminilab.aitoolmarket.agent.entity.AgentToolDescriptorExtension;
 import com.aiminilab.aitoolmarket.agent.service.impl.AgentToolDescriptorServiceImpl;
 import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
+import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -17,8 +19,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class AgentToolDescriptorServiceImplTest {
@@ -35,6 +39,77 @@ class AgentToolDescriptorServiceImplTest {
     AgentModelConfigMapper modelConfigMapper;
     @Mock
     TaskCreditEstimateService taskCreditEstimateService;
+
+    @Test
+    void workflowDescriptorExposesInternalExecutionContract() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        AgentToolDescriptorServiceImpl service = new AgentToolDescriptorServiceImpl(
+                toolMapper,
+                toolFieldItemMapper,
+                extensionMapper,
+                preferenceMapper,
+                modelConfigMapper,
+                taskCreditEstimateService,
+                objectMapper
+        );
+        AiTool tool = new AiTool();
+        tool.setId(19L);
+        tool.setToolCode("ai_comic_drama_agent");
+        tool.setToolName("AI Comic Drama");
+        tool.setExecutionMode("WORKFLOW");
+        tool.setBillingMode("WORKFLOW_STEP");
+        tool.setMinimumRequiredCredits(12);
+        AgentToolDescriptorExtension extension = new AgentToolDescriptorExtension();
+        extension.setRiskLevel("MEDIUM");
+        extension.setConfirmationPolicy("WORKFLOW_DEFINED");
+
+        when(toolMapper.findOnlineByCode(tool.getToolCode())).thenReturn(Optional.of(tool));
+        when(extensionMapper.findByToolCode(tool.getToolCode())).thenReturn(Optional.of(extension));
+        when(preferenceMapper.findByUserIdAndToolCode(7L, tool.getToolCode())).thenReturn(null);
+        when(toolFieldItemMapper.findActiveFields(tool.getId())).thenReturn(List.of());
+        when(taskCreditEstimateService.estimateUserFacingTaskCredits(tool)).thenReturn(12);
+
+        var descriptor = service.getToolForAgent(7L, tool.getToolCode());
+
+        assertThat(descriptor.executionMode()).isEqualTo("WORKFLOW");
+        assertThat(descriptor.billingMode()).isEqualTo("WORKFLOW_STEP");
+        assertThat(descriptor.minimumRequiredCredits()).isEqualTo(12);
+        assertThat(descriptor.runRouteTemplate()).isEqualTo("/agents/runs/{taskId}");
+        assertThat(descriptor.riskLevel()).isEqualTo("MEDIUM");
+        assertThat(descriptor.confirmationPolicy()).isEqualTo("WORKFLOW_DEFINED");
+    }
+
+    @Test
+    void directDescriptorUsesSafeExecutionDefaultsWithoutWorkflowRoute() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        AgentToolDescriptorServiceImpl service = new AgentToolDescriptorServiceImpl(
+                toolMapper,
+                toolFieldItemMapper,
+                extensionMapper,
+                preferenceMapper,
+                modelConfigMapper,
+                taskCreditEstimateService,
+                objectMapper
+        );
+        AiTool tool = new AiTool();
+        tool.setId(20L);
+        tool.setToolCode("direct_image_tool");
+        tool.setToolName("Direct Image Tool");
+
+        when(toolMapper.findOnlineByCode(tool.getToolCode())).thenReturn(Optional.of(tool));
+        when(extensionMapper.findByToolCode(tool.getToolCode())).thenReturn(Optional.empty());
+        when(preferenceMapper.findByUserIdAndToolCode(7L, tool.getToolCode())).thenReturn(null);
+        when(toolFieldItemMapper.findActiveFields(tool.getId())).thenReturn(List.of());
+
+        var descriptor = service.getToolForAgent(7L, tool.getToolCode());
+
+        assertThat(descriptor.executionMode()).isEqualTo("DIRECT");
+        assertThat(descriptor.billingMode()).isEqualTo("FIXED");
+        assertThat(descriptor.minimumRequiredCredits()).isZero();
+        assertThat(descriptor.runRouteTemplate()).isNull();
+        assertThat(descriptor.riskLevel()).isEqualTo("low");
+        assertThat(descriptor.confirmationPolicy()).isEqualTo("auto");
+    }
 
     @Test
     void customModeOptionsObjectCompilesToBooleanEnumForAgentSchema() throws Exception {

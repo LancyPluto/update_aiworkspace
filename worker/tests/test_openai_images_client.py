@@ -464,7 +464,7 @@ def test_openai_images_multipart_incomplete_response_is_not_retried_by_default(m
     monkeypatch.setattr(client.session, "post", fake_post)
 
     with pytest.raises(Exception, match="not retrying this non-idempotent image request"):
-        client._post_multipart_with_ssl_retries(
+        client._post_multipart_with_connect_retries(
             "https://api.ofox.ai/v1/images/edits",
             {"model": "openai/gpt-image-2", "prompt": "edit", "n": "1", "size": "auto", "quality": "low"},
             [("ref.png", b"fake", "image/png")],
@@ -493,7 +493,7 @@ def test_openai_images_json_incomplete_response_is_not_retried_by_default(monkey
     assert attempts["count"] == 1
 
 
-def test_openai_images_incomplete_response_retry_can_be_enabled(monkeypatch) -> None:
+def test_openai_images_incomplete_response_retry_cannot_replay_non_idempotent_create(monkeypatch) -> None:
     attempts = {"count": 0}
 
     class FakeResponse:
@@ -519,10 +519,114 @@ def test_openai_images_incomplete_response_retry_can_be_enabled(monkeypatch) -> 
     )
     monkeypatch.setattr(client.session, "post", fake_post)
 
+    with pytest.raises(Exception, match="not retrying this non-idempotent image request"):
+        client._post("/images/generations", {"model": "openai/gpt-image-2", "prompt": "test"})
+
+    assert attempts["count"] == 1
+
+
+def test_openai_images_connection_error_does_not_replay_non_idempotent_create(monkeypatch) -> None:
+    attempts = {"count": 0}
+
+    def fake_post(*_args, **_kwargs):
+        attempts["count"] += 1
+        raise requests.ConnectionError("connection reset after request may have been sent")
+
+    client = OpenAIImagesClient(
+        base_url="https://api.ofox.ai/v1",
+        api_key="fake-key",
+        extra_auth_json='{"connectionRetries":2,"retryBackoffSeconds":0}',
+    )
+    monkeypatch.setattr(client.session, "post", fake_post)
+
+    with pytest.raises(Exception, match="request may have been sent"):
+        client._post("/images/generations", {"model": "openai/gpt-image-2", "prompt": "test"})
+
+    assert attempts["count"] == 1
+
+
+def test_openai_images_5xx_does_not_replay_non_idempotent_create(monkeypatch) -> None:
+    attempts = {"count": 0}
+
+    class Fake502Response:
+        status_code = 502
+        text = "upstream response lost"
+
+        def raise_for_status(self) -> None:
+            raise requests.HTTPError(response=self)  # type: ignore[arg-type]
+
+    def fake_post(*_args, **_kwargs):
+        attempts["count"] += 1
+        return Fake502Response()
+
+    client = OpenAIImagesClient(
+        base_url="https://api.ofox.ai/v1",
+        api_key="fake-key",
+        extra_auth_json='{"connectionRetries":2,"retryBackoffSeconds":0}',
+    )
+    monkeypatch.setattr(client.session, "post", fake_post)
+
+    with pytest.raises(Exception, match="status=502"):
+        client._post("/images/generations", {"model": "openai/gpt-image-2", "prompt": "test"})
+
+    assert attempts["count"] == 1
+
+
+def test_openai_images_connect_timeout_retries_before_request_is_sent(monkeypatch) -> None:
+    attempts = {"count": 0}
+
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"data": [{"url": "https://example.com/recovered.png"}]}
+
+    def fake_post(*_args, **_kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise requests.ConnectTimeout("connection was not established")
+        return FakeResponse()
+
+    client = OpenAIImagesClient(
+        base_url="https://api.ofox.ai/v1",
+        api_key="fake-key",
+        extra_auth_json='{"connectionRetries":1,"retryBackoffSeconds":0}',
+    )
+    monkeypatch.setattr(client.session, "post", fake_post)
+
     response = client._post("/images/generations", {"model": "openai/gpt-image-2", "prompt": "test"})
 
     assert response["data"][0]["url"] == "https://example.com/recovered.png"
     assert attempts["count"] == 2
+
+
+def test_openai_images_sdk_connection_error_does_not_fallback_to_second_create(monkeypatch) -> None:
+    client = OpenAIImagesClient(
+        base_url="https://api.ofox.ai/v1",
+        api_key="fake-key",
+        extra_auth_json='{"preferSdkEdit":true}',
+    )
+
+    def fail_sdk(*_args, **_kwargs):
+        raise RuntimeError("SDK connection failed after request may have been sent")
+
+    def fail_multipart(*_args, **_kwargs):
+        raise AssertionError("must not replay the edit through another transport")
+
+    monkeypatch.setattr(client, "_edit_via_openai_sdk", fail_sdk)
+    monkeypatch.setattr(client, "_post_multipart", fail_multipart)
+
+    with pytest.raises(RuntimeError, match="request may have been sent"):
+        client._edit_reference_image(
+            "/images/edits",
+            {"model": "openai/gpt-image-2", "prompt": "edit"},
+            [("ref.png", b"fake", "image/png")],
+            source_model="openai/gpt-image-2",
+        )
 
 
 def test_openai_images_force_quality_overrides_params() -> None:

@@ -13,10 +13,14 @@ public class WorkflowRunStep {
     private Long id;
     private Long runId;
     private String nodeId;
+    private Integer sequenceNo;
     private String nodeDefType;
     private String status;
+    private Long revision;
     private Long taskId;
     private Integer attempt;
+    private Integer attemptCount;
+    private Long currentAttemptId;
     private Integer maxAttempts;
     private String inputJson;
     private String outputJson;
@@ -30,14 +34,22 @@ public class WorkflowRunStep {
     public void setRunId(Long runId) { this.runId = runId; }
     public String getNodeId() { return nodeId; }
     public void setNodeId(String nodeId) { this.nodeId = nodeId; }
+    public Integer getSequenceNo() { return sequenceNo; }
+    public void setSequenceNo(Integer sequenceNo) { this.sequenceNo = sequenceNo; }
     public String getNodeDefType() { return nodeDefType; }
     public void setNodeDefType(String nodeDefType) { this.nodeDefType = nodeDefType; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public Long getRevision() { return revision; }
+    public void setRevision(Long revision) { this.revision = revision; }
     public Long getTaskId() { return taskId; }
     public void setTaskId(Long taskId) { this.taskId = taskId; }
     public Integer getAttempt() { return attempt; }
     public void setAttempt(Integer attempt) { this.attempt = attempt; }
+    public Integer getAttemptCount() { return attemptCount; }
+    public void setAttemptCount(Integer attemptCount) { this.attemptCount = attemptCount; }
+    public Long getCurrentAttemptId() { return currentAttemptId; }
+    public void setCurrentAttemptId(Long currentAttemptId) { this.currentAttemptId = currentAttemptId; }
     public Integer getMaxAttempts() { return maxAttempts; }
     public void setMaxAttempts(Integer maxAttempts) { this.maxAttempts = maxAttempts; }
     public String getInputJson() { return inputJson; }

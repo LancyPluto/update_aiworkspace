@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.admin.service.SystemSettingService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -14,18 +15,17 @@ class ProxyRoutingDiagnosticsServiceTest {
 
     @Test
     void autoPrefersAvailablePathThenLatencyWithoutSendingBusinessRequest() {
-        SystemSettingService settings = settings(Map.of(
+        MutableSettings settings = settings(Map.of(
                 MihomoConfigRenderer.ROUTING_CONFIG_KEY,
                 "{\"rules\":[{\"id\":\"ofox\",\"patternType\":\"EXACT\",\"pattern\":\"api.ofox.ai\",\"strategy\":\"AUTO\",\"priority\":100,\"enabled\":true,\"note\":\"\",\"probeUrl\":\"https://api.ofox.ai/health\"}],\"autoSettings\":{\"timeoutMs\":5000,\"sampleSize\":6,\"switchThresholdMs\":150,\"hysteresisMs\":80,\"cooldownSeconds\":300}}"
         ));
         ProxyPathProbe probe = (domain, probeUrl, path, timeoutMs) -> path == ProxyEgressPath.DIRECT
                 ? result(path, false, 90, "network unreachable")
                 : result(path, true, 220, "");
-        ProxyRoutingDiagnosticsService service = new ProxyRoutingDiagnosticsService(
-                settings, new ObjectMapper(), probe
-        );
+        ProxyRoutingService routingService = new ProxyRoutingService(settings, new ObjectMapper());
+        ProxyRoutingDiagnosticsService service = new ProxyRoutingDiagnosticsService(routingService, probe);
 
-        ProxyDomainTestResponse response = service.test(new ProxyDomainTestRequest("api.ofox.ai", ""));
+        ProxyDomainTestResponse response = service.test(new ProxyDomainTestRequest("api.ofox.ai", ""), 42L);
 
         assertThat(response.domain()).isEqualTo("api.ofox.ai");
         assertThat(response.matchedRuleId()).isEqualTo("ofox");
@@ -34,19 +34,50 @@ class ProxyRoutingDiagnosticsServiceTest {
         assertThat(response.autoDecision().selectedPath()).isEqualTo("PROXY");
         assertThat(response.autoDecision().reason()).contains("可用性");
         assertThat(response.probeMethod()).isEqualTo("HEAD");
+        ProxyDomainTestSummary summary = routingService.getConfig().testResults().get("api.ofox.ai");
+        assertThat(summary.success()).isTrue();
+        assertThat(summary.latencyMs()).isEqualTo(220);
+        assertThat(summary.testedAt()).isNotBlank();
+        assertThat(settings.values.get(ProxyRoutingService.ROUTING_TEST_RESULTS_KEY))
+                .doesNotContain("network unreachable");
     }
 
     @Test
     void probeUrlMustTargetTheSameDomainAsStageMeasurements() {
+        ProxyRoutingService routingService = new ProxyRoutingService(settings(Map.of()), new ObjectMapper());
         ProxyRoutingDiagnosticsService service = new ProxyRoutingDiagnosticsService(
-                settings(Map.of()), new ObjectMapper(),
+                routingService,
                 (domain, probeUrl, path, timeoutMs) -> result(path, true, 20, "")
         );
 
         assertThatThrownBy(() -> service.test(new ProxyDomainTestRequest(
                 "api.ofox.ai", "https://health.example.com/ping"
-        ))).isInstanceOf(com.aiminilab.aitoolmarket.common.exception.BusinessException.class)
+        ), 42L
+        )).isInstanceOf(com.aiminilab.aitoolmarket.common.exception.BusinessException.class)
                 .hasMessageContaining("同一域名");
+    }
+
+    @Test
+    void failedProxyTestPersistsStatusWithoutFailureReason() {
+        MutableSettings settings = settings(Map.of(
+                MihomoConfigRenderer.ROUTING_CONFIG_KEY,
+                "{\"rules\":[{\"id\":\"ofox\",\"patternType\":\"EXACT\",\"pattern\":\"api.ofox.ai\",\"strategy\":\"PROXY\",\"priority\":100,\"enabled\":true,\"note\":\"\",\"probeUrl\":\"\"}],\"autoSettings\":{\"timeoutMs\":5000,\"sampleSize\":6,\"switchThresholdMs\":150,\"hysteresisMs\":80,\"cooldownSeconds\":300}}"
+        ));
+        ProxyRoutingService routingService = new ProxyRoutingService(settings, new ObjectMapper());
+        ProxyRoutingDiagnosticsService service = new ProxyRoutingDiagnosticsService(
+                routingService,
+                (domain, probeUrl, path, timeoutMs) -> path == ProxyEgressPath.PROXY
+                        ? result(path, false, 5000, "ttl expired")
+                        : result(path, true, 80, "")
+        );
+
+        service.test(new ProxyDomainTestRequest("api.ofox.ai", ""), 42L);
+
+        ProxyDomainTestSummary summary = routingService.getConfig().testResults().get("api.ofox.ai");
+        assertThat(summary.success()).isFalse();
+        assertThat(summary.latencyMs()).isZero();
+        assertThat(settings.values.get(ProxyRoutingService.ROUTING_TEST_RESULTS_KEY))
+                .doesNotContain("ttl expired");
     }
 
     @Test
@@ -75,24 +106,33 @@ class ProxyRoutingDiagnosticsServiceTest {
         );
     }
 
-    private SystemSettingService settings(Map<String, String> values) {
-        return new SystemSettingService() {
-            @Override
-            public Map<String, String> settings() {
-                return values;
-            }
+    private MutableSettings settings(Map<String, String> values) {
+        return new MutableSettings(values);
+    }
 
-            @Override
-            public Map<String, String> updateSettings(Map<String, String> settings) {
-                return settings;
-            }
+    private static final class MutableSettings implements SystemSettingService {
+        private final Map<String, String> values;
 
-            @Override
-            public com.aiminilab.aitoolmarket.admin.dto.CustomerServiceQrUploadResponse uploadCustomerServiceQr(
-                    org.springframework.web.multipart.MultipartFile file
-            ) {
-                return null;
-            }
-        };
+        private MutableSettings(Map<String, String> values) {
+            this.values = new LinkedHashMap<>(values);
+        }
+
+        @Override
+        public Map<String, String> settings() {
+            return Map.copyOf(values);
+        }
+
+        @Override
+        public Map<String, String> updateSettings(Map<String, String> settings) {
+            values.putAll(settings);
+            return settings();
+        }
+
+        @Override
+        public com.aiminilab.aitoolmarket.admin.dto.CustomerServiceQrUploadResponse uploadCustomerServiceQr(
+                org.springframework.web.multipart.MultipartFile file
+        ) {
+            return null;
+        }
     }
 }

@@ -1,26 +1,21 @@
 package com.aiminilab.aitoolmarket.workflow.service;
 
-import com.aiminilab.aitoolmarket.admin.service.BillingService;
-import com.aiminilab.aitoolmarket.agent.dto.ModelExecutionSnapshot;
-import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
-import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
-import com.aiminilab.aitoolmarket.agent.service.ModelExecutionSnapshotService;
+import com.aiminilab.aitoolmarket.agent.service.AgentDelegatedToolCallLifecycleService;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
-import com.aiminilab.aitoolmarket.credit.dto.PricingQuote;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
-import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
 import com.aiminilab.aitoolmarket.task.dto.WorkerFailedRequest;
 import com.aiminilab.aitoolmarket.task.dto.WorkerSuccessRequest;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
-import com.aiminilab.aitoolmarket.task.service.TaskOutboxService;
 import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.entity.ToolWorkflow;
+import com.aiminilab.aitoolmarket.tool.entity.ToolWorkflowVersion;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolWorkflowVersionMapper;
 import com.aiminilab.aitoolmarket.workflow.dsl.WorkflowDsl;
 import com.aiminilab.aitoolmarket.workflow.dsl.WorkflowEdgeDef;
 import com.aiminilab.aitoolmarket.workflow.dsl.WorkflowNodeDef;
@@ -38,13 +33,12 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.Objects;
+import java.util.Set;
 
 @Service
 public class WorkflowExecutionService {
@@ -52,8 +46,23 @@ public class WorkflowExecutionService {
     private static final Logger LOGGER = LoggerFactory.getLogger(WorkflowExecutionService.class);
     private static final String RUN_RUNNING = "RUNNING";
     private static final String RUN_AWAITING_USER = "AWAITING_USER";
+    private static final String RUN_AWAITING_FUNDS = "AWAITING_FUNDS";
+    private static final String RUN_CANCELLING = "CANCELLING";
     private static final String RUN_SUCCESS = "SUCCESS";
     private static final String RUN_FAILED = "FAILED";
+    private static final String RUN_TIMEOUT = "TIMEOUT";
+    private static final String RUN_CANCELLED = "CANCELLED";
+    private static final Set<String> TERMINAL_RUN_STATUSES = Set.of(
+            RUN_SUCCESS,
+            RUN_FAILED,
+            RUN_TIMEOUT,
+            RUN_CANCELLED
+    );
+    private static final Set<String> FAILABLE_RUN_STATUSES = Set.of(
+            RUN_RUNNING,
+            RUN_AWAITING_USER,
+            RUN_AWAITING_FUNDS
+    );
     private static final String STEP_PENDING = "PENDING";
     private static final String STEP_RUNNING = "RUNNING";
     private static final String STEP_SUCCESS = "SUCCESS";
@@ -65,53 +74,79 @@ public class WorkflowExecutionService {
     private final WorkflowRunStepMapper workflowRunStepMapper;
     private final TaskMapper taskMapper;
     private final ToolMapper toolMapper;
-    private final AgentModelConfigMapper agentModelConfigMapper;
-    private final ModelExecutionSnapshotService modelExecutionSnapshotService;
-    private final TaskOutboxService taskOutboxService;
+    private final ToolWorkflowVersionMapper toolWorkflowVersionMapper;
+    private final WorkflowStepScheduler workflowStepScheduler;
     private final CreditService creditService;
-    private final TaskCreditEstimateService taskCreditEstimateService;
-    private final BillingService billingService;
     private final ObjectMapper objectMapper;
     private final WorkflowRootTaskFinalizer workflowRootTaskFinalizer;
+    private final WorkflowConfirmationTokenService confirmationTokenService;
+    private final AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService;
 
     public WorkflowExecutionService(WorkflowDslService workflowDslService,
                                     WorkflowRunMapper workflowRunMapper,
                                     WorkflowRunStepMapper workflowRunStepMapper,
                                     TaskMapper taskMapper,
                                     ToolMapper toolMapper,
-                                    AgentModelConfigMapper agentModelConfigMapper,
-                                    ModelExecutionSnapshotService modelExecutionSnapshotService,
-                                    TaskOutboxService taskOutboxService,
+                                    ToolWorkflowVersionMapper toolWorkflowVersionMapper,
+                                    WorkflowStepScheduler workflowStepScheduler,
                                     CreditService creditService,
-                                    TaskCreditEstimateService taskCreditEstimateService,
-                                    BillingService billingService,
                                     ObjectMapper objectMapper,
-                                    @Lazy WorkflowRootTaskFinalizer workflowRootTaskFinalizer) {
+                                    @Lazy WorkflowRootTaskFinalizer workflowRootTaskFinalizer,
+                                    WorkflowConfirmationTokenService confirmationTokenService,
+                                    AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService) {
         this.workflowDslService = workflowDslService;
         this.workflowRunMapper = workflowRunMapper;
         this.workflowRunStepMapper = workflowRunStepMapper;
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
-        this.agentModelConfigMapper = agentModelConfigMapper;
-        this.modelExecutionSnapshotService = modelExecutionSnapshotService;
-        this.taskOutboxService = taskOutboxService;
+        this.toolWorkflowVersionMapper = toolWorkflowVersionMapper;
+        this.workflowStepScheduler = workflowStepScheduler;
         this.creditService = creditService;
-        this.taskCreditEstimateService = taskCreditEstimateService;
-        this.billingService = billingService;
         this.objectMapper = objectMapper;
         this.workflowRootTaskFinalizer = workflowRootTaskFinalizer;
+        this.confirmationTokenService = confirmationTokenService;
+        this.delegatedToolCallLifecycleService = delegatedToolCallLifecycleService;
     }
 
     @Transactional
     public void submitUserFeedback(Long rootTaskId, Long userId, Map<String, String> feedbackFields) {
-        WorkflowRun run = workflowRunMapper.findByRootTaskId(rootTaskId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "工作流运行不存在"));
+        WorkflowRun run = workflowRunMapper.selectByRootTaskIdForUpdate(rootTaskId);
+        if (run == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "工作流运行不存在");
+        }
         if (!RUN_AWAITING_USER.equals(run.getStatus())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "当前任务不在等待用户输入状态");
         }
+        if (!Objects.equals(run.getUserId(), userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "无权操作该任务");
+        }
+        WorkflowNodeDef awaitingNode = requireLegacyUserInputNode(run);
+        WorkflowRunStep awaitingStep = workflowRunStepMapper.selectByRunIdAndNodeId(
+                run.getId(), awaitingNode.id()
+        );
+        if (awaitingStep == null || !STEP_PENDING.equals(awaitingStep.getStatus())) {
+            throw new BusinessException(ErrorCode.IDEMPOTENCY_CONFLICT, "等待输入的步骤已经变化");
+        }
+        String fieldKey = text(awaitingNode.parameters(), "fieldKey");
+        if (fieldKey == null || fieldKey.isBlank()) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Workflow user input field is not configured");
+        }
+        if (feedbackFields != null
+                && !feedbackFields.isEmpty()
+                && (feedbackFields.size() != 1 || !feedbackFields.containsKey(fieldKey))) {
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "Legacy workflow feedback only accepts the current user input field"
+            );
+        }
+        String feedbackValue = feedbackFields == null ? null : feedbackFields.get(fieldKey);
+        Map<String, String> normalizedFeedback = Map.of(
+                fieldKey,
+                feedbackValue == null ? "" : feedbackValue
+        );
         AiTask rootTask = taskMapper.findById(rootTaskId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TASK_NOT_FOUND, "任务不存在"));
-        if (!rootTask.getUserId().equals(userId)) {
+        if (!Objects.equals(rootTask.getUserId(), userId)) {
             throw new BusinessException(ErrorCode.FORBIDDEN, "无权操作该任务");
         }
         JsonNode rawInput = readInput(run);
@@ -121,13 +156,7 @@ public class WorkflowExecutionService {
         ObjectNode revisions = params.has("userRevisions") && params.get("userRevisions").isObject()
                 ? (ObjectNode) params.get("userRevisions")
                 : objectMapper.createObjectNode();
-        if (feedbackFields == null || feedbackFields.isEmpty()) {
-            String fieldKey = resolveAwaitingFieldKey(run);
-            if (fieldKey != null && !fieldKey.isBlank()) {
-                feedbackFields = Map.of(fieldKey, "");
-            }
-        }
-        feedbackFields.forEach((key, value) -> {
+        normalizedFeedback.forEach((key, value) -> {
             if (key == null || key.isBlank()) {
                 return;
             }
@@ -140,23 +169,31 @@ public class WorkflowExecutionService {
         run.setInputJson(paramsJson);
         rootTask.setParamsJson(paramsJson);
         taskMapper.updateParamsJson(rootTaskId, paramsJson);
-        run.setStatus(RUN_RUNNING);
-        workflowRunMapper.updateRunStateWithInput(
-                run.getId(),
-                run.getStatus(),
-                paramsJson,
-                run.getContextJson(),
-                run.getCurrentNodeId(),
-                null,
-                null
-        );
+        persistRunStateWithInput(run, RUN_AWAITING_USER, RUN_RUNNING, paramsJson);
         taskMapper.markProcessing(
                 rootTaskId,
                 rootTask.getProgress() == null ? 12 : rootTask.getProgress(),
                 "已收到您的意见，继续生成",
                 List.of(TaskStatus.AWAITING_USER.name(), TaskStatus.PROCESSING.name())
         );
+        delegatedToolCallLifecycleService.progressForWorkflow(
+                run.getRootTaskId(), run.getId(), RUN_RUNNING
+        );
         advanceRun(run.getId());
+    }
+
+    private WorkflowNodeDef requireLegacyUserInputNode(WorkflowRun run) {
+        if (run.getCurrentNodeId() == null || run.getCurrentNodeId().isBlank()) {
+            throw new BusinessException(ErrorCode.IDEMPOTENCY_CONFLICT, "Workflow is not waiting on a user input node");
+        }
+        WorkflowNodeDef node = loadDsl(run).requireNode(run.getCurrentNodeId());
+        if (node.type() != WorkflowNodeDefType.USER_INPUT) {
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "This workflow action requires the confirmation-token API"
+            );
+        }
+        return node;
     }
 
     public boolean shouldUseWorkflow(AiTool tool) {
@@ -177,13 +214,15 @@ public class WorkflowExecutionService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
         ToolWorkflow workflow = workflowDslService.findPublishedWorkflow(tool.getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "工具工作流未发布"));
-        WorkflowDsl dsl = workflowDslService.parse(workflow);
+        ToolWorkflowVersion version = requireWorkflowVersion(workflow.getPublishedVersionId());
+        WorkflowDsl dsl = parseVersion(version);
 
         WorkflowRun run = new WorkflowRun();
         run.setUserId(rootTask.getUserId());
         run.setToolId(tool.getId());
         run.setWorkflowId(workflow.getId());
-        run.setWorkflowVersion(workflow.getVersion());
+        run.setWorkflowVersion(version.getVersion());
+        run.setWorkflowVersionId(version.getId());
         run.setRootTaskId(rootTaskId);
         run.setStatus(RUN_RUNNING);
         run.setInputJson(rootTask.getParamsJson());
@@ -209,57 +248,28 @@ public class WorkflowExecutionService {
     }
 
     @Transactional
-    public void onStepTaskSuccess(Long stepTaskId, WorkerSuccessRequest request) {
-        WorkflowRunStep step = workflowRunStepMapper.findByTaskId(stepTaskId)
-                .orElse(null);
-        if (step == null) {
+    public void onStepAttemptSucceeded(Long stepId, Long stepTaskId, WorkerSuccessRequest request) {
+        WorkflowRunStep step = workflowRunStepMapper.selectById(stepId);
+        if (step == null || !STEP_SUCCESS.equals(step.getStatus())
+                || step.getTaskId() == null || !step.getTaskId().equals(stepTaskId)) {
             return;
         }
-        JsonNode output = parseWorkflowOutput(request);
-        step.setStatus(STEP_SUCCESS);
-        step.setOutputJson(writeJson(output));
-        step.setFinishedAt(LocalDateTime.now());
-        workflowRunStepMapper.updateStepState(
-                step.getId(),
-                step.getStatus(),
-                step.getTaskId(),
-                step.getAttempt(),
-                step.getInputJson(),
-                step.getOutputJson(),
-                step.getErrorMessage(),
-                step.getStartedAt(),
-                step.getFinishedAt()
-        );
+        JsonNode output = readStepOutput(step, request);
         WorkflowRun run = requireRun(step.getRunId());
         ObjectNode context = readContext(run);
         context.set(step.getNodeId(), output);
         saveContext(run, context, step.getNodeId());
         updateRootProgress(run, step.getNodeId(), 90, "节点完成：" + step.getNodeId());
-        chargeWorkflowStepCredits(run, stepTaskId, step.getNodeDefType(), output);
         advanceRun(run.getId());
     }
 
     @Transactional
-    public void onStepTaskFailed(Long stepTaskId, WorkerFailedRequest request) {
-        WorkflowRunStep step = workflowRunStepMapper.findByTaskId(stepTaskId).orElse(null);
-        if (step == null) {
+    public void onStepAttemptsExhausted(Long stepId, WorkerFailedRequest request) {
+        WorkflowRunStep step = workflowRunStepMapper.selectById(stepId);
+        if (step == null || !STEP_FAILED.equals(step.getStatus())) {
             return;
         }
         String errorMessage = request.errorMessage() == null ? "Workflow step failed" : request.errorMessage();
-        step.setStatus(STEP_FAILED);
-        step.setErrorMessage(limit(errorMessage, 1900));
-        step.setFinishedAt(LocalDateTime.now());
-        workflowRunStepMapper.updateStepState(
-                step.getId(),
-                step.getStatus(),
-                step.getTaskId(),
-                step.getAttempt(),
-                step.getInputJson(),
-                step.getOutputJson(),
-                step.getErrorMessage(),
-                step.getStartedAt(),
-                step.getFinishedAt()
-        );
         failRun(step.getRunId(), errorMessage);
     }
 
@@ -332,7 +342,10 @@ public class WorkflowExecutionService {
                 }
                 output.set("fields", fields);
             }
-            case USER_CONFIRM -> output.set("preview", collectConfirmPreview(context, node));
+            case USER_CONFIRM -> {
+                pauseForConfirmation(run, step, node, context);
+                return;
+            }
             case CONDITION -> output.set("branch", evaluateConditionBranch(run, context, node));
             case SCENE_LOOP -> output.setAll(buildSceneLoopOutput(run, node));
             case VIDEO_OUTPUT -> output.set("artifacts", collectArtifacts(context));
@@ -342,8 +355,9 @@ public class WorkflowExecutionService {
         context.set(node.id(), output);
         saveContext(run, context, node.id());
         if (node.type() == WorkflowNodeDefType.VIDEO_OUTPUT) {
-            finalizeRootTask(run, context);
-            markRunSuccess(run);
+            if (markRunSuccess(run)) {
+                finalizeRootTask(run, context);
+            }
             return;
         }
         updateRootProgress(run, node.id(), progressForNode(node.type()), "执行节点：" + node.title());
@@ -355,53 +369,26 @@ public class WorkflowExecutionService {
                                     WorkflowNodeDef node,
                                     ObjectNode context) {
         ObjectNode inputs = buildNodeInputs(dsl, node, context, readInput(run));
-        Long modelConfigId = resolveModelConfigId(node);
-        AgentModelConfig modelConfig = modelConfigId == null
-                ? null
-                : Optional.ofNullable(agentModelConfigMapper.findActiveById(modelConfigId))
-                .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "模型配置不存在: " + modelConfigId));
-        ModelExecutionSnapshot snapshot = modelConfig == null ? null : modelExecutionSnapshotService.create(modelConfig);
-
-        ObjectNode stepParams = objectMapper.createObjectNode();
-        stepParams.put("workflowRunId", run.getId());
-        stepParams.put("workflowStepId", step.getId());
-        stepParams.put("parentTaskId", run.getRootTaskId());
-        stepParams.put("nodeId", node.id());
-        stepParams.put("nodeDefType", node.type().name());
-        stepParams.set("workflowInputs", inputs);
-        stepParams.put("workflowStep", true);
-
-        AiTask child = new AiTask();
-        child.setTaskNo(generateTaskNo());
-        child.setUserId(run.getUserId());
-        child.setToolId(run.getToolId());
-        child.setParamsJson(writeJson(stepParams));
-        if (snapshot != null) {
-            child.setModelSnapshotJson(modelExecutionSnapshotService.serialize(snapshot));
-        }
-        child.setEstimatedCreditCost(0);
-        child.setIdempotencyKey("wf-" + run.getId() + "-" + node.id() + "-" + (step.getAttempt() + 1));
-        Long childTaskId = taskMapper.insertTask(child);
-
-        step.setStatus(STEP_QUEUED);
-        step.setAttempt(step.getAttempt() == null ? 1 : step.getAttempt() + 1);
-        step.setTaskId(childTaskId);
-        step.setInputJson(writeJson(inputs));
-        step.setStartedAt(LocalDateTime.now());
-        workflowRunStepMapper.updateStepState(
+        int ready = workflowRunStepMapper.markReadyForDispatch(
                 step.getId(),
-                step.getStatus(),
-                step.getTaskId(),
-                step.getAttempt(),
-                step.getInputJson(),
-                step.getOutputJson(),
-                step.getErrorMessage(),
-                step.getStartedAt(),
-                step.getFinishedAt()
+                step.getRevision() == null ? 0L : step.getRevision(),
+                STEP_PENDING,
+                step.getCurrentAttemptId(),
+                writeJson(inputs),
+                LocalDateTime.now()
         );
+        if (ready == 0) {
+            WorkflowRunStep current = workflowRunStepMapper.selectById(step.getId());
+            if (current != null && (STEP_QUEUED.equals(current.getStatus()) || STEP_RUNNING.equals(current.getStatus()))) {
+                return;
+            }
+            throw new IllegalStateException("Workflow step readiness compare-and-set failed: " + step.getId());
+        }
+        if (workflowStepScheduler.dispatch(step.getId()) == null) {
+            return;
+        }
         saveContext(run, context, node.id());
         updateRootProgress(run, node.id(), progressForNode(node.type()), "排队执行：" + node.title());
-        taskOutboxService.enqueueTaskCreated(childTaskId);
     }
 
     private void finalizeRootTask(WorkflowRun run, ObjectNode context) {
@@ -449,48 +436,68 @@ public class WorkflowExecutionService {
             return;
         }
         ObjectNode context = readContext(run);
-        finalizeRootTask(run, context);
-        markRunSuccess(run);
+        if (markRunSuccess(run)) {
+            finalizeRootTask(run, context);
+        }
     }
 
     private void failRun(Long runId, String errorMessage) {
         WorkflowRun run = requireRun(runId);
-        run.setStatus(RUN_FAILED);
+        if (TERMINAL_RUN_STATUSES.contains(run.getStatus()) || RUN_CANCELLING.equals(run.getStatus())) {
+            return;
+        }
+        if (!FAILABLE_RUN_STATUSES.contains(run.getStatus())) {
+            throw new IllegalStateException("Workflow run cannot fail from status: " + run.getStatus());
+        }
+        String expectedStatus = run.getStatus();
         run.setErrorMessage(limit(errorMessage, 1900));
         run.setFinishedAt(LocalDateTime.now());
-        workflowRunMapper.updateRunState(
-                run.getId(),
-                run.getStatus(),
-                run.getContextJson(),
-                run.getCurrentNodeId(),
-                run.getErrorMessage(),
-                run.getFinishedAt()
+        persistRunState(run, expectedStatus, RUN_FAILED);
+        AiTask rootTask = taskMapper.findById(run.getRootTaskId())
+                .orElseThrow(() -> new IllegalStateException("Workflow root task not found: " + run.getRootTaskId()));
+        creditService.release(
+                rootTask.getUserId(),
+                CreditSourceType.TASK,
+                rootTask.getId(),
+                rootTask.getEstimatedCreditCost()
         );
-        AiTask rootTask = taskMapper.findById(run.getRootTaskId()).orElse(null);
-        if (rootTask != null) {
-            creditService.release(rootTask.getUserId(), CreditSourceType.TASK, rootTask.getId(), rootTask.getEstimatedCreditCost());
-            taskMapper.markFailed(
-                    rootTask.getId(),
-                    TaskStatus.FAILED.name(),
-                    ErrorCode.MODEL_CALL_FAILED.name(),
-                    limit("工作流失败：" + (errorMessage == null ? "" : errorMessage), 240),
-                    limit(errorMessage, 4000),
-                    List.of(TaskStatus.QUEUED.name(), TaskStatus.PROCESSING.name())
-            );
+        if (taskMapper.markFailed(
+                rootTask.getId(),
+                TaskStatus.FAILED.name(),
+                ErrorCode.MODEL_CALL_FAILED.name(),
+                limit("工作流失败：" + (errorMessage == null ? "" : errorMessage), 240),
+                limit(errorMessage, 4000),
+                List.of(
+                        TaskStatus.QUEUED.name(),
+                        TaskStatus.PROCESSING.name(),
+                        TaskStatus.AWAITING_USER.name(),
+                        TaskStatus.AWAITING_FUNDS.name()
+                )
+        ) != 1) {
+            throw new IllegalStateException("Workflow root task could not fail: " + rootTask.getId());
         }
+        delegatedToolCallLifecycleService.finishForWorkflow(
+                run.getRootTaskId(),
+                run.getId(),
+                RUN_FAILED,
+                run.getErrorMessage()
+        );
     }
 
-    private void markRunSuccess(WorkflowRun run) {
-        run.setStatus(RUN_SUCCESS);
+    private boolean markRunSuccess(WorkflowRun run) {
+        if (RUN_SUCCESS.equals(run.getStatus())) {
+            return false;
+        }
+        if (TERMINAL_RUN_STATUSES.contains(run.getStatus()) || RUN_CANCELLING.equals(run.getStatus())) {
+            return false;
+        }
+        if (!RUN_RUNNING.equals(run.getStatus())) {
+            throw new IllegalStateException("Workflow run cannot succeed from status: " + run.getStatus());
+        }
         run.setFinishedAt(LocalDateTime.now());
-        workflowRunMapper.updateRunState(
-                run.getId(),
-                run.getStatus(),
-                run.getContextJson(),
-                run.getCurrentNodeId(),
-                null,
-                run.getFinishedAt()
-        );
+        run.setErrorMessage(null);
+        persistRunState(run, RUN_RUNNING, RUN_SUCCESS);
+        return true;
     }
 
     private ObjectNode buildNodeInputs(WorkflowDsl dsl, WorkflowNodeDef node, ObjectNode context, JsonNode formInput) {
@@ -509,13 +516,6 @@ public class WorkflowExecutionService {
             inputs.set("parameters", node.parameters());
         }
         return inputs;
-    }
-
-    private Long resolveModelConfigId(WorkflowNodeDef node) {
-        if (node.parameters() != null && node.parameters().hasNonNull("modelConfigId")) {
-            return node.parameters().get("modelConfigId").asLong();
-        }
-        return null;
     }
 
     private boolean dependenciesSucceeded(WorkflowDsl dsl, Map<String, WorkflowRunStep> steps, String nodeId) {
@@ -549,9 +549,39 @@ public class WorkflowExecutionService {
     }
 
     private WorkflowDsl loadDsl(WorkflowRun run) {
-        ToolWorkflow workflow = workflowDslService.findPublishedWorkflow(run.getToolId())
-                .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "工作流未发布"));
-        return workflowDslService.parse(workflow);
+        if (run.getWorkflowVersionId() != null) {
+            return parseVersion(requireWorkflowVersion(run.getWorkflowVersionId()));
+        }
+        ToolWorkflowVersion historicalVersion = run.getWorkflowId() == null || run.getWorkflowVersion() == null
+                ? null
+                : toolWorkflowVersionMapper.selectByWorkflowIdAndVersion(
+                        run.getWorkflowId(),
+                        run.getWorkflowVersion()
+                );
+        if (historicalVersion == null) {
+            throw new BusinessException(
+                    ErrorCode.SYSTEM_ERROR,
+                    "Workflow version snapshot does not exist: runId=%s, workflowId=%s, version=%s"
+                            .formatted(run.getId(), run.getWorkflowId(), run.getWorkflowVersion())
+            );
+        }
+        return parseVersion(historicalVersion);
+    }
+
+    private ToolWorkflowVersion requireWorkflowVersion(Long versionId) {
+        ToolWorkflowVersion version = versionId == null ? null : toolWorkflowVersionMapper.selectById(versionId);
+        if (version == null) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Workflow version does not exist");
+        }
+        return version;
+    }
+
+    private WorkflowDsl parseVersion(ToolWorkflowVersion version) {
+        return workflowDslService.parse(
+                version.getNodesJson(),
+                version.getEdgesJson(),
+                version.getConfigJson()
+        );
     }
 
     private JsonNode readInput(WorkflowRun run) {
@@ -575,45 +605,81 @@ public class WorkflowExecutionService {
     }
 
     private void saveContext(WorkflowRun run, ObjectNode context, String currentNodeId) {
+        if (!RUN_RUNNING.equals(run.getStatus()) && !RUN_AWAITING_USER.equals(run.getStatus())) {
+            throw new IllegalStateException("Workflow run context is immutable in status: " + run.getStatus());
+        }
         run.setContextJson(writeJson(context));
         run.setCurrentNodeId(currentNodeId);
         if (RUN_AWAITING_USER.equals(run.getStatus())) {
-            workflowRunMapper.updateRunStateWithInput(
-                    run.getId(),
-                    run.getStatus(),
-                    run.getInputJson(),
-                    run.getContextJson(),
-                    run.getCurrentNodeId(),
-                    run.getErrorMessage(),
-                    run.getFinishedAt()
-            );
+            persistRunStateWithInput(run, RUN_AWAITING_USER, RUN_AWAITING_USER, run.getInputJson());
             return;
         }
-        workflowRunMapper.updateRunState(
+        persistRunState(run, RUN_RUNNING, RUN_RUNNING);
+    }
+
+    private void markStepSuccess(WorkflowRunStep step, JsonNode output) {
+        if (!STEP_PENDING.equals(step.getStatus())) {
+            throw new IllegalStateException("Inline workflow step cannot succeed from status: " + step.getStatus());
+        }
+        long expectedRevision = step.getRevision() == null ? 0L : step.getRevision();
+        String outputJson = writeJson(output);
+        LocalDateTime finishedAt = LocalDateTime.now();
+        if (workflowRunStepMapper.completeInlineStep(
+                step.getId(),
+                expectedRevision,
+                STEP_PENDING,
+                step.getCurrentAttemptId(),
+                outputJson,
+                finishedAt
+        ) != 1) {
+            throw new IllegalStateException("Inline workflow step completion compare-and-set failed: " + step.getId());
+        }
+        step.setStatus(STEP_SUCCESS);
+        step.setRevision(expectedRevision + 1);
+        step.setOutputJson(outputJson);
+        step.setErrorMessage(null);
+        step.setFinishedAt(finishedAt);
+    }
+
+    private void persistRunState(WorkflowRun run, String expectedStatus, String nextStatus) {
+        long expectedRevision = run.getRevision() == null ? 0L : run.getRevision();
+        if (workflowRunMapper.updateRunState(
                 run.getId(),
-                run.getStatus(),
+                expectedRevision,
+                expectedStatus,
+                nextStatus,
                 run.getContextJson(),
                 run.getCurrentNodeId(),
                 run.getErrorMessage(),
                 run.getFinishedAt()
-        );
+        ) != 1) {
+            throw new IllegalStateException("Workflow run state compare-and-set failed: " + run.getId());
+        }
+        run.setStatus(nextStatus);
+        run.setRevision(expectedRevision + 1);
     }
 
-    private void markStepSuccess(WorkflowRunStep step, JsonNode output) {
-        step.setStatus(STEP_SUCCESS);
-        step.setOutputJson(writeJson(output));
-        step.setFinishedAt(LocalDateTime.now());
-        workflowRunStepMapper.updateStepState(
-                step.getId(),
-                step.getStatus(),
-                step.getTaskId(),
-                step.getAttempt(),
-                step.getInputJson(),
-                step.getOutputJson(),
-                step.getErrorMessage(),
-                step.getStartedAt(),
-                step.getFinishedAt()
-        );
+    private void persistRunStateWithInput(WorkflowRun run,
+                                          String expectedStatus,
+                                          String nextStatus,
+                                          String inputJson) {
+        long expectedRevision = run.getRevision() == null ? 0L : run.getRevision();
+        if (workflowRunMapper.updateRunStateWithInput(
+                run.getId(),
+                expectedRevision,
+                expectedStatus,
+                nextStatus,
+                inputJson,
+                run.getContextJson(),
+                run.getCurrentNodeId(),
+                run.getErrorMessage(),
+                run.getFinishedAt()
+        ) != 1) {
+            throw new IllegalStateException("Workflow run input compare-and-set failed: " + run.getId());
+        }
+        run.setStatus(nextStatus);
+        run.setRevision(expectedRevision + 1);
+        run.setInputJson(inputJson);
     }
 
     private JsonNode parseWorkflowOutput(WorkerSuccessRequest request) {
@@ -628,6 +694,17 @@ public class WorkflowExecutionService {
         node.put("contentText", request.contentText());
         node.put("resourceType", request.resourceType());
         return node;
+    }
+
+    private JsonNode readStepOutput(WorkflowRunStep step, WorkerSuccessRequest request) {
+        try {
+            if (step.getOutputJson() != null && !step.getOutputJson().isBlank()) {
+                return objectMapper.readTree(step.getOutputJson());
+            }
+        } catch (Exception exception) {
+            LOGGER.warn("workflow step output is not JSON, rebuilding from callback stepId={}", step.getId());
+        }
+        return parseWorkflowOutput(request);
     }
 
     /**
@@ -831,23 +908,50 @@ public class WorkflowExecutionService {
                                       String fieldKey) {
         String label = stageLabel == null || stageLabel.isBlank() ? fieldKey : stageLabel;
         String message = "等待您的" + label + "（可留空直接继续）";
-        run.setStatus(RUN_AWAITING_USER);
         run.setCurrentNodeId(node.id());
-        workflowRunMapper.updateRunState(
-                run.getId(),
-                run.getStatus(),
-                run.getContextJson(),
-                run.getCurrentNodeId(),
-                null,
-                null
-        );
+        run.setErrorMessage(null);
+        run.setFinishedAt(null);
+        persistRunState(run, RUN_RUNNING, RUN_AWAITING_USER);
         taskMapper.markAwaitingUser(
                 run.getRootTaskId(),
                 progressForNode(node.type()),
                 limit(message, 240),
                 List.of(TaskStatus.PROCESSING.name(), TaskStatus.QUEUED.name(), TaskStatus.AWAITING_USER.name())
         );
+        delegatedToolCallLifecycleService.progressForWorkflow(
+                run.getRootTaskId(), run.getId(), RUN_AWAITING_USER
+        );
         LOGGER.info("workflow paused for user input runId={} nodeId={} fieldKey={}", run.getId(), node.id(), fieldKey);
+    }
+
+    private void pauseForConfirmation(WorkflowRun run,
+                                      WorkflowRunStep step,
+                                      WorkflowNodeDef node,
+                                      ObjectNode context) {
+        ObjectNode preview = objectMapper.createObjectNode();
+        preview.set("preview", collectConfirmPreview(context, node));
+        confirmationTokenService.issue(run, step, node.parameters());
+        if (workflowRunStepMapper.markAwaitingUser(
+                step.getId(), step.getRevision() == null ? 0L : step.getRevision(), writeJson(preview)
+        ) != 1) {
+            throw new IllegalStateException("Workflow confirmation step compare-and-set failed: " + step.getId());
+        }
+        if (workflowRunMapper.markAwaitingUser(
+                run.getId(), run.getRevision() == null ? 0L : run.getRevision(), node.id(), step.getId()
+        ) != 1) {
+            throw new IllegalStateException("Workflow run could not pause for confirmation: " + run.getId());
+        }
+        if (taskMapper.markAwaitingUser(
+                run.getRootTaskId(), progressForNode(node.type()), "等待您的确认",
+                List.of(TaskStatus.PROCESSING.name(), TaskStatus.QUEUED.name())
+        ) != 1) {
+            throw new IllegalStateException("Workflow root task could not pause for confirmation: " + run.getRootTaskId());
+        }
+        delegatedToolCallLifecycleService.progressForWorkflow(
+                run.getRootTaskId(), run.getId(), RUN_AWAITING_USER
+        );
+        LOGGER.info("workflow paused for confirmation runId={} nodeId={} stepId={}",
+                run.getId(), node.id(), step.getId());
     }
 
     private boolean hasUserStageResponse(WorkflowRun run, String fieldKey) {
@@ -893,15 +997,11 @@ public class WorkflowExecutionService {
         String stageLabel = null;
         if (run.getCurrentNodeId() != null && !run.getCurrentNodeId().isBlank()) {
             try {
-                WorkflowDsl dsl = workflowDslService.findPublishedWorkflow(run.getToolId())
-                        .map(workflowDslService::parse)
-                        .orElse(null);
-                if (dsl != null) {
-                    WorkflowNodeDef node = dsl.requireNode(run.getCurrentNodeId());
-                    stageLabel = text(node.parameters(), "stageLabel");
-                    if (fieldKey == null || fieldKey.isBlank()) {
-                        fieldKey = text(node.parameters(), "fieldKey");
-                    }
+                WorkflowDsl dsl = loadDsl(run);
+                WorkflowNodeDef node = dsl.requireNode(run.getCurrentNodeId());
+                stageLabel = text(node.parameters(), "stageLabel");
+                if (fieldKey == null || fieldKey.isBlank()) {
+                    fieldKey = text(node.parameters(), "fieldKey");
                 }
             } catch (Exception exception) {
                 LOGGER.warn("build workflow preview node lookup failed runId={}", run.getId(), exception);
@@ -1168,12 +1268,7 @@ public class WorkflowExecutionService {
             return null;
         }
         try {
-            WorkflowDsl dsl = workflowDslService.findPublishedWorkflow(run.getToolId())
-                    .map(workflowDslService::parse)
-                    .orElse(null);
-            if (dsl == null) {
-                return null;
-            }
+            WorkflowDsl dsl = loadDsl(run);
             WorkflowNodeDef node = dsl.requireNode(run.getCurrentNodeId());
             return text(node.parameters(), "fieldKey");
         } catch (Exception exception) {
@@ -1182,109 +1277,21 @@ public class WorkflowExecutionService {
         }
     }
 
-    /**
-     * 工作流不做静态预估（前端展示"算力不详"），每个节点成功后按本次实际使用的模型
-     * 成本 ×1.2（见 {@link TaskCreditEstimateService#estimateUserFacingTaskCredits}）响应式扣减。
-     * 多分镜节点（关键帧/配音/图生视频）一次产出 N 个分镜，对应 N 次模型调用，按 N 倍计费。
-     */
-    private void chargeWorkflowStepCredits(WorkflowRun run, Long stepTaskId, String nodeDefType, JsonNode output) {
-        AiTask stepTask = taskMapper.findById(stepTaskId).orElse(null);
-        if (stepTask == null) {
-            return;
-        }
-        AiTool tool = toolMapper.findById(run.getToolId()).orElse(null);
-        if (tool == null) {
-            return;
-        }
-        ModelExecutionSnapshot snapshot = modelExecutionSnapshotService.parse(stepTask.getModelSnapshotJson());
-        AgentModelConfig modelConfig = snapshot == null ? null : snapshot.toModelConfig();
-        if (modelConfig == null) {
-            return;
-        }
-        JsonNode stepParams = parseStepParams(stepTask.getParamsJson());
-        PricingQuote quote = taskCreditEstimateService.quoteUserFacing(tool, modelConfig, stepParams);
-        int unitCredits = quote.chargeCredits();
-        if (unitCredits <= 0) {
-            return;
-        }
-        int units = resolveStepBillingUnits(nodeDefType, output);
-        int stepCredits = unitCredits * units;
-        int chargedCredits = creditService.settleCompleted(
-                run.getUserId(),
-                CreditSourceType.TASK,
-                run.getRootTaskId(),
-                stepCredits
-        );
-        if (chargedCredits < stepCredits) {
-            throw new BusinessException(ErrorCode.CREDIT_NOT_ENOUGH, "算力不足，无法完成当前工作流步骤");
-        }
-        BigDecimal stepVendorCost = quote.vendorCost() == null
-                ? BigDecimal.ZERO
-                : quote.vendorCost().multiply(BigDecimal.valueOf(units));
-        billingService.recordUsage(
-                "TASK",
-                run.getRootTaskId(),
-                run.getUserId(),
-                modelConfig,
-                null,
-                null,
-                units,
-                stepCredits,
-                stepVendorCost,
-                quote.markupRatio()
-        );
-    }
-
-    /** 每镜一次模型调用的节点按实际分镜数计费；LLM/合成节点单次计费。 */
-    private int resolveStepBillingUnits(String nodeDefType, JsonNode output) {
-        if (nodeDefType == null || output == null) {
-            return 1;
-        }
-        boolean perSceneNode = "IMAGE_MODEL".equals(nodeDefType)
-                || "TTS_MODEL".equals(nodeDefType)
-                || "VIDEO_MODEL".equals(nodeDefType);
-        if (!perSceneNode) {
-            return 1;
-        }
-        JsonNode sceneCount = output.get("sceneCount");
-        if (sceneCount != null && sceneCount.isNumber()) {
-            return Math.max(1, sceneCount.asInt());
-        }
-        return 1;
-    }
-
-    private JsonNode parseStepParams(String paramsJson) {
-        if (paramsJson == null || paramsJson.isBlank()) {
-            return objectMapper.createObjectNode();
-        }
-        try {
-            return objectMapper.readTree(paramsJson);
-        } catch (Exception exception) {
-            return objectMapper.createObjectNode();
-        }
-    }
-
     private void updateRootProgress(WorkflowRun run, String nodeId, int progress, String message) {
-        if (!RUN_AWAITING_USER.equals(run.getStatus())) {
-            taskMapper.markProcessing(
-                    run.getRootTaskId(),
-                    progress,
-                    limit(message, 240),
-                    List.of(TaskStatus.PROCESSING.name(), TaskStatus.QUEUED.name(), TaskStatus.AWAITING_USER.name())
-            );
-        }
         run.setCurrentNodeId(nodeId);
         if (RUN_AWAITING_USER.equals(run.getStatus())) {
             return;
         }
-        workflowRunMapper.updateRunState(
-                run.getId(),
-                run.getStatus(),
-                run.getContextJson(),
-                run.getCurrentNodeId(),
-                run.getErrorMessage(),
-                run.getFinishedAt()
+        if (!RUN_RUNNING.equals(run.getStatus())) {
+            throw new IllegalStateException("Workflow run progress is immutable in status: " + run.getStatus());
+        }
+        taskMapper.markProcessing(
+                run.getRootTaskId(),
+                progress,
+                limit(message, 240),
+                List.of(TaskStatus.PROCESSING.name(), TaskStatus.QUEUED.name(), TaskStatus.AWAITING_USER.name())
         );
+        persistRunState(run, RUN_RUNNING, RUN_RUNNING);
     }
 
     private int progressForNode(WorkflowNodeDefType type) {
@@ -1300,10 +1307,6 @@ public class WorkflowExecutionService {
             case VIDEO_OUTPUT -> 96;
             default -> 15;
         };
-    }
-
-    private String generateTaskNo() {
-        return "WF" + System.currentTimeMillis() + UUID.randomUUID().toString().substring(0, 6).toUpperCase();
     }
 
     private String writeJson(JsonNode node) {

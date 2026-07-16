@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 import httpx
+from pydantic import ValidationError
 
 from app.config import Settings, settings as default_settings
 from app.core.attachment_catalog import user_message_for_llm
@@ -16,6 +17,7 @@ from app.core.schemas import (
     TaskCreate,
     TaskDetailResponse,
     TaskStatusResponse,
+    DelegatedWorkflowResponse,
     AgentModelConfig,
     SessionSearchItem,
     ToolCallComplete,
@@ -41,7 +43,13 @@ class BackendBusinessError(BackendClientError):
         self.data = data
 
 
+class WorkflowDelegationUncertainError(BackendClientError):
+    pass
+
+
 logger = logging.getLogger(__name__)
+
+WORKFLOW_DELEGATION_MAX_ATTEMPTS = 2
 
 
 class BackendClient:
@@ -230,6 +238,28 @@ class BackendClient:
             ToolCallTaskBind(taskId=task_id),
         )
         return ToolCallResponse.model_validate(data)
+
+    async def delegate_workflow_tool_call(self, tool_call_id: int) -> DelegatedWorkflowResponse:
+        path = f"/api/internal/v1/agent/tool-calls/{tool_call_id}/delegate-workflow"
+        last_error: Exception | None = None
+        for attempt in range(1, WORKFLOW_DELEGATION_MAX_ATTEMPTS + 1):
+            try:
+                data = await self._request("POST", path)
+                return DelegatedWorkflowResponse.model_validate(data)
+            except BackendBusinessError:
+                raise
+            except (BackendClientError, ValidationError) as exc:
+                last_error = exc
+                if attempt < WORKFLOW_DELEGATION_MAX_ATTEMPTS:
+                    logger.warning(
+                        "workflow delegation response uncertain; retrying persisted tool call toolCallId=%s attempt=%s",
+                        tool_call_id,
+                        attempt,
+                    )
+
+        raise WorkflowDelegationUncertainError(
+            f"workflow delegation outcome is uncertain for tool call {tool_call_id}"
+        ) from last_error
 
     async def complete_tool_call(self, tool_call_id: int, request: ToolCallComplete) -> None:
         await self._request("POST", f"/api/internal/v1/agent/tool-calls/{tool_call_id}/complete", request)

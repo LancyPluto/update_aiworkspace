@@ -36,6 +36,11 @@ import {
 import { fetchModelProviders } from "@/lib/api/model-providers"
 import { deleteModelVendor, upsertModelVendor } from "@/lib/api/model-vendors"
 import { fetchUnifiedApiOverview } from "@/lib/api/unified-api"
+import {
+  capabilitiesForModelProvider,
+  findModelProvider,
+  selectDefaultModelProvider,
+} from "@/lib/model-provider-selection"
 import type {
   AgentModelConfigPayload,
   ModelVendorPayload,
@@ -270,35 +275,6 @@ function capabilityLabel(cap: string) {
   return map[cap] || cap
 }
 
-function providerForVendor(providers: ModelProviderDescriptor[], vendorCode: string, fallbackProvider?: string) {
-  const normalizedVendor = (vendorCode || "").trim().toLowerCase()
-  const normalizedFallback = (fallbackProvider || "").trim().toLowerCase()
-  return (
-    providers.find((provider) => provider.code.toLowerCase() === normalizedVendor) ||
-    providers.find((provider) => provider.code.toLowerCase() === normalizedFallback) ||
-    providers.find((provider) => provider.code.toLowerCase().includes(normalizedVendor)) ||
-    providers[0]
-  )
-}
-
-function modelCapabilitiesForProvider(
-  capabilities: string[] | null | undefined,
-  provider?: ModelProviderDescriptor,
-) {
-  const agentOnlyCaps = (capabilities || []).filter((capability) => capability.toUpperCase() === VISION_INPUT_CAPABILITY)
-  const defaults = provider?.capabilities && provider.capabilities.length > 0 ? provider.capabilities : ["TEXT_GENERATION"]
-  if (!capabilities || capabilities.length === 0) {
-    return [...defaults]
-  }
-  if (!provider?.capabilities?.length) {
-    return [...capabilities]
-  }
-  const allowed = new Set(provider.capabilities.map((capability) => capability.toUpperCase()))
-  const compatible = capabilities.filter((capability) => allowed.has(capability.toUpperCase()))
-  const executable = compatible.length > 0 ? compatible : [...defaults]
-  return [...executable, ...agentOnlyCaps.filter((capability) => !executable.some((item) => item.toUpperCase() === capability.toUpperCase()))]
-}
-
 function routeTasksForModel(provider: string | undefined, capabilities: string[] | null | undefined) {
   const tasks = executionTaskOptions[(provider || "").trim()]
   if (!tasks) return []
@@ -386,8 +362,6 @@ const emptyAccountForm = (): AccountFormState => ({
   baseUrl: "",
   balanceQueryMode: "MANUAL",
   balanceCurrency: "CNY",
-  proxyMode: "inherit",
-  proxyUrl: "",
   enabled: true,
 })
 
@@ -623,7 +597,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
   const [modelKeyword, setModelKeyword] = useState("")
 
   const currentModelProviderMeta = useMemo(
-    () => providers.find((provider) => provider.code === modelForm.provider) || null,
+    () => findModelProvider(providers, modelForm.provider) || null,
     [providers, modelForm.provider],
   )
 
@@ -1039,8 +1013,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
           balanceAmount: account.balanceAmount ?? undefined,
           balanceCurrency: account.balanceCurrency || "CNY",
           balanceLowThreshold: account.balanceLowThreshold ?? undefined,
-          proxyMode: account.proxyMode || "inherit",
-          proxyUrl: account.proxyUrl || "",
           enabled,
         })
         patchVendorAccount(updated)
@@ -1115,7 +1087,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
   }, [overview])
 
   function openCreateAccount(vendorCode: string, label: string) {
-    const meta = providerForVendor(providers, vendorCode)
+    const meta = selectDefaultModelProvider(providers, vendorCode)
     const existingCount = overview?.vendors.find((vendor) => vendor.vendorCode === vendorCode)?.accounts.length ?? 0
     const baseUrl = meta?.defaultBaseUrl || ""
     setAccountForm({
@@ -1139,7 +1111,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       apiKeyMasked: account.apiKeyMasked || "",
       extraAuthJson: account.extraAuthJson || "",
       extraAuthJsonMasked: account.extraAuthJsonMasked || "",
-      topUpEditBatch: hasTopUpEditBatch(account.extraAuthJson),
+      topUpEditBatch: account.extraAuthJson ? hasTopUpEditBatch(account.extraAuthJson) : undefined,
       consoleUrl: account.consoleUrl || "",
       balanceUrl: account.balanceUrl || "",
       consoleCookieMasked: account.consoleCookieMasked || "",
@@ -1148,8 +1120,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       balanceAmount: account.balanceAmount ?? undefined,
       balanceCurrency: account.balanceCurrency || "CNY",
       balanceLowThreshold: account.balanceLowThreshold ?? undefined,
-      proxyMode: account.proxyMode || "inherit",
-      proxyUrl: account.proxyUrl || "",
       enabled: account.enabled,
     })
     setAccountDialogOpen(true)
@@ -1168,7 +1138,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         apiKey: accountForm.apiKey,
         clearApiKey: accountForm.clearApiKey,
         extraAuthJson,
-        clearExtraAuthJson: accountForm.clearExtraAuthJson || (accountForm.topUpEditBatch !== undefined && !extraAuthJson),
+        clearExtraAuthJson: accountForm.clearExtraAuthJson,
         consoleUrl: accountForm.consoleUrl,
         balanceUrl: accountForm.balanceUrl,
         consoleCookie: accountForm.consoleCookie,
@@ -1177,8 +1147,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         balanceAmount: balanceQueryMode === "MANUAL" ? accountForm.balanceAmount : undefined,
         balanceCurrency: accountForm.balanceCurrency,
         balanceLowThreshold: accountForm.balanceLowThreshold,
-        proxyMode: accountForm.proxyMode,
-        proxyUrl: accountForm.proxyUrl,
         enabled: accountForm.enabled,
       }
       if (accountForm.id) {
@@ -1197,8 +1165,9 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
 
   function openCreateModel(vendor: UnifiedApiVendorGroup, accountId: number) {
     const account = vendor.accounts.find((a) => a.id === accountId) || vendor.accounts[0]
-    const meta = providerForVendor(providers, vendor.vendorCode, vendor.models[0]?.provider)
+    const meta = selectDefaultModelProvider(providers, vendor.vendorCode, vendor.models[0]?.provider)
     const defaultProvider = meta?.code || vendor.models[0]?.provider || "openai_compatible"
+    const capabilities = capabilitiesForModelProvider(undefined, meta)
     const accountReady = accountProbePassed(account)
     setModelVendorCode(vendor.vendorCode)
     setModelForm({
@@ -1208,8 +1177,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       modelName: meta?.defaultModel || "",
       baseUrl: "",
       docsUrl: "",
-      capabilities: modelCapabilitiesForProvider(undefined, meta),
-      executionTask: routeTasksForModel(defaultProvider, modelCapabilitiesForProvider(undefined, meta))[0]?.value || "",
+      capabilities,
+      executionTask: routeTasksForModel(defaultProvider, capabilities)[0]?.value || "",
       executionOptionsJson: "",
       billingUnit: (meta?.billingDefault as AgentModelConfigPayload["billingUnit"]) || "TOKEN_PER_M",
       enabled: accountReady,
@@ -1219,7 +1188,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
   }
 
   function openEditModel(model: UnifiedApiModelItem, vendorCode: string) {
-    const meta = providerForVendor(providers, vendorCode, model.provider)
+    const meta = findModelProvider(providers, model.provider)
+      || selectDefaultModelProvider(providers, vendorCode)
     const account = model.vendorAccountId ? accountById.get(model.vendorAccountId) : undefined
     const pricingCurrency = normalizedCurrency(account?.balanceCurrency)
     setModelVendorCode(vendorCode)
@@ -1238,7 +1208,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       enabled: model.enabled,
       agentEnabled: model.agentEnabled ?? true,
       isDefault: model.isDefault ?? false,
-      capabilities: modelCapabilitiesForProvider(model.capabilities, meta),
+      capabilities: capabilitiesForModelProvider(model.capabilities, meta),
       timeoutSeconds: 60,
       inputTokenPricePer1m: priceFromCny(model.inputTokenPricePer1m, pricingCurrency),
       outputTokenPricePer1m: priceFromCny(model.outputTokenPricePer1m, pricingCurrency),
@@ -1964,33 +1934,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 placeholder={accountForm.extraAuthJsonMasked ? "留空则不修改" : '{"accessKey":"...","secretKey":"..."}'}
                 onChange={(e) => setAccountForm((f) => ({ ...f, extraAuthJson: e.target.value }))}
               />
-              <p className="text-xs text-muted-foreground">用于可灵 Access Key / Secret Key、代理、超时等账号级扩展配置。</p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>账号级代理策略</Label>
-                <Select
-                  value={accountForm.proxyMode || "inherit"}
-                  onValueChange={(proxyMode) => setAccountForm((f) => ({ ...f, proxyMode }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="继承" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="inherit">继承系统默认</SelectItem>
-                    <SelectItem value="enabled">启用代理</SelectItem>
-                    <SelectItem value="disabled">禁用代理</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>代理地址</Label>
-                <Input
-                  value={accountForm.proxyUrl || ""}
-                  placeholder="http://127.0.0.1:7890"
-                  onChange={(e) => setAccountForm((f) => ({ ...f, proxyUrl: e.target.value }))}
-                />
-              </div>
+              <p className="text-xs text-muted-foreground">用于可灵 Access Key / Secret Key、超时等账号级扩展配置。</p>
             </div>
             <div className="rounded-xl border bg-muted/30 p-3">
               <div className="flex items-start justify-between gap-4">
@@ -2002,6 +1946,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 </div>
                 <EmbeddedOnOffSwitch
                   checked={accountForm.topUpEditBatch === true}
+                  disabled={Boolean(accountForm.extraAuthJsonMasked) && !accountForm.extraAuthJson}
                   label="图片编辑批量补全"
                   onCheckedChange={(topUpEditBatch) => setAccountForm((f) => ({ ...f, topUpEditBatch }))}
                 />

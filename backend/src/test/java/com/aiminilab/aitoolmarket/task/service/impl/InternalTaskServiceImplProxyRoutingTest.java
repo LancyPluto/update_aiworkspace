@@ -20,7 +20,8 @@ import com.aiminilab.aitoolmarket.task.metrics.TaskMetrics;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
-import com.aiminilab.aitoolmarket.workflow.service.WorkflowExecutionService;
+import com.aiminilab.aitoolmarket.workflow.service.WorkflowRunLockService;
+import com.aiminilab.aitoolmarket.workflow.service.WorkflowStepCallbackService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
@@ -79,7 +80,8 @@ class InternalTaskServiceImplProxyRoutingTest {
                 mock(AgentToolDescriptorService.class), mock(AgentModelConfigService.class),
                 mock(ModelCapabilityService.class), snapshotService, resolver, fieldMapper, objectMapper,
                 mock(CreditService.class), mock(PricingService.class), mock(BillingService.class),
-                mock(TaskMetrics.class), mock(CommunityService.class), mock(WorkflowExecutionService.class),
+                mock(TaskMetrics.class), mock(CommunityService.class), mock(WorkflowStepCallbackService.class),
+                mock(WorkflowRunLockService.class),
                 mock(PrivateAssetAccessService.class), new AppProperties()
         );
 

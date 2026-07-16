@@ -13,6 +13,13 @@ server:
 spring:
   application:
     name: ai-tool-market-backend
+  rabbitmq:
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
   sql:
     init:
       encoding: UTF-8
@@ -58,6 +65,10 @@ app:
   ai-task-queue: ${AI_TASK_QUEUE:ai:task:queue}
   task-queue-backend: ${TASK_QUEUE_BACKEND:rabbitmq}
   generated-media-dir: ${GENERATED_MEDIA_DIR:../data/generated-media}
+  workflow:
+    confirmation:
+      hmac-secret: ${WORKFLOW_CONFIRMATION_HMAC_SECRET:}
+      ttl-minutes: ${WORKFLOW_CONFIRMATION_TTL_MINUTES:30}
   asset-storage:
     provider: ${ASSET_STORAGE_PROVIDER:local}
     public-base-url: ${ASSET_STORAGE_PUBLIC_BASE_URL:${GENERATED_MEDIA_PUBLIC_BASE_URL:/generated}}
@@ -81,9 +92,10 @@ app:
     task-exchange: ${RABBITMQ_TASK_EXCHANGE:ai.task.exchange}
     task-routing-key: ${RABBITMQ_TASK_ROUTING_KEY:tool.normal}
     task-queue: ${RABBITMQ_TASK_QUEUE:ai.tool.normal}
-    dead-queue: ${RABBITMQ_TASK_DEAD_QUEUE:ai.tool.normal.dead}
-    retry-queue-prefix: ${RABBITMQ_TASK_RETRY_QUEUE_PREFIX:ai.tool.normal.retry}
+    dead-queue: ${RABBITMQ_DEAD_QUEUE:${RABBITMQ_TASK_DEAD_QUEUE:ai.tool.normal.dead}}
+    retry-queue-prefix: ${RABBITMQ_RETRY_QUEUE_PREFIX:${RABBITMQ_TASK_RETRY_QUEUE_PREFIX:ai.tool.normal.retry}}
     retry-delays-ms: ${RABBITMQ_TASK_RETRY_DELAYS_MS:5000,30000,120000}
+    publisher-confirm-timeout-ms: ${RABBITMQ_PUBLISHER_CONFIRM_TIMEOUT_MS:5000}
   task-execution:
     lease-minutes: ${TASK_EXECUTION_LEASE_MINUTES:30}
   auth:
@@ -156,6 +168,27 @@ app:
     controller-secret: ${MIHOMO_CONTROLLER_SECRET:}
     config-path: ${MIHOMO_CONFIG_PATH:/data/mihomo/config.yaml}
     reload-path: ${MIHOMO_RELOAD_PATH:/root/.config/mihomo/config.yaml}
+
+workflow:
+  runtime:
+    enabled: ${WORKFLOW_RUNTIME_ENABLED:false}
+    execution-enabled: ${WORKFLOW_RUNTIME_EXECUTION_ENABLED:false}
+    real-billing-enabled: ${WORKFLOW_RUNTIME_REAL_BILLING_ENABLED:false}
+    # Shadow billing cannot run paid providers until its provider-cost guard is connected.
+    shadow-billing-enabled: ${WORKFLOW_RUNTIME_SHADOW_BILLING_ENABLED:false}
+    auto-retry-enabled: ${WORKFLOW_RUNTIME_AUTO_RETRY_ENABLED:false}
+    confirmation-enabled: ${WORKFLOW_RUNTIME_CONFIRMATION_ENABLED:false}
+    allowed-user-ids: ${WORKFLOW_RUNTIME_ALLOWED_USER_IDS:}
+    canary-percentage: ${WORKFLOW_RUNTIME_CANARY_PERCENTAGE:0}
+    attempt-timeout: ${WORKFLOW_RUNTIME_ATTEMPT_TIMEOUT:PT15M}
+    recovery-interval: ${WORKFLOW_RUNTIME_RECOVERY_INTERVAL:PT1M}
+    recovery-batch-size: ${WORKFLOW_RUNTIME_RECOVERY_BATCH_SIZE:100}
+    reconciliation-interval: ${WORKFLOW_RUNTIME_RECONCILIATION_INTERVAL:PT15M}
+    reconciliation-batch-size: ${WORKFLOW_RUNTIME_RECONCILIATION_BATCH_SIZE:100}
+    max-run-cost-credits: ${WORKFLOW_RUNTIME_MAX_RUN_COST_CREDITS:0}
+    max-user-daily-cost-credits: ${WORKFLOW_RUNTIME_MAX_USER_DAILY_COST_CREDITS:0}
+    max-provider-daily-cost-cny: ${WORKFLOW_RUNTIME_MAX_PROVIDER_DAILY_COST_CNY:0}
+    cost-alert-webhook-url: ${WORKFLOW_RUNTIME_COST_ALERT_WEBHOOK_URL:}
 
 ppt:
   engine:

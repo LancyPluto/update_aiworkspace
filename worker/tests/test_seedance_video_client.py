@@ -1,4 +1,7 @@
-from client.seedance_video_client import SeedanceVideoClient
+import pytest
+import requests
+
+from client.seedance_video_client import SeedanceVideoClient, SeedanceVideoTimeoutError
 
 
 class FakeResponse:
@@ -22,7 +25,10 @@ class RecordingSession:
 
     def request(self, method, url, **kwargs):
         self.calls.append({"method": method, "url": url, **kwargs})
-        return self.responses.pop(0)
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 def test_normalize_endpoint_avoids_double_api_v3_prefix() -> None:
@@ -178,3 +184,140 @@ def test_seedance_async_poll_does_not_repeat_create_request() -> None:
     assert result["videoUrl"] == "https://cdn.example.com/out.mp4"
     methods = [call["method"] for call in session.calls]
     assert methods == ["POST", "GET", "GET", "GET"]
+
+
+def test_seedance_reports_submission_before_polling() -> None:
+    session = RecordingSession(
+        [
+            FakeResponse({"id": "seedance-task-1", "status": "queued"}),
+            FakeResponse({"id": "seedance-task-1", "status": "succeeded", "video_url": "https://cdn.example.com/out.mp4"}),
+        ]
+    )
+    client = SeedanceVideoClient(api_key="test-key", poll_interval_seconds=0, timeout_seconds=2)
+    client.session = session
+    submissions = []
+
+    def record_submission(submission):
+        submissions.append(submission)
+        assert [call["method"] for call in session.calls] == ["POST"]
+
+    client.generate_video(
+        prompt="animate",
+        image_size="auto",
+        model="doubao-seedance-1-5-pro-251215",
+        submitted_callback=record_submission,
+    )
+
+    assert submissions == [
+        {"taskId": "seedance-task-1", "requestId": "seedance-task-1"}
+    ]
+
+
+def test_seedance_resumes_checkpoint_with_get_only() -> None:
+    session = RecordingSession(
+        [FakeResponse({"id": "seedance-task-1", "status": "succeeded", "video_url": "https://cdn.example.com/out.mp4"})]
+    )
+    client = SeedanceVideoClient(api_key="test-key", poll_interval_seconds=0, timeout_seconds=2)
+    client.session = session
+
+    result = client.generate_video(
+        prompt="animate",
+        image_size="auto",
+        model="doubao-seedance-1-5-pro-251215",
+        resume={"taskId": "seedance-task-1", "requestId": "seedance-request-1"},
+    )
+
+    assert result["requestId"] == "seedance-request-1"
+    assert result["videoUrl"] == "https://cdn.example.com/out.mp4"
+    assert [call["method"] for call in session.calls] == ["GET"]
+
+
+def test_seedance_retries_poll_timeout_without_repeating_create(monkeypatch) -> None:
+    session = RecordingSession(
+        [
+            FakeResponse({"id": "seedance-task-1", "status": "queued"}),
+            requests.Timeout("temporary poll timeout"),
+            FakeResponse(
+                {
+                    "id": "seedance-task-1",
+                    "status": "succeeded",
+                    "video_url": "https://cdn.example.com/out.mp4",
+                }
+            ),
+        ]
+    )
+    client = SeedanceVideoClient(
+        api_key="test-key",
+        poll_interval_seconds=0,
+        timeout_seconds=2,
+    )
+    client.session = session
+    monkeypatch.setattr("client.seedance_video_client.time.sleep", lambda _seconds: None)
+
+    result = client.generate_video(
+        prompt="animate",
+        image_size="auto",
+        model="doubao-seedance-1-5-pro-251215",
+        duration="5",
+        aspect_ratio="16:9",
+        resolution="480p",
+    )
+
+    assert result["videoUrl"] == "https://cdn.example.com/out.mp4"
+    assert [call["method"] for call in session.calls] == ["POST", "GET", "GET"]
+
+
+def test_seedance_poll_retries_respect_total_deadline_and_clip_request_timeout(monkeypatch) -> None:
+    class FakeClock:
+        def __init__(self):
+            self.now = 0.0
+            self.sleeps = []
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.sleeps.append(seconds)
+            self.now += seconds
+
+    clock = FakeClock()
+    session = RecordingSession(
+        [
+            FakeResponse({"id": "seedance-task-1", "status": "queued"}),
+            requests.Timeout("poll consumed most of the total budget"),
+        ]
+    )
+    original_request = session.request
+
+    def timed_request(method, url, **kwargs):
+        if method == "GET":
+            clock.now += 1.5
+        return original_request(method, url, **kwargs)
+
+    session.request = timed_request
+    client = SeedanceVideoClient(
+        api_key="test-key",
+        poll_interval_seconds=0,
+        timeout_seconds=2,
+    )
+    client.session = session
+    monkeypatch.setattr("client.seedance_video_client.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("client.seedance_video_client.time.sleep", clock.sleep)
+
+    with pytest.raises(SeedanceVideoTimeoutError, match="generation timed out"):
+        client.generate_video(
+            prompt="animate",
+            image_size="auto",
+            model="doubao-seedance-1-5-pro-251215",
+            duration="5",
+            aspect_ratio="16:9",
+            resolution="480p",
+        )
+
+    get_calls = [call for call in session.calls if call["method"] == "GET"]
+    assert len(get_calls) == 1
+    request_timeout = get_calls[0]["timeout"]
+    assert request_timeout.total == 2.0
+    assert request_timeout.connect_timeout == 2.0
+    assert request_timeout.read_timeout == 2.0
+    assert clock.sleeps == [0.5]

@@ -38,6 +38,19 @@ public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
     @Select("""
             SELECT *
             FROM agent_tool_calls
+            WHERE id = #{toolCallId}
+            LIMIT 1
+            FOR UPDATE
+            """)
+    AgentToolCall selectDetailByIdForUpdate(@Param("toolCallId") Long toolCallId);
+
+    default Optional<AgentToolCall> findByIdForUpdate(Long toolCallId) {
+        return Optional.ofNullable(selectDetailByIdForUpdate(toolCallId));
+    }
+
+    @Select("""
+            SELECT *
+            FROM agent_tool_calls
             WHERE run_id = #{runId}
             ORDER BY id ASC
             """)
@@ -98,6 +111,31 @@ public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
     }
 
     @Select("""
+            SELECT call_record.*
+            FROM agent_tool_calls call_record
+            JOIN workflow_runs workflow
+              ON workflow.id = #{workflowRunId}
+             AND workflow.root_task_id = call_record.task_id
+            JOIN ai_tasks root_task
+              ON root_task.id = call_record.task_id
+             AND root_task.user_id = workflow.user_id
+            JOIN ai_tools workflow_tool
+              ON workflow_tool.id = workflow.tool_id
+             AND workflow_tool.tool_code = call_record.tool_code
+            WHERE call_record.task_id = #{rootTaskId}
+              AND call_record.status = 'DELEGATED'
+              AND call_record.user_id = workflow.user_id
+            ORDER BY call_record.id DESC
+            LIMIT 1
+            """)
+    AgentToolCall selectDelegatedByWorkflow(@Param("rootTaskId") Long rootTaskId,
+                                            @Param("workflowRunId") Long workflowRunId);
+
+    default Optional<AgentToolCall> findDelegatedByWorkflow(Long rootTaskId, Long workflowRunId) {
+        return Optional.ofNullable(selectDelegatedByWorkflow(rootTaskId, workflowRunId));
+    }
+
+    @Select("""
             SELECT *
             FROM agent_tool_calls
             WHERE run_id = #{runId}
@@ -118,9 +156,19 @@ public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
 
     @Update("""
             UPDATE agent_tool_calls
+            SET task_id = #{taskId}, status = 'DELEGATED'
+            WHERE id = #{toolCallId}
+              AND task_id IS NULL
+              AND status = 'RUNNING'
+            """)
+    int markDelegated(@Param("toolCallId") Long toolCallId,
+                      @Param("taskId") Long taskId);
+
+    @Update("""
+            UPDATE agent_tool_calls
             SET status = 'SUCCESS', result_json = #{resultJson}, finished_at = #{now}
             WHERE id = #{toolCallId}
-              AND status NOT IN ('SUCCESS', 'FAILED')
+              AND status = 'RUNNING'
             """)
     int markSuccess(@Param("toolCallId") Long toolCallId,
                      @Param("resultJson") String resultJson,
@@ -130,12 +178,31 @@ public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
             UPDATE agent_tool_calls
             SET status = 'FAILED', error_code = #{errorCode}, error_message = #{errorMessage}, finished_at = #{now}
             WHERE id = #{toolCallId}
-              AND status NOT IN ('SUCCESS', 'FAILED')
+              AND status = 'RUNNING'
             """)
     int markFailed(@Param("toolCallId") Long toolCallId,
                     @Param("errorCode") String errorCode,
                     @Param("errorMessage") String errorMessage,
-                    @Param("now") LocalDateTime now);
+                     @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE agent_tool_calls
+            SET status = #{nextStatus},
+                result_json = #{resultJson},
+                error_code = #{errorCode},
+                error_message = #{errorMessage},
+                finished_at = #{now}
+            WHERE id = #{toolCallId}
+              AND task_id = #{taskId}
+              AND status = 'DELEGATED'
+            """)
+    int finishDelegated(@Param("toolCallId") Long toolCallId,
+                        @Param("taskId") Long taskId,
+                        @Param("nextStatus") String nextStatus,
+                        @Param("resultJson") String resultJson,
+                        @Param("errorCode") String errorCode,
+                        @Param("errorMessage") String errorMessage,
+                        @Param("now") LocalDateTime now);
 
     @Select("""
             SELECT c.*

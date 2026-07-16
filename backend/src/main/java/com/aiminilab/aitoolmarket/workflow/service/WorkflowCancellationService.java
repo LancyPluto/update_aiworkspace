@@ -1,0 +1,189 @@
+package com.aiminilab.aitoolmarket.workflow.service;
+
+import com.aiminilab.aitoolmarket.agent.service.AgentDelegatedToolCallLifecycleService;
+import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
+import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
+import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.task.entity.AiTask;
+import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
+import com.aiminilab.aitoolmarket.workflow.entity.WorkflowRun;
+import com.aiminilab.aitoolmarket.workflow.entity.WorkflowStepAttempt;
+import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowConfirmationMapper;
+import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowRunMapper;
+import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowRunStepMapper;
+import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowStepAttemptMapper;
+import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowStepChargeMapper;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+
+@Service
+public class WorkflowCancellationService {
+
+    private static final Set<String> ACTIVE_RUN_STATUSES = Set.of(
+            "RUNNING", "AWAITING_USER", "AWAITING_FUNDS"
+    );
+    private static final Set<String> TERMINAL_RUN_STATUSES = Set.of(
+            "SUCCESS", "FAILED", "TIMEOUT", "CANCELLED"
+    );
+    private static final Set<String> RELEASABLE_ATTEMPT_STATUSES = Set.of(
+            "CREATED", "DISPATCHED", "QUEUED", "RUNNING"
+    );
+
+    private final WorkflowRunMapper runMapper;
+    private final WorkflowRunStepMapper stepMapper;
+    private final WorkflowStepAttemptMapper attemptMapper;
+    private final WorkflowStepChargeMapper chargeMapper;
+    private final WorkflowConfirmationMapper confirmationMapper;
+    private final WorkflowBillingService billingService;
+    private final TaskMapper taskMapper;
+    private final AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService;
+
+    public WorkflowCancellationService(WorkflowRunMapper runMapper,
+                                       WorkflowRunStepMapper stepMapper,
+                                       WorkflowStepAttemptMapper attemptMapper,
+                                       WorkflowStepChargeMapper chargeMapper,
+                                       WorkflowConfirmationMapper confirmationMapper,
+                                       WorkflowBillingService billingService,
+                                       TaskMapper taskMapper,
+                                       AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService) {
+        this.runMapper = runMapper;
+        this.stepMapper = stepMapper;
+        this.attemptMapper = attemptMapper;
+        this.chargeMapper = chargeMapper;
+        this.confirmationMapper = confirmationMapper;
+        this.billingService = billingService;
+        this.taskMapper = taskMapper;
+        this.delegatedToolCallLifecycleService = delegatedToolCallLifecycleService;
+    }
+
+    @Transactional
+    public void begin(Long rootTaskId, Long userId, String reason) {
+        WorkflowRun run = requireOwnedRunForUpdate(rootTaskId, userId);
+        if (TERMINAL_RUN_STATUSES.contains(run.getStatus()) || "CANCELLING".equals(run.getStatus())) {
+            return;
+        }
+        if (!ACTIVE_RUN_STATUSES.contains(run.getStatus())) {
+            throw conflict("当前工作流不能取消");
+        }
+        if (runMapper.beginCancellation(
+                run.getId(), revision(run), List.copyOf(ACTIVE_RUN_STATUSES), normalizedReason(reason)
+        ) != 1) {
+            throw conflict("工作流取消状态已变化");
+        }
+        markRootCancelling(run);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean settle(Long rootTaskId, Long userId, String reason) {
+        WorkflowRun run = requireOwnedRunForUpdate(rootTaskId, userId);
+        return settleLocked(run, reason);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean settlePersisted(Long runId) {
+        WorkflowRun run = runMapper.selectByIdForUpdate(runId);
+        if (run == null || TERMINAL_RUN_STATUSES.contains(run.getStatus())) {
+            return true;
+        }
+        String reason = run.getErrorMessage() == null || run.getErrorMessage().isBlank()
+                ? "CANCELLATION_RECOVERY"
+                : run.getErrorMessage();
+        return settleLocked(run, reason);
+    }
+
+    private boolean settleLocked(WorkflowRun run, String reason) {
+        if (TERMINAL_RUN_STATUSES.contains(run.getStatus())) {
+            return true;
+        }
+        if (!"CANCELLING".equals(run.getStatus())) {
+            throw conflict("工作流尚未进入取消状态");
+        }
+        String normalizedReason = normalizedReason(reason);
+        List<WorkflowStepAttempt> attempts = attemptMapper.selectByRunId(run.getId());
+        for (WorkflowStepAttempt attempt : attempts) {
+            if (attempt.getChildTaskId() != null) {
+                taskMapper.cancel(
+                        attempt.getChildTaskId(),
+                        List.of(TaskStatus.QUEUED.name(), TaskStatus.PROCESSING.name(),
+                                TaskStatus.AWAITING_USER.name(), TaskStatus.AWAITING_FUNDS.name())
+                );
+            }
+            if (!RELEASABLE_ATTEMPT_STATUSES.contains(attempt.getStatus())) {
+                continue;
+            }
+            billingService.release(attempt.getId());
+            attemptMapper.cancelIfActive(attempt.getId(), normalizedReason);
+        }
+        confirmationMapper.cancelPendingByRunId(run.getId());
+        stepMapper.cancelActiveByRunId(run.getId(), normalizedReason);
+
+        boolean hasLostAttempt = attempts.stream().anyMatch(attempt -> "LOST".equals(attempt.getStatus()));
+        if (hasLostAttempt || chargeMapper.countReserved(run.getId()) > 0) {
+            markRootCancelling(run);
+            if (runMapper.deferCancellationReconciliation(run.getId(), revision(run)) != 1) {
+                throw conflict("工作流待对账状态已变化");
+            }
+            return false;
+        }
+        AiTask rootTask = taskMapper.findById(run.getRootTaskId()).orElse(null);
+        if (rootTask != null && !TaskStatus.CANCELLED.name().equals(rootTask.getStatus())) {
+            taskMapper.cancel(
+                    rootTask.getId(),
+                    List.of(TaskStatus.QUEUED.name(), TaskStatus.PROCESSING.name(),
+                            TaskStatus.AWAITING_USER.name(), TaskStatus.AWAITING_FUNDS.name())
+            );
+        }
+        if (runMapper.finishCancellation(run.getId(), revision(run)) != 1) {
+            throw conflict("工作流取消收敛失败");
+        }
+        delegatedToolCallLifecycleService.finishForWorkflow(
+                run.getRootTaskId(),
+                run.getId(),
+                "CANCELLED",
+                normalizedReason
+        );
+        return true;
+    }
+
+    private void markRootCancelling(WorkflowRun run) {
+        AiTask rootTask = taskMapper.findById(run.getRootTaskId()).orElse(null);
+        if (rootTask == null || TaskStatus.CANCELLED.name().equals(rootTask.getStatus())) {
+            return;
+        }
+        taskMapper.markProcessing(
+                rootTask.getId(),
+                rootTask.getProgress() == null ? 0 : rootTask.getProgress(),
+                "正在取消，等待执行和费用收敛",
+                List.of(TaskStatus.QUEUED.name(), TaskStatus.PROCESSING.name(),
+                        TaskStatus.AWAITING_USER.name(), TaskStatus.AWAITING_FUNDS.name())
+        );
+    }
+
+    private WorkflowRun requireOwnedRunForUpdate(Long rootTaskId, Long userId) {
+        WorkflowRun run = runMapper.selectByRootTaskIdForUpdate(rootTaskId);
+        if (run == null) {
+            throw new BusinessException(ErrorCode.TASK_NOT_FOUND, "工作流任务不存在");
+        }
+        if (!Objects.equals(run.getUserId(), userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "无权操作该工作流任务");
+        }
+        return run;
+    }
+
+    private String normalizedReason(String reason) {
+        return reason == null || reason.isBlank() ? "USER_CANCELLED" : reason;
+    }
+
+    private BusinessException conflict(String message) {
+        return new BusinessException(ErrorCode.IDEMPOTENCY_CONFLICT, message);
+    }
+
+    private long revision(WorkflowRun run) {
+        return run.getRevision() == null ? 0L : run.getRevision();
+    }
+}

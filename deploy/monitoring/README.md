@@ -30,6 +30,8 @@ docker compose \
 - 生产 Grafana: `https://wlcloudai.com/grafana/`
 - Grafana 健康检查: `http://127.0.0.1:3001/api/health`
 - Prometheus: `http://127.0.0.1:9091`
+- Loki 就绪检查: `http://127.0.0.1:3100/ready`
+- Alloy 指标: `http://127.0.0.1:12345/metrics`
 
 默认账号：
 
@@ -45,6 +47,8 @@ GRAFANA_ADMIN_USER=admin
 GRAFANA_ADMIN_PASSWORD=请改成强密码
 PROMETHEUS_PORT=9091
 GRAFANA_PORT=3001
+LOKI_PORT=3100
+ALLOY_PORT=12345
 GRAFANA_ROOT_URL=https://wlcloudai.com/grafana/
 PROMETHEUS_RETENTION=15d
 CADVISOR_IMAGE=
@@ -63,7 +67,7 @@ Grafana 会自动加载：
 - `生产运维驾驶舱`（UID：`ops-command-center-cn`）：值班首页分层展示黄金四指标、登录与 AI 任务成功率、关键依赖、采集链路和异常下钻；无请求或指标缺失时显示 `无数据`，不映射为绿色。
 - `AI Tool Market 基础设施总览`：Target 健康、失败 Target、HTTP/TCP 探测、容器资源和文件系统/卷挂载使用率。
 - `AI工具市场-生产可靠性总览`：真实 HTTP histogram P95、Tomcat busy/max threads、线程利用率和业务指标。
-- `生产容器日志`：全部 Docker 容器 stdout/stderr 日志，可按容器、Compose 服务、stream、关键字和 TraceId 查询。
+- `生产容器日志`：全部 Docker 容器 stdout/stderr 日志，可按容器、Compose 服务、日志流（stream）、关键字和 TraceId 查询。
 - `认证安全地图态势`：Grafana 内置 2D Geomap，地图仅显示地域聚合点；IP 明细在表格中跳转管理端人工风控。
 
 ## 生产运维驾驶舱

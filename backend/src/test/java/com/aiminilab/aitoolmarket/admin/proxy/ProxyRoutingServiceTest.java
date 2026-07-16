@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.admin.proxy;
 
 import com.aiminilab.aitoolmarket.admin.service.SystemSettingService;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,7 +29,10 @@ class ProxyRoutingServiceTest {
     @Test
     void updatePersistsNormalizedRulesAndReportsNoProxyConflict() throws Exception {
         when(systemSettingService.settings()).thenReturn(Map.of(
-                "outbound.proxy.noProxyHosts", "localhost,.example.com"
+                "outbound.proxy.noProxyHosts", "localhost,.example.com",
+                ProxyRoutingService.ROUTING_TEST_RESULTS_KEY,
+                "{\"api.example.com\":{\"success\":true,\"latencyMs\":120,\"testedAt\":\"2026-07-16T08:00:00Z\"},"
+                        + "\"removed.example.com\":{\"success\":false,\"latencyMs\":0,\"testedAt\":\"2026-07-16T07:00:00Z\"}}"
         ));
         when(systemSettingService.updateSettings(anyMap(), any())).thenAnswer(invocation -> invocation.getArgument(0));
         ProxyRoutingService service = new ProxyRoutingService(systemSettingService, new ObjectMapper());
@@ -57,7 +61,13 @@ class ProxyRoutingServiceTest {
             assertThat(rule.strategy()).isEqualTo("PROXY");
         });
         assertThat(saved.getValue()).containsEntry("outbound.proxy.routingEnabled", "true");
+        Map<String, ProxyDomainTestSummary> retained = new ObjectMapper().readValue(
+                saved.getValue().get(ProxyRoutingService.ROUTING_TEST_RESULTS_KEY),
+                new TypeReference<>() { }
+        );
+        assertThat(retained).containsOnlyKeys("api.example.com");
         assertThat(response.fallbackStrategy()).isEqualTo("DIRECT");
+        assertThat(response.testResults()).containsOnlyKeys("api.example.com");
         assertThat(response.warnings()).singleElement().asString()
                 .contains("NO_PROXY")
                 .contains("api.example.com");

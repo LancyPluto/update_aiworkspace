@@ -38,6 +38,21 @@ class ToolDescriptor(BaseModel):
     autoCallable: bool = False
     fields: list[ToolFieldDescriptor] = Field(default_factory=list)
     hints: dict[str, Any] = Field(default_factory=dict, validation_alias=AliasChoices("hints", "agentHints"))
+    executionMode: str = Field(default="DIRECT", validation_alias=AliasChoices("executionMode", "execution_mode"))
+    billingMode: str = Field(default="FIXED", validation_alias=AliasChoices("billingMode", "billing_mode"))
+    minimumRequiredCredits: int = Field(
+        default=0,
+        validation_alias=AliasChoices("minimumRequiredCredits", "minimum_required_credits"),
+    )
+    runRouteTemplate: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("runRouteTemplate", "run_route_template"),
+    )
+    riskLevel: str | None = Field(default=None, validation_alias=AliasChoices("riskLevel", "risk_level"))
+    confirmationPolicy: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("confirmationPolicy", "confirmation_policy"),
+    )
 
 
 class AgentSkillDescriptor(BaseModel):
@@ -428,6 +443,13 @@ class TaskStatusResponse(BaseModel):
     status: str
     progress: int | None = None
     progressMessage: str | None = None
+
+
+class DelegatedWorkflowResponse(BaseModel):
+    taskId: int
+    runId: int
+    status: str
+    runUrl: str
 
 
 class TaskResultResponse(BaseModel):

@@ -5,6 +5,7 @@ public enum TaskStatus {
     QUEUED,
     PROCESSING,
     AWAITING_USER,
+    AWAITING_FUNDS,
     RETRYING,
     SUCCESS,
     FAILED,

@@ -966,6 +966,8 @@ Expected: 首次运行若失败，只允许是明确的跨模块契约缺口；�
 ## 12. P0 发布门禁执行结果
 
 - 数据迁移在空库和现有结构上均成功执行。
+- 生产迁移前必须查询历史 `(user_id, idempotency_key)` 重复；完成重复数据治理并保留零重复查询结果作为证据后，才允许创建或启用唯一约束。
+- 发布前至少执行一次真实 MySQL/InnoDB 并发门禁，覆盖外层 `REPEATABLE READ` 与恢复事务 `READ COMMITTED`；可使用测试环境或 Testcontainers，本次 H2 修复测试不能替代该门禁。
 - 同一幂等键只创建一个 root task 和一个 workflow run。
 - run 固定 `workflow_version_id`，发布新版本不影响运行中任务。
 - 每个付费 attempt 在出队前存在 `RESERVED` 费用记录。

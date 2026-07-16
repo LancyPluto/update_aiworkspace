@@ -1212,6 +1212,7 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("billing_usage_logs", "billable_units", "ALTER TABLE billing_usage_logs ADD COLUMN billable_units INT NOT NULL DEFAULT 0");
         ensureColumn("billing_usage_logs", "unit_price", "ALTER TABLE billing_usage_logs ADD COLUMN unit_price DECIMAL(18,8) NOT NULL DEFAULT 0");
         ensureColumn("billing_usage_logs", "vendor_cost_amount", "ALTER TABLE billing_usage_logs ADD COLUMN vendor_cost_amount DECIMAL(18,6) NOT NULL DEFAULT 0 AFTER cost_amount");
+        ensureColumn("billing_usage_logs", "provider_cost_currency", "ALTER TABLE billing_usage_logs ADD COLUMN provider_cost_currency VARCHAR(8) NOT NULL DEFAULT 'CNY' AFTER vendor_cost_amount");
         ensureColumn("billing_usage_logs", "customer_charge_credits", "ALTER TABLE billing_usage_logs ADD COLUMN customer_charge_credits INT NOT NULL DEFAULT 0 AFTER charged_credits");
         ensureColumn("billing_usage_logs", "margin_credits", "ALTER TABLE billing_usage_logs ADD COLUMN margin_credits INT NOT NULL DEFAULT 0 AFTER customer_charge_credits");
         ensureColumn("billing_usage_logs", "markup_ratio", "ALTER TABLE billing_usage_logs ADD COLUMN markup_ratio DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER margin_credits");

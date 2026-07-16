@@ -300,3 +300,71 @@ POST /api/internal/v1/tasks/{taskId}/failed
 - `worker/scripts/run_fake_integration_test.py`
 - `worker/scripts/run_fake_worker_redis_test.py`
 - `worker/tools/xiaohongshu_copywriting/backend_integration_minimum.md`
+
+## Workflow provider checkpoint and accounting extension
+
+Workflow child tasks extend the V1 contract with the following fields. These
+fields are optional for legacy/direct tools and required when a workflow step
+creates an asynchronous provider task.
+
+### Execution context
+
+`GET /api/internal/v1/tasks/{taskId}/execution-context` additionally returns:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `providerCheckpoint` | object | No | Last provider task checkpoint accepted by the backend. |
+| `providerCheckpointVersion` | number | Yes | CAS version; defaults to `0`. |
+
+### Save provider checkpoint
+
+```text
+POST /api/internal/v1/tasks/{taskId}/provider-checkpoint
+```
+
+```json
+{
+  "checkpoint": {
+    "kind": "WORKFLOW_VIDEO",
+    "provider": "seedance",
+    "scenes": {
+      "1": {
+        "status": "SUBMITTED",
+        "taskId": "provider-task-id",
+        "requestId": "provider-request-id"
+      }
+    }
+  },
+  "expectedVersion": 0,
+  "claimToken": "current-worker-claim"
+}
+```
+
+The backend accepts the write only while the task is `PROCESSING`, the lease
+and claim token are current, and `expectedVersion` matches. The response returns
+the stored checkpoint and incremented `version`. Workers must persist a received
+provider task ID before polling and must resume with that ID after redelivery.
+
+### Provider accounting callbacks
+
+Both `/success` and `/failed` callbacks may include:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `providerCostAmount` | decimal | Conditional | Actual provider-reported cost. Never send an estimate as actual cost. |
+| `providerCostCurrency` | string | Conditional | Uppercase currency code; required with an explicit cost amount. |
+| `providerRequestId` | string | No | Stable provider request/task identifier for reconciliation. |
+
+`/failed` also supports `providerCharged`, `failureStage`, and
+`providerErrorCode`. Callback replay must keep these values identical. A
+conflicting amount, currency, or request ID is rejected rather than overwritten.
+
+For a single-scene video step, the Worker promotes the checkpointed
+`providerRequestId` and any explicitly reported cost into the top-level success
+callback. This still applies when the polling response omits the request ID.
+
+For a multi-scene video step, the Worker must not invent one aggregate request
+ID or cost. Each clip keeps its own provider accounting metadata, while the
+top-level result reports `MULTIPLE_PROVIDER_CALLS_REQUIRE_ITEMIZED_ACCOUNTING`.
+Paid multi-scene execution remains fail-closed until the backend has a
+per-provider-call child ledger.

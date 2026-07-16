@@ -8,6 +8,7 @@ import com.aiminilab.aitoolmarket.task.dto.StaleTaskReconcileResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskDetailResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskEstimateResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
+import com.fasterxml.jackson.databind.JsonNode;
 
 public interface TaskService {
     TaskStatusResponse create(Long userId, CreateTaskRequest request);
@@ -15,6 +16,8 @@ public interface TaskService {
     TaskStatusResponse createForAgentTool(Long userId, CreateTaskRequest request);
 
     TaskStatusResponse createForAgentTool(Long userId, CreateTaskRequest request, int excludeFrozen);
+
+    TaskStatusResponse createWorkflowRoot(Long userId, String toolCode, JsonNode params, String clientRequestId);
 
     TaskEstimateResponse estimate(Long userId, EstimateTaskRequest request);
 

@@ -4,11 +4,13 @@ import { useAuthStore } from "@/store/authStore"
 import LoginPage from "@/pages/Login/Page.vue"
 import LegalPage from "@/pages/Legal/Page.vue"
 import { contactDocument, labelingDocument, privacyDocument, refundDocument, termsDocument } from "@/data/legalDocuments"
+import { redirectLegacyWorkflowRoute } from "@/utils/workflowRoutes"
 
 const AppLayout = () => import("@/layouts/AppLayout.vue")
 const HomePage = () => import("@/pages/Home/Page.vue")
 const DashboardPage = () => import("@/pages/Dashboard/Page.vue")
 const AgentHomePage = () => import("@/pages/AgentHome/Page.vue")
+const AgentPlaceholderPage = () => import("@/pages/AgentPlaceholder/Page.vue")
 const ToolListPage = () => import("@/pages/ToolList/Page.vue")
 const MyTasksPage = () => import("@/pages/MyTasks/Page.vue")
 const MaterialLibraryPage = () => import("@/pages/MaterialLibrary/Page.vue")
@@ -68,9 +70,22 @@ const router = createRouter({
         {
           path: "agents",
           name: "AgentTools",
-          meta: { requiresAuth: false },
-          component: ToolListPage,
-          props: { mode: "agents" },
+          meta: { requiresAuth: true },
+          component: AgentPlaceholderPage,
+        },
+        {
+          path: "agents/tools/:toolCode",
+          name: "WorkflowToolDetail",
+          meta: { requiresAuth: true },
+          component: () => import("@/pages/WorkflowToolDetail.vue"),
+          props: true,
+        },
+        {
+          path: "agents/runs/:taskId",
+          name: "WorkflowRun",
+          meta: { requiresAuth: true },
+          component: () => import("@/pages/WorkflowRun/Page.vue"),
+          props: true,
         },
         {
           path: "tools/:id",
@@ -150,10 +165,9 @@ const router = createRouter({
         },
         {
           path: "workflow/studio/:taskId",
-          name: "WorkflowStudio",
+          name: "LegacyWorkflowStudio",
           meta: { requiresAuth: true },
-          component: () => import("@/pages/WorkflowStudio/Page.vue"),
-          props: true,
+          redirect: redirectLegacyWorkflowRoute,
         },
       ],
     },

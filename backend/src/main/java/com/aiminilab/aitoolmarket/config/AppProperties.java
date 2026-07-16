@@ -24,6 +24,7 @@ public class AppProperties {
     private Payment payment = new Payment();
     private Cache cache = new Cache();
     private AssetStorage assetStorage = new AssetStorage();
+    private Workflow workflow = new Workflow();
 
     public boolean isProductionMode() {
         return productionMode;
@@ -149,6 +150,47 @@ public class AppProperties {
 
     public void setCache(Cache cache) {
         this.cache = cache == null ? new Cache() : cache;
+    }
+
+    public Workflow getWorkflow() {
+        return workflow;
+    }
+
+    public void setWorkflow(Workflow workflow) {
+        this.workflow = workflow == null ? new Workflow() : workflow;
+    }
+
+    public static class Workflow {
+        private Confirmation confirmation = new Confirmation();
+
+        public Confirmation getConfirmation() {
+            return confirmation;
+        }
+
+        public void setConfirmation(Confirmation confirmation) {
+            this.confirmation = confirmation == null ? new Confirmation() : confirmation;
+        }
+    }
+
+    public static class Confirmation {
+        private String hmacSecret = "";
+        private int ttlMinutes = 30;
+
+        public String getHmacSecret() {
+            return hmacSecret == null ? "" : hmacSecret.trim();
+        }
+
+        public void setHmacSecret(String hmacSecret) {
+            this.hmacSecret = hmacSecret;
+        }
+
+        public int getTtlMinutes() {
+            return Math.max(1, Math.min(ttlMinutes, 24 * 60));
+        }
+
+        public void setTtlMinutes(int ttlMinutes) {
+            this.ttlMinutes = ttlMinutes;
+        }
     }
 
     public static class Cache {

@@ -1,13 +1,19 @@
 import json
+import logging
 import time
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 import requests
+from urllib3.util import Timeout as Urllib3Timeout
 
 from config import settings
 from utils.input_image import InputImageError, resolve_reference_image_data_url
 from volcengine_model import normalize_volcengine_openai_base_url
+
+
+LOGGER = logging.getLogger(__name__)
+POLL_REQUEST_ATTEMPTS = 3
 
 
 class SeedanceVideoError(RuntimeError):
@@ -85,33 +91,42 @@ class SeedanceVideoClient:
         watermark: bool | None = None,
         camera_fixed: bool | None = None,
         mode: str = "",
+        resume: dict[str, Any] | None = None,
+        submitted_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         if not self._has_auth():
             raise SeedanceVideoError("SEEDANCE_API_KEY is not configured")
 
-        payload = self._build_payload(
-            prompt=prompt,
-            image_size=image_size,
-            negative_prompt=negative_prompt,
-            model=model or self.default_model,
-            image=image,
-            images=images,
-            audio_data_url=audio_data_url,
-            image_tail=image_tail,
-            video_url=video_url,
-            seed=seed,
-            duration=duration,
-            aspect_ratio=aspect_ratio,
-            resolution=resolution,
-            generate_audio=generate_audio,
-            watermark=watermark,
-            camera_fixed=camera_fixed,
-        )
-        created = self._request("POST", self.create_path, payload)
-        task_id = self._extract_task_id(created)
+        resume = resume if isinstance(resume, dict) else {}
+        task_id = str(resume.get("taskId") or "").strip()
+        request_id = str(resume.get("requestId") or task_id).strip()
+        if not task_id:
+            payload = self._build_payload(
+                prompt=prompt,
+                image_size=image_size,
+                negative_prompt=negative_prompt,
+                model=model or self.default_model,
+                image=image,
+                images=images,
+                audio_data_url=audio_data_url,
+                image_tail=image_tail,
+                video_url=video_url,
+                seed=seed,
+                duration=duration,
+                aspect_ratio=aspect_ratio,
+                resolution=resolution,
+                generate_audio=generate_audio,
+                watermark=watermark,
+                camera_fixed=camera_fixed,
+            )
+            created = self._request("POST", self.create_path, payload)
+            task_id = self._extract_task_id(created)
+            request_id = task_id
+            if submitted_callback:
+                submitted_callback({"taskId": task_id, "requestId": request_id})
         finished = self.wait_for_video(task_id)
         return {
-            "requestId": task_id,
+            "requestId": request_id,
             "status": self._extract_status(finished),
             "videoUrl": self._extract_video_url(finished),
             "reason": str(finished.get("reason") or finished.get("message") or ""),
@@ -127,18 +142,63 @@ class SeedanceVideoClient:
         last_payload: dict[str, Any] = {}
         path = f"{self.create_path.rstrip('/')}/{task_id}"
         while time.monotonic() < deadline:
-            last_payload = self._request("GET", path, None)
+            last_payload = self._poll_status_with_retry(path=path, task_id=task_id, deadline=deadline)
             status = self._extract_status(last_payload).lower()
             if status in {"succeeded", "succeed", "success", "completed", "done"}:
                 return last_payload
             if status in {"failed", "fail", "error", "cancelled", "canceled"}:
                 reason = str(last_payload.get("message") or last_payload.get("reason") or "seedance video generation failed")
                 raise SeedanceVideoError(reason)
-            time.sleep(self.poll_interval_seconds)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(self.poll_interval_seconds, remaining))
 
         raise SeedanceVideoTimeoutError(
             f"seedance video generation timed out, taskId={task_id}, lastStatus={self._extract_status(last_payload)}"
         )
+
+    def _poll_status_with_retry(self, *, path: str, task_id: str, deadline: float) -> dict[str, Any]:
+        for attempt in range(1, POLL_REQUEST_ATTEMPTS + 1):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise self._poll_deadline_error(task_id)
+            try:
+                return self._request("GET", path, None, request_timeout=self._clip_request_timeout(remaining))
+            except SeedanceVideoError as exc:
+                transport_error = isinstance(exc, SeedanceVideoTimeoutError) or isinstance(
+                    exc.__cause__, requests.RequestException
+                )
+                if not transport_error:
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise self._poll_deadline_error(task_id) from exc
+                if attempt >= POLL_REQUEST_ATTEMPTS:
+                    raise
+                LOGGER.warning(
+                    "seedance video poll request failed; retrying existing task taskId=%s attempt=%s/%s: %s",
+                    task_id,
+                    attempt,
+                    POLL_REQUEST_ATTEMPTS,
+                    exc,
+                )
+                time.sleep(min(float(attempt), remaining))
+                if deadline - time.monotonic() <= 0:
+                    raise self._poll_deadline_error(task_id) from exc
+        raise SeedanceVideoError("seedance video poll retry exhausted")
+
+    def _clip_request_timeout(self, remaining: float) -> Urllib3Timeout:
+        connect_timeout, read_timeout = self.timeout
+        return Urllib3Timeout(
+            total=remaining,
+            connect=min(float(connect_timeout), remaining),
+            read=min(float(read_timeout), remaining),
+        )
+
+    @staticmethod
+    def _poll_deadline_error(task_id: str) -> SeedanceVideoTimeoutError:
+        return SeedanceVideoTimeoutError(f"seedance video generation timed out while polling, taskId={task_id}")
 
     def _build_payload(
         self,
@@ -264,12 +324,25 @@ class SeedanceVideoClient:
             }
         return {"type": "audio_url", "audio_url": {"url": raw}}
 
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None,
+        *,
+        request_timeout: Urllib3Timeout | tuple[float, float] | None = None,
+    ) -> dict[str, Any]:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) if payload is not None else ""
         url = f"{self.base_url}{path}"
         headers = self._headers(method, path, body)
         try:
-            response = self.session.request(method, url, data=body.encode("utf-8") if body else None, headers=headers, timeout=self.timeout)
+            response = self.session.request(
+                method,
+                url,
+                data=body.encode("utf-8") if body else None,
+                headers=headers,
+                timeout=request_timeout if request_timeout is not None else self.timeout,
+            )
         except requests.Timeout as exc:
             raise SeedanceVideoTimeoutError("seedance video request timed out") from exc
         except requests.RequestException as exc:

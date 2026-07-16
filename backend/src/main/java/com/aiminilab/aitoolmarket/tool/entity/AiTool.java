@@ -28,6 +28,10 @@ public class AiTool {
     private Long modelConfigId;
     private Long templateId;
     private String executionHandler;
+    private String executionMode;
+    private String billingMode;
+    private Boolean agentSurfaceEnabled;
+    private Integer minimumRequiredCredits;
     @TableField(exist = false)
     private String modelConfigName;
     @TableField(exist = false)
@@ -172,6 +176,38 @@ public class AiTool {
 
     public void setExecutionHandler(String executionHandler) {
         this.executionHandler = executionHandler;
+    }
+
+    public String getExecutionMode() {
+        return executionMode;
+    }
+
+    public void setExecutionMode(String executionMode) {
+        this.executionMode = executionMode;
+    }
+
+    public String getBillingMode() {
+        return billingMode;
+    }
+
+    public void setBillingMode(String billingMode) {
+        this.billingMode = billingMode;
+    }
+
+    public Boolean getAgentSurfaceEnabled() {
+        return agentSurfaceEnabled;
+    }
+
+    public void setAgentSurfaceEnabled(Boolean agentSurfaceEnabled) {
+        this.agentSurfaceEnabled = agentSurfaceEnabled;
+    }
+
+    public Integer getMinimumRequiredCredits() {
+        return minimumRequiredCredits;
+    }
+
+    public void setMinimumRequiredCredits(Integer minimumRequiredCredits) {
+        this.minimumRequiredCredits = minimumRequiredCredits;
     }
 
     public String getModelConfigName() {

@@ -77,6 +77,7 @@ export interface ProxyRoutingConfig {
   autoSettings: ProxyAutoSettings
   fallbackStrategy: "DIRECT"
   warnings: string[]
+  testResults: Record<string, ProxyDomainTestSummary>
 }
 
 export interface ProxyPathProbeResult {
@@ -111,6 +112,12 @@ export interface ProxyDomainTestResult {
   direct: ProxyPathProbeResult
   proxy: ProxyPathProbeResult
   autoDecision: ProxyAutoDecision
+  testedAt: string
+}
+
+export interface ProxyDomainTestSummary {
+  success: boolean
+  latencyMs: number
   testedAt: string
 }
 

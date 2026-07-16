@@ -4,6 +4,8 @@ import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.credit.dto.PricingBreakdownItem;
 import com.aiminilab.aitoolmarket.credit.dto.PricingQuote;
 import com.aiminilab.aitoolmarket.credit.dto.PricingUsage;
+import com.aiminilab.aitoolmarket.credit.dto.PricingPolicySnapshot;
+import com.aiminilab.aitoolmarket.credit.dto.PricingRuleSnapshot;
 import com.aiminilab.aitoolmarket.credit.entity.PricingMargin;
 import com.aiminilab.aitoolmarket.credit.entity.PricingRule;
 import com.aiminilab.aitoolmarket.credit.mapper.PricingMarginMapper;
@@ -45,8 +47,43 @@ public class PricingServiceImpl implements PricingService {
     @Override
     public PricingQuote computeQuote(AiTool tool, AgentModelConfig modelConfig, JsonNode params,
                                      PricingUsage usage, int fallbackCredits) {
-        int fallback = Math.max(0, fallbackCredits);
+        return computeQuote(snapshot(tool, modelConfig), modelConfig, params, usage, fallbackCredits);
+    }
+
+    @Override
+    public PricingPolicySnapshot snapshot(AiTool tool, AgentModelConfig modelConfig) {
         ResolvedPricing pricing = resolvePricing(tool, modelConfig);
+        Long modelId = modelConfig == null ? null : modelConfig.getId();
+        Long toolId = tool == null ? null : tool.getId();
+        Long categoryId = tool == null ? null : tool.getCategoryId();
+        List<PricingRuleSnapshot> rules = pricingRuleMapper.findActiveForScopes(modelId, toolId, categoryId)
+                .stream()
+                .map(rule -> new PricingRuleSnapshot(
+                        rule.getParamKey(), rule.getRuleType(), rule.getMatchOp(), rule.getMatchValue(),
+                        rule.getFactor(), rule.getExtraCredits(), rule.getPriority()
+                ))
+                .toList();
+        return new PricingPolicySnapshot(
+                pricing.ratio, pricing.minCredits, pricing.imageEstimateInputTokens,
+                pricing.imageEstimateOutputTokens, rules
+        );
+    }
+
+    @Override
+    public PricingQuote computeQuote(PricingPolicySnapshot snapshot,
+                                     AgentModelConfig modelConfig,
+                                     JsonNode params,
+                                     PricingUsage usage,
+                                     int fallbackCredits) {
+        int fallback = Math.max(0, fallbackCredits);
+        PricingPolicySnapshot effective = snapshot == null
+                ? new PricingPolicySnapshot(DEFAULT_MARKUP, 0,
+                IMAGE_INPUT_TOKEN_UPPER_ESTIMATE, IMAGE_OUTPUT_TOKEN_UPPER_ESTIMATE, List.of())
+                : snapshot;
+        ResolvedPricing pricing = new ResolvedPricing(
+                effective.markupRatio(), effective.minCredits(), effective.imageEstimateInputTokens(),
+                effective.imageEstimateOutputTokens()
+        );
         if (modelConfig == null) {
             return fallbackQuote(fallback, pricing);
         }
@@ -61,7 +98,7 @@ public class PricingServiceImpl implements PricingService {
                 vendor.detail + "（厂商成本 " + adjustedCost.stripTrailingZeros().toPlainString() + " 元）",
                 costToCredits(adjustedCost)));
 
-        RuleOutcome rules = applyRules(tool, modelConfig, params, adjustedCost, breakdown);
+        RuleOutcome rules = applyRules(effective.rules(), params, adjustedCost, breakdown);
         adjustedCost = rules.cost;
 
         int baseCredits = costToCredits(adjustedCost) + rules.extraCredits;
@@ -76,9 +113,100 @@ public class PricingServiceImpl implements PricingService {
         return new PricingQuote(adjustedCost, baseCredits, pricing.ratio, charge, true, breakdown);
     }
 
+    private RuleOutcome applyRules(List<PricingRuleSnapshot> rules,
+                                   JsonNode params,
+                                   BigDecimal cost,
+                                   List<PricingBreakdownItem> breakdown) {
+        if (rules == null || rules.isEmpty()) {
+            return new RuleOutcome(cost, 0);
+        }
+        BigDecimal adjusted = cost;
+        int extraCredits = 0;
+        for (PricingRuleSnapshot rule : rules) {
+            if (!ruleMatches(rule, params)) {
+                continue;
+            }
+            String type = rule.ruleType() == null ? "MULTIPLIER" : rule.ruleType().toUpperCase();
+            if ("ADDITIVE".equals(type)) {
+                int add = rule.extraCredits() == null ? 0 : Math.max(0, rule.extraCredits());
+                if (add > 0) {
+                    extraCredits += add;
+                    breakdown.add(PricingBreakdownItem.of("参数加价(" + rule.paramKey() + ")",
+                            ruleSnapshotDesc(rule), add));
+                }
+            } else {
+                String op = rule.matchOp() == null ? "EQ" : rule.matchOp().toUpperCase();
+                BigDecimal factor = resolveMultiplierFactor(rule, params, op);
+                if (factor.compareTo(BigDecimal.ZERO) > 0 && factor.compareTo(BigDecimal.ONE) != 0) {
+                    BigDecimal before = adjusted;
+                    adjusted = adjusted.multiply(factor);
+                    breakdown.add(PricingBreakdownItem.of("参数倍率(" + rule.paramKey() + ")",
+                            ruleSnapshotDesc(rule), costToCredits(adjusted) - costToCredits(before)));
+                }
+            }
+        }
+        return new RuleOutcome(adjusted, extraCredits);
+    }
+
+    private boolean ruleMatches(PricingRuleSnapshot rule, JsonNode params) {
+        String op = rule.matchOp() == null ? "EQ" : rule.matchOp().toUpperCase();
+        if ("ANY".equals(op)) {
+            return params != null && params.hasNonNull(rule.paramKey());
+        }
+        if (params == null || rule.paramKey() == null) {
+            return false;
+        }
+        JsonNode node = params.get(rule.paramKey());
+        if (node == null || node.isNull()) {
+            return false;
+        }
+        String expected = rule.matchValue();
+        if ("EQ".equals(op)) {
+            return expected != null && node.asText("").trim().equalsIgnoreCase(expected.trim());
+        }
+        Double actual = asNumber(node);
+        if ("VALUE".equals(op)) {
+            return actual != null && actual > 0;
+        }
+        Double threshold = parseDouble(expected);
+        if (actual == null || threshold == null) {
+            return false;
+        }
+        return switch (op) {
+            case "GT" -> actual > threshold;
+            case "GTE" -> actual >= threshold;
+            case "LT" -> actual < threshold;
+            case "LTE" -> actual <= threshold;
+            default -> false;
+        };
+    }
+
+    private BigDecimal resolveMultiplierFactor(PricingRuleSnapshot rule, JsonNode params, String op) {
+        if ("VALUE".equals(op)) {
+            Double value = params == null || rule.paramKey() == null ? null : asNumber(params.get(rule.paramKey()));
+            if (value == null || value <= 0) {
+                return BigDecimal.ONE;
+            }
+            BigDecimal factor = BigDecimal.valueOf(value);
+            if (rule.factor() != null && rule.factor().compareTo(BigDecimal.ZERO) > 0) {
+                factor = factor.multiply(rule.factor());
+            }
+            return factor;
+        }
+        return rule.factor() == null ? BigDecimal.ONE : rule.factor();
+    }
+
+    private String ruleSnapshotDesc(PricingRuleSnapshot rule) {
+        String op = rule.matchOp() == null ? "EQ" : rule.matchOp();
+        if ("ANY".equalsIgnoreCase(op)) return rule.paramKey() + " 存在";
+        if ("VALUE".equalsIgnoreCase(op)) return rule.paramKey() + " 按参数数值倍率";
+        return rule.paramKey() + " " + op + " " + rule.matchValue();
+    }
+
     @Override
     public PricingQuote computeTokenQuote(AgentModelConfig modelConfig, Integer promptTokens, Integer completionTokens) {
-        return computeQuote(null, modelConfig, null, new PricingUsage(promptTokens, completionTokens, null), 0);
+        return computeQuote((AiTool) null, modelConfig, null,
+                new PricingUsage(promptTokens, completionTokens, null), 0);
     }
 
     private PricingQuote fallbackQuote(int fallbackCredits, ResolvedPricing pricing) {

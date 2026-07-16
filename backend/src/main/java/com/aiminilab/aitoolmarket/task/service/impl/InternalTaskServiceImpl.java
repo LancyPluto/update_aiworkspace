@@ -25,6 +25,8 @@ import com.aiminilab.aitoolmarket.task.dto.ClaimTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.ClaimTaskResponse;
 import com.aiminilab.aitoolmarket.task.dto.ExecutionContextResponse;
 import com.aiminilab.aitoolmarket.task.dto.ExecutionModelConfigResponse;
+import com.aiminilab.aitoolmarket.task.dto.ProviderCheckpointRequest;
+import com.aiminilab.aitoolmarket.task.dto.ProviderCheckpointResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.dto.WorkerFailedRequest;
 import com.aiminilab.aitoolmarket.task.dto.WorkerProcessingRequest;
@@ -37,7 +39,8 @@ import com.aiminilab.aitoolmarket.task.support.TaskFailureMessage;
 import com.aiminilab.aitoolmarket.task.support.TaskParamMediaFields;
 import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
 import com.aiminilab.aitoolmarket.storage.PrivateAssetAccessService;
-import com.aiminilab.aitoolmarket.workflow.service.WorkflowExecutionService;
+import com.aiminilab.aitoolmarket.workflow.service.WorkflowStepCallbackService;
+import com.aiminilab.aitoolmarket.workflow.service.WorkflowRunLockService;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.aiminilab.aitoolmarket.tool.support.ToolRuntimeConfig;
@@ -52,6 +55,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @Service
@@ -73,7 +77,8 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     private final BillingService billingService;
     private final TaskMetrics taskMetrics;
     private final CommunityService communityService;
-    private final WorkflowExecutionService workflowExecutionService;
+    private final WorkflowStepCallbackService workflowStepCallbackService;
+    private final WorkflowRunLockService workflowRunLockService;
     private final PrivateAssetAccessService privateAssetAccessService;
     private final AppProperties appProperties;
 
@@ -87,9 +92,10 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                                    ToolFieldItemMapper toolFieldItemMapper, ObjectMapper objectMapper,
                                    CreditService creditService, PricingService pricingService,
                                    BillingService billingService,
-                                   TaskMetrics taskMetrics, CommunityService communityService,
-                                   WorkflowExecutionService workflowExecutionService,
-                                   PrivateAssetAccessService privateAssetAccessService,
+                                    TaskMetrics taskMetrics, CommunityService communityService,
+                                    WorkflowStepCallbackService workflowStepCallbackService,
+                                    WorkflowRunLockService workflowRunLockService,
+                                    PrivateAssetAccessService privateAssetAccessService,
                                    AppProperties appProperties) {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
@@ -106,7 +112,8 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         this.billingService = billingService;
         this.taskMetrics = taskMetrics;
         this.communityService = communityService;
-        this.workflowExecutionService = workflowExecutionService;
+        this.workflowStepCallbackService = workflowStepCallbackService;
+        this.workflowRunLockService = workflowRunLockService;
         this.privateAssetAccessService = privateAssetAccessService;
         this.appProperties = appProperties;
     }
@@ -122,19 +129,22 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
         ModelExecutionSnapshot snapshot = modelExecutionSnapshotService.parse(task.getModelSnapshotJson());
         ToolRuntimeConfig runtimeConfig = ToolRuntimeConfig.fromConfigNote(tool.getConfigNote(), objectMapper);
+        ExecutionContextResponse response;
         if (snapshot != null) {
             var runtimeProxyPolicy = outboundProxyPolicyResolver.resolve(snapshot.toModelConfig());
-            return ExecutionContextResponse.of(task, workerParams,
+            response = ExecutionContextResponse.of(task, workerParams,
                     ExecutionModelConfigResponse.from(snapshot, runtimeProxyPolicy), snapshot, fields,
                     runtimeConfig.systemPrompt(), runtimeConfig.adminPrompt());
+        } else {
+            AgentModelConfig modelConfig = resolveTaskModelConfig(task, tool);
+            modelCapabilityService.validateExecution(tool, modelConfig);
+            List<String> caps = modelCapabilityService.resolveCapabilities(modelConfig);
+            AgentModelConfig executionConfig = agentModelConfigService.resolveForExecution(modelConfig);
+            response = ExecutionContextResponse.of(task, workerParams,
+                    ExecutionModelConfigResponse.from(executionConfig, caps, outboundProxyPolicyResolver.resolve(executionConfig)), fields,
+                    runtimeConfig.systemPrompt(), runtimeConfig.adminPrompt());
         }
-        AgentModelConfig modelConfig = resolveTaskModelConfig(task, tool);
-        modelCapabilityService.validateExecution(tool, modelConfig);
-        List<String> caps = modelCapabilityService.resolveCapabilities(modelConfig);
-        AgentModelConfig executionConfig = agentModelConfigService.resolveForExecution(modelConfig);
-        return ExecutionContextResponse.of(task, workerParams,
-                ExecutionModelConfigResponse.from(executionConfig, caps, outboundProxyPolicyResolver.resolve(executionConfig)), fields,
-                runtimeConfig.systemPrompt(), runtimeConfig.adminPrompt());
+        return response.withProviderCheckpoint(parseProviderCheckpoint(task));
     }
 
     @Override
@@ -151,6 +161,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             taskMetrics.recordLeaseClaim("denied", "terminal");
             return claimResponse(false, before, claimToken, workerId, "terminal");
         }
+        lockWorkflowRunBeforeCoupledMutation(before);
         LocalDateTime now = LocalDateTime.now();
         boolean expiredProcessing = TaskStatus.PROCESSING.name().equals(before.getStatus())
                 && before.getLeaseUntil() != null
@@ -168,6 +179,13 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             return claimResponse(false, current, claimToken, workerId, reason);
         }
         AiTask claimed = findTask(taskId);
+        if (isWorkflowStepTask(claimed)
+                && !workflowStepCallbackService.running(taskId, claimed.getLeaseUntil())) {
+            throw new BusinessException(
+                    ErrorCode.TASK_STATUS_INVALID,
+                    "Workflow step attempt is no longer active"
+            );
+        }
         String reason = expiredProcessing ? "expired_reclaimed" : "claimed";
         taskMetrics.recordLeaseClaim("success", reason);
         return claimResponse(true, claimed, claimToken, workerId, reason);
@@ -183,6 +201,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             taskMetrics.recordLeaseRenew("denied");
             return claimResponse(false, before, claimToken, workerId, "invalid_request");
         }
+        lockWorkflowRunBeforeCoupledMutation(before);
         LocalDateTime leaseUntil = LocalDateTime.now().plusMinutes(leaseMinutes());
         int updated = taskMapper.renewLease(taskId, claimToken, leaseUntil);
         if (updated == 0) {
@@ -193,11 +212,61 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             taskMetrics.recordLeaseRenew("denied");
             return claimResponse(false, current, claimToken, workerId, reason);
         }
+        AiTask renewed = findTask(taskId);
+        if (isWorkflowStepTask(renewed)
+                && !workflowStepCallbackService.leaseRenewed(taskId, renewed.getLeaseUntil())) {
+            throw new BusinessException(
+                    ErrorCode.TASK_STATUS_INVALID,
+                    "Workflow step attempt is no longer active"
+            );
+        }
         taskMetrics.recordLeaseRenew("success");
-        return claimResponse(true, findTask(taskId), claimToken, workerId, "renewed");
+        return claimResponse(true, renewed, claimToken, workerId, "renewed");
     }
 
     @Override
+    @Transactional
+    public ProviderCheckpointResponse saveProviderCheckpoint(Long taskId, ProviderCheckpointRequest request) {
+        AiTask task = findTask(taskId);
+        String claimToken = cleanClaimPart(request == null ? null : request.claimToken(), 128);
+        if (!TaskStatus.PROCESSING.name().equals(task.getStatus())
+                || claimToken == null
+                || !claimToken.equals(task.getClaimToken())) {
+            throw new BusinessException(ErrorCode.TASK_STATUS_INVALID, "任务执行租约不匹配");
+        }
+        if (request.checkpoint() == null || !request.checkpoint().isObject()) {
+            throw new BusinessException(ErrorCode.TASK_STATUS_INVALID, "供应商任务检查点格式无效");
+        }
+        int expectedVersion = request.expectedVersion() == null ? -1 : request.expectedVersion();
+        String checkpointJson = request.checkpoint().toString();
+        if (checkpointJson.getBytes(StandardCharsets.UTF_8).length > 60_000) {
+            throw new BusinessException(ErrorCode.TASK_STATUS_INVALID, "供应商任务检查点过大");
+        }
+        lockWorkflowRunBeforeCoupledMutation(task);
+        if (taskMapper.updateProviderCheckpointGuarded(
+                taskId, claimToken, expectedVersion, checkpointJson) == 0) {
+            AiTask current = findTask(taskId);
+            int currentVersion = current.getProviderCheckpointVersion() == null
+                    ? 0
+                    : current.getProviderCheckpointVersion();
+            boolean responseReplay = TaskStatus.PROCESSING.name().equals(current.getStatus())
+                    && claimToken.equals(current.getClaimToken())
+                    && currentVersion == expectedVersion + 1
+                    && request.checkpoint().equals(parseProviderCheckpoint(current));
+            if (!responseReplay) {
+                rejectGuardedCallback(taskId, current, "PROVIDER_CHECKPOINT");
+            }
+        }
+        AiTask saved = findTask(taskId);
+        return new ProviderCheckpointResponse(
+                taskId,
+                parseProviderCheckpoint(saved),
+                saved.getProviderCheckpointVersion()
+        );
+    }
+
+    @Override
+    @Transactional
     public TaskStatusResponse markProcessing(Long taskId, WorkerProcessingRequest request) {
         int progress = request.progress() == null ? 10 : Math.max(0, Math.min(99, request.progress()));
         String message = request.progressMessage() == null || request.progressMessage().isBlank()
@@ -209,6 +278,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         if (!TaskStatus.PROCESSING.name().equals(task.getStatus())) {
             TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.PROCESSING.name());
         }
+        lockWorkflowRunBeforeCoupledMutation(task);
         if (taskMapper.markProcessingGuarded(taskId, claimToken, progress, message,
                 List.of(TaskStatus.QUEUED.name(), TaskStatus.PROCESSING.name())) == 0) {
             TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.PROCESSING.name());
@@ -222,12 +292,20 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         AiTask task = findTask(taskId);
         String claimToken = cleanClaimPart(request.claimToken(), 128);
         ensureClaimToken(task, claimToken);
+        lockWorkflowRunBeforeCoupledMutation(task);
         if (isWorkflowStepTask(task)) {
-            if (TaskStatus.SUCCESS.name().equals(task.getStatus()) || TaskStatus.CANCELLED.name().equals(task.getStatus())) {
+            if (TaskStateMachine.isTerminal(task.getStatus())) {
+                workflowStepCallbackService.succeeded(taskId, request);
                 return TaskStatusResponse.from(task);
             }
+            if (!TaskStatus.PROCESSING.name().equals(task.getStatus())) {
+                throw new BusinessException(
+                        ErrorCode.TASK_STATUS_INVALID,
+                        "Workflow child task must be claimed before success"
+                );
+            }
             int updated = taskMapper.markSuccessGuarded(taskId, claimToken,
-                    List.of(TaskStatus.PROCESSING.name(), TaskStatus.QUEUED.name()));
+                    List.of(TaskStatus.PROCESSING.name()));
             if (updated == 0) {
                 AiTask current = findTask(taskId);
                 if (TaskStateMachine.isTerminal(current.getStatus())) {
@@ -235,7 +313,12 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                 }
                 rejectGuardedCallback(taskId, current, TaskStatus.SUCCESS.name());
             }
-            workflowExecutionService.onStepTaskSuccess(taskId, request);
+            if (!workflowStepCallbackService.succeeded(taskId, request)) {
+                throw new BusinessException(
+                        ErrorCode.TASK_STATUS_INVALID,
+                        "Workflow step attempt is no longer active"
+                );
+            }
             return TaskStatusResponse.from(findTask(taskId));
         }
         if (TaskStatus.SUCCESS.name().equals(task.getStatus())) {
@@ -339,6 +422,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         AiTask task = findTask(taskId);
         String claimToken = cleanClaimPart(request.claimToken(), 128);
         ensureClaimToken(task, claimToken);
+        lockWorkflowRunBeforeCoupledMutation(task);
         String errorCode = request.errorCode() == null || request.errorCode().isBlank()
                 ? ErrorCode.MODEL_CALL_FAILED.name()
                 : request.errorCode();
@@ -354,6 +438,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         );
         if (isWorkflowStepTask(task)) {
             if (TaskStateMachine.isTerminal(task.getStatus())) {
+                workflowStepCallbackService.failed(taskId, request);
                 Long rootTaskId = resolveWorkflowRootTaskId(task);
                 return TaskStatusResponse.from(findTask(rootTaskId == null ? taskId : rootTaskId));
             }
@@ -368,7 +453,12 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                 }
                 rejectGuardedCallback(taskId, current, targetStatus);
             }
-            workflowExecutionService.onStepTaskFailed(taskId, request);
+            if (!workflowStepCallbackService.failed(taskId, request)) {
+                throw new BusinessException(
+                        ErrorCode.TASK_STATUS_INVALID,
+                        "Workflow step attempt is no longer active"
+                );
+            }
             Long rootTaskId = resolveWorkflowRootTaskId(task);
             return TaskStatusResponse.from(findTask(rootTaskId == null ? taskId : rootTaskId));
         }
@@ -410,27 +500,41 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     }
 
     private void recordFailureCostIfPresent(AiTask task, WorkerFailedRequest request, String outcome, String errorCode) {
+        if (Boolean.FALSE.equals(request.providerCharged())) {
+            return;
+        }
         boolean providerCharged = Boolean.TRUE.equals(request.providerCharged());
-        boolean hasExplicitCost = request.providerCostAmount() != null && request.providerCostAmount().signum() > 0;
+        boolean hasExplicitCost = request.providerCostAmount() != null;
         if (!providerCharged && !hasExplicitCost) {
             return;
         }
-        try {
-            AiTool billingTool = toolMapper.findById(task.getToolId())
-                    .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
-            ModelExecutionSnapshot snapshot = modelExecutionSnapshotService.parse(task.getModelSnapshotJson());
-            AgentModelConfig modelConfig = snapshot != null
-                    ? snapshot.toModelConfig()
-                    : resolveTaskModelConfig(task, billingTool);
-            billingService.recordUsage("TASK", task.getId(), task.getUserId(), modelConfig,
-                    request.promptTokens(), request.completionTokens(), request.billableUnits(), 0,
-                    request.providerCostAmount(), null,
-                    outcome, errorCode, normalizeFailureStage(request.failureStage()),
-                    request.providerErrorCode(), request.providerRequestId(), providerCharged);
-        } catch (Exception exception) {
-            LOGGER.warn("failed to record provider failure cost taskId={} outcome={} errorCode={}",
-                    task.getId(), outcome, errorCode, exception);
+        String providerCostCurrency;
+        if (hasExplicitCost) {
+            if (request.providerCostAmount().signum() < 0
+                    || request.providerCostCurrency() == null
+                    || request.providerCostCurrency().isBlank()) {
+                throw new IllegalArgumentException(
+                        "Explicit provider cost requires a non-negative amount and currency"
+                );
+            }
+            providerCostCurrency = request.providerCostCurrency();
+        } else {
+            providerCostCurrency = request.providerCostCurrency() == null
+                    || request.providerCostCurrency().isBlank()
+                    ? "UNKNOWN"
+                    : request.providerCostCurrency();
         }
+        AiTool billingTool = toolMapper.findById(task.getToolId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+        ModelExecutionSnapshot snapshot = modelExecutionSnapshotService.parse(task.getModelSnapshotJson());
+        AgentModelConfig modelConfig = snapshot != null
+                ? snapshot.toModelConfig()
+                : resolveTaskModelConfig(task, billingTool);
+        billingService.recordUsage("TASK", task.getId(), task.getUserId(), modelConfig,
+                request.promptTokens(), request.completionTokens(), request.billableUnits(), 0,
+                request.providerCostAmount(), providerCostCurrency, null,
+                outcome, errorCode, normalizeFailureStage(request.failureStage()),
+                request.providerErrorCode(), request.providerRequestId(), request.providerCharged());
     }
 
     private String normalizeFailureStage(String failureStage) {
@@ -523,6 +627,22 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         }
     }
 
+    private JsonNode parseProviderCheckpoint(AiTask task) {
+        String checkpointJson = task == null ? null : task.getProviderCheckpointJson();
+        if (checkpointJson == null || checkpointJson.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode checkpoint = objectMapper.readTree(checkpointJson);
+            if (checkpoint == null || !checkpoint.isObject()) {
+                throw new IllegalArgumentException("checkpoint must be an object");
+            }
+            return checkpoint;
+        } catch (Exception exception) {
+            throw new BusinessException(ErrorCode.TASK_STATUS_INVALID, "供应商任务检查点损坏，已拒绝继续执行");
+        }
+    }
+
     private JsonNode resolveParamsForWorker(Long userId, JsonNode params) {
         JsonNode resolved = params == null ? objectMapper.createObjectNode() : params.deepCopy();
         rewritePrivateAssetUrls(userId, resolved);
@@ -574,6 +694,12 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     private boolean isWorkflowStepTask(AiTask task) {
         JsonNode params = parseParams(task.getParamsJson());
         return params.path("workflowStep").asBoolean(false);
+    }
+
+    private void lockWorkflowRunBeforeCoupledMutation(AiTask task) {
+        if (isWorkflowStepTask(task)) {
+            workflowRunLockService.requireByChildTaskId(task.getId());
+        }
     }
 
     private Long resolveWorkflowRootTaskId(AiTask task) {

@@ -46,9 +46,16 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowExecutionService;
+import com.aiminilab.aitoolmarket.workflow.entity.WorkflowRun;
+import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowRunMapper;
+import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowStepAttemptMapper;
+import com.aiminilab.aitoolmarket.workflow.service.WorkflowInteractionService;
+import com.aiminilab.aitoolmarket.workflow.service.WorkflowRuntimeAdmissionService;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -84,6 +91,12 @@ public class TaskServiceImpl implements TaskService {
     private final AgentAttachmentUrlResolver agentAttachmentUrlResolver;
     private final AssetStorageService assetStorageService;
     private final WorkflowExecutionService workflowExecutionService;
+    private final WorkflowRunMapper workflowRunMapper;
+    private final WorkflowStepAttemptMapper workflowStepAttemptMapper;
+    private final WorkflowInteractionService workflowInteractionService;
+    private final WorkflowRuntimeAdmissionService workflowRuntimeAdmissionService;
+    private final TaskIdempotencyRecoveryService taskIdempotencyRecoveryService;
+    private final TransactionTemplate transactionTemplate;
 
     public TaskServiceImpl(
             TaskMapper taskMapper,
@@ -102,7 +115,13 @@ public class TaskServiceImpl implements TaskService {
             CommunityPostMapper communityPostMapper,
             AgentAttachmentUrlResolver agentAttachmentUrlResolver,
             AssetStorageService assetStorageService,
-            @Lazy WorkflowExecutionService workflowExecutionService
+            @Lazy WorkflowExecutionService workflowExecutionService,
+            WorkflowRunMapper workflowRunMapper,
+            WorkflowStepAttemptMapper workflowStepAttemptMapper,
+            @Lazy WorkflowInteractionService workflowInteractionService,
+            WorkflowRuntimeAdmissionService workflowRuntimeAdmissionService,
+            TaskIdempotencyRecoveryService taskIdempotencyRecoveryService,
+            TransactionTemplate transactionTemplate
     ) {
         this.taskMapper = taskMapper;
         this.toolMapper = toolMapper;
@@ -121,15 +140,24 @@ public class TaskServiceImpl implements TaskService {
         this.agentAttachmentUrlResolver = agentAttachmentUrlResolver;
         this.assetStorageService = assetStorageService;
         this.workflowExecutionService = workflowExecutionService;
+        this.workflowRunMapper = workflowRunMapper;
+        this.workflowStepAttemptMapper = workflowStepAttemptMapper;
+        this.workflowInteractionService = workflowInteractionService;
+        this.workflowRuntimeAdmissionService = workflowRuntimeAdmissionService;
+        this.taskIdempotencyRecoveryService = taskIdempotencyRecoveryService;
+        this.transactionTemplate = transactionTemplate;
     }
 
     @Override
     @Transactional
     public TaskStatusResponse create(Long userId, CreateTaskRequest request) {
-        return taskMapper.findByUserIdAndIdempotencyKey(userId, request.clientRequestId())
-                .map(TaskStatusResponse::from)
-                .orElseGet(() -> createNewTask(userId, request.toolCode(), request.params(), request.clientRequestId(),
-                        request.sourcePostId(), request.modelConfigId(), true));
+        String idempotencyKey = normalizeIdempotencyKey(request.clientRequestId());
+        AiTask existing = findIdempotentTask(userId, idempotencyKey, request.toolCode());
+        if (existing != null) {
+            return TaskStatusResponse.from(existing);
+        }
+        return createNewTask(userId, request.toolCode(), request.params(), idempotencyKey,
+                request.sourcePostId(), request.modelConfigId(), true);
     }
 
     @Override
@@ -141,23 +169,63 @@ public class TaskServiceImpl implements TaskService {
     @Override
     @Transactional
     public TaskStatusResponse createForAgentTool(Long userId, CreateTaskRequest request, int excludeFrozen) {
-        return taskMapper.findByUserIdAndIdempotencyKey(userId, request.clientRequestId())
-                .map(TaskStatusResponse::from)
-                .orElseGet(() -> {
-                    AiTool tool = toolMapper.findOnlineByCode(request.toolCode())
-                            .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
-                    AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool, request.modelConfigId());
-                    taskCreditDispatchService.ensureDispatchAllowed(userId, tool, modelConfig, excludeFrozen);
-                    return createNewTask(
-                            userId,
-                            request.toolCode(),
-                            request.params(),
-                            request.clientRequestId(),
-                            request.sourcePostId(),
-                            request.modelConfigId(),
-                            true
-                    );
-                });
+        String idempotencyKey = normalizeIdempotencyKey(request.clientRequestId());
+        AiTask existing = findIdempotentTask(userId, idempotencyKey, request.toolCode());
+        if (existing != null) {
+            return TaskStatusResponse.from(existing);
+        }
+        AiTool tool = toolMapper.findOnlineByCode(request.toolCode())
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
+        rejectLegacyWorkflowEntry(tool);
+        AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool, request.modelConfigId());
+        taskCreditDispatchService.ensureDispatchAllowed(userId, tool, modelConfig, excludeFrozen);
+        return createNewTask(
+                userId,
+                request.toolCode(),
+                request.params(),
+                idempotencyKey,
+                request.sourcePostId(),
+                request.modelConfigId(),
+                true
+        );
+    }
+
+    @Override
+    @Transactional
+    public TaskStatusResponse createWorkflowRoot(Long userId,
+                                                 String toolCode,
+                                                 JsonNode params,
+                                                 String clientRequestId) {
+        String idempotencyKey = normalizeIdempotencyKey(clientRequestId);
+        if (idempotencyKey == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "clientRequestId 不能为空");
+        }
+        AiTask existing = findIdempotentTask(userId, idempotencyKey, toolCode);
+        if (existing != null) {
+            return TaskStatusResponse.from(existing);
+        }
+
+        AiTool tool = toolMapper.findOnlineByCode(toolCode)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
+        JsonNode normalizedParams = normalizeTaskParams(userId, params);
+        AiTask task = new AiTask();
+        task.setTaskNo(generateTaskNo());
+        task.setUserId(userId);
+        task.setToolId(tool.getId());
+        task.setParamsJson(normalizedParams.toString());
+        task.setIdempotencyKey(idempotencyKey);
+        task.setEstimatedCreditCost(0);
+        try {
+            taskMapper.insertTask(task);
+        } catch (DuplicateKeyException duplicate) {
+            return taskIdempotencyRecoveryService.recover(
+                    userId,
+                    idempotencyKey,
+                    tool.getId(),
+                    duplicate
+            );
+        }
+        return TaskStatusResponse.from(findTask(task.getId(), userId));
     }
 
     @Override
@@ -212,8 +280,18 @@ public class TaskServiceImpl implements TaskService {
     }
 
     @Override
-    @Transactional
     public TaskStatusResponse cancel(Long userId, Long taskId) {
+        findTask(taskId, userId);
+        WorkflowRun workflowRun = workflowRunMapper.selectByRootTaskId(taskId);
+        if (workflowRun != null) {
+            workflowInteractionService.cancel(taskId, userId, "USER_CANCELLED");
+            return TaskStatusResponse.from(findTask(taskId, userId));
+        }
+        rejectWorkflowChildTask(taskId, "取消");
+        return transactionTemplate.execute(status -> cancelStandardTask(userId, taskId));
+    }
+
+    private TaskStatusResponse cancelStandardTask(Long userId, Long taskId) {
         AiTask task = findTask(taskId, userId);
         TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.CANCELLED.name());
         int updated = taskMapper.cancel(taskId, List.of(task.getStatus()));
@@ -246,6 +324,7 @@ public class TaskServiceImpl implements TaskService {
     @Transactional
     public TaskStatusResponse regenerate(Long userId, Long taskId, RegenerateTaskRequest request) {
         AiTask originalTask = findTask(taskId, userId);
+        rejectWorkflowTask(taskId, "重新生成");
         return taskMapper.findByUserIdAndIdempotencyKey(userId, request.clientRequestId())
                 .map(TaskStatusResponse::from)
                 .orElseGet(() -> createNewTask(userId, originalTask.getToolCode(), request.params(),
@@ -272,6 +351,7 @@ public class TaskServiceImpl implements TaskService {
     @Transactional
     public TaskStatusResponse adminRetry(Long taskId) {
         AiTask task = findTask(taskId);
+        rejectWorkflowTask(taskId, "管理员重试");
         TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.RETRYING.name());
         if (taskMapper.markRetrying(taskId, List.of(TaskStatus.FAILED.name(), TaskStatus.TIMEOUT.name())) == 0) {
             TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.RETRYING.name());
@@ -289,6 +369,12 @@ public class TaskServiceImpl implements TaskService {
     @Override
     public TaskStatusResponse adminCancel(Long taskId) {
         AiTask task = findTask(taskId);
+        WorkflowRun workflowRun = workflowRunMapper.selectByRootTaskId(taskId);
+        if (workflowRun != null) {
+            workflowInteractionService.cancel(taskId, workflowRun.getUserId(), "ADMIN_CANCELLED");
+            return TaskStatusResponse.from(findTask(taskId));
+        }
+        rejectWorkflowChildTask(taskId, "管理员取消");
         TaskStateMachine.ensureTransition(task.getStatus(), TaskStatus.CANCELLED.name());
         int updated = taskMapper.cancel(taskId, List.of(TaskStatus.QUEUED.name(), TaskStatus.PROCESSING.name()));
         if (updated == 0) {
@@ -330,8 +416,10 @@ public class TaskServiceImpl implements TaskService {
 
     private TaskStatusResponse createNewTask(Long userId, String toolCode, JsonNode params, String clientRequestId,
                                              Long sourcePostId, Long requestedModelConfigId, boolean chargeTaskCredits) {
+        String idempotencyKey = normalizeIdempotencyKey(clientRequestId);
         AiTool tool = toolMapper.findOnlineByCode(toolCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
+        rejectLegacyWorkflowEntry(tool);
         AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool, requestedModelConfigId);
         modelCapabilityService.validateExecution(tool, modelConfig);
         ModelExecutionSnapshot modelSnapshot = modelExecutionSnapshotService.create(modelConfig);
@@ -347,11 +435,21 @@ public class TaskServiceImpl implements TaskService {
         task.setModelConfigId(modelConfig == null ? null : modelConfig.getId());
         task.setParamsJson(normalizedParams.toString());
         task.setModelSnapshotJson(modelExecutionSnapshotService.serialize(modelSnapshot));
-        task.setIdempotencyKey(clientRequestId);
+        task.setIdempotencyKey(idempotencyKey);
         int estimatedCredits = chargeTaskCredits ? estimatedTaskCredits(tool, modelConfig, normalizedParams) : 0;
         task.setEstimatedCreditCost(estimatedCredits);
 
-        Long taskId = taskMapper.insertTask(task);
+        Long taskId;
+        try {
+            taskId = taskMapper.insertTask(task);
+        } catch (DuplicateKeyException duplicate) {
+            return taskIdempotencyRecoveryService.recover(
+                    userId,
+                    idempotencyKey,
+                    tool.getId(),
+                    duplicate
+            );
+        }
         if (chargeTaskCredits) {
             creditService.freeze(userId, CreditSourceType.TASK, taskId, estimatedCredits);
         }
@@ -364,6 +462,41 @@ public class TaskServiceImpl implements TaskService {
             taskOutboxService.enqueueTaskCreated(taskId);
         }
         return TaskStatusResponse.from(findTask(taskId, userId));
+    }
+
+    private AiTask findIdempotentTask(Long userId, String idempotencyKey, String requestedToolCode) {
+        AiTask existing = taskMapper.findByUserIdAndIdempotencyKeyIncludingDeleted(userId, idempotencyKey)
+                .orElse(null);
+        if (existing == null) {
+            return null;
+        }
+        ensureSameIdempotentTool(existing.getToolCode(), requestedToolCode);
+        return existing;
+    }
+
+    private void rejectLegacyWorkflowEntry(AiTool tool) {
+        if (tool != null && "WORKFLOW".equalsIgnoreCase(tool.getExecutionMode())) {
+            workflowRuntimeAdmissionService.rejectLegacyWorkflowEntry();
+        }
+    }
+
+    private void ensureSameIdempotentTool(String existingToolCode, String requestedToolCode) {
+        if (existingToolCode == null
+                || requestedToolCode == null
+                || !existingToolCode.equalsIgnoreCase(requestedToolCode)) {
+            throw idempotencyConflict();
+        }
+    }
+
+    private String normalizeIdempotencyKey(String idempotencyKey) {
+        return idempotencyKey == null || idempotencyKey.isBlank() ? null : idempotencyKey;
+    }
+
+    private BusinessException idempotencyConflict() {
+        return new BusinessException(
+                ErrorCode.IDEMPOTENCY_CONFLICT,
+                "clientRequestId 已用于其他工具"
+        );
     }
 
     private int estimatedTaskCredits(AiTool tool, AgentModelConfig modelConfig, JsonNode params) {
@@ -512,6 +645,26 @@ public class TaskServiceImpl implements TaskService {
 
     private AgentTaskSourceResponse toAgentTaskSource(AgentToolCall call) {
         return new AgentTaskSourceResponse(call.getRunId(), call.getId(), call.getToolCode());
+    }
+
+    private void rejectWorkflowTask(Long taskId, String operation) {
+        if (workflowRunMapper.selectByRootTaskId(taskId) != null) {
+            throw workflowTaskOperationRejected(operation);
+        }
+        rejectWorkflowChildTask(taskId, operation);
+    }
+
+    private void rejectWorkflowChildTask(Long taskId, String operation) {
+        if (workflowStepAttemptMapper.selectRunIdByChildTaskId(taskId) != null) {
+            throw workflowTaskOperationRejected(operation);
+        }
+    }
+
+    private BusinessException workflowTaskOperationRejected(String operation) {
+        return new BusinessException(
+                ErrorCode.TASK_STATUS_INVALID,
+                "工作流任务不能通过通用任务接口执行" + operation
+        );
     }
 
     private AiTask findTask(Long taskId, Long userId) {

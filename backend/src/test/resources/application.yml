@@ -1,4 +1,9 @@
 spring:
+  rabbitmq:
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
   datasource:
     url: jdbc:h2:mem:backend_test_default;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1
     driver-class-name: org.h2.Driver
@@ -18,6 +23,10 @@ app:
     enabled: false
   jwt-secret: local-dev-secret
   internal-api-token: local-internal-token
+  workflow:
+    confirmation:
+      hmac-secret: test-workflow-confirmation-secret-with-at-least-32-characters
+      ttl-minutes: 30
   ai-task-queue: ai:task:queue
   task-queue-backend: redis
   cors:

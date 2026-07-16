@@ -45,6 +45,8 @@ public class AiTask {
     private LocalDateTime claimedAt;
     private LocalDateTime leaseRenewedAt;
     private Integer executionAttempt;
+    private String providerCheckpointJson;
+    private Integer providerCheckpointVersion;
     private LocalDateTime createdAt;
     private LocalDateTime queuedAt;
     private LocalDateTime startedAt;
@@ -272,6 +274,22 @@ public class AiTask {
 
     public void setExecutionAttempt(Integer executionAttempt) {
         this.executionAttempt = executionAttempt;
+    }
+
+    public String getProviderCheckpointJson() {
+        return providerCheckpointJson;
+    }
+
+    public void setProviderCheckpointJson(String providerCheckpointJson) {
+        this.providerCheckpointJson = providerCheckpointJson;
+    }
+
+    public Integer getProviderCheckpointVersion() {
+        return providerCheckpointVersion;
+    }
+
+    public void setProviderCheckpointVersion(Integer providerCheckpointVersion) {
+        this.providerCheckpointVersion = providerCheckpointVersion;
     }
 
     public LocalDateTime getCreatedAt() {

@@ -28,7 +28,9 @@ public record ExecutionContextResponse(
         String modelName,
         String systemPrompt,
         String userPromptTemplate,
-        List<ToolFieldResponse> fields
+        List<ToolFieldResponse> fields,
+        JsonNode providerCheckpoint,
+        Integer providerCheckpointVersion
 ) {
     public static ExecutionContextResponse of(AiTask task, JsonNode params, ExecutionModelConfigResponse modelConfig,
                                               List<ToolFieldResponse> fields) {
@@ -69,7 +71,18 @@ public record ExecutionContextResponse(
                 modelConfig == null ? null : modelConfig.modelName(),
                 blankToNull(systemPrompt),
                 blankToNull(userPromptTemplate),
-                fields
+                fields,
+                null,
+                task.getProviderCheckpointVersion() == null ? 0 : task.getProviderCheckpointVersion()
+        );
+    }
+
+    public ExecutionContextResponse withProviderCheckpoint(JsonNode checkpoint) {
+        return new ExecutionContextResponse(
+                taskId, taskNo, userId, toolId, toolCode, toolName, toolType, executionHandler,
+                inputModality, outputModality, status, traceId, params, modelConfig, modelSnapshot,
+                modelProviderCode, modelName, systemPrompt, userPromptTemplate, fields,
+                checkpoint, providerCheckpointVersion
         );
     }
 

@@ -1,6 +1,9 @@
 import base64
 
-from client.agnes_video_client import AgnesVideoClient
+import pytest
+import requests
+
+from client.agnes_video_client import AgnesVideoClient, AgnesVideoTimeoutError
 
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
@@ -27,7 +30,10 @@ class RecordingSession:
 
     def request(self, method, url, **kwargs):
         self.calls.append({"method": method, "url": url, **kwargs})
-        return self.responses.pop(0)
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 def test_agnes_video_client_creates_task_and_retrieves_result_by_video_id():
@@ -81,6 +87,96 @@ def test_agnes_video_client_creates_task_and_retrieves_result_by_video_id():
     assert session.calls[1]["method"] == "GET"
     assert session.calls[1]["url"] == "https://apihub.agnes-ai.com/agnesapi"
     assert session.calls[1]["params"] == {"video_id": "video_456", "model_name": "agnes-video-v2.0"}
+
+
+def test_agnes_video_client_reports_submission_before_polling():
+    session = RecordingSession(
+        [
+            FakeResponse({"task_id": "task_123", "video_id": "video_456", "status": "queued"}),
+            FakeResponse({"status": "completed", "video_url": "https://cdn.example/video.mp4"}),
+        ]
+    )
+    client = AgnesVideoClient(
+        base_url="https://apihub.agnes-ai.com",
+        api_key="test-key",
+        poll_interval_seconds=0,
+        timeout_seconds=2,
+    )
+    client.session = session
+    submissions = []
+
+    def record_submission(submission):
+        submissions.append(submission)
+        assert [call["method"] for call in session.calls] == ["POST"]
+
+    client.generate_video(
+        prompt="A cinematic product reveal",
+        image_size="1280x720",
+        model="agnes-video-v2.0",
+        submitted_callback=record_submission,
+    )
+
+    assert submissions == [
+        {"taskId": "task_123", "videoId": "video_456", "requestId": "task_123"}
+    ]
+
+
+def test_agnes_video_client_checkpoints_immediate_result_before_returning():
+    session = RecordingSession(
+        [FakeResponse({
+            "task_id": "task_immediate",
+            "video_id": "video_immediate",
+            "status": "completed",
+            "video_url": "https://cdn.example/immediate.mp4",
+        })]
+    )
+    client = AgnesVideoClient(
+        base_url="https://apihub.agnes-ai.com",
+        api_key="test-key",
+        poll_interval_seconds=0,
+        timeout_seconds=2,
+    )
+    client.session = session
+    submissions = []
+
+    result = client.generate_video(
+        prompt="A cinematic product reveal",
+        image_size="1280x720",
+        model="agnes-video-v2.0",
+        submitted_callback=submissions.append,
+    )
+
+    assert result["videoUrl"] == "https://cdn.example/immediate.mp4"
+    assert submissions == [{
+        "taskId": "task_immediate",
+        "videoId": "video_immediate",
+        "requestId": "task_immediate",
+    }]
+    assert [call["method"] for call in session.calls] == ["POST"]
+
+
+def test_agnes_video_client_resumes_checkpoint_with_get_only():
+    session = RecordingSession(
+        [FakeResponse({"status": "completed", "video_url": "https://cdn.example/video.mp4"})]
+    )
+    client = AgnesVideoClient(
+        base_url="https://apihub.agnes-ai.com",
+        api_key="test-key",
+        poll_interval_seconds=0,
+        timeout_seconds=2,
+    )
+    client.session = session
+
+    result = client.generate_video(
+        prompt="A cinematic product reveal",
+        image_size="1280x720",
+        model="agnes-video-v2.0",
+        resume={"taskId": "task_123", "videoId": "video_456", "requestId": "request_789"},
+    )
+
+    assert result["requestId"] == "request_789"
+    assert result["videoUrl"] == "https://cdn.example/video.mp4"
+    assert [call["method"] for call in session.calls] == ["GET"]
 
 
 def test_agnes_video_client_uses_extra_body_image_for_multi_image_requests():
@@ -216,3 +312,84 @@ def test_agnes_video_client_reports_poll_progress_when_provider_returns_percent(
 
     assert result["videoUrl"] == "https://cdn.example/video.mp4"
     assert progress_updates == [56]
+
+
+def test_agnes_video_client_retries_poll_timeout_without_repeating_create(monkeypatch):
+    session = RecordingSession(
+        [
+            FakeResponse({"task_id": "task_123", "video_id": "video_456", "status": "queued"}),
+            requests.Timeout("temporary poll timeout"),
+            FakeResponse({"status": "completed", "video_url": "https://cdn.example/video.mp4"}),
+        ]
+    )
+    client = AgnesVideoClient(
+        base_url="https://apihub.agnes-ai.com",
+        api_key="test-key",
+        poll_interval_seconds=0,
+        timeout_seconds=2,
+    )
+    client.session = session
+    monkeypatch.setattr("client.agnes_video_client.time.sleep", lambda _seconds: None)
+
+    result = client.generate_video(
+        prompt="A cinematic product reveal",
+        image_size="1280x720",
+        model="agnes-video-v2.0",
+    )
+
+    assert result["videoUrl"] == "https://cdn.example/video.mp4"
+    assert [call["method"] for call in session.calls] == ["POST", "GET", "GET"]
+
+
+def test_agnes_poll_retries_respect_total_deadline_and_clip_request_timeout(monkeypatch):
+    class FakeClock:
+        def __init__(self):
+            self.now = 0.0
+            self.sleeps = []
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.sleeps.append(seconds)
+            self.now += seconds
+
+    clock = FakeClock()
+    session = RecordingSession(
+        [
+            FakeResponse({"task_id": "task_123", "video_id": "video_456", "status": "queued"}),
+            requests.Timeout("poll consumed most of the total budget"),
+        ]
+    )
+    original_request = session.request
+
+    def timed_request(method, url, **kwargs):
+        if method == "GET":
+            clock.now += 1.5
+        return original_request(method, url, **kwargs)
+
+    session.request = timed_request
+    client = AgnesVideoClient(
+        base_url="https://apihub.agnes-ai.com",
+        api_key="test-key",
+        poll_interval_seconds=0,
+        timeout_seconds=2,
+    )
+    client.session = session
+    monkeypatch.setattr("client.agnes_video_client.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("client.agnes_video_client.time.sleep", clock.sleep)
+
+    with pytest.raises(AgnesVideoTimeoutError, match="generation timed out"):
+        client.generate_video(
+            prompt="A cinematic product reveal",
+            image_size="1280x720",
+            model="agnes-video-v2.0",
+        )
+
+    get_calls = [call for call in session.calls if call["method"] == "GET"]
+    assert len(get_calls) == 1
+    request_timeout = get_calls[0]["timeout"]
+    assert request_timeout.total == 2.0
+    assert request_timeout.connect_timeout == 2.0
+    assert request_timeout.read_timeout == 2.0
+    assert clock.sleeps == [0.5]

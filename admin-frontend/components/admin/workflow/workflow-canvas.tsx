@@ -1378,6 +1378,7 @@ export function WorkflowCanvas({
   const [loading, setLoading] = useState(true)
   const [workflowVersion, setWorkflowVersion] = useState(0)
   const [workflowStatus, setWorkflowStatus] = useState<string>("DRAFT")
+  const [draftRevision, setDraftRevision] = useState(0)
   const [publishing, setPublishing] = useState(false)
   const [versionsOpen, setVersionsOpen] = useState(false)
   const [versions, setVersions] = useState<WorkflowVersionItem[]>([])
@@ -1441,6 +1442,7 @@ export function WorkflowCanvas({
         setGroups(loadedGroups)
         setWorkflowVersion(workflow.version)
         setWorkflowStatus(workflow.status || "DRAFT")
+        setDraftRevision(workflow.draftRevision)
         clear()
       })
       .catch(() => {
@@ -1558,9 +1560,11 @@ export function WorkflowCanvas({
         nodesJson: JSON.stringify(nodes),
         edgesJson: JSON.stringify(edges),
         groupsJson: groups.length > 0 ? JSON.stringify(groups) : undefined,
+        expectedDraftRevision: draftRevision,
       })
       setWorkflowVersion(saved.version)
       setWorkflowStatus(saved.status || "DRAFT")
+      setDraftRevision(saved.draftRevision)
       setSaveStatus("saved")
       setTimeout(() => setSaveStatus("idle"), 2000)
       return true
@@ -1570,7 +1574,7 @@ export function WorkflowCanvas({
     } finally {
       setSaving(false)
     }
-  }, [toolId, toolName, nodes, edges, groups])
+  }, [toolId, toolName, nodes, edges, groups, draftRevision])
 
   const doPublish = useCallback(async () => {
     setPublishing(true)
@@ -1588,6 +1592,7 @@ export function WorkflowCanvas({
       const published = await publishWorkflow(toolId)
       setWorkflowStatus(published.status || "PUBLISHED")
       setWorkflowVersion(published.version)
+      setDraftRevision(published.draftRevision)
       toast.success("工作流已发布，用户任务将按当前 DAG 执行")
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "发布失败")
@@ -1601,6 +1606,7 @@ export function WorkflowCanvas({
     try {
       const result = await unpublishWorkflow(toolId)
       setWorkflowStatus(result.status || "DRAFT")
+      setDraftRevision(result.draftRevision)
       toast.success("工作流已下线（DRAFT），任务将回退到工具默认执行方式")
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "下线失败")
@@ -1639,6 +1645,7 @@ export function WorkflowCanvas({
         setGroups(restoredGroups)
         setWorkflowVersion(restored.version)
         setWorkflowStatus(restored.status || "DRAFT")
+        setDraftRevision(restored.draftRevision)
         clear()
         toast.success(`已恢复到 v${version}（生成新版本 v${restored.version}）`)
         void loadVersions()
@@ -2025,7 +2032,7 @@ export function WorkflowCanvas({
               <div className="min-w-0 text-xs">
                 <span className="font-medium">v{item.version}</span>
                 <span className="ml-2 text-muted-foreground">
-                  {item.snapshotLabel || "快照"} · {item.createdAt?.replace("T", " ").slice(0, 19) || "--"}
+                  {item.snapshotLabel || "正式版本"} · {item.publishedAt?.replace("T", " ").slice(0, 19) || "--"}
                 </span>
               </div>
               <Button

@@ -215,6 +215,83 @@ public class CreditServiceImpl implements CreditService {
 
     @Override
     @Transactional
+    public boolean tryFreeze(Long userId, CreditSourceType sourceType, Long sourceId,
+                             int amount, String idempotencyKey) {
+        requireIdempotentArguments(userId, sourceType, sourceId, amount, idempotencyKey);
+        CreditLog existing = creditLogMapper.selectByIdempotencyKey(idempotencyKey);
+        if (existing != null) {
+            validateIdempotentLog(existing, userId, sourceType, sourceId,
+                    CreditLogType.FREEZE.name(), 0, amount);
+            return true;
+        }
+        creditMapper.getOrCreateAccount(userId);
+        CreditAccount before = requireAccountForUpdate(userId);
+        existing = creditLogMapper.selectByIdempotencyKeyForUpdate(idempotencyKey);
+        if (existing != null) {
+            validateIdempotentLog(existing, userId, sourceType, sourceId,
+                    CreditLogType.FREEZE.name(), 0, amount);
+            return true;
+        }
+        if (before.getBalance() - before.getFrozen() < amount) {
+            return false;
+        }
+        insertIdempotentLog(before, sourceType, sourceId, CreditLogType.FREEZE.name(),
+                0, amount, before.getBalance(), before.getFrozen() + amount, idempotencyKey,
+                sourceLabel(sourceType) + " reserved credits");
+        if (amount > 0 && !creditMapper.freeze(before.getId(), amount)) {
+            throw new IllegalStateException("Credit reservation lost its account lock");
+        }
+        return true;
+    }
+
+    @Override
+    @Transactional
+    public void captureReserved(Long userId, CreditSourceType sourceType, Long sourceId,
+                                int reservedAmount, int actualAmount, String idempotencyKey) {
+        requireIdempotentArguments(userId, sourceType, sourceId, reservedAmount, idempotencyKey);
+        if (actualAmount < 0 || actualAmount > reservedAmount) {
+            throw new IllegalArgumentException("Actual credits must be between zero and the reserved amount");
+        }
+        creditMapper.getOrCreateAccount(userId);
+        CreditAccount before = requireAccountForUpdate(userId);
+        CreditLog existing = creditLogMapper.selectByIdempotencyKeyForUpdate(idempotencyKey);
+        if (existing != null) {
+            validateIdempotentLog(existing, userId, sourceType, sourceId,
+                    CreditLogType.DEDUCT.name(), actualAmount, -reservedAmount);
+            return;
+        }
+        insertIdempotentLog(before, sourceType, sourceId, CreditLogType.DEDUCT.name(),
+                actualAmount, -reservedAmount, before.getBalance() - actualAmount,
+                before.getFrozen() - reservedAmount, idempotencyKey,
+                sourceLabel(sourceType) + " captured reserved credits");
+        if (creditMapper.captureReservedRows(before.getId(), reservedAmount, actualAmount) != 1) {
+            throw new IllegalStateException("Reserved credits are no longer available for capture");
+        }
+    }
+
+    @Override
+    @Transactional
+    public void releaseReserved(Long userId, CreditSourceType sourceType, Long sourceId,
+                                int amount, String idempotencyKey) {
+        requireIdempotentArguments(userId, sourceType, sourceId, amount, idempotencyKey);
+        creditMapper.getOrCreateAccount(userId);
+        CreditAccount before = requireAccountForUpdate(userId);
+        CreditLog existing = creditLogMapper.selectByIdempotencyKeyForUpdate(idempotencyKey);
+        if (existing != null) {
+            validateIdempotentLog(existing, userId, sourceType, sourceId,
+                    CreditLogType.RELEASE.name(), 0, -amount);
+            return;
+        }
+        insertIdempotentLog(before, sourceType, sourceId, CreditLogType.RELEASE.name(),
+                0, -amount, before.getBalance(), before.getFrozen() - amount, idempotencyKey,
+                sourceLabel(sourceType) + " released reserved credits");
+        if (amount > 0 && !creditMapper.release(before.getId(), amount)) {
+            throw new IllegalStateException("Reserved credits are no longer available for release");
+        }
+    }
+
+    @Override
+    @Transactional
     public CreditAccountResponse manualAdd(Long userId, int amount, String reason, Long operatorId) {
         CreditAccount before = creditMapper.getOrCreateAccount(userId);
         if (!creditMapper.manualAdd(before.getId(), amount)) {
@@ -573,6 +650,78 @@ public class CreditServiceImpl implements CreditService {
         creditLogMapper.insert(log);
     }
 
+    private void insertIdempotentLog(CreditAccount before,
+                                     CreditSourceType sourceType,
+                                     Long sourceId,
+                                     String logType,
+                                     int amount,
+                                     int frozenAmount,
+                                     int balanceAfter,
+                                     int frozenAfter,
+                                     String idempotencyKey,
+                                     String reason) {
+        CreditLog log = new CreditLog();
+        log.setUserId(before.getUserId());
+        log.setAccountId(before.getId());
+        log.setTaskId(taskId(sourceType, sourceId));
+        log.setAgentRunId(agentRunId(sourceType, sourceId));
+        log.setSourceType(sourceType.name());
+        log.setSourceRef(sourceId);
+        log.setLogType(logType);
+        log.setAmount(amount);
+        log.setFrozenAmount(frozenAmount);
+        log.setBalanceBefore(before.getBalance());
+        log.setBalanceAfter(balanceAfter);
+        log.setFrozenBefore(before.getFrozen());
+        log.setFrozenAfter(frozenAfter);
+        log.setIdempotencyKey(idempotencyKey);
+        log.setOperatorType("SYSTEM");
+        log.setReason(reason);
+        creditLogMapper.insert(log);
+    }
+
+    private CreditAccount requireAccountForUpdate(Long userId) {
+        CreditAccount account = creditMapper.selectByUserIdForUpdate(userId);
+        if (account == null) {
+            throw new IllegalStateException("Credit account is missing");
+        }
+        return account;
+    }
+
+    private void requireIdempotentArguments(Long userId,
+                                            CreditSourceType sourceType,
+                                            Long sourceId,
+                                            int amount,
+                                            String idempotencyKey) {
+        if (userId == null || sourceType == null || sourceId == null) {
+            throw new IllegalArgumentException("Credit operation source is required");
+        }
+        if (amount < 0) {
+            throw new IllegalArgumentException("Credit operation amount cannot be negative");
+        }
+        if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 128) {
+            throw new IllegalArgumentException("A valid credit idempotency key is required");
+        }
+    }
+
+    private void validateIdempotentLog(CreditLog log,
+                                       Long userId,
+                                       CreditSourceType sourceType,
+                                       Long sourceId,
+                                       String logType,
+                                       int amount,
+                                       int frozenAmount) {
+        boolean matches = userId.equals(log.getUserId())
+                && sourceType.name().equals(log.getSourceType())
+                && sourceId.equals(log.getSourceRef())
+                && logType.equals(log.getLogType())
+                && Integer.valueOf(amount).equals(log.getAmount())
+                && Integer.valueOf(frozenAmount).equals(log.getFrozenAmount());
+        if (!matches) {
+            throw new IllegalStateException("Credit idempotency key conflicts with an existing operation");
+        }
+    }
+
     private CreditLogResponse toResponse(CreditLog log) {
         return new CreditLogResponse(
                 log.getId(),
@@ -616,6 +765,7 @@ public class CreditServiceImpl implements CreditService {
         return switch (sourceType) {
             case AGENT_RUN -> "Agent 运行";
             case PPT_STEP -> "PPT 生成";
+            case WORKFLOW_STEP -> "Workflow step";
             default -> "任务";
         };
     }

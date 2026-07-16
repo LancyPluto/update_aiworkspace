@@ -11,6 +11,15 @@ def test_openai_gateway_4k_image_model_uses_allowed_sizes():
     assert _resolve_openai_image_size({"aspectRatio": "9:16"}, model_config) == "1728x3072"
 
 
+def test_openai_gateway_prefers_preserved_frontend_size_field():
+    model_config = {"provider": "openai_images_gateway", "modelName": "gpt-image-2"}
+
+    assert _resolve_openai_image_size(
+        {"size": "1024x1536", "aspectRatio": "16:9"},
+        model_config,
+    ) == "1024x1536"
+
+
 def test_volcengine_seedream_auto_size_uses_aspect_ratio_size():
     model_config = {
         "provider": "volcengine_images",

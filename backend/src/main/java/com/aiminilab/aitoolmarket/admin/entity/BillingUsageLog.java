@@ -11,6 +11,7 @@ import java.time.LocalDateTime;
 public class BillingUsageLog {
     @TableId
     private Long id;
+    private String idempotencyKey;
     private String sourceType;
     private Long sourceId;
     private Long userId;
@@ -33,6 +34,7 @@ public class BillingUsageLog {
     private BigDecimal unitPrice;
     private BigDecimal costAmount;
     private BigDecimal vendorCostAmount;
+    private String providerCostCurrency;
     private Integer chargedCredits;
     private Integer customerChargeCredits;
     private Integer marginCredits;
@@ -47,6 +49,8 @@ public class BillingUsageLog {
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+    public String getIdempotencyKey() { return idempotencyKey; }
+    public void setIdempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; }
     public String getSourceType() { return sourceType; }
     public void setSourceType(String sourceType) { this.sourceType = sourceType; }
     public Long getSourceId() { return sourceId; }
@@ -83,6 +87,8 @@ public class BillingUsageLog {
     public void setCostAmount(BigDecimal costAmount) { this.costAmount = costAmount; }
     public BigDecimal getVendorCostAmount() { return vendorCostAmount; }
     public void setVendorCostAmount(BigDecimal vendorCostAmount) { this.vendorCostAmount = vendorCostAmount; }
+    public String getProviderCostCurrency() { return providerCostCurrency; }
+    public void setProviderCostCurrency(String providerCostCurrency) { this.providerCostCurrency = providerCostCurrency; }
     public Integer getChargedCredits() { return chargedCredits; }
     public void setChargedCredits(Integer chargedCredits) { this.chargedCredits = chargedCredits; }
     public Integer getCustomerChargeCredits() { return customerChargeCredits; }

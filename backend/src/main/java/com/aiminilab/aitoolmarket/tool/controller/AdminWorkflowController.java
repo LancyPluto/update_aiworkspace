@@ -67,7 +67,7 @@ public class AdminWorkflowController {
             return ApiResponse.fail(ErrorCode.PARAM_ERROR, "工作流校验未通过：" + String.join("；", result.errors()));
         }
         Long operatorId = AuthContext.get().userId();
-        return ApiResponse.success(workflowService.updateStatus(workflow.id(), "PUBLISHED", operatorId));
+        return ApiResponse.success(workflowService.publish(workflow.id(), operatorId));
     }
 
     /** 将工作流退回 DRAFT，运行端会回退到工具原有的执行 handler。 */
