@@ -14,6 +14,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.concurrent.Executor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -42,12 +43,77 @@ class MihomoRuntimeServiceTest {
 
         MihomoRuntimeResponse status = service.status();
         MihomoRuntimeResponse apply = service.apply();
+        service.applyPersistedConfigOnApplicationReady();
 
         assertThat(status.managed()).isFalse();
         assertThat(apply.managed()).isFalse();
         assertThat(Files.exists(configPath)).isFalse();
         verify(systemSettingService, never()).settings();
         verify(httpClient, never()).send(any(), any());
+    }
+
+    @Test
+    void applicationReadyRetriesUntilControllerAcceptsPersistedConfig() throws Exception {
+        Path configPath = tempDir.resolve("mihomo/config.yaml");
+        MihomoRuntimeProperties properties = properties(true, configPath);
+        when(systemSettingService.settings()).thenReturn(Map.of(
+                "outbound.proxy.sourceType", "MANUAL",
+                "outbound.proxy.manualProtocol", "SOCKS5",
+                "outbound.proxy.manualHost", "47.85.19.188",
+                "outbound.proxy.manualPort", "1080"
+        ));
+        HttpResponse<String> unavailable = mock(HttpResponse.class);
+        when(unavailable.statusCode()).thenReturn(503);
+        HttpResponse<String> accepted = mock(HttpResponse.class);
+        when(accepted.statusCode()).thenReturn(204);
+        when(httpClient.send(any(), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(unavailable, unavailable, accepted);
+
+        Executor directExecutor = Runnable::run;
+        MihomoRuntimeService service = new MihomoRuntimeService(
+                systemSettingService,
+                new MihomoConfigRenderer(),
+                properties,
+                httpClient,
+                new ObjectMapper(),
+                directExecutor,
+                0
+        );
+
+        service.applyPersistedConfigOnApplicationReady();
+
+        verify(httpClient, org.mockito.Mockito.times(3)).send(any(), any(HttpResponse.BodyHandler.class));
+        assertThat(Files.readString(configPath)).contains(
+                "type: 'socks5'",
+                "server: '47.85.19.188'",
+                "port: 1080"
+        );
+    }
+
+    @Test
+    void applicationReadyStopsAfterFiniteRetryBudget() throws Exception {
+        MihomoRuntimeProperties properties = properties(true, tempDir.resolve("mihomo/config.yaml"));
+        when(systemSettingService.settings()).thenReturn(Map.of(
+                "outbound.proxy.sourceType", "MANUAL",
+                "outbound.proxy.manualHost", "47.85.19.188",
+                "outbound.proxy.manualPort", "1080"
+        ));
+        HttpResponse<String> unavailable = mock(HttpResponse.class);
+        when(unavailable.statusCode()).thenReturn(503);
+        when(httpClient.send(any(), any(HttpResponse.BodyHandler.class))).thenReturn(unavailable);
+        MihomoRuntimeService service = new MihomoRuntimeService(
+                systemSettingService,
+                new MihomoConfigRenderer(),
+                properties,
+                httpClient,
+                new ObjectMapper(),
+                Runnable::run,
+                0
+        );
+
+        service.applyPersistedConfigOnApplicationReady();
+
+        verify(httpClient, org.mockito.Mockito.times(5)).send(any(), any(HttpResponse.BodyHandler.class));
     }
 
     @Test

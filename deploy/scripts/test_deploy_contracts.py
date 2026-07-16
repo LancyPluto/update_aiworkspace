@@ -79,8 +79,25 @@ class DeployContractTests(unittest.TestCase):
             self.assertIn("MIHOMO_ENABLED=true", deploy)
             self.assertIn("MIHOMO_CONTROLLER_SECRET", deploy)
             self.assertIn("docker-compose.proxy.yml", deploy)
+            self.assertIn("--env-file ../.env", deploy)
             self.assertIn("Removing legacy Mihomo container", deploy)
             self.assertIn("up -d mihomo", deploy)
+            self.assertIn("docker inspect mihomo", deploy)
+            self.assertIn("unmanaged Mihomo container named mihomo", deploy)
+            self.assertIn("--force-recreate --no-deps", deploy)
+
+        selective_deploys = (deploys[0], deploys[2])
+        for deploy in selective_deploys:
+            self.assertIn("mihomo|mihomo-init)", deploy)
+
+    def test_rollback_does_not_recreate_application_dependencies(self) -> None:
+        rollback = self.read("deploy/scripts/rollback_release.sh")
+        self.assertIn(
+            'up -d --force-recreate --no-deps "${app_services[@]}"',
+            rollback,
+        )
+        self.assertIn("--env-file ../.env", rollback)
+        self.assertIn("mihomo|mihomo-init)", rollback)
 
     def test_release_gate_requires_fresh_monitoring_metrics(self) -> None:
         health = self.read("deploy/scripts/verify_release_health.sh")

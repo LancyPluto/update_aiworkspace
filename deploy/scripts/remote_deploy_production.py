@@ -256,6 +256,10 @@ if echo "$SERVICES" | grep -qw banana-slides; then
   COMPOSE_ARGS+=(--profile banana-slides)
 fi
 
+if docker inspect mihomo >/dev/null 2>&1; then
+  echo "ERROR: Found unmanaged Mihomo container named mihomo; run the one-time managed-overlay migration before deployment." >&2
+  exit 1
+fi
 if docker inspect ai-supermarket-mihomo >/dev/null 2>&1; then
   mihomo_config_files="$(docker inspect --format '{{{{ index .Config.Labels \"com.docker.compose.project.config_files\" }}}}' ai-supermarket-mihomo 2>/dev/null || true)"
   if [[ "$mihomo_config_files" != *docker-compose.proxy.yml* ]]; then
@@ -286,6 +290,8 @@ for svc in $SERVICES; do
     prometheus|grafana|loki|alloy|node-exporter|cadvisor|blackbox-exporter)
       MONITORING_SERVICES="$MONITORING_SERVICES $svc"
       ;;
+    mihomo|mihomo-init)
+      ;;
     *)
       APP_SERVICES="$APP_SERVICES $svc"
       ;;
@@ -293,7 +299,7 @@ for svc in $SERVICES; do
 done
 
 if [ -n "$APP_SERVICES" ]; then
-  docker compose "${{COMPOSE_ARGS[@]}}" up -d --force-recreate $APP_SERVICES
+  docker compose "${{COMPOSE_ARGS[@]}}" up -d --force-recreate --no-deps $APP_SERVICES
 fi
 
 if [ -n "$MONITORING_SERVICES" ]; then

@@ -95,7 +95,7 @@ print("restored production env for rollback")
 PY
 
 cd "$REMOTE_DIR/deploy"
-compose_args=(-f docker-compose.yml -f docker-compose.nginx.yml)
+compose_args=(--env-file ../.env -f docker-compose.yml -f docker-compose.nginx.yml)
 if [ -f docker-compose.monitoring.yml ]; then
   compose_args+=(-f docker-compose.monitoring.yml)
 fi
@@ -110,6 +110,8 @@ for service in $DEPLOY_SERVICES; do
       ;;
     prometheus|grafana|loki|alloy|node-exporter|cadvisor|blackbox-exporter)
       monitoring_requested=true
+      ;;
+    mihomo|mihomo-init)
       ;;
     nginx) nginx_requested=true ;;
   esac
@@ -195,7 +197,7 @@ fi
 
 if [ "${#app_services[@]}" -gt 0 ]; then
   docker compose "${compose_args[@]}" build "${app_services[@]}"
-  docker compose "${compose_args[@]}" up -d --force-recreate "${app_services[@]}"
+  docker compose "${compose_args[@]}" up -d --force-recreate --no-deps "${app_services[@]}"
   if [ "$nginx_requested" != true ]; then
     docker compose "${compose_args[@]}" restart nginx
   fi

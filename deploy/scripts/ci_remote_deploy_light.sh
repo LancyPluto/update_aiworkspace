@@ -398,7 +398,7 @@ if [ -f "\$REMOTE_DIR/deploy/logs/last-deploy.files.txt" ]; then
 fi
 
 cd "\$REMOTE_DIR/deploy"
-COMPOSE_ARGS=(-f docker-compose.yml -f docker-compose.nginx.yml)
+COMPOSE_ARGS=(--env-file ../.env -f docker-compose.yml -f docker-compose.nginx.yml)
 if grep -Eqi '^MIHOMO_ENABLED=true$' "\$REMOTE_DIR/.env"; then
   COMPOSE_ARGS+=(-f docker-compose.proxy.yml)
   echo "Mihomo overlay enabled"
@@ -422,6 +422,10 @@ rollback_on_failure() {
 }
 trap rollback_on_failure ERR
 
+if docker inspect mihomo >/dev/null 2>&1; then
+  echo "::error::Found unmanaged Mihomo container named mihomo; run the one-time managed-overlay migration before deployment." >&2
+  exit 1
+fi
 if docker inspect ai-supermarket-mihomo >/dev/null 2>&1; then
   mihomo_config_files="\$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' ai-supermarket-mihomo 2>/dev/null || true)"
   if [[ "\$mihomo_config_files" != *docker-compose.proxy.yml* ]]; then
@@ -485,6 +489,8 @@ for svc in \$DEPLOY_SERVICES; do
     prometheus|grafana|loki|alloy|node-exporter|cadvisor|blackbox-exporter)
       MONITORING_SERVICES="\$MONITORING_SERVICES \$svc"
       ;;
+    mihomo|mihomo-init)
+      ;;
     *)
       APP_SERVICES="\$APP_SERVICES \$svc"
       ;;
@@ -493,7 +499,7 @@ done
 
 if [ -n "\$APP_SERVICES" ]; then
   echo "Force-recreating application containers:\$APP_SERVICES"
-  docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate \$APP_SERVICES
+  docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate --no-deps \$APP_SERVICES
 fi
 
 if [ -n "\$MONITORING_SERVICES" ]; then

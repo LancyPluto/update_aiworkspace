@@ -3,7 +3,11 @@ package com.aiminilab.aitoolmarket.admin.proxy;
 import com.aiminilab.aitoolmarket.admin.service.SystemSettingService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -19,14 +23,23 @@ import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 public class MihomoRuntimeService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(MihomoRuntimeService.class);
+    private static final int STARTUP_APPLY_MAX_ATTEMPTS = 5;
+    private static final long STARTUP_APPLY_RETRY_DELAY_MILLIS = 1_000;
+
     private final SystemSettingService systemSettingService;
     private final MihomoConfigRenderer renderer;
     private final MihomoRuntimeProperties properties;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
+    private final Executor startupExecutor;
+    private final long startupRetryDelayMillis;
+    private final AtomicBoolean startupApplyScheduled = new AtomicBoolean(false);
     private volatile Instant lastAppliedAt;
     private volatile String lastMessage = "";
 
@@ -48,11 +61,41 @@ public class MihomoRuntimeService {
             HttpClient httpClient,
             ObjectMapper objectMapper
     ) {
+        this(
+                systemSettingService,
+                renderer,
+                properties,
+                httpClient,
+                objectMapper,
+                MihomoRuntimeService::startDaemon,
+                STARTUP_APPLY_RETRY_DELAY_MILLIS
+        );
+    }
+
+    MihomoRuntimeService(
+            SystemSettingService systemSettingService,
+            MihomoConfigRenderer renderer,
+            MihomoRuntimeProperties properties,
+            HttpClient httpClient,
+            ObjectMapper objectMapper,
+            Executor startupExecutor,
+            long startupRetryDelayMillis
+    ) {
         this.systemSettingService = systemSettingService;
         this.renderer = renderer;
         this.properties = properties;
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
+        this.startupExecutor = startupExecutor;
+        this.startupRetryDelayMillis = Math.max(0, startupRetryDelayMillis);
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void applyPersistedConfigOnApplicationReady() {
+        if (!properties.isEnabled() || !startupApplyScheduled.compareAndSet(false, true)) {
+            return;
+        }
+        startupExecutor.execute(this::applyPersistedConfigWithRetry);
     }
 
     public MihomoRuntimeResponse status() {
@@ -79,7 +122,7 @@ public class MihomoRuntimeService {
         }
     }
 
-    public MihomoRuntimeResponse apply() {
+    public synchronized MihomoRuntimeResponse apply() {
         if (!properties.isEnabled()) {
             return unmanaged();
         }
@@ -122,6 +165,37 @@ public class MihomoRuntimeService {
             builder.header("Authorization", "Bearer " + secret);
         }
         return builder;
+    }
+
+    private void applyPersistedConfigWithRetry() {
+        for (int attempt = 1; attempt <= STARTUP_APPLY_MAX_ATTEMPTS; attempt++) {
+            MihomoRuntimeResponse result = apply();
+            if (!result.managed() || result.available()) {
+                LOGGER.info("Applied persisted Mihomo configuration on startup attempt={}", attempt);
+                return;
+            }
+            if (attempt >= STARTUP_APPLY_MAX_ATTEMPTS) {
+                LOGGER.error(
+                        "Failed to apply persisted Mihomo configuration after {} attempts: {}",
+                        attempt,
+                        result.message()
+                );
+                return;
+            }
+            try {
+                Thread.sleep(startupRetryDelayMillis);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                LOGGER.warn("Startup Mihomo configuration apply was interrupted");
+                return;
+            }
+        }
+    }
+
+    private static void startDaemon(Runnable task) {
+        Thread thread = new Thread(task, "mihomo-startup-apply");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private void writeAtomically(Path destination, String content) throws IOException {
