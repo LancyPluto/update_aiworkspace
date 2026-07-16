@@ -231,15 +231,16 @@ class CreditReservationIdempotencyTest {
     }
 
     @Test
-    void manualAddCreditsEnterGiftBucket() {
+    void manualAddCreditsEnterPermanentBucket() {
         creditService.manualAdd(USER_ID, 20, "test", 1L);
 
         assertThat(jdbcTemplate.queryForMap(
-                "SELECT balance, membership_balance, gift_balance FROM credit_accounts WHERE user_id = ?",
+                "SELECT balance, permanent_balance, membership_balance, gift_balance FROM credit_accounts WHERE user_id = ?",
                 USER_ID
         )).containsEntry("balance", 120)
+                .containsEntry("permanent_balance", 20)
                 .containsEntry("membership_balance", 100)
-                .containsEntry("gift_balance", 20);
+                .containsEntry("gift_balance", 0);
     }
 
     private int accountValue(String column) {
