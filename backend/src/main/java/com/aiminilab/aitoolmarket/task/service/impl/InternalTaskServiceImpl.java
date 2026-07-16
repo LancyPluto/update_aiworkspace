@@ -123,8 +123,9 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         ModelExecutionSnapshot snapshot = modelExecutionSnapshotService.parse(task.getModelSnapshotJson());
         ToolRuntimeConfig runtimeConfig = ToolRuntimeConfig.fromConfigNote(tool.getConfigNote(), objectMapper);
         if (snapshot != null) {
+            var runtimeProxyPolicy = outboundProxyPolicyResolver.resolve(snapshot.toModelConfig());
             return ExecutionContextResponse.of(task, workerParams,
-                    ExecutionModelConfigResponse.from(snapshot), snapshot, fields,
+                    ExecutionModelConfigResponse.from(snapshot, runtimeProxyPolicy), snapshot, fields,
                     runtimeConfig.systemPrompt(), runtimeConfig.adminPrompt());
         }
         AgentModelConfig modelConfig = resolveTaskModelConfig(task, tool);

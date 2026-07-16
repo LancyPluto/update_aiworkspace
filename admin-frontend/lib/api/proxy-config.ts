@@ -50,6 +50,70 @@ export interface MihomoRuntimeStatus {
   message: string
 }
 
+export type ProxyPatternType = "EXACT" | "SUFFIX" | "WILDCARD"
+export type ProxyRouteStrategy = "DIRECT" | "PROXY" | "AUTO"
+
+export interface ProxyRoutingRule {
+  id: string
+  patternType: ProxyPatternType
+  pattern: string
+  strategy: ProxyRouteStrategy
+  priority: number
+  enabled: boolean
+  note: string
+  probeUrl: string
+}
+
+export interface ProxyAutoSettings {
+  timeoutMs: number
+  sampleSize: number
+  switchThresholdMs: number
+  hysteresisMs: number
+  cooldownSeconds: number
+}
+
+export interface ProxyRoutingConfig {
+  rules: ProxyRoutingRule[]
+  autoSettings: ProxyAutoSettings
+  fallbackStrategy: "DIRECT"
+  warnings: string[]
+}
+
+export interface ProxyPathProbeResult {
+  path: "DIRECT" | "PROXY"
+  success: boolean
+  dnsMs: number
+  tcpMs: number
+  tlsMs: number
+  httpMs: number
+  totalMs: number
+  httpStatus: number | null
+  error: string
+  successRate: number
+  sampleCount: number
+}
+
+export interface ProxyAutoDecision {
+  selectedPath: "DIRECT" | "PROXY"
+  reason: string
+  sampleCount: number
+  timeoutMs: number
+  switchThresholdMs: number
+  hysteresisMs: number
+  cooldownSeconds: number
+}
+
+export interface ProxyDomainTestResult {
+  domain: string
+  matchedRuleId: string
+  matchedStrategy: ProxyRouteStrategy
+  probeMethod: "HEAD"
+  direct: ProxyPathProbeResult
+  proxy: ProxyPathProbeResult
+  autoDecision: ProxyAutoDecision
+  testedAt: string
+}
+
 export function fetchProxyConfig() {
   return http.get<ProxyConfig>("/api/admin/v1/proxy-config")
 }
@@ -68,4 +132,16 @@ export function fetchMihomoRuntime() {
 
 export function applyMihomoConfig() {
   return http.post<MihomoRuntimeStatus>("/api/admin/v1/proxy-config/apply")
+}
+
+export function fetchProxyRoutingConfig() {
+  return http.get<ProxyRoutingConfig>("/api/admin/v1/proxy-config/routing")
+}
+
+export function updateProxyRoutingConfig(config: Pick<ProxyRoutingConfig, "rules" | "autoSettings">) {
+  return http.put<ProxyRoutingConfig>("/api/admin/v1/proxy-config/routing", config)
+}
+
+export function testProxyDomain(domain: string, probeUrl = "") {
+  return http.post<ProxyDomainTestResult>("/api/admin/v1/proxy-config/routing/test", { domain, probeUrl })
 }

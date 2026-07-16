@@ -73,3 +73,6 @@ ai-tool-market-config-*.json
 # CI/CD 与文档引用的核心脚本（无前缀或见 deploy/CI_CD.md）仍应提交
 deploy/scripts/_*
 .cursor/
+AGENTS.md
+.agents/skills/clarify-requirements/SKILL.md
+.agents/skills/clarify-requirements/agents/openai.yaml

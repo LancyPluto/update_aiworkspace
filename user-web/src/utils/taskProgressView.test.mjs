@@ -18,6 +18,12 @@ async function importTsModule(path) {
 
 const progressView = await importTsModule("./taskProgressView.ts")
 
+test("hides the standalone percent label when the caption already contains a percent", () => {
+  assert.equal(progressView.shouldShowProgressPercentLabel("实时进度：1%", "5%"), false)
+  assert.equal(progressView.shouldShowProgressPercentLabel("AI 正在生成", "5%"), true)
+  assert.equal(progressView.shouldShowProgressPercentLabel("AI 正在生成", ""), false)
+})
+
 test("uses provider realtime progress without estimated wording", () => {
   const view = progressView.buildTaskProgressView(
     {

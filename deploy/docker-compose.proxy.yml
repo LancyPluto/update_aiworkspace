@@ -44,23 +44,35 @@ services:
       MIHOMO_CONTROLLER_SECRET: ${MIHOMO_CONTROLLER_SECRET:?MIHOMO_CONTROLLER_SECRET is required when Mihomo is enabled}
       MIHOMO_CONFIG_PATH: /data/mihomo/config.yaml
       MIHOMO_RELOAD_PATH: /root/.config/mihomo/config.yaml
-      HTTP_PROXY: http://mihomo:7890
-      HTTPS_PROXY: http://mihomo:7890
-      NO_PROXY: ${CONTAINER_NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,mihomo,host.docker.internal}
+      PROJECT_MIHOMO_PROXY_URL: http://mihomo:7890
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      all_proxy: ""
     volumes:
       - mihomo_config:/data/mihomo
 
   worker:
     environment:
-      HTTP_PROXY: http://mihomo:7890
-      HTTPS_PROXY: http://mihomo:7890
-      NO_PROXY: ${CONTAINER_NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,mihomo,host.docker.internal}
+      PROJECT_MIHOMO_PROXY_URL: http://mihomo:7890
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      all_proxy: ""
 
   agent-service:
     environment:
-      HTTP_PROXY: http://mihomo:7890
-      HTTPS_PROXY: http://mihomo:7890
-      NO_PROXY: ${CONTAINER_NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,mihomo,host.docker.internal}
+      PROJECT_MIHOMO_PROXY_URL: http://mihomo:7890
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      all_proxy: ""
 
 volumes:
   mihomo_config:

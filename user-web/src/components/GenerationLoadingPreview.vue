@@ -8,6 +8,7 @@ import {
   inferSerialActiveSlot,
   type ImageOutputLayout,
 } from "@/utils/taskImageOutput"
+import { shouldShowProgressPercentLabel } from "@/utils/taskProgressView"
 import type { TaskDetail } from "@/api/types"
 
 const props = withDefaults(
@@ -77,6 +78,7 @@ const serialCaption = computed(() => {
 })
 
 const estimatedProgress = computed(() => props.percentLabel.includes("预计"))
+const showPercentLabel = computed(() => shouldShowProgressPercentLabel(serialCaption.value, props.percentLabel))
 
 function parallelSlotPercent(slotIndex: number): number {
   return inferParallelSlotPercent(props.percent, slotIndex, outputPlan.value.count)
@@ -133,7 +135,7 @@ function parallelSlotPercentLabel(slotIndex: number): string {
         <span />
       </div>
       <p class="generation-loading-preview__caption">{{ serialCaption }}</p>
-      <p v-if="percentLabel && !failed" class="generation-loading-preview__percent">{{ percentLabel }}</p>
+      <p v-if="showPercentLabel && !failed" class="generation-loading-preview__percent">{{ percentLabel }}</p>
     </div>
     <div v-if="!failed" class="generation-loading-preview__progress" aria-hidden="true">
       <span class="generation-loading-preview__progress-bar" :style="{ width: `${Math.max(0, Math.min(100, percent))}%` }" />

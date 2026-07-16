@@ -90,6 +90,32 @@ class DeployContractTests(unittest.TestCase):
         for deploy in selective_deploys:
             self.assertIn("mihomo|mihomo-init)", deploy)
 
+    def test_project_proxy_overlay_does_not_force_global_application_proxy(self) -> None:
+        overlay = self.read("deploy/docker-compose.proxy.yml")
+        base = self.read("deploy/docker-compose.yml")
+        self.assertIn('"127.0.0.1:${MIHOMO_PROXY_PORT:-7890}:7890"', overlay)
+        self.assertNotIn("network_mode: host", overlay)
+        for service in ("backend:", "worker:", "agent-service:"):
+            self.assertIn(service, overlay)
+        self.assertNotIn("HTTP_PROXY: http://mihomo:7890", overlay)
+        self.assertNotIn("HTTPS_PROXY: http://mihomo:7890", overlay)
+        self.assertNotIn("ALL_PROXY: http", overlay)
+        for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+            self.assertEqual(overlay.count(f'{key}: ""'), 3)
+            self.assertEqual(base.count(f'{key}: ""'), 5)
+
+        deploys = (
+            self.read("deploy/scripts/ci_remote_deploy_light.sh"),
+            self.read("deploy/scripts/ci_remote_deploy.sh"),
+            self.read("deploy/scripts/remote_deploy_production.py"),
+        )
+        for deploy in deploys:
+            self.assertNotIn("CONTAINER_HTTP_PROXY=http://host.docker.internal:7890", deploy)
+            self.assertNotIn("CONTAINER_HTTPS_PROXY=http://host.docker.internal:7890", deploy)
+            self.assertIn("LEGACY_APPLICATION_PROXY_KEYS", deploy)
+            for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "CONTAINER_HTTP_PROXY", "CONTAINER_HTTPS_PROXY"):
+                self.assertIn(key, deploy)
+
     def test_rollback_does_not_recreate_application_dependencies(self) -> None:
         rollback = self.read("deploy/scripts/rollback_release.sh")
         self.assertIn(

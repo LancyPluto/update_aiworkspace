@@ -27,18 +27,18 @@ def test_openai_images_does_not_use_environment_proxy_by_default():
     assert client.session.trust_env is False
 
 
-def test_openai_images_allows_explicit_trust_env_override():
+def test_openai_images_ignores_legacy_trust_env_override():
     client = OpenAIImagesClient(
         base_url="https://api.ofox.ai/v1",
         api_key="test-key",
         extra_auth_json='{"trustEnv": true, "readTimeoutSeconds": 900}',
     )
 
-    assert client.session.trust_env is True
+    assert client.session.trust_env is False
     assert client.timeout == (10, 900)
 
 
-def test_openai_images_uses_http_proxy_env_when_configured(monkeypatch):
+def test_openai_images_ignores_http_proxy_env_when_configured(monkeypatch):
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:7890")
     client = OpenAIImagesClient(
         base_url="https://api.ofox.ai/v1",
@@ -46,8 +46,7 @@ def test_openai_images_uses_http_proxy_env_when_configured(monkeypatch):
     )
 
     assert client.session.trust_env is False
-    assert client.session.proxies["http"] == "http://127.0.0.1:7890"
-    assert client.session.proxies["https"] == "http://127.0.0.1:7890"
+    assert client.session.proxies == {}
 
 
 def test_openai_images_uses_execution_proxy_policy():
@@ -56,17 +55,20 @@ def test_openai_images_uses_execution_proxy_policy():
         api_key="test-key",
         extra_auth_json='{"proxyUrl":"http://legacy:7890"}',
         model_config={
-            "proxyPolicy": {
-                "enabled": True,
-                "proxyUrl": "http://policy:7890",
-                "noProxyHosts": ["backend"],
-            }
+                "proxyPolicy": {
+                    "enabled": True,
+                    "projectProxyUrl": "http://mihomo:7890",
+                    "noProxyHosts": ["backend"],
+                    "routingRules": [
+                        {"id": "ofox", "patternType": "EXACT", "pattern": "api.ofox.ai", "strategy": "PROXY", "priority": 100, "enabled": True}
+                    ],
+                }
         },
     )
 
     assert client.session.trust_env is False
-    assert client.session.proxies["http"] == "http://policy:7890"
-    assert client.session.proxies["https"] == "http://policy:7890"
+    assert client.session.proxies["http"] == "http://mihomo:7890"
+    assert client.session.proxies["https"] == "http://mihomo:7890"
     assert client.session.policy.no_proxy_hosts == frozenset({"backend"})
 
 

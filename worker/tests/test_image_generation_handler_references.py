@@ -25,17 +25,20 @@ def test_openai_image_client_receives_execution_proxy_policy():
             "baseUrl": "https://api.ofox.ai/v1",
             "apiKey": "test-key",
             "modelName": "openai/gpt-image-2",
-            "proxyPolicy": {
-                "enabled": True,
-                "proxyUrl": "http://127.0.0.1:7890",
-                "noProxyHosts": ["backend"],
-            },
+                "proxyPolicy": {
+                    "enabled": True,
+                    "projectProxyUrl": "http://mihomo:7890",
+                    "noProxyHosts": ["backend"],
+                    "routingRules": [
+                        {"id": "ofox", "patternType": "EXACT", "pattern": "api.ofox.ai", "strategy": "PROXY", "priority": 100, "enabled": True}
+                    ],
+                },
         },
         {},
     )
 
     assert isinstance(client, OpenAIImagesClient)
-    assert client.session.proxies["http"] == "http://127.0.0.1:7890"
+    assert client.session.proxies["http"] == "http://mihomo:7890"
     assert client.session.policy.no_proxy_hosts == frozenset({"backend"})
 
 
