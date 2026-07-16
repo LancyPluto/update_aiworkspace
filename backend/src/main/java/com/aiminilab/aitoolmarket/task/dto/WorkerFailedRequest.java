@@ -8,6 +8,7 @@ public record WorkerFailedRequest(
         String failureStage,
         Boolean providerCharged,
         BigDecimal providerCostAmount,
+        String providerCostCurrency,
         String providerErrorCode,
         String providerRequestId,
         Integer promptTokens,
@@ -15,4 +16,19 @@ public record WorkerFailedRequest(
         Integer billableUnits,
         String claimToken
 ) {
+    public WorkerFailedRequest(String errorCode,
+                               String errorMessage,
+                               String failureStage,
+                               Boolean providerCharged,
+                               BigDecimal providerCostAmount,
+                               String providerErrorCode,
+                               String providerRequestId,
+                               Integer promptTokens,
+                               Integer completionTokens,
+                               Integer billableUnits,
+                               String claimToken) {
+        this(errorCode, errorMessage, failureStage, providerCharged, providerCostAmount,
+                null, providerErrorCode, providerRequestId, promptTokens, completionTokens,
+                billableUnits, claimToken);
+    }
 }

@@ -25,6 +25,12 @@ public class ToolWorkflow {
 
     private String status;
 
+    private Long draftRevision;
+
+    private Long publishedVersionId;
+
+    private Boolean executionEnabled;
+
     private Long createdBy;
 
     private Long updatedBy;
@@ -61,6 +67,15 @@ public class ToolWorkflow {
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+
+    public Long getDraftRevision() { return draftRevision; }
+    public void setDraftRevision(Long draftRevision) { this.draftRevision = draftRevision; }
+
+    public Long getPublishedVersionId() { return publishedVersionId; }
+    public void setPublishedVersionId(Long publishedVersionId) { this.publishedVersionId = publishedVersionId; }
+
+    public Boolean getExecutionEnabled() { return executionEnabled; }
+    public void setExecutionEnabled(Boolean executionEnabled) { this.executionEnabled = executionEnabled; }
 
     public Long getCreatedBy() { return createdBy; }
     public void setCreatedBy(Long createdBy) { this.createdBy = createdBy; }

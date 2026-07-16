@@ -19,4 +19,11 @@ public interface ToolWorkflowVersionMapper extends BaseMapper<ToolWorkflowVersio
     @Select("SELECT * FROM tool_workflow_versions WHERE workflow_id = #{workflowId} AND version = #{version} LIMIT 1")
     ToolWorkflowVersion selectByWorkflowIdAndVersion(@Param("workflowId") Long workflowId,
                                                        @Param("version") int version);
+
+    @Select("SELECT COALESCE(MAX(version), 0) FROM tool_workflow_versions WHERE workflow_id = #{workflowId}")
+    int selectMaxVersion(@Param("workflowId") Long workflowId);
+
+    @Select("SELECT * FROM tool_workflow_versions WHERE workflow_id = #{workflowId} AND dsl_hash = #{dslHash} LIMIT 1")
+    ToolWorkflowVersion selectByWorkflowIdAndDslHash(@Param("workflowId") Long workflowId,
+                                                      @Param("dslHash") String dslHash);
 }

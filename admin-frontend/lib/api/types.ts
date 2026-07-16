@@ -1055,6 +1055,10 @@ export interface WorkflowResponse {
   configJson: string | null
   version: number
   status: string
+  draftRevision: number
+  publishedVersionId: number | null
+  executionEnabled: boolean
+  hasUnpublishedChanges: boolean
   createdBy?: number
   updatedBy?: number
   createdAt: string
@@ -1064,9 +1068,11 @@ export interface WorkflowResponse {
 export interface WorkflowVersionItem {
   id: number
   version: number
+  dslHash: string | null
+  sourceDraftRevision: number | null
   snapshotLabel: string | null
-  createdBy: number
-  createdAt: string
+  publishedBy: number | null
+  publishedAt: string | null
 }
 
 export interface UpsertWorkflowPayload {
@@ -1076,6 +1082,7 @@ export interface UpsertWorkflowPayload {
   groupsJson?: string
   configJson?: string
   status?: string
+  expectedDraftRevision: number
 }
 
 export interface WorkflowValidationResult {

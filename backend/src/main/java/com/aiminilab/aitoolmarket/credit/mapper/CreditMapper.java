@@ -50,6 +50,177 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
                 .last("LIMIT 1")));
     }
 
+    @Select("SELECT * FROM credit_accounts WHERE user_id = #{userId} FOR UPDATE")
+    CreditAccount selectByUserIdForUpdate(@Param("userId") Long userId);
+
+    @Update("""
+            UPDATE credit_accounts
+            SET gift_frozen = gift_frozen + LEAST(
+                    GREATEST(0, gift_balance - gift_frozen),
+                    GREATEST(0, #{amount}
+                        - LEAST(#{amount}, GREATEST(0, membership_balance - membership_frozen))
+                        - LEAST(
+                            GREATEST(0, #{amount}
+                                - LEAST(#{amount}, GREATEST(0, membership_balance - membership_frozen))),
+                            GREATEST(0, permanent_balance - permanent_frozen)
+                        ))
+                ),
+                permanent_frozen = permanent_frozen + LEAST(
+                    GREATEST(0, #{amount}
+                        - LEAST(#{amount}, GREATEST(0, membership_balance - membership_frozen))),
+                    GREATEST(0, permanent_balance - permanent_frozen)
+                ),
+                membership_frozen = membership_frozen
+                    + LEAST(#{amount}, GREATEST(0, membership_balance - membership_frozen)),
+                frozen = frozen + #{amount},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND balance - frozen >= #{amount} AND status = 'ACTIVE'
+            """)
+    int freezeRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+
+    default boolean freeze(Long accountId, int amount) {
+        return freezeRows(accountId, amount) == 1;
+    }
+
+    default int settleRows(@Param("accountId") Long accountId, @Param("amount") int amount) {
+        return captureReservedRows(accountId, amount, amount);
+    }
+
+    default boolean settle(Long accountId, int amount) {
+        return settleRows(accountId, amount) == 1;
+    }
+
+    @Update("""
+            UPDATE credit_accounts
+            SET gift_balance = gift_balance - LEAST(
+                    GREATEST(0, gift_balance - gift_frozen),
+                    GREATEST(0, #{amount}
+                        - LEAST(#{amount}, GREATEST(0, membership_balance - membership_frozen))
+                        - LEAST(
+                            GREATEST(0, #{amount}
+                                - LEAST(#{amount}, GREATEST(0, membership_balance - membership_frozen))),
+                            GREATEST(0, permanent_balance - permanent_frozen)
+                        ))
+                ),
+                permanent_balance = permanent_balance - LEAST(
+                    GREATEST(0, #{amount}
+                        - LEAST(#{amount}, GREATEST(0, membership_balance - membership_frozen))),
+                    GREATEST(0, permanent_balance - permanent_frozen)
+                ),
+                membership_balance = membership_balance
+                    - LEAST(#{amount}, GREATEST(0, membership_balance - membership_frozen)),
+                balance = balance - #{amount},
+                total_consumed = total_consumed + #{amount},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND balance - frozen >= #{amount} AND status = 'ACTIVE'
+            """)
+    int deductAvailableRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+
+    default boolean deductAvailable(Long accountId, int amount) {
+        return deductAvailableRows(accountId, amount) == 1;
+    }
+
+    @Update("""
+            UPDATE credit_accounts
+            SET balance = balance - LEAST(#{amount}, expired_membership_frozen),
+                gift_frozen = gift_frozen - LEAST(
+                    gift_frozen,
+                    GREATEST(0, #{amount}
+                        - LEAST(#{amount}, expired_membership_frozen)
+                        - LEAST(GREATEST(0, #{amount} - LEAST(#{amount}, expired_membership_frozen)), membership_frozen)
+                        - LEAST(
+                            GREATEST(0, #{amount}
+                                - LEAST(#{amount}, expired_membership_frozen)
+                                - LEAST(GREATEST(0, #{amount} - LEAST(#{amount}, expired_membership_frozen)), membership_frozen)),
+                            permanent_frozen
+                        ))
+                ),
+                permanent_frozen = permanent_frozen - LEAST(
+                    GREATEST(0, #{amount}
+                        - LEAST(#{amount}, expired_membership_frozen)
+                        - LEAST(GREATEST(0, #{amount} - LEAST(#{amount}, expired_membership_frozen)), membership_frozen)),
+                    permanent_frozen
+                ),
+                membership_frozen = membership_frozen - LEAST(
+                    GREATEST(0, #{amount} - LEAST(#{amount}, expired_membership_frozen)),
+                    membership_frozen
+                ),
+                expired_membership_frozen = expired_membership_frozen
+                    - LEAST(#{amount}, expired_membership_frozen),
+                frozen = frozen - #{amount},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND frozen >= #{amount} AND status = 'ACTIVE'
+            """)
+    int releaseRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+
+    default boolean release(Long accountId, int amount) {
+        return releaseRows(accountId, amount) == 1;
+    }
+
+    @Update("""
+            UPDATE credit_accounts
+            SET gift_balance = gift_balance - LEAST(
+                    gift_balance,
+                    gift_frozen,
+                    GREATEST(0, #{actualAmount}
+                        - LEAST(#{actualAmount}, expired_membership_frozen)
+                        - LEAST(GREATEST(0, #{actualAmount} - LEAST(#{actualAmount}, expired_membership_frozen)), membership_frozen)
+                        - LEAST(
+                            GREATEST(0, #{actualAmount}
+                                - LEAST(#{actualAmount}, expired_membership_frozen)
+                                - LEAST(GREATEST(0, #{actualAmount} - LEAST(#{actualAmount}, expired_membership_frozen)), membership_frozen)),
+                            permanent_frozen
+                        ))
+                ),
+                permanent_balance = permanent_balance - LEAST(
+                    permanent_balance,
+                    permanent_frozen,
+                    GREATEST(0, #{actualAmount}
+                        - LEAST(#{actualAmount}, expired_membership_frozen)
+                        - LEAST(GREATEST(0, #{actualAmount} - LEAST(#{actualAmount}, expired_membership_frozen)), membership_frozen))
+                ),
+                membership_balance = membership_balance - LEAST(
+                    membership_balance,
+                    membership_frozen,
+                    GREATEST(0, #{actualAmount} - LEAST(#{actualAmount}, expired_membership_frozen))
+                ),
+                gift_frozen = gift_frozen - LEAST(
+                    gift_frozen,
+                    GREATEST(0, #{reservedAmount}
+                        - LEAST(#{reservedAmount}, expired_membership_frozen)
+                        - LEAST(GREATEST(0, #{reservedAmount} - LEAST(#{reservedAmount}, expired_membership_frozen)), membership_frozen)
+                        - LEAST(
+                            GREATEST(0, #{reservedAmount}
+                                - LEAST(#{reservedAmount}, expired_membership_frozen)
+                                - LEAST(GREATEST(0, #{reservedAmount} - LEAST(#{reservedAmount}, expired_membership_frozen)), membership_frozen)),
+                            permanent_frozen
+                        ))
+                ),
+                permanent_frozen = permanent_frozen - LEAST(
+                    permanent_frozen,
+                    GREATEST(0, #{reservedAmount}
+                        - LEAST(#{reservedAmount}, expired_membership_frozen)
+                        - LEAST(GREATEST(0, #{reservedAmount} - LEAST(#{reservedAmount}, expired_membership_frozen)), membership_frozen))
+                ),
+                membership_frozen = membership_frozen - LEAST(
+                    membership_frozen,
+                    GREATEST(0, #{reservedAmount} - LEAST(#{reservedAmount}, expired_membership_frozen))
+                ),
+                expired_membership_frozen = expired_membership_frozen
+                    - LEAST(#{reservedAmount}, expired_membership_frozen),
+                balance = balance - #{actualAmount},
+                frozen = frozen - #{reservedAmount},
+                total_consumed = total_consumed + #{actualAmount},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId}
+              AND frozen >= #{reservedAmount}
+              AND balance >= #{actualAmount}
+              AND status = 'ACTIVE'
+            """)
+    int captureReservedRows(@Param("accountId") Long accountId,
+                            @Param("reservedAmount") int reservedAmount,
+                            @Param("actualAmount") int actualAmount);
+
     @Update("""
             UPDATE credit_accounts
             SET balance = balance + #{amount},
@@ -123,4 +294,32 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
         return referralBonusAddRows(accountId, amount) == 1;
     }
 
+    @Update("""
+            UPDATE credit_accounts
+            SET gift_balance = gift_balance - LEAST(
+                    GREATEST(0, gift_balance - gift_frozen),
+                    GREATEST(0, #{amount}
+                        - LEAST(#{amount}, GREATEST(0, membership_balance - membership_frozen))
+                        - LEAST(
+                            GREATEST(0, #{amount}
+                                - LEAST(#{amount}, GREATEST(0, membership_balance - membership_frozen))),
+                            GREATEST(0, permanent_balance - permanent_frozen)
+                        ))
+                ),
+                permanent_balance = permanent_balance - LEAST(
+                    GREATEST(0, #{amount}
+                        - LEAST(#{amount}, GREATEST(0, membership_balance - membership_frozen))),
+                    GREATEST(0, permanent_balance - permanent_frozen)
+                ),
+                membership_balance = membership_balance
+                    - LEAST(#{amount}, GREATEST(0, membership_balance - membership_frozen)),
+                balance = balance - #{amount},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{accountId} AND balance - frozen >= #{amount} AND status = 'ACTIVE'
+            """)
+    int manualDeductRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+
+    default boolean manualDeduct(Long accountId, int amount) {
+        return manualDeductRows(accountId, amount) == 1;
+    }
 }

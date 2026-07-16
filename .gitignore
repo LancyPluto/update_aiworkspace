@@ -25,6 +25,7 @@ engines/banana-slides/backend/.temp/
 engines/banana-slides/.env
 
 # Java
+/.m2/
 target/
 *.class
 

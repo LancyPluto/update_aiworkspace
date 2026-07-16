@@ -11,18 +11,21 @@ export BACKUP_OSS_URI='oss://independent-backup-bucket/mysql/full'
 bash deploy/scripts/backup_mysql.sh
 ```
 
-During development and controlled internal testing, both `BACKUP_ENCRYPTION_PASSWORD` and
-`BACKUP_OSS_URI` are optional so missing infrastructure does not block team delivery. Without an
-encryption password, automated deployment logs a warning and skips the pre-migration backup. With
-a password but no OSS URI, it creates an encrypted local backup only.
+During development and controlled internal testing, `BACKUP_OSS_URI` remains optional and an
+encrypted local backup can be used. In production, `verify_production_environment.sh` and the
+standalone backup script both fail closed unless an encryption password and independent OSS URI
+are configured.
 
-Both settings become mandatory commercial-launch acceptance items: configure the password in the
-server's root `.env` or `deploy/.env`, and configure an independent OSS location so the only
-recovery point is not stored on the database host. The standalone backup and restore commands
+Both settings become mandatory commercial-launch acceptance items: configure them in the server's
+`deploy/.env`, and use an independent OSS location so the only recovery point is not stored on the
+database host. Keeping these values out of the root `.env` also keeps them out of application
+containers. The standalone backup and restore commands
 remain fail-closed and never create or consume an unencrypted database dump.
 
-The script creates an AES-256 encrypted dump and a manifest containing size and SHA-256. Local
-files default to `deploy/backup/files` and are retained for 14 days. Configure the OSS bucket with
+The script creates an AES-256 encrypted dump and a versioned manifest containing encryption
+parameters, schema migration checkpoint, size, and SHA-256. It confirms that both remote objects
+exist after upload. The restore drill uses the checkpoint to validate only the tables that existed
+when that backup was created. Local files default to `deploy/backup/files` and are retained for 14 days. Configure the OSS bucket with
 server-side encryption, versioning, lifecycle retention, and a write-only backup identity.
 
 ## Restore Drill
@@ -35,8 +38,9 @@ bash deploy/scripts/restore_mysql_to_staging.sh
 ```
 
 The restore script refuses ordinary database names, recreates only a name ending in `_staging`,
-`_restore`, or `_verify`, and checks the users, balances, recharge orders, tasks, credit logs, and
-settings tables. Record row counts, elapsed time, commit, backup timestamp, and operator in the
+`_restore`, or `_verify`, verifies both encrypted size and SHA-256, and checks core business and
+workflow tables. It writes a permission-restricted report under `deploy/backup/restore-drills/`.
+Record row counts, commit, backup timestamp, operator, sampling result, and cleanup time in the
 monthly restore drill ticket.
 
 ## Operational Targets

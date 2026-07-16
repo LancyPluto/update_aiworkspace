@@ -13,21 +13,210 @@ class DeployContractTests(unittest.TestCase):
         script = self.read("deploy/scripts/apply_sql_migrations.sh")
         self.assertIn("checksum_sha256", script)
         self.assertIn("applied migration changed", script)
+        self.assertIn("workflow P0 migration preflight found historical idempotency duplicates", script)
+        self.assertIn("workflow P0 migration appears partially applied but is not recorded", script)
+        self.assertIn("GROUP BY user_id, idempotency_key", script)
+        self.assertIn("GROUP BY root_task_id", script)
+        self.assertIn("074_vendor_account_console_cookie.sql", script)
+        self.assertIn("compatible columns already supplied by historical 044", script)
+        self.assertIn("character_maximum_length=20", script)
+        self.assertIn("column_default='UNKNOWN'", script)
+        self.assertIn("084_configurable_image_token_estimates.sql", script)
+        self.assertIn("compatible columns already supplied by historical 061", script)
+        self.assertIn("column_default IS NULL", script)
         self.assertNotIn("Duplicate column name.*success", script)
         self.assertNotIn("Duplicate key name.*success", script)
 
+    def test_workflow_schema_deployment_does_not_switch_existing_tool(self) -> None:
+        migration = self.read("sql/093_workflow_rollout_safety.sql")
+        self.assertIn("SET execution_mode = 'DIRECT'", migration)
+        self.assertIn("billing_mode = 'FIXED'", migration)
+        self.assertIn("agent_surface_enabled = 0", migration)
+        self.assertIn("SET workflow.execution_enabled = 0", migration)
+
+    def test_fresh_database_has_model_route_prerequisite_before_066(self) -> None:
+        prerequisite = "065_zz_agent_model_extra_auth_compat.sql"
+        dependent = "066_standardize_model_execution_routes.sql"
+        self.assertLess(prerequisite, dependent)
+        migration = self.read("sql/" + prerequisite)
+        self.assertIn("column_name = 'extra_auth_json'", migration)
+        self.assertIn("ADD COLUMN extra_auth_json", migration)
+
+    def test_task_runtime_columns_are_migrated_before_application_start(self) -> None:
+        migration = self.read("sql/094_task_runtime_columns.sql")
+        for column in (
+            "user_deleted",
+            "user_deleted_at",
+            "model_snapshot_json",
+            "claimed_by",
+            "claim_token",
+            "lease_until",
+            "claimed_at",
+            "lease_renewed_at",
+            "execution_attempt",
+        ):
+            self.assertIn("column_name = '" + column + "'", migration)
+            self.assertIn("ADD COLUMN " + column, migration)
+        self.assertIn("index_name = 'idx_tasks_lease'", migration)
+        self.assertIn("index_name = 'idx_tasks_claim_token'", migration)
+
+    def test_provider_checkpoint_columns_are_migrated_for_worker_restart_recovery(self) -> None:
+        migration = self.read("sql/095_task_provider_checkpoint.sql")
+        for column in ("provider_checkpoint_json", "provider_checkpoint_version"):
+            self.assertIn("column_name = '" + column + "'", migration)
+            self.assertIn("ADD COLUMN " + column, migration)
+
     def test_backup_is_encrypted_and_validated(self) -> None:
         script = self.read("deploy/scripts/backup_mysql.sh")
+        self.assertIn("umask 077", script)
         self.assertIn("gzip -t", script)
         self.assertIn("-aes-256-cbc", script)
+        self.assertIn("manifest_version=1", script)
+        self.assertIn("encryption=aes-256-cbc", script)
+        self.assertIn("kdf=pbkdf2-sha256", script)
+        self.assertIn("schema_checkpoint=", script)
         self.assertIn("sha256sum", script)
         self.assertIn("BACKUP_ENCRYPTION_PASSWORD is required", script)
+        self.assertIn("BACKUP_OSS_URI is required in production", script)
+        self.assertIn('ossutil stat "$remote_encrypted"', script)
+        self.assertIn('ossutil stat "$remote_manifest"', script)
 
     def test_restore_cannot_target_production_database(self) -> None:
         script = self.read("deploy/scripts/restore_mysql_to_staging.sh")
+        self.assertIn("umask 077", script)
         self.assertIn("(_staging|_restore|_verify)", script)
         self.assertIn("backup checksum verification failed", script)
+        self.assertIn("backup size verification failed", script)
         self.assertIn("DROP DATABASE IF EXISTS", script)
+        self.assertIn("RESTORE_DRILL_REPORT", script)
+        self.assertIn("status=SUCCESS", script)
+        self.assertIn("backup_sha256=", script)
+        self.assertIn("schema_checkpoint=", script)
+        self.assertIn("elapsed_seconds=", script)
+        self.assertIn('chmod 600 "$RESTORE_DRILL_REPORT"', script)
+        self.assertIn("checkpoint_number", script)
+        self.assertIn("workflow_tables=()", script)
+
+    def test_production_environment_preflight_fails_closed(self) -> None:
+        script = self.read("deploy/scripts/verify_production_environment.sh")
+        for required_setting in (
+            "RABBITMQ_USERNAME",
+            "RABBITMQ_PASSWORD",
+            "BACKUP_ENCRYPTION_PASSWORD",
+            "BACKUP_OSS_URI",
+            "PRODUCTION_PREFLIGHT_MYSQL_USER",
+            "PRODUCTION_PREFLIGHT_MYSQL_PASSWORD",
+            "WORKFLOW_RUNTIME_EXECUTION_ENABLED",
+            "WORKFLOW_RUNTIME_MAX_PROVIDER_DAILY_COST_CNY",
+            "WORKFLOW_RUNTIME_COST_ALERT_WEBHOOK_URL",
+        ):
+            self.assertIn(required_setting, script)
+        self.assertIn("guest RabbitMQ credentials are forbidden", script)
+        self.assertIn("read-only preflight account cannot be root", script)
+        self.assertIn("require_positive_decimal", script)
+        self.assertIn("cost alert webhook must use https://", script)
+        self.assertIn("backup bucket must be separate from application asset buckets", script)
+        self.assertIn("production environment preflight failed", script)
+
+    def test_production_database_preflight_is_read_only_and_auditable(self) -> None:
+        script = self.read("deploy/scripts/production_readonly_preflight.sh")
+        self.assertIn("umask 077", script)
+        self.assertIn("PRODUCTION_PREFLIGHT_MYSQL_USER", script)
+        self.assertIn("read-only preflight account cannot be root", script)
+        self.assertIn("SHOW GRANTS FOR CURRENT_USER", script)
+        self.assertIn("unexpected_grants", script)
+        self.assertIn("GRANT (USAGE ON", script)
+        self.assertIn("START TRANSACTION READ ONLY", script)
+        self.assertIn("information_schema", script)
+        self.assertIn("workflow_step_charges", script)
+        self.assertIn("billing_usage_logs", script)
+        self.assertIn("provider_cost IS NULL", script)
+        self.assertIn("status = 'CAPTURED'", script)
+        self.assertIn("active_workflow_provider_reservation_missing", script)
+        self.assertIn("provider_cost_reserved_cny <= 0", script)
+        self.assertNotIn("status = 'CHARGED'", script)
+        self.assertIn("095_task_provider_checkpoint.sql", script)
+        self.assertIn("096_workflow_provider_accounting.sql", script)
+        self.assertIn("097_workflow_provider_cost_gate_index.sql", script)
+        self.assertIn("098_workflow_provider_cost_reservation.sql", script)
+        self.assertIn('migration_count" = "11"', script)
+        self.assertIn("PREFLIGHT_REPORT_FILE", script)
+        self.assertIn("status=PASS", script)
+        self.assertNotIn("DROP DATABASE", script)
+        self.assertNotIn("DELETE FROM", script)
+        self.assertNotIn("UPDATE workflow", script)
+
+    def test_production_database_preflight_blocks_unknown_actual_provider_cost(self) -> None:
+        script = self.read("deploy/scripts/production_readonly_preflight.sh")
+        self.assertIn("successful_workflow_actual_provider_cost_unknown", script)
+        self.assertIn("outcome IN ('SUCCESS', 'CANCELLED_LATE_SUCCESS')", script)
+        self.assertIn("provider_charged = 0", script)
+        self.assertIn("UPPER(TRIM(provider_cost_currency)) = 'UNKNOWN'", script)
+
+    def test_workflow_cost_guard_settings_are_deployable(self) -> None:
+        root_environment = self.read(".env.example")
+        deploy_environment = self.read("deploy/.env.example")
+        compose = self.read("deploy/docker-compose.yml")
+        application = self.read("backend/src/main/resources/application.yml")
+        for setting in (
+            "WORKFLOW_RUNTIME_MAX_PROVIDER_DAILY_COST_CNY",
+            "WORKFLOW_RUNTIME_COST_ALERT_WEBHOOK_URL",
+        ):
+            self.assertIn(setting + "=", root_environment)
+            self.assertIn("${" + setting + ":", application)
+            self.assertNotIn(setting + "=", deploy_environment)
+            self.assertNotIn(setting + ": ${" + setting, compose)
+
+    def test_provider_accounting_columns_are_migrated_before_backend_start(self) -> None:
+        migration = self.read("sql/096_workflow_provider_accounting.sql")
+        for column in (
+            "provider_cost_currency",
+            "outcome",
+            "error_code",
+            "failure_stage",
+            "provider_error_code",
+            "provider_request_id",
+            "provider_charged",
+        ):
+            self.assertIn("column_name = '" + column + "'", migration)
+            self.assertIn("ADD COLUMN " + column, migration)
+
+    def test_provider_cost_reservation_schema_is_migrated_before_backend_start(self) -> None:
+        migration = self.read("sql/098_workflow_provider_cost_reservation.sql")
+        self.assertIn("workflow_provider_cost_budget_days", migration)
+        self.assertIn("column_name = 'provider_cost_reserved_cny'", migration)
+        self.assertIn("ADD COLUMN provider_cost_reserved_cny", migration)
+        self.assertIn("idx_workflow_run_provider_cost_reservation", migration)
+
+    def test_deploy_runs_production_preflight_around_migrations(self) -> None:
+        deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
+        environment_gate = deploy.index("verify_production_environment.sh")
+        historical_gate = deploy.index("production_readonly_preflight.sh")
+        backup = deploy.index("backup_mysql.sh")
+        migrations = deploy.index("apply_sql_migrations.sh")
+        post_migration_gate = deploy.index(
+            "production_readonly_preflight.sh", historical_gate + 1
+        )
+        self.assertLess(environment_gate, historical_gate)
+        self.assertLess(historical_gate, backup)
+        self.assertLess(backup, migrations)
+        self.assertLess(migrations, post_migration_gate)
+
+    def test_windows_production_entrypoint_cannot_bypass_data_gates(self) -> None:
+        deploy = self.read("deploy/scripts/remote_deploy_production.py")
+        environment_gate = deploy.index("verify_production_environment.sh")
+        historical_gate = deploy.index("production_readonly_preflight.sh")
+        backup = deploy.index("backup_mysql.sh")
+        migrations = deploy.index("apply_sql_migrations.sh")
+        post_migration_gate = deploy.index(
+            "production_readonly_preflight.sh", historical_gate + 1
+        )
+        build = deploy.index('echo "Building $svc ..."')
+        self.assertLess(environment_gate, historical_gate)
+        self.assertLess(historical_gate, backup)
+        self.assertLess(backup, migrations)
+        self.assertLess(migrations, post_migration_gate)
+        self.assertLess(post_migration_gate, build)
 
     def test_release_health_is_a_blocking_gate(self) -> None:
         deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
@@ -226,6 +415,68 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("production secret preflight failed", deploy)
         self.assertIn("differs between .env and deploy/.env", deploy)
         self.assertLess(deploy.index("production secret preflight passed"), deploy.index("Force-recreating application containers"))
+    def test_rabbitmq_queue_names_are_consistent_across_services(self) -> None:
+        environment = self.read(".env.example")
+        backend = self.read("backend/src/main/resources/application.yml")
+        worker = self.read("worker/config.py")
+        compose = self.read("deploy/docker-compose.yml")
+        compose_lines = compose.splitlines()
+
+        self.assertIn("RABBITMQ_DEAD_QUEUE=ai.tool.normal.dead", environment)
+        self.assertIn("RABBITMQ_RETRY_QUEUE_PREFIX=ai.tool.normal.retry", environment)
+        self.assertIn("RABBITMQ_USERNAME=guest", environment)
+        self.assertIn("RABBITMQ_PASSWORD=guest", environment)
+        self.assertNotIn("RABBITMQ_TASK_DEAD_QUEUE=", environment)
+        self.assertNotIn("RABBITMQ_TASK_RETRY_QUEUE_PREFIX=", environment)
+        self.assertIn("username: ${RABBITMQ_USERNAME:guest}", backend)
+        self.assertIn("password: ${RABBITMQ_PASSWORD:guest}", backend)
+        self.assertIn(
+            "${RABBITMQ_DEAD_QUEUE:${RABBITMQ_TASK_DEAD_QUEUE:ai.tool.normal.dead}}",
+            backend,
+        )
+        self.assertIn(
+            "${RABBITMQ_RETRY_QUEUE_PREFIX:${RABBITMQ_TASK_RETRY_QUEUE_PREFIX:ai.tool.normal.retry}}",
+            backend,
+        )
+        self.assertIn("os.getenv('RABBITMQ_DEAD_QUEUE', 'ai.tool.normal.dead')", worker)
+        self.assertIn("os.getenv('RABBITMQ_USERNAME', 'guest')", worker)
+        self.assertIn("os.getenv('RABBITMQ_PASSWORD', 'guest')", worker)
+        self.assertIn(
+            "os.getenv('RABBITMQ_RETRY_QUEUE_PREFIX', 'ai.tool.normal.retry')",
+            worker,
+        )
+        self.assertEqual(
+            compose.count(
+                "RABBITMQ_DEAD_QUEUE: ${RABBITMQ_DEAD_QUEUE:-ai.tool.normal.dead}"
+            ),
+            2,
+        )
+        self.assertEqual(
+            compose.count(
+                "RABBITMQ_RETRY_QUEUE_PREFIX: ${RABBITMQ_RETRY_QUEUE_PREFIX:-ai.tool.normal.retry}"
+            ),
+            2,
+        )
+        self.assertIn(
+            "RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-guest}",
+            compose,
+        )
+        self.assertIn(
+            "RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}",
+            compose,
+        )
+        self.assertEqual(
+            compose_lines.count(
+                "      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}"
+            ),
+            2,
+        )
+        self.assertEqual(
+            compose_lines.count(
+                "      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}"
+            ),
+            2,
+        )
 
     def test_rollback_uses_recorded_previous_revision(self) -> None:
         rollback = self.read("deploy/scripts/rollback_release.sh")

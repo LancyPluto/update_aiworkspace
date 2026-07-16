@@ -26,7 +26,6 @@ discovery.relabel "docker_containers" {
     source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
     target_label  = "compose_project"
   }
-
 }
 
 loki.source.docker "docker_containers" {

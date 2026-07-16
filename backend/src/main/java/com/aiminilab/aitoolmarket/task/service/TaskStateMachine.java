@@ -16,9 +16,11 @@ public final class TaskStateMachine {
                     TaskStatus.FAILED.name(),
                     TaskStatus.TIMEOUT.name(),
                     TaskStatus.CANCELLED.name(),
-                    TaskStatus.AWAITING_USER.name()
+                    TaskStatus.AWAITING_USER.name(),
+                    TaskStatus.AWAITING_FUNDS.name()
             ),
             TaskStatus.AWAITING_USER.name(), Set.of(TaskStatus.PROCESSING.name(), TaskStatus.CANCELLED.name()),
+            TaskStatus.AWAITING_FUNDS.name(), Set.of(TaskStatus.PROCESSING.name(), TaskStatus.CANCELLED.name()),
             TaskStatus.FAILED.name(), Set.of(TaskStatus.RETRYING.name()),
             TaskStatus.TIMEOUT.name(), Set.of(TaskStatus.RETRYING.name()),
             TaskStatus.RETRYING.name(), Set.of(TaskStatus.QUEUED.name())

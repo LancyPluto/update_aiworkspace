@@ -6,6 +6,8 @@ import com.aiminilab.aitoolmarket.task.dto.ClaimTaskResponse;
 import com.aiminilab.aitoolmarket.task.dto.CreateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.ExecutionContextResponse;
 import com.aiminilab.aitoolmarket.task.dto.InternalCreateTaskRequest;
+import com.aiminilab.aitoolmarket.task.dto.ProviderCheckpointRequest;
+import com.aiminilab.aitoolmarket.task.dto.ProviderCheckpointResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskDetailResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.dto.WorkerFailedRequest;
@@ -69,6 +71,13 @@ public class InternalTaskController {
     public ApiResponse<ClaimTaskResponse> renewLease(@PathVariable Long taskId,
                                                      @RequestBody ClaimTaskRequest request) {
         return ApiResponse.success(internalTaskService.renewLease(taskId, request));
+    }
+
+    @PostMapping("/{taskId}/provider-checkpoint")
+    public ApiResponse<ProviderCheckpointResponse> saveProviderCheckpoint(
+            @PathVariable Long taskId,
+            @Valid @RequestBody ProviderCheckpointRequest request) {
+        return ApiResponse.success(internalTaskService.saveProviderCheckpoint(taskId, request));
     }
 
     @PostMapping("/{taskId}/processing")

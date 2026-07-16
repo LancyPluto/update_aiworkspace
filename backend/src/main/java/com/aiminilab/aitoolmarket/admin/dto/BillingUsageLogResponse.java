@@ -25,6 +25,10 @@ public record BillingUsageLogResponse(
         Integer billableUnits,
         BigDecimal unitPrice,
         BigDecimal costAmount,
+        BigDecimal vendorCostAmount,
+        String providerCostCurrency,
+        String providerRequestId,
+        Boolean providerCharged,
         Integer chargedCredits,
         LocalDateTime createdAt
 ) {

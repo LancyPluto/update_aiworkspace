@@ -5,7 +5,9 @@ import java.time.LocalDateTime;
 public record WorkflowVersionItemResponse(
         Long id,
         int version,
+        String dslHash,
+        Long sourceDraftRevision,
         String snapshotLabel,
-        Long createdBy,
-        LocalDateTime createdAt
+        Long publishedBy,
+        LocalDateTime publishedAt
 ) {}

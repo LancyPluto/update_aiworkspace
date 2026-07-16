@@ -1,12 +1,18 @@
 package com.aiminilab.aitoolmarket.task.service;
 
 import com.aiminilab.aitoolmarket.config.AppProperties;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.GetResponse;
 import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.rabbit.support.DefaultMessagePropertiesConverter;
+import org.springframework.amqp.rabbit.support.MessagePropertiesConverter;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -14,14 +20,22 @@ import java.util.Properties;
 @Service
 public class QueueOperationsService {
 
+    private static final MessagePropertiesConverter MESSAGE_PROPERTIES_CONVERTER =
+            new DefaultMessagePropertiesConverter();
+
     private final AmqpAdmin amqpAdmin;
     private final RabbitTemplate rabbitTemplate;
     private final AppProperties appProperties;
+    private final TaskQueuePublisher taskQueuePublisher;
 
-    public QueueOperationsService(AmqpAdmin amqpAdmin, RabbitTemplate rabbitTemplate, AppProperties appProperties) {
+    public QueueOperationsService(AmqpAdmin amqpAdmin,
+                                  RabbitTemplate rabbitTemplate,
+                                  AppProperties appProperties,
+                                  TaskQueuePublisher taskQueuePublisher) {
         this.amqpAdmin = amqpAdmin;
         this.rabbitTemplate = rabbitTemplate;
         this.appProperties = appProperties;
+        this.taskQueuePublisher = taskQueuePublisher;
     }
 
     public Map<String, Object> stats() {
@@ -42,16 +56,10 @@ public class QueueOperationsService {
         String deadQueue = appProperties.getRabbitmq().getDeadQueue();
         try {
             for (int index = 0; index < boundedLimit; index++) {
-                Message message = rabbitTemplate.receive(deadQueue, 500);
-                if (message == null) {
+                Boolean requeued = rabbitTemplate.execute(channel -> requeueOne(channel, deadQueue));
+                if (!Boolean.TRUE.equals(requeued)) {
                     break;
                 }
-                resetRetryHeaders(message);
-                rabbitTemplate.send(
-                        appProperties.getRabbitmq().getTaskExchange(),
-                        appProperties.getRabbitmq().getTaskRoutingKey(),
-                        message
-                );
                 moved++;
             }
         } catch (AmqpException exception) {
@@ -59,6 +67,40 @@ public class QueueOperationsService {
                     "available", false, "error", exception.getMessage());
         }
         return Map.of("requested", boundedLimit, "requeued", moved, "deadQueue", deadQueue, "available", true);
+    }
+
+    private boolean requeueOne(Channel channel, String deadQueue) throws Exception {
+        GetResponse response = channel.basicGet(deadQueue, false);
+        if (response == null) {
+            return false;
+        }
+
+        long deliveryTag = response.getEnvelope().getDeliveryTag();
+        Message message = new Message(
+                response.getBody(),
+                MESSAGE_PROPERTIES_CONVERTER.toMessageProperties(
+                        response.getProps(),
+                        response.getEnvelope(),
+                        StandardCharsets.UTF_8.name()
+                )
+        );
+        resetRetryHeaders(message);
+        try {
+            taskQueuePublisher.publishConfirmed(message);
+            channel.basicAck(deliveryTag, false);
+            return true;
+        } catch (Exception exception) {
+            nackForRetry(channel, deliveryTag, exception);
+            throw exception;
+        }
+    }
+
+    private static void nackForRetry(Channel channel, long deliveryTag, Exception publishFailure) {
+        try {
+            channel.basicNack(deliveryTag, false, true);
+        } catch (IOException nackFailure) {
+            publishFailure.addSuppressed(nackFailure);
+        }
     }
 
     private Map<String, Object> queueStats(String queueName) {

@@ -56,6 +56,23 @@ public class BillingMetrics {
         }
     }
 
+    public void recordLateProviderCost(String sourceType, String outcome, String provider,
+                                       String failureStage, String errorCode,
+                                       BigDecimal vendorCostAmount) {
+        double vendorCost = vendorCostAmount == null ? 0 : vendorCostAmount.max(BigDecimal.ZERO).doubleValue();
+        if (vendorCost <= 0) {
+            return;
+        }
+        meterRegistry.counter(
+                "ai_billing_vendor_cost_cny_total",
+                "source_type", normalize(sourceType, "UNKNOWN"),
+                "outcome", normalize(outcome, "UNKNOWN"),
+                "provider", normalize(provider, "UNKNOWN"),
+                "failure_stage", normalize(failureStage, "none"),
+                "error_code", normalize(errorCode, "none")
+        ).increment(vendorCost);
+    }
+
     private String normalize(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
     }

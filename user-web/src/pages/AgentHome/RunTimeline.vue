@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
-import { CheckCircle2, ChevronDown, Loader2 } from "lucide-vue-next"
+import { CheckCircle2, ChevronDown, ExternalLink, Loader2 } from "lucide-vue-next"
 import type { AgentRunEvent } from "@/api/types"
 import { filterUserFacingRunEvents, memoryEventTitle } from "./runTimelineEvents"
 
@@ -137,10 +137,18 @@ function titleFor(event: AgentRunEvent) {
     const toolCode = String(payload.toolCode || event.eventText || "工具")
     if (status === "PROCESSING") return `工具任务执行中：${toolCode}`
     if (status === "QUEUED") return `工具任务排队中：${toolCode}`
+    if (status === "AWAITING_USER") return `工作流等待你的确认：${toolCode}`
+    if (status === "AWAITING_FUNDS") return `工作流等待补充算力：${toolCode}`
+    if (status === "RUNNING") return `工作流继续执行：${toolCode}`
     return status ? `工具任务状态：${toolCode}（${status}）` : `工具任务进度：${toolCode}`
   }
   if (event.eventType === "tool.finished") {
-    return payload.errorCode ? `工具执行失败：${String(payload.toolCode || event.eventText || "工具")}` : `工具执行完成：${String(payload.toolCode || event.eventText || "工具")}`
+    const status = String(payload.workflowStatus || payload.status || "").toUpperCase()
+    const toolCode = String(payload.toolCode || event.eventText || "工具")
+    if (status === "CANCELLED") return `工具执行已取消：${toolCode}`
+    if (status === "TIMEOUT") return `工具执行已超时：${toolCode}`
+    if (status === "FAILED" || payload.errorCode) return `工具执行失败：${toolCode}`
+    return `工具执行完成：${toolCode}`
   }
   if (event.eventType === "message.completed") return "回复已生成"
   if (event.eventType === "run.completed") return "本次运行已完成"
@@ -202,6 +210,12 @@ function detailJson(event: AgentRunEvent) {
   const payload = parseEventJson(event.eventJson)
   if (Object.keys(payload).length === 0) return ""
   return JSON.stringify(payload, null, 2)
+}
+
+function workflowRunUrl(event: AgentRunEvent) {
+  const value = parseEventJson(event.eventJson).runUrl
+  if (typeof value !== "string" || !/^\/agents\/runs\/[A-Za-z0-9_-]+$/.test(value)) return null
+  return value
 }
 
 function toggleExpanded(eventId: number) {
@@ -275,6 +289,15 @@ function stepTitleFor(event: AgentRunEvent, index: number) {
                 {{ isEventExpanded(event.id) ? "收起" : "详情" }}
               </button>
             </div>
+            <RouterLink
+              v-if="workflowRunUrl(event)"
+              :to="workflowRunUrl(event)!"
+              class="workflow-run-link"
+              title="打开工作流运行页"
+            >
+              <ExternalLink class="h-3.5 w-3.5" />
+              查看运行
+            </RouterLink>
             <div v-if="isEventExpanded(event.id)" class="step-detail-wrap">
               <p v-if="detailFor(event)" class="timeline-detail">{{ detailFor(event) }}</p>
               <ul v-if="hasMemoryTrace(event)" class="memory-trace-list">
@@ -358,6 +381,23 @@ function stepTitleFor(event: AgentRunEvent, index: number) {
 .summary-chevron {
   color: rgb(255 255 255 / 0.34);
   transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.workflow-run-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  margin-top: 6px;
+  color: rgb(196 181 253 / 0.9);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.workflow-run-link:hover {
+  color: rgb(221 214 254);
+  text-decoration: underline;
 }
 
 .summary-chevron.open {

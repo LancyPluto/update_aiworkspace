@@ -1,6 +1,22 @@
 import type { ToolField } from "@/api/types"
 import { parseFieldMeta } from "@/utils/fieldUiMeta"
 
+export function buildAspectRatioTaskParams(
+  value: unknown,
+  fieldKey?: string | null,
+): Record<string, string> {
+  const ratio = String(value ?? "").trim()
+  if (!ratio) return {}
+
+  const params: Record<string, string> = {
+    aspectRatio: ratio,
+    imageRatio: ratio,
+  }
+  const originalKey = fieldKey?.trim()
+  if (originalKey) params[originalKey] = ratio
+  return params
+}
+
 /**
  * 将动态表单原始值转换为后端任务所需的 params。
  * 与 ToolUse/Page.vue 中的逻辑保持一致，供工具弹窗与详情页共用。

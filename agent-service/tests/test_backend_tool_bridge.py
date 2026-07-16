@@ -2,6 +2,7 @@
 
 import pytest
 
+from app.clients.backend_client import WorkflowDelegationUncertainError
 from app.config import settings
 from app.core.schemas import AgentFileContext, ChatMessage, RecentToolCallContext, ReferenceMention, RunContext, RuntimeSettings, TaskDetailResponse, ToolDescriptor
 from app.runtime.tool_orchestrator import _raise_image_prompt_schema_validation_if_needed
@@ -763,6 +764,182 @@ async def test_execute_stores_v2_arguments_but_dispatches_physical_image_params(
     assert len(backend.task_params["reference_images"]) == 1
     assert backend.task_params["reference_images"][0].endswith("/generated/uploads/face.png")
     assert backend.completed
+
+
+def test_tool_descriptor_parses_workflow_execution_contract():
+    tool = ToolDescriptor.model_validate(
+        {
+            "toolCode": "ai_comic_drama_agent",
+            "name": "AI Comic Drama",
+            "executionMode": "WORKFLOW",
+            "billingMode": "WORKFLOW_STEP",
+            "minimumRequiredCredits": 12,
+            "runRouteTemplate": "/agents/runs/{taskId}",
+            "riskLevel": "MEDIUM",
+            "confirmationPolicy": "WORKFLOW_DEFINED",
+        }
+    )
+
+    assert tool.executionMode == "WORKFLOW"
+    assert tool.billingMode == "WORKFLOW_STEP"
+    assert tool.minimumRequiredCredits == 12
+    assert tool.runRouteTemplate == "/agents/runs/{taskId}"
+    assert tool.riskLevel == "MEDIUM"
+    assert tool.confirmationPolicy == "WORKFLOW_DEFINED"
+
+
+@pytest.mark.asyncio
+async def test_workflow_tool_delegates_without_direct_task_lifecycle_calls():
+    class Backend:
+        def __init__(self) -> None:
+            self.created_tool_calls = []
+            self.delegated_tool_calls = []
+            self.events = []
+
+        async def create_tool_call(self, run_id: int, request):
+            self.created_tool_calls.append((run_id, request))
+            return type("ToolCall", (), {"id": 91, "toolCode": request.toolCode})()
+
+        async def delegate_workflow_tool_call(self, tool_call_id: int):
+            self.delegated_tool_calls.append(tool_call_id)
+            return type(
+                "DelegatedWorkflow",
+                (),
+                {"taskId": 501, "runId": 601, "status": "RUNNING", "runUrl": "/agents/runs/501"},
+            )()
+
+        async def append_event(self, run_id: int, event) -> None:
+            self.events.append((run_id, event.eventType))
+
+        async def create_task(self, request):
+            raise AssertionError("WORKFLOW must not create a direct task")
+
+        async def bind_tool_call_task(self, tool_call_id: int, task_id: int):
+            raise AssertionError("delegate endpoint owns task binding")
+
+        async def get_task_detail(self, user_id: int, task_id: int):
+            raise AssertionError("WORKFLOW must not poll task detail")
+
+        async def get_run_context(self, run_id: int):
+            raise AssertionError("WORKFLOW must not poll agent run context")
+
+        async def complete_tool_call(self, tool_call_id: int, request) -> None:
+            raise AssertionError("delegate endpoint owns DELEGATED status")
+
+        async def cancel_task(self, user_id: int, task_id: int) -> None:
+            raise AssertionError("WORKFLOW must not cancel after successful delegation")
+
+    backend = Backend()
+    bridge = BackendToolBridge(backend_client=backend, timeout_seconds=1, poll_interval_seconds=0.01)  # type: ignore[arg-type]
+    context = RunContext(runId=88, sessionId=1, userId=7, message="create a comic", status="RUNNING")
+    tool = ToolDescriptor(
+        toolCode="ai_comic_drama_agent",
+        toolName="AI Comic Drama",
+        executionMode="WORKFLOW",
+        billingMode="WORKFLOW_STEP",
+        runRouteTemplate="/agents/runs/{taskId}",
+        inputSchema={"type": "object", "properties": {"prompt": {"type": "string"}}},
+    )
+
+    result = await bridge.execute_with_args(context, tool, {"prompt": context.message})
+
+    assert backend.delegated_tool_calls == [91]
+    assert backend.created_tool_calls[0][1].argumentsJson == {"prompt": context.message}
+    assert result["status"] == "DELEGATED"
+    assert result["taskId"] == 501
+    assert result["runUrl"] == "/agents/runs/501"
+
+
+@pytest.mark.asyncio
+async def test_workflow_delegate_uncertain_error_does_not_fail_or_cancel_tool_call():
+    class Backend:
+        def __init__(self) -> None:
+            self.delegated_tool_calls = []
+            self.failed_tool_calls = []
+            self.cancelled_tasks = []
+
+        async def append_event(self, run_id: int, event) -> None:
+            return None
+
+        async def create_tool_call(self, run_id: int, request):
+            return type("ToolCall", (), {"id": 93, "toolCode": request.toolCode})()
+
+        async def delegate_workflow_tool_call(self, tool_call_id: int):
+            self.delegated_tool_calls.append(tool_call_id)
+            raise WorkflowDelegationUncertainError("workflow delegation outcome is uncertain")
+
+        async def fail_tool_call(self, tool_call_id: int, request) -> None:
+            self.failed_tool_calls.append(tool_call_id)
+
+        async def cancel_task(self, user_id: int, task_id: int) -> None:
+            self.cancelled_tasks.append(task_id)
+
+    backend = Backend()
+    bridge = BackendToolBridge(backend_client=backend, timeout_seconds=1, poll_interval_seconds=0.01)  # type: ignore[arg-type]
+    context = RunContext(runId=90, sessionId=1, userId=7, message="create a comic", status="RUNNING")
+    tool = ToolDescriptor(toolCode="ai_comic_drama_agent", toolName="AI Comic Drama", executionMode="WORKFLOW")
+
+    with pytest.raises(WorkflowDelegationUncertainError, match="outcome is uncertain"):
+        await bridge.execute_with_args(context, tool, {"prompt": context.message})
+
+    assert backend.delegated_tool_calls == [93]
+    assert backend.failed_tool_calls == []
+    assert backend.cancelled_tasks == []
+
+
+@pytest.mark.asyncio
+async def test_direct_tool_keeps_create_bind_poll_and_complete_lifecycle():
+    class Backend:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def append_event(self, run_id: int, event) -> None:
+            self.calls.append("event")
+
+        async def create_tool_call(self, run_id: int, request):
+            self.calls.append("create_tool_call")
+            return type("ToolCall", (), {"id": 92, "toolCode": request.toolCode})()
+
+        async def create_task(self, request):
+            self.calls.append("create_task")
+            return type("TaskStatus", (), {"taskId": 502, "status": "QUEUED"})()
+
+        async def bind_tool_call_task(self, tool_call_id: int, task_id: int):
+            self.calls.append("bind_tool_call_task")
+            return type("ToolCall", (), {"id": tool_call_id, "taskId": task_id})()
+
+        async def get_task_detail(self, user_id: int, task_id: int) -> TaskDetailResponse:
+            self.calls.append("get_task_detail")
+            return TaskDetailResponse(
+                taskId=task_id,
+                status="SUCCESS",
+                result={"resourceType": "TEXT", "contentText": "done"},
+            )
+
+        async def get_run_context(self, run_id: int):
+            raise AssertionError("terminal task must not poll run context")
+
+        async def complete_tool_call(self, tool_call_id: int, request) -> None:
+            self.calls.append("complete_tool_call")
+
+        async def fail_tool_call(self, tool_call_id: int, request) -> None:
+            raise AssertionError("unexpected failure")
+
+        async def cancel_task(self, user_id: int, task_id: int) -> None:
+            raise AssertionError("unexpected cancel")
+
+    backend = Backend()
+    bridge = BackendToolBridge(backend_client=backend, timeout_seconds=1, poll_interval_seconds=0.01)  # type: ignore[arg-type]
+    context = RunContext(runId=89, sessionId=1, userId=7, message="write copy", status="RUNNING")
+    tool = ToolDescriptor(toolCode="copywriter", toolName="Copywriter", executionMode="DIRECT")
+
+    result = await bridge.execute_with_args(context, tool, {"prompt": context.message})
+
+    assert result["status"] == "SUCCESS"
+    assert "create_task" in backend.calls
+    assert "bind_tool_call_task" in backend.calls
+    assert "get_task_detail" in backend.calls
+    assert "complete_tool_call" in backend.calls
 
 
 def test_attached_ready_image_fills_reference_image_field():

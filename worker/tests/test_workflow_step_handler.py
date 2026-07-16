@@ -3,6 +3,7 @@ import json
 import pytest
 
 import handlers.workflow_step_handler as workflow_step_handler
+from client.backend_client import BackendClientError
 from client.model_client import ModelClientError
 from handlers.workflow_step_handler import (
     WorkflowStepHandler,
@@ -359,5 +360,230 @@ def test_video_node_injects_scene_specific_reference_images_for_agnes_multi_imag
 
 
 class NoopBackendClient:
+    def __init__(self):
+        self.checkpoint_version = 0
+
     def mark_processing(self, *args, **kwargs):
         return None
+
+    def save_provider_checkpoint(self, *args, expected_version, **kwargs):
+        assert expected_version == self.checkpoint_version
+        self.checkpoint_version += 1
+        return {"version": self.checkpoint_version}
+
+
+def test_workflow_success_callback_carries_provider_accounting(monkeypatch):
+    class CapturingBackendClient:
+        def __init__(self):
+            self.success_payload = None
+
+        def mark_processing(self, *args, **kwargs):
+            return None
+
+        def mark_success(self, task_id, payload, **kwargs):
+            self.success_payload = payload
+
+        def mark_failed(self, *args, **kwargs):
+            raise AssertionError("success path must not report failure")
+
+    backend = CapturingBackendClient()
+    handler = WorkflowStepHandler(backend_client=backend)
+    monkeypatch.setattr(
+        handler,
+        "_run_script_planner",
+        lambda *_args, **_kwargs: {
+            "result": "ok",
+            "providerRequestId": "provider-success-1",
+            "providerCostAmount": "0.345678",
+            "providerCostCurrency": "usd",
+        },
+    )
+
+    result = handler.handle({
+        "taskId": 321,
+        "__executionContext": {
+            "status": "PROCESSING",
+            "params": {
+                "workflowStep": True,
+                "nodeDefType": "LLM_TEXT",
+                "workflowInputs": {},
+            },
+            "modelConfig": {},
+        },
+    })
+
+    assert result["status"] == "SUCCESS"
+    assert backend.success_payload["providerRequestId"] == "provider-success-1"
+    assert backend.success_payload["providerCostAmount"] == "0.345678"
+    assert backend.success_payload["providerCostCurrency"] == "USD"
+
+
+def test_workflow_success_callback_preserves_explicit_zero_provider_cost():
+    payload = workflow_step_handler._provider_accounting_payload({
+        "providerRequestId": "provider-free-1",
+        "providerCostAmount": 0,
+        "providerCostCurrency": "cny",
+    })
+
+    assert payload["providerCostAmount"] == 0
+    assert payload["providerCostCurrency"] == "CNY"
+
+
+def test_workflow_failure_callback_carries_provider_accounting(monkeypatch):
+    class ProviderFailure(RuntimeError):
+        provider_charged = True
+        provider_cost_amount = "0.456789"
+        provider_cost_currency = "usd"
+        provider_error_code = "UPSTREAM_500"
+        provider_request_id = "provider-failure-1"
+        failure_stage = "PROVIDER_POLLING"
+
+    class CapturingBackendClient:
+        def __init__(self):
+            self.failed_payload = None
+
+        def mark_processing(self, *args, **kwargs):
+            return None
+
+        def mark_success(self, *args, **kwargs):
+            raise AssertionError("failure path must not report success")
+
+        def mark_failed(self, task_id, payload, **kwargs):
+            self.failed_payload = payload
+
+    backend = CapturingBackendClient()
+    handler = WorkflowStepHandler(backend_client=backend)
+    monkeypatch.setattr(
+        handler,
+        "_run_script_planner",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ProviderFailure("provider failed")),
+    )
+
+    result = handler.handle({
+        "taskId": 654,
+        "__executionContext": {
+            "status": "PROCESSING",
+            "params": {
+                "workflowStep": True,
+                "nodeDefType": "LLM_TEXT",
+                "workflowInputs": {},
+            },
+            "modelConfig": {},
+        },
+    })
+
+    assert result["status"] == "FAILED"
+    assert backend.failed_payload["providerCharged"] is True
+    assert backend.failed_payload["providerCostAmount"] == "0.456789"
+    assert backend.failed_payload["providerCostCurrency"] == "USD"
+    assert backend.failed_payload["providerErrorCode"] == "UPSTREAM_500"
+    assert backend.failed_payload["providerRequestId"] == "provider-failure-1"
+    assert backend.failed_payload["failureStage"] == "PROVIDER_POLLING"
+
+
+def test_workflow_failure_callback_error_is_retried_by_queue(monkeypatch):
+    class FailingBackendClient:
+        def mark_processing(self, *args, **kwargs):
+            return None
+
+        def mark_success(self, *args, **kwargs):
+            raise AssertionError("failure path must not report success")
+
+        def mark_failed(self, *args, **kwargs):
+            raise BackendClientError("backend request failed: status=500")
+
+    handler = WorkflowStepHandler(backend_client=FailingBackendClient())
+    monkeypatch.setattr(
+        handler,
+        "_run_script_planner",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("provider failed")),
+    )
+
+    with pytest.raises(BackendClientError, match="status=500"):
+        handler.handle({
+            "taskId": 655,
+            "__executionContext": {
+                "status": "PROCESSING",
+                "params": {
+                    "workflowStep": True,
+                    "nodeDefType": "LLM_TEXT",
+                    "workflowInputs": {},
+                },
+                "modelConfig": {},
+            },
+        })
+
+
+def test_image_generator_does_not_replay_ambiguous_connection_failure(monkeypatch):
+    calls = {"count": 0}
+
+    class FailingImageClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        def generate_images(self, **_kwargs):
+            calls["count"] += 1
+            raise RuntimeError("connection timed out after provider may have accepted request")
+
+    monkeypatch.setattr(workflow_step_handler.provider_registry, "provider_protocol", lambda _provider: "openai_images")
+    monkeypatch.setattr(workflow_step_handler, "OpenAIImagesClient", FailingImageClient)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+
+    generate = workflow_step_handler._resolve_image_generator(
+        {"provider": "test-images", "modelName": "test-image", "apiKey": "test-key"}
+    )
+
+    with pytest.raises(RuntimeError, match="provider may have accepted"):
+        generate("draw one image")
+
+    assert calls["count"] == 1
+
+
+def test_video_generator_does_not_replay_ambiguous_poll_timeout(monkeypatch):
+    calls = {"count": 0}
+
+    class FailingVideoClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        def generate_video(self, **_kwargs):
+            calls["count"] += 1
+            raise RuntimeError("connection timeout while polling an accepted video task")
+
+    monkeypatch.setattr(workflow_step_handler.provider_registry, "provider_protocol", lambda _provider: "agnes_video")
+    monkeypatch.setattr(workflow_step_handler, "AgnesVideoClient", FailingVideoClient)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+
+    generate = workflow_step_handler._resolve_video_generator(
+        {"provider": "test-video", "modelName": "test-video", "apiKey": "test-key"}
+    )
+
+    with pytest.raises(RuntimeError, match="accepted video task"):
+        generate(prompt="animate", image="https://example.com/frame.png")
+
+    assert calls["count"] == 1
+
+
+def test_seedance_video_generator_does_not_replay_ambiguous_create_timeout(monkeypatch):
+    calls = {"count": 0}
+
+    class FailingSeedanceClient:
+        @classmethod
+        def from_model_config(cls, _model_config):
+            return cls()
+
+        def generate_video(self, **_kwargs):
+            calls["count"] += 1
+            raise RuntimeError("timeout after seedance may have accepted the create request")
+
+    monkeypatch.setattr(workflow_step_handler.provider_registry, "provider_protocol", lambda _provider: "seedance")
+    monkeypatch.setattr(workflow_step_handler, "SeedanceVideoClient", FailingSeedanceClient)
+
+    generate = workflow_step_handler._resolve_video_generator(
+        {"provider": "test-seedance", "modelName": "test-video", "apiKey": "test-key"}
+    )
+
+    with pytest.raises(RuntimeError, match="accepted the create request"):
+        generate(prompt="animate", image="https://example.com/frame.png")
+
+    assert calls["count"] == 1

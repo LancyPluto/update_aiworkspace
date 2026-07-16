@@ -11,6 +11,7 @@ import org.apache.ibatis.annotations.Arg;
 import org.apache.ibatis.annotations.ConstructorArgs;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -18,6 +19,38 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 public interface BillingUsageLogMapper extends BaseMapper<BillingUsageLog> {
+
+    @Select("SELECT * FROM billing_usage_logs WHERE idempotency_key = #{idempotencyKey} LIMIT 1")
+    BillingUsageLog selectByIdempotencyKey(@Param("idempotencyKey") String idempotencyKey);
+
+    @Select("SELECT * FROM billing_usage_logs WHERE idempotency_key = #{idempotencyKey} LIMIT 1 FOR UPDATE")
+    BillingUsageLog selectByIdempotencyKeyForUpdate(@Param("idempotencyKey") String idempotencyKey);
+
+    @Select("SELECT * FROM billing_usage_logs WHERE id = #{id} LIMIT 1 FOR UPDATE")
+    BillingUsageLog selectByIdForUpdate(@Param("id") Long id);
+
+    @Update("""
+            UPDATE billing_usage_logs
+            SET cost_amount = #{providerCostAmount},
+                vendor_cost_amount = #{providerCostAmount},
+                provider_cost_currency = #{providerCostCurrency},
+                provider_charged = 1,
+                provider_request_id = COALESCE(provider_request_id, #{providerRequestId}),
+                margin_credits = #{marginCredits}
+            WHERE id = #{id}
+              AND provider_charged = 0
+              AND COALESCE(cost_amount, 0) = 0
+              AND COALESCE(vendor_cost_amount, 0) = 0
+              AND UPPER(TRIM(provider_cost_currency)) = 'UNKNOWN'
+              AND (#{providerRequestId} IS NULL
+                   OR provider_request_id IS NULL
+                   OR provider_request_id = #{providerRequestId})
+            """)
+    int attachActualProviderAccountingIfUnknown(@Param("id") Long id,
+                                                 @Param("providerCostAmount") BigDecimal providerCostAmount,
+                                                 @Param("providerCostCurrency") String providerCostCurrency,
+                                                 @Param("providerRequestId") String providerRequestId,
+                                                 @Param("marginCredits") int marginCredits);
 
     String FILTER = """
             <if test="startAt != null">AND created_at &gt;= #{startAt}</if>
@@ -230,7 +263,9 @@ public interface BillingUsageLogMapper extends BaseMapper<BillingUsageLog> {
                    l.user_id, l.model_config_id, l.provider, l.model_name,
                    l.prompt_tokens, l.completion_tokens, l.total_tokens, l.input_token_price_per_1k,
                    l.output_token_price_per_1k, l.input_token_price_per_1m, l.output_token_price_per_1m,
-                   l.billing_unit, l.billable_units, l.unit_price, l.cost_amount, l.charged_credits, l.created_at
+                   l.billing_unit, l.billable_units, l.unit_price, l.cost_amount, l.vendor_cost_amount,
+                   l.provider_cost_currency, l.provider_request_id, l.provider_charged,
+                   l.charged_credits, l.created_at
             FROM billing_usage_logs l
             INNER JOIN (
                 SELECT id FROM billing_usage_logs
@@ -266,6 +301,10 @@ public interface BillingUsageLogMapper extends BaseMapper<BillingUsageLog> {
             @Arg(column = "billable_units", javaType = Integer.class),
             @Arg(column = "unit_price", javaType = BigDecimal.class),
             @Arg(column = "cost_amount", javaType = BigDecimal.class),
+            @Arg(column = "vendor_cost_amount", javaType = BigDecimal.class),
+            @Arg(column = "provider_cost_currency", javaType = String.class),
+            @Arg(column = "provider_request_id", javaType = String.class),
+            @Arg(column = "provider_charged", javaType = Boolean.class),
             @Arg(column = "charged_credits", javaType = Integer.class),
             @Arg(column = "created_at", javaType = LocalDateTime.class)
     })

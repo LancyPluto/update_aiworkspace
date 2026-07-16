@@ -7,6 +7,7 @@ import { resolveCommunityDerivativeUrl } from "@/utils/communityPostMedia"
 import { normalizeMediaFieldValue, normalizeMediaUrl, isValidImagePreviewUrl } from "@/utils/toolCoverMedia"
 import { useAuthStore } from "@/store/authStore"
 import { buildTaskResultBlocks, resolveAudioTracks } from "@/utils/taskResultBlocks"
+import { buildAspectRatioTaskParams } from "@/utils/toolTaskParams"
 import { useGeneratedMaterialList, useUploadHistoryList } from "@/composables/useMaterialPickerLists"
 import { useInfiniteScroll } from "@/composables/useInfiniteScroll"
 import {
@@ -1569,8 +1570,7 @@ function getRequestParams(): Record<string, unknown> {
   const params: Record<string, unknown> = {}
   if (hasAspectRatioControl.value && state.value.imageRatio) {
     const ratio = normalizeAspectRatio(state.value.imageRatio)
-    params.aspectRatio = ratio
-    params.imageRatio = ratio
+    Object.assign(params, buildAspectRatioTaskParams(ratio, ratioField.value?.fieldKey))
   }
   if (webSearchCapability.value && showWebSearch.value) params.webSearch = state.value.webSearch === true
   if (codeCapability.value && state.value.language) params.language = state.value.language

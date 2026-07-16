@@ -23,6 +23,14 @@ public interface CreditService {
 
     void release(Long userId, CreditSourceType sourceType, Long sourceId, int amount);
 
+    boolean tryFreeze(Long userId, CreditSourceType sourceType, Long sourceId, int amount, String idempotencyKey);
+
+    void captureReserved(Long userId, CreditSourceType sourceType, Long sourceId,
+                         int reservedAmount, int actualAmount, String idempotencyKey);
+
+    void releaseReserved(Long userId, CreditSourceType sourceType, Long sourceId,
+                         int amount, String idempotencyKey);
+
     default void freezeForTask(Long userId, Long taskId, int amount) {
         freeze(userId, CreditSourceType.TASK, taskId, amount);
     }

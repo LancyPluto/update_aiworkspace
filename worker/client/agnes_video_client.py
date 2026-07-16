@@ -7,6 +7,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 import requests
+from urllib3.util import Timeout as Urllib3Timeout
 
 from config import settings
 
@@ -14,6 +15,7 @@ from config import settings
 LOGGER = logging.getLogger(__name__)
 SUCCESS_STATUSES = {"succeeded", "succeed", "success", "completed", "done", "finish", "finished"}
 FAILED_STATUSES = {"failed", "fail", "failure", "error", "cancelled", "canceled", "timeout", "timed_out"}
+POLL_REQUEST_ATTEMPTS = 3
 
 
 class AgnesVideoError(RuntimeError):
@@ -87,6 +89,8 @@ class AgnesVideoClient:
         resolution: str = "",
         mode: str = "",
         progress_callback: Callable[[int], None] | None = None,
+        resume: dict[str, Any] | None = None,
+        submitted_callback: Callable[[dict[str, Any]], None] | None = None,
         **_: Any,
     ) -> dict[str, Any]:
         if not self.base_url:
@@ -98,42 +102,58 @@ class AgnesVideoClient:
         if not prompt.strip():
             raise AgnesVideoError("Agnes video prompt is required")
 
-        payload = self._build_payload(
-            prompt=prompt,
-            image_size=image_size,
-            negative_prompt=negative_prompt,
-            model=model,
-            image=image,
-            image_tail=image_tail,
-            images=images,
-            seed=seed,
-            duration=duration,
-            aspect_ratio=aspect_ratio,
-            resolution=resolution,
-            mode=mode,
-        )
-        LOGGER.info(
-            "agnes video create path=%s model=%s size=%sx%s hasImage=%s",
-            self.create_endpoint_path,
-            payload.get("model"),
-            payload.get("width"),
-            payload.get("height"),
-            bool(payload.get("image") or payload.get("extra_body")),
-        )
-        created = self._request("POST", self.create_endpoint_path, json_payload=payload)
-        if self._extract_video_url_or_empty(created):
-            finished = created
-        else:
-            task_id = self._extract_task_id(created)
-            video_id = self._extract_video_id(created) or task_id
+        resume = resume if isinstance(resume, dict) else {}
+        resumed_task_id = str(resume.get("taskId") or "").strip()
+        if resumed_task_id:
+            task_id = resumed_task_id
+            video_id = str(resume.get("videoId") or task_id).strip()
+            request_id = str(resume.get("requestId") or task_id).strip()
             finished = self.wait_for_video(
                 task_id=task_id,
                 video_id=video_id,
                 model=model,
                 progress_callback=progress_callback,
             )
+        else:
+            payload = self._build_payload(
+                prompt=prompt,
+                image_size=image_size,
+                negative_prompt=negative_prompt,
+                model=model,
+                image=image,
+                image_tail=image_tail,
+                images=images,
+                seed=seed,
+                duration=duration,
+                aspect_ratio=aspect_ratio,
+                resolution=resolution,
+                mode=mode,
+            )
+            LOGGER.info(
+                "agnes video create path=%s model=%s size=%sx%s hasImage=%s",
+                self.create_endpoint_path,
+                payload.get("model"),
+                payload.get("width"),
+                payload.get("height"),
+                bool(payload.get("image") or payload.get("extra_body")),
+            )
+            created = self._request("POST", self.create_endpoint_path, json_payload=payload)
+            task_id = self._extract_task_id(created)
+            request_id = task_id
+            video_id = self._extract_video_id(created) or task_id
+            if submitted_callback:
+                submitted_callback({"taskId": task_id, "videoId": video_id, "requestId": request_id})
+            if self._extract_video_url_or_empty(created):
+                finished = created
+            else:
+                finished = self.wait_for_video(
+                    task_id=task_id,
+                    video_id=video_id,
+                    model=model,
+                    progress_callback=progress_callback,
+                )
         return {
-            "requestId": self._extract_task_id(created),
+            "requestId": request_id,
             "status": self._extract_status(finished),
             "videoUrl": self._extract_video_url(finished),
             "reason": str(finished.get("reason") or finished.get("message") or ""),
@@ -156,7 +176,12 @@ class AgnesVideoClient:
         last_payload: dict[str, Any] = {}
         last_progress: int | None = None
         while time.monotonic() < deadline:
-            last_payload = self._request_result(task_id=task_id, video_id=video_id, model=model)
+            last_payload = self._request_result_with_retry(
+                task_id=task_id,
+                video_id=video_id,
+                model=model,
+                deadline=deadline,
+            )
             if self._extract_video_url_or_empty(last_payload):
                 return last_payload
             progress = self._extract_progress_percent(last_payload)
@@ -176,7 +201,10 @@ class AgnesVideoClient:
                 raise AgnesVideoError(
                     self._describe_response_problem("Agnes video generation failed", last_payload)
                 )
-            time.sleep(self.poll_interval_seconds)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(self.poll_interval_seconds, remaining))
         raise AgnesVideoTimeoutError(
             self._describe_response_problem(
                 f"Agnes video generation timed out, taskId={task_id}, videoId={video_id}, "
@@ -185,15 +213,82 @@ class AgnesVideoClient:
             )
         )
 
-    def _request_result(self, *, task_id: str, video_id: str, model: str) -> dict[str, Any]:
+    def _request_result_with_retry(
+        self,
+        *,
+        task_id: str,
+        video_id: str,
+        model: str,
+        deadline: float,
+    ) -> dict[str, Any]:
+        for attempt in range(1, POLL_REQUEST_ATTEMPTS + 1):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise self._poll_deadline_error(task_id)
+            try:
+                return self._request_result(
+                    task_id=task_id,
+                    video_id=video_id,
+                    model=model,
+                    request_timeout=self._clip_request_timeout(remaining),
+                )
+            except AgnesVideoError as exc:
+                transport_error = isinstance(exc, AgnesVideoTimeoutError) or isinstance(
+                    exc.__cause__, requests.RequestException
+                )
+                if not transport_error:
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise self._poll_deadline_error(task_id) from exc
+                if attempt >= POLL_REQUEST_ATTEMPTS:
+                    raise
+                LOGGER.warning(
+                    "Agnes video poll request failed; retrying existing task taskId=%s attempt=%s/%s: %s",
+                    task_id,
+                    attempt,
+                    POLL_REQUEST_ATTEMPTS,
+                    exc,
+                )
+                time.sleep(min(float(attempt), remaining))
+                if deadline - time.monotonic() <= 0:
+                    raise self._poll_deadline_error(task_id) from exc
+        raise AgnesVideoError("Agnes video poll retry exhausted")
+
+    def _request_result(
+        self,
+        *,
+        task_id: str,
+        video_id: str,
+        model: str,
+        request_timeout: Urllib3Timeout | tuple[float, float] | None = None,
+    ) -> dict[str, Any]:
         mode = _normalized_option(self.result_query_mode)
         if mode in {"videoidquery", "agnesapi"}:
             return self._request(
                 "GET",
                 self.result_endpoint_path,
                 params={"video_id": video_id, "model_name": model},
+                request_timeout=request_timeout,
             )
-        return self._request("GET", self._task_result_path(task_id), params=None)
+        return self._request(
+            "GET",
+            self._task_result_path(task_id),
+            params=None,
+            request_timeout=request_timeout,
+        )
+
+    def _clip_request_timeout(self, remaining: float) -> Urllib3Timeout:
+        connect_timeout, read_timeout = self.request_timeout
+        return Urllib3Timeout(
+            total=remaining,
+            connect=min(float(connect_timeout), remaining),
+            read=min(float(read_timeout), remaining),
+        )
+
+    @staticmethod
+    def _poll_deadline_error(task_id: str) -> AgnesVideoTimeoutError:
+        return AgnesVideoTimeoutError(f"Agnes video generation timed out while polling, taskId={task_id}")
 
     def _build_payload(
         self,
@@ -356,6 +451,7 @@ class AgnesVideoClient:
         *,
         json_payload: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
+        request_timeout: Urllib3Timeout | tuple[float, float] | None = None,
     ) -> dict[str, Any]:
         url = f"{self.base_url}{_ensure_leading_slash(path)}"
         try:
@@ -365,7 +461,7 @@ class AgnesVideoClient:
                 json=json_payload,
                 params=params,
                 headers=self._headers(),
-                timeout=self.request_timeout,
+                timeout=request_timeout if request_timeout is not None else self.request_timeout,
             )
         except requests.Timeout as exc:
             raise AgnesVideoTimeoutError("Agnes video request timed out") from exc

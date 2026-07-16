@@ -23,6 +23,12 @@ export const userRoutes = {
   get agentTools() {
     return { name: "AgentTools" }
   },
+  workflowTool(toolCode: string) {
+    return { name: "WorkflowToolDetail", params: { toolCode } }
+  },
+  workflowRun(taskId: string | number) {
+    return { name: "WorkflowRun", params: { taskId: String(taskId) } }
+  },
   toolDetail(id: string) {
     return { name: "ToolDetail", params: { id } }
   },
@@ -60,6 +66,6 @@ export const userRoutes = {
     return { name: "TaskResult", params: { taskId } }
   },
   workflowStudio(taskId: string) {
-    return { name: "WorkflowStudio", params: { taskId } }
+    return { name: "WorkflowRun", params: { taskId } }
   },
 } as const

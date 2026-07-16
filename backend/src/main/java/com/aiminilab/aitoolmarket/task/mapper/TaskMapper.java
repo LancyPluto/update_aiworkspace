@@ -86,6 +86,9 @@ public interface TaskMapper extends BaseMapper<AiTask> {
         return Optional.ofNullable(selectDetailById(taskId));
     }
 
+    @Select("SELECT * FROM ai_tasks WHERE id = #{taskId} FOR UPDATE")
+    AiTask selectByIdForUpdate(@Param("taskId") Long taskId);
+
     @Select("""
             <script>
             SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality,
@@ -115,6 +118,48 @@ public interface TaskMapper extends BaseMapper<AiTask> {
     }
 
     @Select("""
+            SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler,
+                   tool.input_modality, tool.output_modality
+            FROM ai_tasks t
+            JOIN ai_tools tool ON tool.id = t.tool_id
+            WHERE t.user_id = #{userId}
+              AND t.idempotency_key = #{idempotencyKey}
+            ORDER BY t.id DESC
+            LIMIT 1
+            """)
+    AiTask selectByUserIdAndIdempotencyKeyIncludingDeleted(@Param("userId") Long userId,
+                                                            @Param("idempotencyKey") String idempotencyKey);
+
+    default Optional<AiTask> findByUserIdAndIdempotencyKeyIncludingDeleted(Long userId,
+                                                                           String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(selectByUserIdAndIdempotencyKeyIncludingDeleted(userId, idempotencyKey));
+    }
+
+    @Select("""
+            SELECT * FROM ai_tasks
+            WHERE user_id = #{userId}
+              AND idempotency_key = #{idempotencyKey}
+            ORDER BY id DESC
+            LIMIT 1
+            """)
+    AiTask selectRawByUserIdAndIdempotencyKeyIncludingDeleted(@Param("userId") Long userId,
+                                                               @Param("idempotencyKey") String idempotencyKey);
+
+    default Optional<AiTask> findRawByUserIdAndIdempotencyKeyIncludingDeleted(Long userId,
+                                                                              String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(selectRawByUserIdAndIdempotencyKeyIncludingDeleted(
+                userId,
+                idempotencyKey
+        ));
+    }
+
+    @Select("""
             <script>
             SELECT t.*, tool.tool_code, tool.tool_name, tool.tool_type, tool.execution_handler, tool.input_modality, tool.output_modality,
                    COALESCE(model_config.display_name, model_config.model_name) AS model_config_name,
@@ -125,6 +170,10 @@ public interface TaskMapper extends BaseMapper<AiTask> {
                 JOIN ai_tools tool2 ON tool2.id = t2.tool_id
                 WHERE t2.user_id = #{userId}
                   AND (t2.user_deleted IS NULL OR t2.user_deleted = 0)
+                  AND NOT EXISTS (
+                    SELECT 1 FROM workflow_step_attempts workflow_attempt
+                    WHERE workflow_attempt.child_task_id = t2.id
+                  )
                 <if test="status != null and status.trim() != ''">
                   AND t2.status = #{status}
                 </if>
@@ -153,6 +202,10 @@ public interface TaskMapper extends BaseMapper<AiTask> {
             JOIN ai_tools tool ON tool.id = t.tool_id
             WHERE t.user_id = #{userId}
               AND (t.user_deleted IS NULL OR t.user_deleted = 0)
+              AND NOT EXISTS (
+                SELECT 1 FROM workflow_step_attempts workflow_attempt
+                WHERE workflow_attempt.child_task_id = t.id
+              )
             <if test="status != null and status.trim() != ''">
               AND t.status = #{status}
             </if>
@@ -208,6 +261,14 @@ public interface TaskMapper extends BaseMapper<AiTask> {
               AND COALESCE(model_config.is_deleted, 0) = 0
             WHERE t.status IN ('QUEUED', 'PROCESSING')
               AND COALESCE(t.updated_at, t.started_at, t.queued_at, t.created_at) < #{cutoff}
+              AND NOT EXISTS (
+                SELECT 1 FROM workflow_runs workflow_run
+                WHERE workflow_run.root_task_id = t.id
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM workflow_step_attempts workflow_attempt
+                WHERE workflow_attempt.child_task_id = t.id
+              )
             ORDER BY t.id ASC
             LIMIT #{limit}
             """)
@@ -350,6 +411,23 @@ public interface TaskMapper extends BaseMapper<AiTask> {
                    @Param("leaseUntil") LocalDateTime leaseUntil);
 
     @Update("""
+            UPDATE ai_tasks
+            SET provider_checkpoint_json = #{checkpointJson},
+                provider_checkpoint_version = provider_checkpoint_version + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{taskId}
+              AND status = 'PROCESSING'
+              AND claim_token = #{claimToken}
+              AND lease_until IS NOT NULL
+              AND lease_until >= CURRENT_TIMESTAMP
+              AND provider_checkpoint_version = #{expectedVersion}
+            """)
+    int updateProviderCheckpointGuarded(@Param("taskId") Long taskId,
+                                        @Param("claimToken") String claimToken,
+                                        @Param("expectedVersion") int expectedVersion,
+                                        @Param("checkpointJson") String checkpointJson);
+
+    @Update("""
             <script>
             UPDATE ai_tasks
             SET status = 'AWAITING_USER', progress = #{progress}, progress_message = #{progressMessage},
@@ -365,6 +443,22 @@ public interface TaskMapper extends BaseMapper<AiTask> {
                          @Param("progress") int progress,
                          @Param("progressMessage") String progressMessage,
                          @Param("expectedStatuses") List<String> expectedStatuses);
+
+    @Update("""
+            <script>
+            UPDATE ai_tasks
+            SET status = 'AWAITING_FUNDS', progress_message = #{progressMessage},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{taskId}
+              AND status IN
+              <foreach collection="expectedStatuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
+            """)
+    int markAwaitingFunds(@Param("taskId") Long taskId,
+                          @Param("progressMessage") String progressMessage,
+                          @Param("expectedStatuses") List<String> expectedStatuses);
 
     @Update("""
             UPDATE ai_tasks

@@ -638,7 +638,8 @@ flowchart TD
 继续使用现有 `task_id` 绑定工作流 root task，不新建另一张 Agent 工作流调用表。为异步工作流增加 `DELEGATED` 状态：
 
 - `RUNNING -> DELEGATED`：工作流已创建并绑定 root task，聊天模型可以结束本轮请求。
-- `DELEGATED -> SUCCESS | FAILED | CANCELLED`：由 workflow root task 的最终状态驱动。
+- `DELEGATED -> SUCCESS | FAILED`：由 workflow root task 的最终状态驱动。
+- workflow `CANCELLED` 映射为 `agent_tool_call.status=CANCELLED`、`error_code=WORKFLOW_CANCELLED`；真实的 `workflowStatus=CANCELLED` 同时保留在 `result_json.data` 和 `tool.finished` 事件中。这样聊天事件、运行页和持久化状态表达同一个事实，不把用户取消伪装成执行失败。
 
 普通直接工具仍使用现有 `RUNNING -> SUCCESS | FAILED` 路径。
 
@@ -725,7 +726,7 @@ P0 保留 `GET /api/v1/agent/tools` 作为聊天页的轻量工具选择列表�
 5. 将 `agent_tool_call.task_id` 绑定到 root task。
 6. 将该 `agent_tool_call` 标记为 `DELEGATED`。agent-service 不等待整个长工作流完成，立即向当前对话返回“工作流已启动”的结构化结果和 `/agents/runs/:taskId` 地址。
 7. `/agent` 页面展示运行卡片；任务进入 `AWAITING_USER`、`AWAITING_FUNDS` 或终态时更新卡片和 Agent 事件。
-8. 工作流终态负责把关联的 `DELEGATED` tool call 更新为成功、失败或取消。此更新以绑定的 task 为依据，不要求原 Agent run 仍在执行，因此不能把正常异步完成误判为 `RUN_ALREADY_TERMINATED`。
+8. 工作流终态负责把关联的 `DELEGATED` tool call 更新为成功、失败或取消；取消按 `CANCELLED + WORKFLOW_CANCELLED` 映射。此更新按 root task、workflow run、用户和工具身份联合定位，不要求原 Agent run 仍在执行，因此不能把正常异步完成误判为 `RUN_ALREADY_TERMINATED`。
 
 普通直接工具继续沿用当前“创建 task 后等待终态”的路径；只有 `executionMode=WORKFLOW` 的长任务走异步返回，避免改变现有直接工具行为。
 
@@ -768,6 +769,13 @@ sequenceDiagram
 - Worker 领取 attempt 时校验 claim token 和当前状态。
 - 回调必须携带 run、step、attempt 和 claim token。
 - 后端只允许目标 attempt 从预期状态进入终态。
+
+### 12.3 LOST 与新 run 门禁
+
+- 任一关联 attempt 进入 `LOST`，表示供应商是否执行、用户冻结或供应商成本仍未完成可信收敛。
+- 即使对应 charge 已是 `RELEASED`，晚到回调仍可能补记供应商成本；在 LOST 被人工或自动 resolution 前，该 run 必须持续判为对账不一致。
+- 对账发现 LOST 后立即关闭新 run 门禁，不自动释放 `RESERVED`、不修改余额；已有 in-flight run 和查询仍可继续。
+- 只有一次覆盖全部 run 的干净对账扫描完成，且扫描期间没有更新的失败 generation，才能重新打开新 run 门禁。
 - charge 唯一键保证重复成功回调不会重复扣费。
 
 ### 12.3 每日对账
@@ -921,7 +929,7 @@ flowchart LR
 - `agent_auto_callable=false` 或需要确认时，聊天智能体必须先取得用户确认；不允许绕过现有风险策略。
 - 同一个 `agent_tool_call` 重试创建工作流 100 次，只产生一个 root task 和一个 workflow run。
 - `agent_tool_call.task_id` 正确绑定 root task，聊天运行卡片链接到 `/agents/runs/:taskId`。
-- 工作流创建后 `agent_tool_call` 进入 `DELEGATED`，工作流终态再驱动它进入对应终态。
+- 工作流创建后 `agent_tool_call` 进入 `DELEGATED`；成功进入 `SUCCESS`，失败和超时进入 `FAILED`，取消进入 `CANCELLED` 并使用 `WORKFLOW_CANCELLED` 错误码。
 - 工作流处于等待用户、等待充值、成功、失败或取消时，聊天运行卡片收到对应状态。
 - agent-service 在工作流创建后及时返回，不因等待长任务而占住一次模型请求。
 - Agent run 先结束、workflow 后完成时，绑定 task 的 `DELEGATED` tool call 仍正确进入终态，不出现 `RUN_ALREADY_TERMINATED`。
@@ -938,6 +946,28 @@ flowchart LR
 - AI 漫剧成功、失败、取消、余额不足和用户确认链路均完成验收。
 - `/agents` 页面直接启动和 `/agent` 聊天调用两种入口均通过完整验收，并确认创建的是同一种 workflow run。
 - 部署回滚和向前修复迁移各演练一次。
+
+### 17.8 Task 12 门禁执行记录
+
+本阶段只完成代码接线和自动化测试第一阶段，以下状态不能解释为“已经可以生产部署”：
+
+- [x] `workflow.runtime.enabled`、`execution-enabled` 默认保持 `false`；新 `/agents` run 在任何 root/run/step/outbox/freeze 写入前执行准入判断。
+- [x] 同一个已存在的 `clientRequestId` 先返回原 run；kill switch 只阻止新建，不影响已有 run 查询和 in-flight 收敛。
+- [x] 旧 `TaskService.create/createForAgentTool` 的 `executionMode=WORKFLOW` 路径稳定拒绝，避免旧 TASK 冻结与新 WORKFLOW_STEP 冻结同时发生；内部 `createWorkflowRoot` 只供 Workflow Run Application Service 使用，不二次 gate。
+- [x] run 预算只读取 canonical workflow 绑定的固定发布版 `billing_policy_json.nodePolicies[*].maxCreditCost`；缺失、非法、节点不匹配或溢出全部 fail closed。
+- [x] 用户日额度按 `Asia/Shanghai` 自然日统计已绑定 `CAPTURED` 的实扣 usage，并加上尚未结算的 `RESERVED` 暴露；付费准入通过同一用户 `credit_accounts` 行锁串行化，直到首步预留与 run 一起提交，不同 requestId 不能并发绕过额度。
+- [x] confirmation node 在 `confirmation-enabled=false` 时拒绝新 run，不自动通过。
+- [x] 任一 LOST attempt 都使对账不一致并关闭新 run gate；不会自动释放或修改余额。
+- [x] H2 第一阶段测试包含默认关闭零副作用、100 次同键创建、100 次同 tool call 委派、100 次 callback、余额不足、取消/回调竞争和 LOST 注入。
+- [x] 失败 callback 和未领取 attempt 的安全恢复会立即创建下一 attempt；`auto-retry-enabled=false` 时失败 callback 直接收敛，不会暗中重试；RUNNING 超时仍进入 LOST，不自动重派。
+- [x] 取消映射统一为 `agent_tool_call CANCELLED + WORKFLOW_CANCELLED`，并保留真实 workflow status 和单次 `tool.finished` 事件。
+- [x] 已恢复 `088_workflow_tools_p0.sql` 的不可变内容；新增结构拆入 `089-092`，`093` 明确保留现有漫画工具的 `DIRECT` 旧链路。部署结构迁移不等于执行路径切换，切换必须在后续独立灰度步骤完成。
+- [x] 迁移脚本在未执行 `088` 前检查历史 task 幂等键、workflow root 重复和未记账的部分迁移痕迹，发现异常立即停止，不在流水线里自动删历史数据。
+- [ ] 尚未执行生产历史 `(user_id, idempotency_key)`、workflow run、usage/credit ledger 重复数据预检和治理。
+- [ ] 尚未在真实 MySQL 8 / InnoDB 上执行迁移、回滚与向前修复演练。
+- [ ] 尚未执行真实 MySQL 并发门禁；必须覆盖外层 `REPEATABLE READ` 与恢复事务 `READ COMMITTED`。H2 结果不能替代该证据。
+- [ ] 尚未完成 RabbitMQ 重投、DLQ、数据库短暂断连和供应商“已执行但响应丢失”的环境级故障注入。
+- [ ] shadow billing 的供应商成本保护和财务差异自动告警尚未接通；完成前禁止用 shadow 模式执行付费 provider，生产 runtime 保持关闭。
 
 ## 18. P1/P2 路线图
 

@@ -5,6 +5,7 @@ import com.aiminilab.aitoolmarket.agent.dto.AgentGraphCheckpointResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunEventResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentRunResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentToolCallResponse;
+import com.aiminilab.aitoolmarket.agent.dto.DelegatedWorkflowToolCallResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentWorkspaceMemoryItemResponse;
 import com.aiminilab.aitoolmarket.agent.dto.BindAgentToolCallTaskRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CompleteAgentRunRequest;
@@ -36,6 +37,7 @@ import com.aiminilab.aitoolmarket.agent.service.AgentRunService;
 import com.aiminilab.aitoolmarket.agent.service.AgentSkillBundleService;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentWorkspaceMemoryItemMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentWorkspaceService;
+import com.aiminilab.aitoolmarket.agent.service.AgentWorkflowDelegationService;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import java.time.LocalDateTime;
@@ -60,6 +62,7 @@ public class InternalAgentController {
     private final AgentFileService agentFileService;
     private final AgentWorkspaceMemoryItemMapper agentWorkspaceMemoryItemMapper;
     private final AgentAuditService agentAuditService;
+    private final AgentWorkflowDelegationService workflowDelegationService;
 
     public InternalAgentController(AgentRunService agentRunService,
                                    AgentSkillBundleService agentSkillBundleService,
@@ -67,7 +70,8 @@ public class InternalAgentController {
                                    AgentWorkspaceService agentWorkspaceService,
                                    AgentFileService agentFileService,
                                    AgentWorkspaceMemoryItemMapper agentWorkspaceMemoryItemMapper,
-                                   AgentAuditService agentAuditService) {
+                                   AgentAuditService agentAuditService,
+                                   AgentWorkflowDelegationService workflowDelegationService) {
         this.agentRunService = agentRunService;
         this.agentSkillBundleService = agentSkillBundleService;
         this.agentModelConfigService = agentModelConfigService;
@@ -75,6 +79,7 @@ public class InternalAgentController {
         this.agentFileService = agentFileService;
         this.agentWorkspaceMemoryItemMapper = agentWorkspaceMemoryItemMapper;
         this.agentAuditService = agentAuditService;
+        this.workflowDelegationService = workflowDelegationService;
     }
 
     @GetMapping("/runs/{runId}/context")
@@ -203,6 +208,11 @@ public class InternalAgentController {
     public ApiResponse<AgentToolCallResponse> bindToolCallTask(@PathVariable Long toolCallId,
                                                                @Valid @RequestBody BindAgentToolCallTaskRequest request) {
         return ApiResponse.success(agentRunService.bindToolCallTask(toolCallId, request));
+    }
+
+    @PostMapping("/tool-calls/{toolCallId}/delegate-workflow")
+    public ApiResponse<DelegatedWorkflowToolCallResponse> delegateWorkflow(@PathVariable Long toolCallId) {
+        return ApiResponse.success(workflowDelegationService.delegate(toolCallId));
     }
 
     @PostMapping("/tool-calls/{toolCallId}/complete")

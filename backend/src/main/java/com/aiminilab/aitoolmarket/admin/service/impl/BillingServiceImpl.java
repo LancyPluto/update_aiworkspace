@@ -14,6 +14,7 @@ import com.aiminilab.aitoolmarket.agent.mapper.VendorBalanceAdjustmentMapper;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.dao.DuplicateKeyException;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -104,18 +105,172 @@ public class BillingServiceImpl implements BillingService {
                             BigDecimal vendorCostAmount, BigDecimal markupRatio,
                             String outcome, String errorCode, String failureStage,
                             String providerErrorCode, String providerRequestId, Boolean providerCharged) {
+        recordUsage(sourceType, sourceId, userId, modelConfig, promptTokens, completionTokens,
+                billableUnits, chargedCredits, vendorCostAmount, "CNY", markupRatio, outcome,
+                errorCode, failureStage, providerErrorCode, providerRequestId, providerCharged);
+    }
+
+    @Override
+    @Transactional
+    public void recordUsage(String sourceType, Long sourceId, Long userId, AgentModelConfig modelConfig,
+                            Integer promptTokens, Integer completionTokens, Integer billableUnits, Integer chargedCredits,
+                            BigDecimal vendorCostAmount, String providerCostCurrency, BigDecimal markupRatio,
+                            String outcome, String errorCode, String failureStage,
+                            String providerErrorCode, String providerRequestId, Boolean providerCharged) {
+        recordUsageInternal(null, sourceType, sourceId, userId, modelConfig, promptTokens, completionTokens,
+                billableUnits, chargedCredits, vendorCostAmount, providerCostCurrency, markupRatio,
+                outcome, errorCode, failureStage,
+                providerErrorCode, providerRequestId, providerCharged);
+    }
+
+    @Override
+    @Transactional
+    public Long recordUsageOnce(String idempotencyKey, String sourceType, Long sourceId, Long userId,
+                                AgentModelConfig modelConfig, Integer promptTokens, Integer completionTokens,
+                                Integer billableUnits, Integer chargedCredits, BigDecimal vendorCostAmount,
+                                BigDecimal markupRatio) {
+        return recordUsageOnce(idempotencyKey, sourceType, sourceId, userId, modelConfig,
+                promptTokens, completionTokens, billableUnits, chargedCredits, vendorCostAmount,
+                markupRatio, "SUCCESS", null, null, null, null, true);
+    }
+
+    @Override
+    @Transactional
+    public Long recordUsageOnce(String idempotencyKey, String sourceType, Long sourceId, Long userId,
+                                AgentModelConfig modelConfig, Integer promptTokens, Integer completionTokens,
+                                Integer billableUnits, Integer chargedCredits, BigDecimal vendorCostAmount,
+                                BigDecimal markupRatio, String outcome, String errorCode, String failureStage,
+                                String providerErrorCode, String providerRequestId, Boolean providerCharged) {
+        return recordUsageOnce(idempotencyKey, sourceType, sourceId, userId, modelConfig,
+                promptTokens, completionTokens, billableUnits, chargedCredits, vendorCostAmount,
+                "CNY", markupRatio, outcome, errorCode, failureStage, providerErrorCode,
+                providerRequestId, providerCharged);
+    }
+
+    @Override
+    @Transactional
+    public Long recordUsageOnce(String idempotencyKey, String sourceType, Long sourceId, Long userId,
+                                AgentModelConfig modelConfig, Integer promptTokens, Integer completionTokens,
+                                Integer billableUnits, Integer chargedCredits, BigDecimal vendorCostAmount,
+                                String providerCostCurrency, BigDecimal markupRatio, String outcome,
+                                String errorCode, String failureStage, String providerErrorCode,
+                                String providerRequestId, Boolean providerCharged) {
+        if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 128) {
+            throw new IllegalArgumentException("A valid billing usage idempotency key is required");
+        }
+        BillingUsageLog existing = billingUsageLogMapper.selectByIdempotencyKey(idempotencyKey);
+        if (existing != null) {
+            validateUsageReplay(existing, sourceType, sourceId, userId, promptTokens, completionTokens,
+                    billableUnits, chargedCredits, vendorCostAmount, providerCostCurrency,
+                    outcome, errorCode, failureStage,
+                    providerErrorCode, providerRequestId, providerCharged);
+            return existing.getId();
+        }
+        try {
+            return recordUsageInternal(idempotencyKey, sourceType, sourceId, userId, modelConfig,
+                    promptTokens, completionTokens, billableUnits, chargedCredits, vendorCostAmount,
+                    providerCostCurrency, markupRatio, outcome, errorCode, failureStage, providerErrorCode,
+                    providerRequestId, providerCharged);
+        } catch (DuplicateKeyException exception) {
+            existing = billingUsageLogMapper.selectByIdempotencyKeyForUpdate(idempotencyKey);
+            if (existing == null) {
+                throw exception;
+            }
+            validateUsageReplay(existing, sourceType, sourceId, userId, promptTokens, completionTokens,
+                    billableUnits, chargedCredits, vendorCostAmount, providerCostCurrency,
+                    outcome, errorCode, failureStage,
+                    providerErrorCode, providerRequestId, providerCharged);
+            return existing.getId();
+        }
+    }
+
+    @Override
+    @Transactional
+    public boolean attachActualProviderAccounting(Long usageId,
+                                                  AgentModelConfig modelConfig,
+                                                  BigDecimal providerCostAmount,
+                                                  String providerCostCurrency,
+                                                  String providerRequestId) {
+        if (usageId == null || providerCostAmount == null || providerCostAmount.signum() < 0) {
+            throw new IllegalArgumentException("A non-negative actual provider cost is required");
+        }
+        BigDecimal normalizedCost = providerCostAmount.setScale(6, RoundingMode.HALF_UP);
+        if (normalizedCost.precision() - normalizedCost.scale() > 12) {
+            throw new IllegalArgumentException("Actual provider cost is too large");
+        }
+        String normalizedCurrency = normalizeProviderCostCurrency(providerCostCurrency);
+        String normalizedRequestId = cleanNullable(providerRequestId, 128);
+        BillingUsageLog existing = billingUsageLogMapper.selectByIdForUpdate(usageId);
+        if (existing == null) {
+            throw new IllegalStateException("Billing usage does not exist for provider accounting");
+        }
+        if (Boolean.TRUE.equals(existing.getProviderCharged())) {
+            validateAttachedProviderAccounting(existing, normalizedCost, normalizedCurrency, normalizedRequestId);
+            return false;
+        }
+        boolean unknown = zeroIfNull(existing.getCostAmount()).signum() == 0
+                && zeroIfNull(existing.getVendorCostAmount()).signum() == 0
+                && "UNKNOWN".equalsIgnoreCase(clean(existing.getProviderCostCurrency()));
+        if (!unknown) {
+            throw new IllegalStateException("Billing usage provider accounting is not attachable");
+        }
+        if (existing.getProviderRequestId() != null
+                && normalizedRequestId != null
+                && !existing.getProviderRequestId().equals(normalizedRequestId)) {
+            throw new IllegalStateException("Provider request id conflicts with existing billing usage");
+        }
+        int customerCredits = nonNegative(existing.getCustomerChargeCredits());
+        int marginCredits = Math.max(0, customerCredits - costToCredits(normalizedCost));
+        if (billingUsageLogMapper.attachActualProviderAccountingIfUnknown(
+                usageId,
+                normalizedCost,
+                normalizedCurrency,
+                normalizedRequestId,
+                marginCredits
+        ) != 1) {
+            BillingUsageLog replay = billingUsageLogMapper.selectByIdForUpdate(usageId);
+            validateAttachedProviderAccounting(replay, normalizedCost, normalizedCurrency, normalizedRequestId);
+            return false;
+        }
+        BillingUsageLog updated = billingUsageLogMapper.selectByIdForUpdate(usageId);
+        if ("CNY".equals(normalizedCurrency)) {
+            billingMetrics.recordLateProviderCost(
+                    updated.getSourceType(),
+                    updated.getOutcome(),
+                    updated.getProvider(),
+                    updated.getFailureStage(),
+                    updated.getErrorCode(),
+                    normalizedCost
+            );
+        }
+        deductManualVendorBalance(updated, modelConfig, normalizedCost);
+        return true;
+    }
+
+    private Long recordUsageInternal(String idempotencyKey,
+                                     String sourceType, Long sourceId, Long userId, AgentModelConfig modelConfig,
+                                     Integer promptTokens, Integer completionTokens, Integer billableUnits,
+                                     Integer chargedCredits, BigDecimal vendorCostAmount,
+                                     String providerCostCurrency, BigDecimal markupRatio,
+                                     String outcome, String errorCode, String failureStage,
+                                     String providerErrorCode, String providerRequestId, Boolean providerCharged) {
         int prompt = nonNegative(promptTokens);
         int completion = nonNegative(completionTokens);
         int units = nonNegative(billableUnits);
         int charged = nonNegative(chargedCredits);
+        boolean providerChargeDenied = Boolean.FALSE.equals(providerCharged);
+        boolean explicitCostReported = vendorCostAmount != null && !providerChargeDenied;
         BigDecimal explicitVendorCost = vendorCostAmount == null ? BigDecimal.ZERO : vendorCostAmount.max(BigDecimal.ZERO);
         boolean successOutcome = "SUCCESS".equalsIgnoreCase(cleanOutcome(outcome));
-        boolean vendorWasCharged = Boolean.TRUE.equals(providerCharged)
+        boolean vendorWasCharged = !providerChargeDenied
+                && (Boolean.TRUE.equals(providerCharged)
                 || successOutcome
-                || explicitVendorCost.compareTo(BigDecimal.ZERO) > 0;
+                || explicitVendorCost.compareTo(BigDecimal.ZERO) > 0);
         if (prompt == 0 && completion == 0 && units == 0 && charged == 0
-                && explicitVendorCost.compareTo(BigDecimal.ZERO) <= 0) {
-            return;
+                && explicitVendorCost.compareTo(BigDecimal.ZERO) <= 0
+                && successOutcome
+                && clean(providerRequestId) == null) {
+            return null;
         }
         BigDecimal inputPricePer1m = price(modelConfig == null ? null : modelConfig.getInputTokenPricePer1m());
         BigDecimal outputPricePer1m = price(modelConfig == null ? null : modelConfig.getOutputTokenPricePer1m());
@@ -126,6 +281,7 @@ public class BillingServiceImpl implements BillingService {
                 ? "TOKEN_PER_M"
                 : modelConfig.getBillingUnit();
         BillingUsageLog log = new BillingUsageLog();
+        log.setIdempotencyKey(idempotencyKey);
         log.setSourceType(sourceType);
         log.setSourceId(sourceId);
         log.setUserId(userId);
@@ -145,15 +301,16 @@ public class BillingServiceImpl implements BillingService {
         BigDecimal derivedCost = costPerMillion(prompt, inputPricePer1m)
                 .add(costPerMillion(completion, outputPricePer1m))
                 .add(perUnitCost(billingUnit, units, unitPrice));
-        BigDecimal vendorCost = explicitVendorCost.compareTo(BigDecimal.ZERO) > 0
-                ? explicitVendorCost
-                : derivedCost;
+        BigDecimal vendorCost = !vendorWasCharged
+                ? BigDecimal.ZERO
+                : (explicitCostReported ? explicitVendorCost : (successOutcome ? derivedCost : BigDecimal.ZERO));
         int costCredits = costToCredits(vendorCost);
         // charged_credits now reflects the real user-facing charge (incl. markup) so that revenue
         // and profitability can be aggregated directly; vendor cost stays in the *_cost columns.
         int finalCharge = charged > 0 ? charged : (successOutcome ? costCredits : 0);
         log.setCostAmount(vendorCost);
         log.setVendorCostAmount(vendorCost);
+        log.setProviderCostCurrency(normalizeProviderCostCurrency(providerCostCurrency));
         log.setChargedCredits(finalCharge);
         log.setCustomerChargeCredits(finalCharge);
         log.setMarginCredits(Math.max(0, finalCharge - costCredits));
@@ -170,6 +327,77 @@ public class BillingServiceImpl implements BillingService {
                 finalCharge, log.getFailureStage(), log.getErrorCode(), log.getModelName(), vendorWasCharged);
         if (vendorWasCharged) {
             deductManualVendorBalance(log, modelConfig, vendorCost);
+        }
+        return log.getId();
+    }
+
+    private void validateUsageReplay(BillingUsageLog existing,
+                                     String sourceType,
+                                     Long sourceId,
+                                     Long userId,
+                                     Integer promptTokens,
+                                     Integer completionTokens,
+                                     Integer billableUnits,
+                                     Integer chargedCredits,
+                                     BigDecimal vendorCostAmount,
+                                     String providerCostCurrency,
+                                     String outcome,
+                                     String errorCode,
+                                     String failureStage,
+                                     String providerErrorCode,
+                                     String providerRequestId,
+                                     Boolean providerCharged) {
+        boolean providerChargeDenied = Boolean.FALSE.equals(providerCharged);
+        BigDecimal expectedCost = providerChargeDenied || vendorCostAmount == null
+                ? BigDecimal.ZERO
+                : vendorCostAmount.max(BigDecimal.ZERO);
+        BigDecimal existingCost = existing.getVendorCostAmount() == null
+                ? BigDecimal.ZERO
+                : existing.getVendorCostAmount();
+        String expectedOutcome = cleanOutcome(outcome);
+        boolean expectedProviderCharged = !providerChargeDenied
+                && (Boolean.TRUE.equals(providerCharged)
+                || "SUCCESS".equals(expectedOutcome)
+                || expectedCost.compareTo(BigDecimal.ZERO) > 0);
+        boolean matches = java.util.Objects.equals(sourceType, existing.getSourceType())
+                && java.util.Objects.equals(sourceId, existing.getSourceId())
+                && java.util.Objects.equals(userId, existing.getUserId())
+                && nonNegative(promptTokens) == nonNegative(existing.getPromptTokens())
+                && nonNegative(completionTokens) == nonNegative(existing.getCompletionTokens())
+                && nonNegative(billableUnits) == nonNegative(existing.getBillableUnits())
+                && nonNegative(chargedCredits) == nonNegative(existing.getChargedCredits())
+                && expectedCost.compareTo(existingCost) == 0
+                && java.util.Objects.equals(
+                        normalizeProviderCostCurrency(providerCostCurrency),
+                        normalizeProviderCostCurrency(existing.getProviderCostCurrency())
+                )
+                && java.util.Objects.equals(expectedOutcome, existing.getOutcome())
+                && java.util.Objects.equals(cleanNullable(errorCode, 64), existing.getErrorCode())
+                && java.util.Objects.equals(cleanNullable(failureStage, 64), existing.getFailureStage())
+                && java.util.Objects.equals(cleanNullable(providerErrorCode, 128), existing.getProviderErrorCode())
+                && java.util.Objects.equals(cleanNullable(providerRequestId, 128), existing.getProviderRequestId())
+                && expectedProviderCharged == Boolean.TRUE.equals(existing.getProviderCharged());
+        if (!matches) {
+            throw new IllegalStateException("Billing usage idempotency key conflicts with an existing record");
+        }
+    }
+
+    private void validateAttachedProviderAccounting(BillingUsageLog existing,
+                                                    BigDecimal providerCostAmount,
+                                                    String providerCostCurrency,
+                                                    String providerRequestId) {
+        boolean matches = existing != null
+                && Boolean.TRUE.equals(existing.getProviderCharged())
+                && providerCostAmount.compareTo(zeroIfNull(existing.getVendorCostAmount())) == 0
+                && providerCostAmount.compareTo(zeroIfNull(existing.getCostAmount())) == 0
+                && java.util.Objects.equals(
+                        providerCostCurrency,
+                        normalizeProviderCostCurrency(existing.getProviderCostCurrency())
+                )
+                && (providerRequestId == null
+                || java.util.Objects.equals(providerRequestId, existing.getProviderRequestId()));
+        if (!matches) {
+            throw new IllegalStateException("Actual provider accounting conflicts with existing billing usage");
         }
     }
 
@@ -282,6 +510,15 @@ public class BillingServiceImpl implements BillingService {
             return null;
         }
         return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength);
+    }
+
+    private String normalizeProviderCostCurrency(String value) {
+        String normalized = clean(value);
+        normalized = normalized == null ? "CNY" : normalized.toUpperCase(java.util.Locale.ROOT);
+        if (!normalized.matches("[A-Z0-9]{3,8}")) {
+            throw new IllegalArgumentException("Provider cost currency must be a 3-8 character currency code");
+        }
+        return normalized;
     }
 
     private String defaultString(String value) {

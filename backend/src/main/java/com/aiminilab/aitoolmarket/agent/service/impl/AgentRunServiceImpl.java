@@ -120,7 +120,7 @@ public class AgentRunServiceImpl implements AgentRunService {
     private static final Set<String> CANCELLABLE_STATUSES = Set.of("CREATED", "RUNNING", "WAITING_USER_CONFIRMATION");
     private static final Set<String> CONFIRMABLE_STATUSES = Set.of("WAITING_USER_CONFIRMATION");
     private static final Set<String> TERMINAL_STATUSES = Set.of("SUCCESS", "FAILED", "CANCELLED", "TIMEOUT");
-    private static final Set<String> TOOL_CALL_TERMINAL_STATUSES = Set.of("SUCCESS", "FAILED");
+    private static final Set<String> TOOL_CALL_TERMINAL_STATUSES = Set.of("SUCCESS", "FAILED", "CANCELLED");
     private final Map<Long, CopyOnWriteArrayList<SseEmitter>> eventStreams = new ConcurrentHashMap<>();
 
     private final AgentSessionMapper agentSessionMapper;
@@ -1084,7 +1084,10 @@ public class AgentRunServiceImpl implements AgentRunService {
             return AgentToolCallResponse.from(findToolCall(toolCallId));
         }
         LocalDateTime now = LocalDateTime.now();
-        agentToolCallMapper.markSuccess(toolCallId, toJson(request.resultJson()), now);
+        int updated = agentToolCallMapper.markSuccess(toolCallId, toJson(request.resultJson()), now);
+        if (updated == 0) {
+            return AgentToolCallResponse.from(findToolCall(toolCallId));
+        }
         appendEventInternal(
                 call.getRunId(),
                 call.getUserId(),
@@ -1101,12 +1104,15 @@ public class AgentRunServiceImpl implements AgentRunService {
     @Transactional
     public AgentToolCallResponse failToolCall(Long toolCallId, FailAgentToolCallRequest request) {
         AgentToolCall call = findToolCall(toolCallId);
-        if (TOOL_CALL_TERMINAL_STATUSES.contains(call.getStatus())) {
+        if (!"RUNNING".equals(call.getStatus())) {
             return AgentToolCallResponse.from(call);
         }
         LocalDateTime now = LocalDateTime.now();
         String errorMessage = errorMessagePreview(request.errorMessage());
-        agentToolCallMapper.markFailed(toolCallId, request.errorCode(), errorMessage, now);
+        int updated = agentToolCallMapper.markFailed(toolCallId, request.errorCode(), errorMessage, now);
+        if (updated == 0) {
+            return AgentToolCallResponse.from(findToolCall(toolCallId));
+        }
         appendEventInternal(
                 call.getRunId(),
                 call.getUserId(),
@@ -1223,9 +1229,12 @@ public class AgentRunServiceImpl implements AgentRunService {
         String limitedErrorMessage = errorMessagePreview(errorMessage);
         agentToolCallMapper.findByRunId(runId)
                 .stream()
-                .filter(call -> !TOOL_CALL_TERMINAL_STATUSES.contains(call.getStatus()))
+                .filter(call -> "RUNNING".equals(call.getStatus()))
                 .forEach(call -> {
-                    agentToolCallMapper.markFailed(call.getId(), errorCode, limitedErrorMessage, now);
+                    int updated = agentToolCallMapper.markFailed(call.getId(), errorCode, limitedErrorMessage, now);
+                    if (updated == 0) {
+                        return;
+                    }
                     appendEventInternal(
                             runId,
                             userId,

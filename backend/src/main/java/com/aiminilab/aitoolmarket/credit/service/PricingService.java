@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.credit.service;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.credit.dto.PricingQuote;
 import com.aiminilab.aitoolmarket.credit.dto.PricingUsage;
+import com.aiminilab.aitoolmarket.credit.dto.PricingPolicySnapshot;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -23,6 +24,11 @@ public interface PricingService {
      */
     PricingQuote computeQuote(AiTool tool, AgentModelConfig modelConfig, JsonNode params,
                               PricingUsage usage, int fallbackCredits);
+
+    PricingPolicySnapshot snapshot(AiTool tool, AgentModelConfig modelConfig);
+
+    PricingQuote computeQuote(PricingPolicySnapshot snapshot, AgentModelConfig modelConfig,
+                              JsonNode params, PricingUsage usage, int fallbackCredits);
 
     /**
      * Token-only quote for the Agent run path (no tool/params), markup resolved by model scope.

@@ -36,8 +36,8 @@ class OpenAIImagesTimeoutError(OpenAIImagesError):
     pass
 
 
-class OpenAIImagesRetryableServerError(OpenAIImagesError):
-    """5xx gateway responses that are safe to retry within the same task."""
+class OpenAIImagesRequestNotSentError(OpenAIImagesError):
+    """The connection was not established, so the provider did not receive the request."""
 
 
 class OpenAIImagesClient:
@@ -62,7 +62,6 @@ class OpenAIImagesClient:
             endpoint_value,
             edit_endpoint_value,
         )
-        self.ssl_eof_retries = self._resolve_ssl_eof_retries()
         self.connection_retries = self._resolve_connection_retries()
         self.retry_backoff_seconds = _as_float(self.extra_auth.get("retryBackoffSeconds"), 2.0)
         self.retry_backoff_max_seconds = _as_float(self.extra_auth.get("retryBackoffMaxSeconds"), 30.0)
@@ -402,7 +401,6 @@ class OpenAIImagesClient:
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.base_url}{_ensure_leading_slash(path)}"
-        ssl_budget = self.ssl_eof_retries
         conn_budget = self.connection_retries
         conn_retry_index = 0
         attempt = 0
@@ -410,50 +408,14 @@ class OpenAIImagesClient:
             attempt += 1
             try:
                 return self._post_once(url, payload)
-            except SSLError as exc:
-                if not _is_ssl_eof_error(exc) or ssl_budget <= 0:
-                    raise OpenAIImagesError(
-                        "openai images SSL connection failed before an HTTP response was received. "
-                        "Check the gateway URL, local requests/urllib3 versions, proxy/VPN, and TLS interception. "
-                        f"detail={exc}"
-                    ) from exc
-                ssl_budget -= 1
-                LOGGER.warning(
-                    "openai images transport retry scheduled reason=ssl_eof attempt=%s sslRemaining=%s url=%s",
-                    attempt,
-                    ssl_budget,
-                    _redact_url(url),
-                )
-                time.sleep(min(2.0, float(attempt)))
-            except (RequestsConnectionError, ChunkedEncodingError) as exc:
-                if self._is_non_retryable_response_read_error(exc):
-                    raise OpenAIImagesError(
-                        "openai images response ended before the image result could be read; "
-                        "not retrying this non-idempotent image request to avoid duplicate upstream billing. "
-                        f"detail={exc}"
-                    ) from exc
+            except OpenAIImagesRequestNotSentError as exc:
                 if conn_budget <= 0:
-                    raise OpenAIImagesError(f"openai images request failed: {exc}") from exc
+                    raise
                 conn_budget -= 1
                 conn_retry_index += 1
                 backoff = self._compute_backoff(conn_retry_index)
                 LOGGER.warning(
-                    "openai images transport retry scheduled reason=%s attempt=%s retriesRemaining=%s backoff=%.1fs url=%s",
-                    exc,
-                    attempt + 1,
-                    conn_budget,
-                    backoff,
-                    _redact_url(url),
-                )
-                time.sleep(backoff)
-            except OpenAIImagesRetryableServerError as exc:
-                if conn_budget <= 0:
-                    raise OpenAIImagesError(f"openai images request failed: {exc}") from exc
-                conn_budget -= 1
-                conn_retry_index += 1
-                backoff = self._compute_backoff(conn_retry_index)
-                LOGGER.warning(
-                    "openai images transport retry scheduled reason=%s attempt=%s retriesRemaining=%s backoff=%.1fs url=%s",
+                    "openai images connect retry scheduled reason=%s attempt=%s retriesRemaining=%s backoff=%.1fs url=%s",
                     exc,
                     attempt + 1,
                     conn_budget,
@@ -479,15 +441,7 @@ class OpenAIImagesClient:
     ) -> dict[str, Any]:
         """Reference edits default to requests (same TLS stack as text-to-image). SDK is opt-in."""
         if _as_bool(self.extra_auth.get("preferSdkEdit"), False):
-            try:
-                return self._edit_via_openai_sdk(form_fields, image_files, source_model=source_model)
-            except OpenAIImagesError as exc:
-                if not _should_fallback_to_requests_edit(str(exc)):
-                    raise
-                LOGGER.warning(
-                    "openai images sdk edit failed, falling back to requests multipart: %s",
-                    exc,
-                )
+            return self._edit_via_openai_sdk(form_fields, image_files, source_model=source_model)
         return self._post_multipart(endpoint, form_fields, image_files, source_model=source_model)
 
     def _create_httpx_client(self) -> Any:
@@ -549,7 +503,6 @@ class OpenAIImagesClient:
     ) -> dict[str, Any]:
         candidates = self._edit_model_candidates(source_model)
         last_error: OpenAIImagesError | None = None
-        connection_failed = False
 
         for index, model_name in enumerate(candidates):
             attempt_fields = {**form_fields, "model": model_name}
@@ -566,7 +519,7 @@ class OpenAIImagesClient:
             if output_format:
                 edit_kwargs["output_format"] = output_format
 
-            ssl_attempts = self.ssl_eof_retries + 1
+            ssl_attempts = 1
             for ssl_attempt in range(1, ssl_attempts + 1):
                 http_client = self._create_httpx_client()
                 try:
@@ -592,19 +545,9 @@ class OpenAIImagesClient:
                 except APITimeoutError as exc:
                     raise OpenAIImagesTimeoutError(f"openai images edit timed out: {exc}") from exc
                 except APIConnectionError as exc:
-                    connection_failed = True
-                    if _is_ssl_eof_error(exc) and ssl_attempt < ssl_attempts:
-                        LOGGER.warning(
-                            "openai images sdk SSL handshake failed, retrying edit model=%s attempt=%s/%s",
-                            model_name,
-                            ssl_attempt,
-                            ssl_attempts,
-                        )
-                        time.sleep(min(2, ssl_attempt))
-                        continue
                     last_error = OpenAIImagesError(
-                        "openai images SSL connection failed before an HTTP response was received. "
-                        "Check gateway URL, proxy/VPN, and local TLS interception. "
+                        "openai images connection failed without a provider response; "
+                        "not retrying this non-idempotent edit request. "
                         f"detail={exc}"
                     )
                     break
@@ -626,17 +569,6 @@ class OpenAIImagesClient:
 
             if last_error and not _is_missing_model_error(str(last_error)):
                 break
-
-        if connection_failed and not _as_bool(self.extra_auth.get("disableRequestsEditFallback"), False):
-            LOGGER.warning(
-                "openai images sdk connection failed, falling back to requests multipart transport"
-            )
-            return self._post_multipart(
-                self.edit_endpoint_path,
-                form_fields,
-                image_files,
-                source_model=source_model,
-            )
 
         if last_error:
             raise last_error
@@ -680,7 +612,7 @@ class OpenAIImagesClient:
         for index, model_name in enumerate(candidates):
             attempt_fields = {**form_fields, "model": model_name}
             try:
-                return self._post_multipart_with_ssl_retries(url, attempt_fields, image_files)
+                return self._post_multipart_with_connect_retries(url, attempt_fields, image_files)
             except OpenAIImagesError as exc:
                 last_error = exc
                 if _is_missing_model_error(str(exc)) and index < len(candidates) - 1:
@@ -695,13 +627,12 @@ class OpenAIImagesClient:
             raise last_error
         raise OpenAIImagesError("openai images request failed")
 
-    def _post_multipart_with_ssl_retries(
+    def _post_multipart_with_connect_retries(
         self,
         url: str,
         form_fields: dict[str, str],
         image_files: list[tuple[str, bytes, str]],
     ) -> dict[str, Any]:
-        ssl_budget = self.ssl_eof_retries
         conn_budget = self.connection_retries
         conn_retry_index = 0
         attempt = 0
@@ -716,50 +647,14 @@ class OpenAIImagesClient:
             )
             try:
                 return self._post_multipart_once(url, form_fields, image_files)
-            except SSLError as exc:
-                if not _is_ssl_eof_error(exc) or ssl_budget <= 0:
-                    raise OpenAIImagesError(
-                        "openai images SSL connection failed before an HTTP response was received. "
-                        "Check the gateway URL, local requests/urllib3 versions, proxy/VPN, and TLS interception. "
-                        f"detail={exc}"
-                    ) from exc
-                ssl_budget -= 1
-                LOGGER.warning(
-                    "openai images transport retry scheduled reason=ssl_eof attempt=%s sslRemaining=%s url=%s",
-                    attempt + 1,
-                    ssl_budget,
-                    _redact_url(url),
-                )
-                time.sleep(min(2.0, float(attempt)))
-            except (RequestsConnectionError, ChunkedEncodingError) as exc:
-                if self._is_non_retryable_response_read_error(exc):
-                    raise OpenAIImagesError(
-                        "openai images edit response ended before the image result could be read; "
-                        "not retrying this non-idempotent image request to avoid duplicate upstream billing. "
-                        f"detail={exc}"
-                    ) from exc
+            except OpenAIImagesRequestNotSentError as exc:
                 if conn_budget <= 0:
-                    raise OpenAIImagesError(f"openai images edit request failed: {exc}") from exc
+                    raise
                 conn_budget -= 1
                 conn_retry_index += 1
                 backoff = self._compute_backoff(conn_retry_index)
                 LOGGER.warning(
-                    "openai images transport retry scheduled reason=%s attempt=%s retriesRemaining=%s backoff=%.1fs url=%s",
-                    exc,
-                    attempt + 1,
-                    conn_budget,
-                    backoff,
-                    _redact_url(url),
-                )
-                time.sleep(backoff)
-            except OpenAIImagesRetryableServerError as exc:
-                if conn_budget <= 0:
-                    raise OpenAIImagesError(f"openai images edit request failed: {exc}") from exc
-                conn_budget -= 1
-                conn_retry_index += 1
-                backoff = self._compute_backoff(conn_retry_index)
-                LOGGER.warning(
-                    "openai images transport retry scheduled reason=%s attempt=%s retriesRemaining=%s backoff=%.1fs url=%s",
+                    "openai images connect retry scheduled reason=%s attempt=%s retriesRemaining=%s backoff=%.1fs url=%s",
                     exc,
                     attempt + 1,
                     conn_budget,
@@ -804,8 +699,13 @@ class OpenAIImagesClient:
                 elapsed=elapsed,
                 transport="multipart",
                 diagnostics=diagnostics,
-                will_retry=500 <= response.status_code < 600 and self._should_retry_http_status(response.status_code),
+                will_retry=False,
             )
+        except ConnectTimeout as exc:
+            elapsed = time.perf_counter() - started_at
+            raise OpenAIImagesRequestNotSentError(
+                f"openai images connect timed out before request was sent: elapsed={elapsed:.3f}s"
+            ) from exc
         except Timeout as exc:
             elapsed = time.perf_counter() - started_at
             timeout_kind = _timeout_kind(exc)
@@ -833,8 +733,12 @@ class OpenAIImagesClient:
                 "disable trustEnv or configure proxyUrl explicitly. "
                 f"detail={exc}"
             ) from exc
-        except (RequestsConnectionError, ChunkedEncodingError):
-            raise
+        except (RequestsConnectionError, ChunkedEncodingError) as exc:
+            raise OpenAIImagesError(
+                "openai images connection failed after the request may have been sent; "
+                "not retrying this non-idempotent image request to avoid duplicate upstream billing. "
+                f"detail={exc}"
+            ) from exc
         except RequestException as exc:
             raise OpenAIImagesError(f"openai images request failed: {exc}") from exc
 
@@ -842,10 +746,6 @@ class OpenAIImagesClient:
             response.raise_for_status()
         except requests.HTTPError as exc:
             if 500 <= response.status_code < 600:
-                if self._should_retry_http_status(response.status_code):
-                    raise OpenAIImagesRetryableServerError(
-                        f"openai images gateway error status={response.status_code} elapsed={elapsed:.3f}s; body={response.text}"
-                    ) from exc
                 raise OpenAIImagesError(
                     _format_openai_images_http_error(response.status_code, response.text, form_fields.get("model"))
                 ) from exc
@@ -884,8 +784,13 @@ class OpenAIImagesClient:
                 elapsed=elapsed,
                 transport="json",
                 diagnostics=diagnostics,
-                will_retry=500 <= response.status_code < 600 and self._should_retry_http_status(response.status_code),
+                will_retry=False,
             )
+        except ConnectTimeout as exc:
+            elapsed = time.perf_counter() - started_at
+            raise OpenAIImagesRequestNotSentError(
+                f"openai images connect timed out before request was sent: elapsed={elapsed:.3f}s"
+            ) from exc
         except Timeout as exc:
             elapsed = time.perf_counter() - started_at
             timeout_kind = _timeout_kind(exc)
@@ -913,8 +818,12 @@ class OpenAIImagesClient:
                 "disable trustEnv or configure proxyUrl explicitly. "
                 f"detail={exc}"
             ) from exc
-        except (RequestsConnectionError, ChunkedEncodingError):
-            raise
+        except (RequestsConnectionError, ChunkedEncodingError) as exc:
+            raise OpenAIImagesError(
+                "openai images connection failed after the request may have been sent; "
+                "not retrying this non-idempotent image request to avoid duplicate upstream billing. "
+                f"detail={exc}"
+            ) from exc
         except RequestException as exc:
             raise OpenAIImagesError(f"openai images request failed: {exc}") from exc
 
@@ -922,10 +831,6 @@ class OpenAIImagesClient:
             response.raise_for_status()
         except requests.HTTPError as exc:
             if 500 <= response.status_code < 600:
-                if self._should_retry_http_status(response.status_code):
-                    raise OpenAIImagesRetryableServerError(
-                        f"openai images request failed: status={response.status_code}, body={response.text}"
-                    ) from exc
                 raise OpenAIImagesError(
                     f"openai images request failed: status={response.status_code}, body={response.text}"
                 ) from exc
@@ -1025,12 +930,6 @@ class OpenAIImagesClient:
         )
         return (max(1.0, connect_timeout), max(600.0, read_timeout))
 
-    def _resolve_ssl_eof_retries(self) -> int:
-        value = self.extra_auth.get("sslEofRetries")
-        if isinstance(value, bool):
-            return 1 if value else 0
-        return min(2, _as_int(value))
-
     def _resolve_connection_retries(self) -> int:
         value = self.extra_auth.get("connectionRetries")
         if isinstance(value, bool):
@@ -1047,27 +946,6 @@ class OpenAIImagesClient:
         if configured is None:
             return 0
         return max(0, _as_int(configured))
-
-    def _no_retry_http_statuses(self) -> set[int]:
-        raw = self.extra_auth.get("noRetryHttpStatuses")
-        if not isinstance(raw, list):
-            return set()
-        statuses: set[int] = set()
-        for item in raw:
-            code = _as_int(item)
-            if code > 0:
-                statuses.add(code)
-        return statuses
-
-    def _should_retry_http_status(self, status_code: int) -> bool:
-        if status_code in self._no_retry_http_statuses():
-            return False
-        return 500 <= status_code < 600
-
-    def _is_non_retryable_response_read_error(self, exc: BaseException) -> bool:
-        if _as_bool(self.extra_auth.get("retryIncompleteResponses"), False):
-            return False
-        return _is_response_incomplete_error(exc)
 
     def _resolve_quality(self, quality: str | None, *, required: bool = False) -> str:
         force_quality = str(self.extra_auth.get("forceQuality") or "").strip()
@@ -1270,16 +1148,6 @@ def _is_missing_model_error(message: str) -> bool:
     )
 
 
-def _should_fallback_to_requests_edit(message: str) -> bool:
-    lowered = message.lower()
-    return (
-        "ssl connection failed" in lowered
-        or "connection error" in lowered
-        or "eof occurred in violation of protocol" in lowered
-        or _is_missing_model_error(lowered)
-    )
-
-
 def _normalize_size(value: str) -> str:
     size = (value or "1024x1024").strip()
     if ":" in size:
@@ -1352,20 +1220,6 @@ def _response_format_for_log(payload: dict[str, Any]) -> str:
         if isinstance(value, str):
             return value
     return ""
-
-
-def _is_ssl_eof_error(exc: BaseException) -> bool:
-    message = str(exc).lower()
-    return "eof occurred in violation of protocol" in message or "ssleoferror" in message
-
-
-def _is_response_incomplete_error(exc: BaseException) -> bool:
-    message = str(exc).lower()
-    return (
-        "incompleteread" in message
-        or "response ended prematurely" in message
-        or "connection broken" in message and "read" in message
-    )
 
 
 def _timeout_kind(exc: Timeout) -> str:

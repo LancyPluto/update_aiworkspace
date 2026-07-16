@@ -1,14 +1,21 @@
 package com.aiminilab.aitoolmarket.tool;
 
 import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
+import com.aiminilab.aitoolmarket.tool.entity.ToolWorkflowVersion;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolWorkflowVersionMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -46,6 +53,225 @@ class AdminWorkflowApiTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Autowired
+    private ToolWorkflowVersionMapper versionMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Test
+    void staleDraftRevisionReturnsConflictWithoutOverwritingLatestDraft() throws Exception {
+        String adminToken = login();
+        Long toolId = createTool(adminToken, "wf_draft_revision_tool");
+
+        MvcResult created = saveWorkflow(adminToken, toolId, INVALID_NODES, "[]", 0L)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.draftRevision").value(1))
+                .andReturn();
+        long revision = responseData(created).path("draftRevision").asLong();
+
+        saveWorkflow(adminToken, toolId, VALID_NODES, VALID_EDGES, revision)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.draftRevision").value(2));
+
+        saveWorkflow(adminToken, toolId, INVALID_NODES, "[]", revision)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_CONFLICT"))
+                .andExpect(jsonPath("$.data.latestDraftRevision").value(2));
+
+        MvcResult latest = mockMvc.perform(get("/api/admin/v1/tools/{toolId}/workflow", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.draftRevision").value(2))
+                .andReturn();
+        assertThat(objectMapper.readTree(responseData(latest).path("nodesJson").asText()))
+                .isEqualTo(objectMapper.readTree(VALID_NODES));
+    }
+
+    @Test
+    void publishCreatesImmutableVersionAndLaterDraftSaveKeepsPublishedSnapshot() throws Exception {
+        String adminToken = login();
+        Long toolId = createTool(adminToken, "wf_immutable_publish_tool");
+
+        MvcResult saved = saveWorkflow(adminToken, toolId, VALID_NODES, VALID_EDGES, 0L)
+                .andExpect(status().isOk())
+                .andReturn();
+        long revision = responseData(saved).path("draftRevision").asLong();
+
+        MvcResult published = mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.publishedVersionId").isNumber())
+                .andExpect(jsonPath("$.data.executionEnabled").value(true))
+                .andExpect(jsonPath("$.data.hasUnpublishedChanges").value(false))
+                .andReturn();
+        long versionId = responseData(published).path("publishedVersionId").asLong();
+
+        saveWorkflow(adminToken, toolId, INVALID_NODES, "[]", revision)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.publishedVersionId").value(versionId))
+                .andExpect(jsonPath("$.data.hasUnpublishedChanges").value(true));
+
+        ToolWorkflowVersion immutableVersion = versionMapper.selectById(versionId);
+        assertThat(objectMapper.readTree(immutableVersion.getNodesJson()))
+                .isEqualTo(objectMapper.readTree(VALID_NODES));
+        assertThat(objectMapper.readTree(immutableVersion.getEdgesJson()))
+                .isEqualTo(objectMapper.readTree(VALID_EDGES));
+        assertThat(versionMapper.countByWorkflowId(immutableVersion.getWorkflowId())).isEqualTo(1);
+    }
+
+    @Test
+    void republishSnapshotsNewPricingWithoutChangingOldVersion() throws Exception {
+        String adminToken = login();
+        Long toolId = createTool(adminToken, "wf_pricing_snapshot_tool");
+        long modelId = jdbcTemplate.queryForObject(
+                "SELECT id FROM agent_model_configs WHERE enabled = 1 AND is_deleted = 0 ORDER BY id LIMIT 1",
+                Long.class
+        );
+        var originalModel = jdbcTemplate.queryForMap("""
+                SELECT billing_unit, unit_price,
+                       input_token_price_per_1k, output_token_price_per_1k,
+                       input_token_price_per_1m, output_token_price_per_1m
+                FROM agent_model_configs WHERE id = ?
+                """, modelId);
+        String nodes = """
+                [
+                  {"id":"start","data":{"nodeDefType":"start","title":"Start"}},
+                  {"id":"worker","data":{"nodeDefType":"llm_text","title":"Worker",
+                    "parameters":{"modelConfigId":%d,"maxCreditCost":100,"maxProviderCostCny":1.00,"duration":5}}},
+                  {"id":"output","data":{"nodeDefType":"video_output","title":"Output"}}
+                ]
+                """.formatted(modelId);
+        String edges = """
+                [
+                  {"id":"e1","source":"start","target":"worker"},
+                  {"id":"e2","source":"worker","target":"output"}
+                ]
+                """;
+        try {
+            jdbcTemplate.update("""
+                    UPDATE agent_model_configs
+                    SET billing_unit = 'PER_CALL', unit_price = 0.10
+                    WHERE id = ?
+                    """, modelId);
+            jdbcTemplate.update("""
+                    INSERT INTO pricing_margins(
+                      scope_type, scope_ref, markup_ratio, min_credits, enabled, remark
+                    ) VALUES ('MODEL', ?, 1.5, 0, 1, 'version one')
+                    """, modelId);
+            jdbcTemplate.update("""
+                    INSERT INTO pricing_rules(
+                      scope_type, scope_ref, param_key, rule_type, match_op, match_value,
+                      factor, extra_credits, priority, enabled, remark
+                    ) VALUES ('TOOL', ?, 'duration', 'MULTIPLIER', 'VALUE', NULL,
+                              2.0, 0, 1, 1, 'version one')
+                    """, toolId);
+
+            MvcResult saved = saveWorkflow(adminToken, toolId, nodes, edges, 0L)
+                    .andExpect(status().isOk())
+                    .andReturn();
+            long revision = responseData(saved).path("draftRevision").asLong();
+            MvcResult firstPublished = mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
+                            .header("Authorization", "Bearer " + adminToken))
+                    .andExpect(status().isOk())
+                    .andReturn();
+            long firstVersionId = responseData(firstPublished).path("publishedVersionId").asLong();
+            JsonNode firstPolicy = billingPolicy(firstVersionId).path("nodePolicies").path("worker");
+
+            jdbcTemplate.update("""
+                    UPDATE agent_model_configs SET unit_price = 0.90 WHERE id = ?
+                    """, modelId);
+            jdbcTemplate.update("""
+                    UPDATE pricing_margins SET markup_ratio = 3.0
+                    WHERE scope_type = 'MODEL' AND scope_ref = ?
+                    """, modelId);
+            jdbcTemplate.update("""
+                    UPDATE pricing_rules SET factor = 4.0
+                    WHERE scope_type = 'TOOL' AND scope_ref = ?
+                    """, toolId);
+            saveWorkflow(adminToken, toolId, nodes, edges, revision)
+                    .andExpect(status().isOk());
+            MvcResult secondPublished = mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
+                            .header("Authorization", "Bearer " + adminToken))
+                    .andExpect(status().isOk())
+                    .andReturn();
+            long secondVersionId = responseData(secondPublished).path("publishedVersionId").asLong();
+            JsonNode secondPolicy = billingPolicy(secondVersionId).path("nodePolicies").path("worker");
+
+            assertThat(firstVersionId).isNotEqualTo(secondVersionId);
+            assertThat(firstPolicy.path("modelPricingSnapshot").path("unitPrice").decimalValue())
+                    .isEqualByComparingTo("0.10");
+            assertThat(firstPolicy.path("pricingPolicy").path("markupRatio").decimalValue())
+                    .isEqualByComparingTo("1.5");
+            assertThat(firstPolicy.path("pricingPolicy").path("rules").path(0).path("factor").decimalValue())
+                    .isEqualByComparingTo("2.0");
+            assertThat(firstPolicy.path("staticParams").path("duration").asInt()).isEqualTo(5);
+            assertThat(firstPolicy.path("maxProviderCostCny").decimalValue())
+                    .isEqualByComparingTo("1.000000");
+            assertThat(secondPolicy.path("modelPricingSnapshot").path("unitPrice").decimalValue())
+                    .isEqualByComparingTo("0.90");
+            assertThat(secondPolicy.path("pricingPolicy").path("markupRatio").decimalValue())
+                    .isEqualByComparingTo("3.0");
+            assertThat(secondPolicy.path("pricingPolicy").path("rules").path(0).path("factor").decimalValue())
+                    .isEqualByComparingTo("4.0");
+            assertThat(secondPolicy.path("maxProviderCostCny").decimalValue())
+                    .isEqualByComparingTo("1.000000");
+            assertThat(billingPolicy(firstVersionId)
+                    .path("nodePolicies").path("worker")
+                    .path("modelPricingSnapshot").path("unitPrice").decimalValue())
+                    .isEqualByComparingTo("0.10");
+        } finally {
+            jdbcTemplate.update("DELETE FROM pricing_rules WHERE scope_type = 'TOOL' AND scope_ref = ?", toolId);
+            jdbcTemplate.update("DELETE FROM pricing_margins WHERE scope_type = 'MODEL' AND scope_ref = ?", modelId);
+            jdbcTemplate.update("""
+                    UPDATE agent_model_configs
+                    SET billing_unit = ?, unit_price = ?,
+                        input_token_price_per_1k = ?, output_token_price_per_1k = ?,
+                        input_token_price_per_1m = ?, output_token_price_per_1m = ?
+                    WHERE id = ?
+                    """,
+                    originalModel.get("billing_unit"), originalModel.get("unit_price"),
+                    originalModel.get("input_token_price_per_1k"), originalModel.get("output_token_price_per_1k"),
+                    originalModel.get("input_token_price_per_1m"), originalModel.get("output_token_price_per_1m"),
+                    modelId);
+        }
+    }
+
+    @Test
+    void publishRejectsPaidWorkerWithoutProviderCostCap() throws Exception {
+        String adminToken = login();
+        Long toolId = createTool(adminToken, "wf_missing_provider_cost_cap");
+        long modelId = jdbcTemplate.queryForObject(
+                "SELECT id FROM agent_model_configs WHERE enabled = 1 AND is_deleted = 0 ORDER BY id LIMIT 1",
+                Long.class
+        );
+        String nodes = """
+                [
+                  {"id":"start","data":{"nodeDefType":"start","title":"Start"}},
+                  {"id":"worker","data":{"nodeDefType":"llm_text","title":"Worker",
+                    "parameters":{"modelConfigId":%d,"maxCreditCost":100}}},
+                  {"id":"output","data":{"nodeDefType":"video_output","title":"Output"}}
+                ]
+                """.formatted(modelId);
+        String edges = """
+                [
+                  {"id":"e1","source":"start","target":"worker"},
+                  {"id":"e2","source":"worker","target":"output"}
+                ]
+                """;
+        saveWorkflow(adminToken, toolId, nodes, edges, 0L)
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
+                .andExpect(jsonPath("$.message").value(containsString("provider cost cap")));
+    }
 
     @Test
     void publishRequiresValidDagAndSaveKeepsPublishedStatus() throws Exception {
@@ -100,20 +326,75 @@ class AdminWorkflowApiTest {
                 .andExpect(jsonPath("$.data[0].version").exists());
     }
 
+    @Test
+    void publishRejectsWorkerWithInactiveModelConfig() throws Exception {
+        String adminToken = login();
+        Long toolId = createTool(adminToken, "wf_inactive_model_tool");
+        String nodes = """
+                [
+                  {"id":"start","data":{"nodeDefType":"start","title":"Start"}},
+                  {"id":"worker","data":{"nodeDefType":"llm_text","title":"Worker",
+                    "parameters":{"modelConfigId":999999,"maxCreditCost":100,"maxProviderCostCny":1.00}}},
+                  {"id":"output","data":{"nodeDefType":"video_output","title":"Output"}}
+                ]
+                """;
+        String edges = """
+                [
+                  {"id":"e1","source":"start","target":"worker"},
+                  {"id":"e2","source":"worker","target":"output"}
+                ]
+                """;
+        saveWorkflow(adminToken, toolId, nodes, edges, 0L)
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
+                .andExpect(jsonPath("$.message").value(containsString("inactive model configuration")));
+    }
+
     private void saveWorkflow(String adminToken, Long toolId, String nodesJson, String edgesJson) throws Exception {
+        long revision = currentDraftRevision(adminToken, toolId);
+        saveWorkflow(adminToken, toolId, nodesJson, edgesJson, revision)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+    }
+
+    private org.springframework.test.web.servlet.ResultActions saveWorkflow(String adminToken,
+                                                                             Long toolId,
+                                                                             String nodesJson,
+                                                                             String edgesJson,
+                                                                             long expectedDraftRevision) throws Exception {
         String body = """
                 {
                   "workflowName": "default",
                   "nodesJson": %s,
-                  "edgesJson": %s
+                  "edgesJson": %s,
+                  "expectedDraftRevision": %d
                 }
-                """.formatted(jsonString(nodesJson), jsonString(edgesJson));
-        mockMvc.perform(put("/api/admin/v1/tools/{toolId}/workflow", toolId)
+                """.formatted(jsonString(nodesJson), jsonString(edgesJson), expectedDraftRevision);
+        return mockMvc.perform(put("/api/admin/v1/tools/{toolId}/workflow", toolId)
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(body))
+                        .content(body));
+    }
+
+    private long currentDraftRevision(String adminToken, Long toolId) throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/admin/v1/tools/{toolId}/workflow", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value("SUCCESS"));
+                .andReturn();
+        JsonNode data = responseData(result);
+        return data.isMissingNode() || data.isNull() ? 0L : data.path("draftRevision").asLong(0L);
+    }
+
+    private JsonNode responseData(MvcResult result) throws Exception {
+        return objectMapper.readTree(result.getResponse().getContentAsByteArray()).path("data");
+    }
+
+    private JsonNode billingPolicy(long versionId) throws Exception {
+        return objectMapper.readTree(versionMapper.selectById(versionId).getBillingPolicyJson());
     }
 
     private static String jsonString(String raw) {

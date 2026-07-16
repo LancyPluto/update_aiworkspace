@@ -1339,14 +1339,21 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         if (isBlank(nodesJson) || isBlank(edgesJson)) {
             return;
         }
-        workflowService.saveWorkflow(toolId, new UpsertWorkflowRequest(
+        WorkflowResponse current = workflowService.getWorkflow(toolId);
+        WorkflowResponse saved = workflowService.saveWorkflow(toolId, new UpsertWorkflowRequest(
                 workflow.workflowName(),
                 nodesJson,
                 edgesJson,
                 workflow.resolvedGroupsJson(),
                 workflow.resolvedConfigJson(),
-                workflow.status()
+                workflow.status(),
+                current == null ? 0L : current.draftRevision()
         ), operatorId);
+        if ("PUBLISHED".equalsIgnoreCase(workflow.status())) {
+            workflowService.publish(saved.id(), operatorId);
+        } else if (current != null && current.executionEnabled()) {
+            workflowService.updateStatus(saved.id(), "DRAFT", operatorId);
+        }
         counter.workflows++;
     }
 

@@ -15,14 +15,20 @@ import com.aiminilab.aitoolmarket.auth.security.InternalRequestSignatureVerifier
 import com.aiminilab.aitoolmarket.auth.security.TokenDenylistService;
 import com.aiminilab.aitoolmarket.auth.service.HumanCaptchaService;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
+import com.aiminilab.aitoolmarket.workflow.config.WorkflowRuntimeGate;
+import com.aiminilab.aitoolmarket.workflow.service.WorkflowRecoveryScheduler;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.mockito.Mockito;
+import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
@@ -57,7 +63,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.sql.init.mode=always",
         "spring.sql.init.schema-locations=classpath:schema-test.sql",
         "app.agent.max-active-runs-per-user=100",
-        "app.agent.max-messages-per-minute=100"
+        "app.agent.max-messages-per-minute=100",
+        "workflow.runtime.enabled=true",
+        "workflow.runtime.execution-enabled=true",
+        "workflow.runtime.canary-percentage=100",
+        "spring.task.scheduling.enabled=false"
 })
 class AgentApiTest {
 
@@ -100,11 +110,30 @@ class AgentApiTest {
     @Autowired
     private AgentMessageMapper agentMessageMapper;
 
-    @Autowired
+    @SpyBean
     private AgentToolCallMapper agentToolCallMapper;
 
     @Autowired
     private AgentToolPreferenceMapper agentToolPreferenceMapper;
+
+    @Autowired
+    private WorkflowRuntimeGate workflowRuntimeGate;
+
+    @MockBean
+    private WorkflowRecoveryScheduler workflowRecoveryScheduler;
+
+    @Autowired
+    private MeterRegistry meterRegistry;
+
+    @Autowired
+    private SqlSessionTemplate sqlSessionTemplate;
+
+    @BeforeEach
+    void openWorkflowGateForIntegrationFixtures() {
+        workflowRuntimeGate.markReconciliationHealthyAfterFullScan(
+                workflowRuntimeGate.reconciliationFailureGeneration()
+        );
+    }
 
     @Test
     void userCanCreateSessionSendMessageAndListEvents() throws Exception {
@@ -848,6 +877,233 @@ class AgentApiTest {
         assertThat(events.get(1).getEventText())
                 .hasSize(4000)
                 .endsWith("... [truncated]");
+    }
+
+    @Test
+    void delegatedToolCallCannotBeOverwrittenByOrdinaryFailureEndpoint() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_delegated_failure_fence_user");
+        String token = login("agent_delegated_failure_fence_user");
+        Long sessionId = createSession(token, "Delegated Failure Fence");
+        Long runId = sendMessage(token, sessionId, "Start a workflow tool.").runId();
+        ensureOnlineTool("xiaohongshu_copywriting");
+        String createToolBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "toolCode", "xiaohongshu_copywriting",
+                "argumentsJson", java.util.Map.of("topic", "workflow")
+        ));
+        String startedResponse = mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/tool-calls", runId), "POST",
+                        "/api/internal/v1/agent/runs/%d/tool-calls".formatted(runId), createToolBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createToolBody))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        long toolCallId = objectMapper.readTree(startedResponse).path("data").path("id").asLong();
+        jdbcTemplate.update("UPDATE agent_tool_calls SET status = 'DELEGATED', task_id = ? WHERE id = ?", 9001L, toolCallId);
+        Integer finishedEventsBefore = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM agent_run_events WHERE run_id = ? AND event_type = 'tool.finished'",
+                Integer.class,
+                runId
+        );
+        String failToolBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "errorCode", "AMBIGUOUS_DELEGATION",
+                "errorMessage", "The delegate response was lost"
+        ));
+
+        mockMvc.perform(signed(post("/api/internal/v1/agent/tool-calls/{toolCallId}/fail", toolCallId), "POST",
+                        "/api/internal/v1/agent/tool-calls/%d/fail".formatted(toolCallId), failToolBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(failToolBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("DELEGATED"));
+
+        var toolCall = agentToolCallMapper.findById(toolCallId).orElseThrow();
+        assertThat(toolCall.getStatus()).isEqualTo("DELEGATED");
+        assertThat(toolCall.getErrorCode()).isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM agent_run_events WHERE run_id = ? AND event_type = 'tool.finished'",
+                Integer.class,
+                runId
+        )).isEqualTo(finishedEventsBefore);
+    }
+
+    @Test
+    void directRunningToolCallCompletesSuccessfully() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_direct_complete_user");
+        String token = login("agent_direct_complete_user");
+        Long sessionId = createSession(token, "Direct Complete");
+        Long runId = sendMessage(token, sessionId, "Run a direct tool.").runId();
+        ensureOnlineTool("xiaohongshu_copywriting");
+        String createToolBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "toolCode", "xiaohongshu_copywriting",
+                "argumentsJson", java.util.Map.of("topic", "direct")
+        ));
+        String startedResponse = mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/tool-calls", runId), "POST",
+                        "/api/internal/v1/agent/runs/%d/tool-calls".formatted(runId), createToolBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createToolBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("RUNNING"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        long toolCallId = objectMapper.readTree(startedResponse).path("data").path("id").asLong();
+        double successesBefore = toolOutcomeCount("xiaohongshu_copywriting", "SUCCESS");
+        String completeToolBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "resultJson", java.util.Map.of("postId", "direct-draft")
+        ));
+
+        mockMvc.perform(signed(post("/api/internal/v1/agent/tool-calls/{toolCallId}/complete", toolCallId), "POST",
+                        "/api/internal/v1/agent/tool-calls/%d/complete".formatted(toolCallId), completeToolBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(completeToolBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("SUCCESS"));
+
+        assertThat(agentToolCallMapper.findById(toolCallId).orElseThrow().getStatus()).isEqualTo("SUCCESS");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM agent_run_events WHERE run_id = ? AND event_type = 'tool.finished'",
+                Integer.class,
+                runId
+        )).isEqualTo(1);
+        assertThat(toolOutcomeCount("xiaohongshu_copywriting", "SUCCESS")).isEqualTo(successesBefore + 1.0d);
+    }
+
+    @Test
+    void directCompletionLosingCasToCancellationHasNoCompletionSideEffects() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_direct_complete_cancel_race_user");
+        String token = login("agent_direct_complete_cancel_race_user");
+        Long sessionId = createSession(token, "Direct Complete Cancel Race");
+        Long runId = sendMessage(token, sessionId, "Race a direct tool completion with cancellation.").runId();
+        ensureOnlineTool("xiaohongshu_copywriting");
+        String createToolBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "toolCode", "xiaohongshu_copywriting",
+                "argumentsJson", java.util.Map.of("topic", "cancelled")
+        ));
+        String startedResponse = mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/tool-calls", runId), "POST",
+                        "/api/internal/v1/agent/runs/%d/tool-calls".formatted(runId), createToolBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createToolBody))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        long toolCallId = objectMapper.readTree(startedResponse).path("data").path("id").asLong();
+        int finishedEventsBefore = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM agent_run_events WHERE run_id = ? AND event_type = 'tool.finished'",
+                Integer.class,
+                runId
+        );
+        double successesBefore = toolOutcomeCount("xiaohongshu_copywriting", "SUCCESS");
+        AgentToolCallMapper realMapper = sqlSessionTemplate.getMapper(AgentToolCallMapper.class);
+        Mockito.doAnswer(invocation -> {
+                    jdbcTemplate.update("UPDATE agent_tool_calls SET status = 'CANCELLED' WHERE id = ?", toolCallId);
+                    return realMapper.markSuccess(
+                            invocation.getArgument(0),
+                            invocation.getArgument(1),
+                            invocation.getArgument(2)
+                    );
+                })
+                .when(agentToolCallMapper)
+                .markSuccess(Mockito.eq(toolCallId), Mockito.anyString(), Mockito.any());
+        String completeToolBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "resultJson", java.util.Map.of("postId", "must-not-persist")
+        ));
+
+        mockMvc.perform(signed(post("/api/internal/v1/agent/tool-calls/{toolCallId}/complete", toolCallId), "POST",
+                        "/api/internal/v1/agent/tool-calls/%d/complete".formatted(toolCallId), completeToolBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(completeToolBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+
+        String failToolBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "errorCode", "LATE_FAILURE",
+                "errorMessage", "Must not overwrite cancellation"
+        ));
+        mockMvc.perform(signed(post("/api/internal/v1/agent/tool-calls/{toolCallId}/fail", toolCallId), "POST",
+                        "/api/internal/v1/agent/tool-calls/%d/fail".formatted(toolCallId), failToolBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(failToolBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+        mockMvc.perform(post("/api/v1/agent/runs/{runId}/cancel", runId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+
+        var cancelledCall = agentToolCallMapper.findById(toolCallId).orElseThrow();
+        assertThat(cancelledCall.getStatus()).isEqualTo("CANCELLED");
+        assertThat(cancelledCall.getResultJson()).isNull();
+        assertThat(cancelledCall.getErrorCode()).isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM agent_run_events WHERE run_id = ? AND event_type = 'tool.finished'",
+                Integer.class,
+                runId
+        )).isEqualTo(finishedEventsBefore);
+        assertThat(toolOutcomeCount("xiaohongshu_copywriting", "SUCCESS")).isEqualTo(successesBefore);
+    }
+
+    @Test
+    void workflowToolCallDelegationUsesEmptyBodyAndIsIdempotent() throws Exception {
+        mockExternalAuthDependencies();
+        String toolCode = "agent_internal_workflow_delegate";
+        ensureWorkflowTool(toolCode);
+        register("agent_internal_workflow_delegate_user");
+        String token = login("agent_internal_workflow_delegate_user");
+        Long sessionId = createSession(token, "Workflow Delegate");
+        Long runId = sendMessage(token, sessionId, "Create a city-night comic.").runId();
+        String createToolBody = objectMapper.writeValueAsString(java.util.Map.of(
+                "toolCode", toolCode,
+                "argumentsJson", java.util.Map.of("prompt", "city night")
+        ));
+        String startedResponse = mockMvc.perform(signed(post("/api/internal/v1/agent/runs/{runId}/tool-calls", runId), "POST",
+                        "/api/internal/v1/agent/runs/%d/tool-calls".formatted(runId), createToolBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createToolBody))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        long toolCallId = objectMapper.readTree(startedResponse).path("data").path("id").asLong();
+        String delegatePath = "/api/internal/v1/agent/tool-calls/%d/delegate-workflow".formatted(toolCallId);
+
+        String firstResponse = mockMvc.perform(signed(post(delegatePath), "POST", delegatePath, ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.taskId").isNumber())
+                .andExpect(jsonPath("$.data.runId").isNumber())
+                .andExpect(jsonPath("$.data.runUrl").isString())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String repeatedResponse = mockMvc.perform(signed(post(delegatePath), "POST", delegatePath, ""))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode first = objectMapper.readTree(firstResponse).path("data");
+        JsonNode repeated = objectMapper.readTree(repeatedResponse).path("data");
+        long rootTaskId = first.path("taskId").asLong();
+        assertThat(repeated.path("taskId").asLong()).isEqualTo(rootTaskId);
+        assertThat(repeated.path("runId").asLong()).isEqualTo(first.path("runId").asLong());
+        assertThat(first.path("runUrl").asText()).isEqualTo("/agents/runs/" + rootTaskId);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workflow_runs WHERE user_id = (SELECT user_id FROM agent_runs WHERE id = ?) AND client_request_id = ?",
+                Integer.class,
+                runId,
+                "agent-run-%d-tool-call-%d".formatted(runId, toolCallId)
+        )).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT launch_source FROM workflow_runs WHERE root_task_id = ?",
+                String.class,
+                rootTaskId
+        )).isEqualTo("AGENT_CHAT");
+        assertThat(agentToolCallMapper.findById(toolCallId).orElseThrow().getTaskId()).isEqualTo(rootTaskId);
+        assertThat(agentToolCallMapper.findById(toolCallId).orElseThrow().getStatus()).isEqualTo("DELEGATED");
     }
 
     @Test
@@ -2040,6 +2296,72 @@ class AgentApiTest {
                 """,
                 toolId,
                 toolCode
+        );
+    }
+
+    private double toolOutcomeCount(String toolCode, String status) {
+        var counter = meterRegistry.find("ai_agent_tool_call_total")
+                .tags("tool_code", toolCode, "status", status)
+                .counter();
+        return counter == null ? 0.0d : counter.count();
+    }
+
+    private void ensureWorkflowTool(String toolCode) {
+        ensureOnlineTool(toolCode);
+        Long toolId = jdbcTemplate.queryForObject(
+                "SELECT id FROM ai_tools WHERE tool_code = ?",
+                Long.class,
+                toolCode
+        );
+        jdbcTemplate.update("""
+                UPDATE ai_tools
+                SET execution_mode = 'WORKFLOW', billing_mode = 'WORKFLOW_STEP',
+                    agent_surface_enabled = 1, minimum_required_credits = 0, estimated_credit_cost = 0
+                WHERE id = ?
+                """, toolId);
+        String nodes = """
+                [
+                  {"id":"start","data":{"nodeDefType":"start","title":"Start"}},
+                  {"id":"review","data":{"nodeDefType":"user_input","title":"Review","parameters":{"fieldKey":"review","stageLabel":"Review"}}},
+                  {"id":"output","data":{"nodeDefType":"video_output","title":"Output"}}
+                ]
+                """;
+        String edges = """
+                [
+                  {"id":"edge-1","source":"start","target":"review"},
+                  {"id":"edge-2","source":"review","target":"output"}
+                ]
+                """;
+        jdbcTemplate.update("""
+                INSERT INTO tool_workflows(
+                  tool_id, workflow_name, nodes_json, edges_json, groups_json, config_json,
+                  version, status, draft_revision, execution_enabled, created_at, updated_at
+                ) VALUES (?, 'default', ?, ?, NULL, '{}', 1, 'PUBLISHED', 1, 1,
+                          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, toolId, nodes, edges);
+        Long workflowId = jdbcTemplate.queryForObject(
+                "SELECT id FROM tool_workflows WHERE tool_id = ? AND workflow_name = 'default'",
+                Long.class,
+                toolId
+        );
+        jdbcTemplate.update("""
+                INSERT INTO tool_workflow_versions(
+                  workflow_id, version, nodes_json, edges_json, groups_json, config_json,
+                  canonical_dsl_json, dsl_version, node_registry_version, dsl_hash,
+                  input_schema_snapshot_json, dependency_manifest_json, billing_policy_json,
+                  risk_policy_json, source_draft_revision, published_at, published_by, created_at
+                ) VALUES (?, 1, ?, ?, NULL, '{}', '{}', '1', 'p0', ?, '{}', '{}',
+                          '{"mode":"WORKFLOW_STEP","nodePolicies":{}}', '{}', 1, CURRENT_TIMESTAMP, 1, CURRENT_TIMESTAMP)
+                """, workflowId, nodes, edges, "agent-workflow-" + workflowId);
+        Long versionId = jdbcTemplate.queryForObject(
+                "SELECT id FROM tool_workflow_versions WHERE workflow_id = ? AND version = 1",
+                Long.class,
+                workflowId
+        );
+        jdbcTemplate.update(
+                "UPDATE tool_workflows SET published_version_id = ? WHERE id = ?",
+                versionId,
+                workflowId
         );
     }
 

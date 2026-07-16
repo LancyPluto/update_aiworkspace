@@ -55,6 +55,59 @@ for column in checksum_sha256 execution_ms; do
   fi
 done
 
+workflow_p0_logged="$(mysql_q "$MYSQL_DB" -N -e "SELECT COUNT(*) FROM _sql_migration_log WHERE name='088_workflow_tools_p0.sql';" | tail -1)"
+has_ai_tasks="$(mysql_q "$MYSQL_DB" -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${MYSQL_DB}' AND table_name='ai_tasks';" | tail -1)"
+has_workflow_runs="$(mysql_q "$MYSQL_DB" -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${MYSQL_DB}' AND table_name='workflow_runs';" | tail -1)"
+
+if [ "$workflow_p0_logged" = "0" ] && [ "$has_ai_tasks" = "1" ] && [ "$has_workflow_runs" = "1" ]; then
+  duplicate_task_keys="$(mysql_q "$MYSQL_DB" -N -e "
+    SELECT COUNT(*) FROM (
+      SELECT 1
+      FROM ai_tasks
+      WHERE idempotency_key IS NOT NULL
+      GROUP BY user_id, idempotency_key
+      HAVING COUNT(*) > 1
+      LIMIT 1
+    ) duplicate_keys;
+  " | tail -1)"
+  duplicate_root_tasks="$(mysql_q "$MYSQL_DB" -N -e "
+    SELECT COUNT(*) FROM (
+      SELECT 1
+      FROM workflow_runs
+      WHERE root_task_id IS NOT NULL
+      GROUP BY root_task_id
+      HAVING COUNT(*) > 1
+      LIMIT 1
+    ) duplicate_roots;
+  " | tail -1)"
+  partial_workflow_p0="$(mysql_q "$MYSQL_DB" -N -e "
+    SELECT
+      (SELECT COUNT(*) FROM information_schema.statistics
+       WHERE table_schema='${MYSQL_DB}' AND table_name='ai_tasks'
+         AND index_name='uk_ai_tasks_user_idempotency')
+      +
+      (SELECT COUNT(*) FROM information_schema.columns
+       WHERE table_schema='${MYSQL_DB}' AND table_name='workflow_runs'
+         AND column_name='workflow_version_id')
+      +
+      (SELECT COUNT(*) FROM information_schema.tables
+       WHERE table_schema='${MYSQL_DB}' AND table_name='workflow_step_attempts');
+  " | tail -1)"
+
+  if [ "$duplicate_task_keys" != "0" ] || [ "$duplicate_root_tasks" != "0" ]; then
+    echo "ERROR: workflow P0 migration preflight found historical idempotency duplicates" >&2
+    echo "  duplicate ai_tasks(user_id,idempotency_key)=$duplicate_task_keys" >&2
+    echo "  duplicate workflow_runs(root_task_id)=$duplicate_root_tasks" >&2
+    echo "Resolve duplicates and rerun the zero-duplicate preflight before deployment." >&2
+    exit 1
+  fi
+  if [ "$partial_workflow_p0" != "0" ]; then
+    echo "ERROR: workflow P0 migration appears partially applied but is not recorded" >&2
+    echo "Repair or roll forward the schema explicitly before rerunning migrations." >&2
+    exit 1
+  fi
+fi
+
 echo "==> Verify and apply SQL files from $SQL_DIR"
 applied=0
 skipped=0
@@ -88,6 +141,51 @@ for file in "${migration_files[@]}"; do
     has_users="$(mysql_q "$MYSQL_DB" -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${MYSQL_DB}' AND table_name='users';" | tail -1)"
     if [ "$has_users" = "1" ]; then
       echo "  ADOPT $name (schema already initialized)"
+      mysql_q "$MYSQL_DB" -e "INSERT INTO _sql_migration_log(name, checksum_sha256, execution_ms) VALUES ('${name}', '${checksum}', 0);"
+      skipped=$((skipped + 1))
+      continue
+    fi
+  fi
+
+  if [ "$name" = "074_vendor_account_console_cookie.sql" ]; then
+    compatible_cookie_columns="$(mysql_q "$MYSQL_DB" -N -e "
+      SELECT COUNT(*)
+      FROM information_schema.columns
+      WHERE table_schema='${MYSQL_DB}'
+        AND table_name='model_vendor_accounts'
+        AND (
+          (column_name='console_cookie'
+            AND data_type='text'
+            AND is_nullable='YES')
+          OR
+          (column_name='console_cookie_status'
+            AND data_type='varchar'
+            AND character_maximum_length=20
+            AND is_nullable='YES'
+            AND column_default='UNKNOWN')
+        );
+    " | tail -1)"
+    if [ "$compatible_cookie_columns" = "2" ]; then
+      echo "  ADOPT $name (compatible columns already supplied by historical 044)"
+      mysql_q "$MYSQL_DB" -e "INSERT INTO _sql_migration_log(name, checksum_sha256, execution_ms) VALUES ('${name}', '${checksum}', 0);"
+      skipped=$((skipped + 1))
+      continue
+    fi
+  fi
+
+  if [ "$name" = "084_configurable_image_token_estimates.sql" ]; then
+    compatible_image_estimate_columns="$(mysql_q "$MYSQL_DB" -N -e "
+      SELECT COUNT(*)
+      FROM information_schema.columns
+      WHERE table_schema='${MYSQL_DB}'
+        AND table_name='pricing_margins'
+        AND column_name IN ('image_estimate_input_tokens', 'image_estimate_output_tokens')
+        AND data_type='int'
+        AND is_nullable='YES'
+        AND column_default IS NULL;
+    " | tail -1)"
+    if [ "$compatible_image_estimate_columns" = "2" ]; then
+      echo "  ADOPT $name (compatible columns already supplied by historical 061)"
       mysql_q "$MYSQL_DB" -e "INSERT INTO _sql_migration_log(name, checksum_sha256, execution_ms) VALUES ('${name}', '${checksum}', 0);"
       skipped=$((skipped + 1))
       continue

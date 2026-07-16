@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -22,11 +23,16 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(BusinessException.class)
-    @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public ApiResponse<Object> handleBusinessException(BusinessException exception) {
+    public ResponseEntity<ApiResponse<Object>> handleBusinessException(BusinessException exception) {
         log.warn("Business exception: code={}, traceId={}, message={}",
                 exception.getErrorCode(), traceId(), exception.getMessage());
-        return ApiResponse.fail(exception.getErrorCode(), exception.getMessage(), exception.getData());
+        HttpStatus status = switch (exception.getErrorCode()) {
+            case IDEMPOTENCY_CONFLICT -> HttpStatus.CONFLICT;
+            case WORKFLOW_RUNTIME_BLOCKED -> HttpStatus.SERVICE_UNAVAILABLE;
+            default -> HttpStatus.BAD_REQUEST;
+        };
+        return ResponseEntity.status(status)
+                .body(ApiResponse.fail(exception.getErrorCode(), exception.getMessage(), exception.getData()));
     }
 
     @ExceptionHandler({MethodArgumentNotValidException.class, ConstraintViolationException.class})

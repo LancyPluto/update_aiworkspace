@@ -58,6 +58,10 @@ CREATE TABLE ai_tools (
   model_config_id BIGINT,
   template_id BIGINT,
   execution_handler VARCHAR(32),
+  execution_mode VARCHAR(16) NOT NULL DEFAULT 'DIRECT',
+  billing_mode VARCHAR(32) NOT NULL DEFAULT 'FIXED',
+  agent_surface_enabled TINYINT NOT NULL DEFAULT 0,
+  minimum_required_credits INT NOT NULL DEFAULT 0,
   created_by BIGINT,
   updated_by BIGINT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -159,11 +163,14 @@ CREATE TABLE ai_tasks (
   claimed_at DATETIME,
   lease_renewed_at DATETIME,
   execution_attempt INT NOT NULL DEFAULT 0,
+  provider_checkpoint_json TEXT,
+  provider_checkpoint_version INT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   queued_at DATETIME,
   started_at DATETIME,
   finished_at DATETIME,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT uk_ai_tasks_user_idempotency UNIQUE (user_id, idempotency_key)
 );
 
 CREATE TABLE ai_result_resources (
@@ -219,6 +226,8 @@ CREATE TABLE credit_logs (
   account_id BIGINT NOT NULL,
   task_id BIGINT,
   agent_run_id BIGINT,
+  source_type VARCHAR(32),
+  source_ref BIGINT,
   log_type VARCHAR(32) NOT NULL,
   amount INT NOT NULL DEFAULT 0,
   frozen_amount INT NOT NULL DEFAULT 0,
@@ -813,6 +822,7 @@ CREATE TABLE model_provider_metadata (
 
 CREATE TABLE billing_usage_logs (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  idempotency_key VARCHAR(128),
   source_type VARCHAR(32) NOT NULL,
   source_id BIGINT NOT NULL,
   user_id BIGINT NOT NULL,
@@ -831,6 +841,7 @@ CREATE TABLE billing_usage_logs (
   unit_price DECIMAL(18,8) NOT NULL DEFAULT 0,
   cost_amount DECIMAL(18,6) NOT NULL DEFAULT 0,
   vendor_cost_amount DECIMAL(18,6) NOT NULL DEFAULT 0,
+  provider_cost_currency VARCHAR(8) NOT NULL DEFAULT 'CNY',
   charged_credits INT NOT NULL DEFAULT 0,
   customer_charge_credits INT NOT NULL DEFAULT 0,
   margin_credits INT NOT NULL DEFAULT 0,
@@ -841,8 +852,13 @@ CREATE TABLE billing_usage_logs (
   provider_error_code VARCHAR(128),
   provider_request_id VARCHAR(128),
   provider_charged TINYINT NOT NULL DEFAULT 0,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_billing_usage_idempotency UNIQUE (idempotency_key)
 );
+CREATE INDEX idx_billing_usage_user_source_created
+  ON billing_usage_logs(user_id, source_type, created_at);
+CREATE INDEX idx_billing_usage_workflow_provider_cost
+  ON billing_usage_logs(source_type, provider_charged, created_at, provider_cost_currency);
 
 CREATE TABLE vendor_balance_adjustments (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -1042,6 +1058,9 @@ CREATE TABLE tool_workflows (
   config_json CLOB,
   version INT NOT NULL DEFAULT 1,
   status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+  draft_revision BIGINT NOT NULL DEFAULT 0,
+  published_version_id BIGINT,
+  execution_enabled TINYINT NOT NULL DEFAULT 0,
   created_by BIGINT,
   updated_by BIGINT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1057,10 +1076,140 @@ CREATE TABLE tool_workflow_versions (
   edges_json CLOB NOT NULL,
   groups_json CLOB,
   config_json CLOB,
+  canonical_dsl_json CLOB,
+  dsl_version VARCHAR(32),
+  node_registry_version VARCHAR(32),
+  dsl_hash CHAR(64),
+  input_schema_snapshot_json CLOB,
+  dependency_manifest_json CLOB,
+  billing_policy_json CLOB,
+  risk_policy_json CLOB,
+  source_draft_revision BIGINT,
+  published_at TIMESTAMP,
+  published_by BIGINT,
   snapshot_label VARCHAR(255),
   created_by BIGINT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT uk_workflow_version UNIQUE (workflow_id, version)
+);
+
+CREATE TABLE workflow_runs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  tool_id BIGINT NOT NULL,
+  workflow_id BIGINT NOT NULL,
+  workflow_version INT NOT NULL DEFAULT 1,
+  workflow_version_id BIGINT,
+  root_task_id BIGINT NOT NULL,
+  launch_source VARCHAR(32) NOT NULL DEFAULT 'LEGACY_TASK',
+  client_request_id VARCHAR(128),
+  status VARCHAR(32) NOT NULL DEFAULT 'RUNNING',
+  revision BIGINT NOT NULL DEFAULT 0,
+  cancellation_generation BIGINT NOT NULL DEFAULT 0,
+  input_json CLOB,
+  context_json CLOB,
+  current_node_id VARCHAR(64),
+  current_step_id BIGINT,
+  billing_status VARCHAR(32) NOT NULL DEFAULT 'CLEAR',
+  provider_cost_reserved_cny DECIMAL(18,6) NOT NULL DEFAULT 0,
+  error_message VARCHAR(2000),
+  started_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  finished_at TIMESTAMP,
+  CONSTRAINT uk_workflow_run_root_task UNIQUE (root_task_id),
+  CONSTRAINT uk_workflow_run_user_request UNIQUE (user_id, client_request_id)
+);
+
+CREATE TABLE workflow_provider_cost_budget_days (
+  budget_date DATE PRIMARY KEY,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE workflow_run_steps (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  run_id BIGINT NOT NULL,
+  node_id VARCHAR(64) NOT NULL,
+  sequence_no INT NOT NULL DEFAULT 0,
+  node_def_type VARCHAR(64) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+  revision BIGINT NOT NULL DEFAULT 0,
+  task_id BIGINT,
+  attempt INT NOT NULL DEFAULT 0,
+  attempt_count INT NOT NULL DEFAULT 0,
+  current_attempt_id BIGINT,
+  max_attempts INT NOT NULL DEFAULT 2,
+  input_json CLOB,
+  output_json CLOB,
+  error_message VARCHAR(2000),
+  started_at TIMESTAMP,
+  finished_at TIMESTAMP,
+  CONSTRAINT uk_workflow_step_run_node UNIQUE (run_id, node_id)
+);
+
+CREATE TABLE workflow_step_attempts (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  step_id BIGINT NOT NULL,
+  attempt_no INT NOT NULL,
+  cancellation_generation BIGINT NOT NULL DEFAULT 0,
+  child_task_id BIGINT,
+  status VARCHAR(32) NOT NULL DEFAULT 'CREATED',
+  claim_token VARCHAR(128) NOT NULL,
+  provider_code VARCHAR(64),
+  provider_request_id VARCHAR(128),
+  input_json CLOB,
+  output_json CLOB,
+  error_code VARCHAR(64),
+  error_message VARCHAR(2000),
+  lease_expires_at TIMESTAMP,
+  started_at TIMESTAMP,
+  finished_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_workflow_attempt_step_no UNIQUE (step_id, attempt_no),
+  CONSTRAINT uk_workflow_attempt_child_task UNIQUE (child_task_id),
+  CONSTRAINT uk_workflow_attempt_claim_token UNIQUE (claim_token),
+  CONSTRAINT uk_workflow_attempt_provider_request UNIQUE (provider_code, provider_request_id)
+);
+
+CREATE TABLE workflow_step_charges (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  run_id BIGINT NOT NULL,
+  step_id BIGINT NOT NULL,
+  attempt_id BIGINT,
+  user_id BIGINT NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'RESERVED',
+  reserved_credits INT NOT NULL,
+  charged_credits INT NOT NULL DEFAULT 0,
+  provider_cost DECIMAL(18,6),
+  provider_cost_currency VARCHAR(8),
+  idempotency_key VARCHAR(128) NOT NULL,
+  credit_log_id BIGINT,
+  billing_usage_id BIGINT,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_workflow_charge_attempt UNIQUE (attempt_id),
+  CONSTRAINT uk_workflow_charge_idempotency UNIQUE (idempotency_key)
+);
+CREATE INDEX idx_workflow_charge_billing_usage
+  ON workflow_step_charges(billing_usage_id);
+
+CREATE TABLE workflow_confirmations (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  run_id BIGINT NOT NULL,
+  step_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  token_hash CHAR(64) NOT NULL,
+  parameter_hash CHAR(64) NOT NULL,
+  allowed_actions_json CLOB NOT NULL,
+  decision VARCHAR(32),
+  feedback_json CLOB,
+  status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+  expires_at TIMESTAMP NOT NULL,
+  consumed_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_workflow_confirmation_token UNIQUE (token_hash)
 );
 
 CREATE TABLE IF NOT EXISTS user_generation_subjects (

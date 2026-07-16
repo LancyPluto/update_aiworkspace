@@ -45,4 +45,10 @@ class TaskStateMachineTest {
                 .hasMessageContaining("FAILED")
                 .hasMessageContaining("SUCCESS");
     }
+
+    @Test
+    void awaitingFundsCanResumeOrCancel() {
+        assertThat(TaskStateMachine.canTransition(TaskStatus.AWAITING_FUNDS.name(), TaskStatus.PROCESSING.name())).isTrue();
+        assertThat(TaskStateMachine.canTransition(TaskStatus.AWAITING_FUNDS.name(), TaskStatus.CANCELLED.name())).isTrue();
+    }
 }

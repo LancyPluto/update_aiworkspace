@@ -292,6 +292,104 @@ class WorkerInternalApiTest {
     }
 
     @Test
+    void providerCheckpointUsesClaimTokenAndVersionCompareAndSet() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long toolId = createTool(adminToken, "worker_provider_checkpoint_tool", 1);
+        publishTool(adminToken, toolId);
+        String userToken = login("/api/v1/auth/login", "user1");
+        Long taskId = createTask(userToken, "worker_provider_checkpoint_tool");
+
+        String claimBody = """
+                {
+                  "workerId": "worker-a",
+                  "claimToken": "checkpoint-claim-a"
+                }
+                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/claim", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/claim".formatted(taskId), claimBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(claimBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.claimed").value(true));
+
+        String checkpointBody = """
+                {
+                  "expectedVersion": 0,
+                  "claimToken": "checkpoint-claim-a",
+                  "checkpoint": {
+                    "kind": "WORKFLOW_VIDEO",
+                    "scenes": {
+                      "1": {"status": "SUBMITTED", "taskId": "provider-task-1"}
+                    }
+                  }
+                }
+                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/provider-checkpoint", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/provider-checkpoint".formatted(taskId), checkpointBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(checkpointBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.version").value(1))
+                .andExpect(jsonPath("$.data.checkpoint.scenes.1.taskId").value("provider-task-1"));
+
+        mockMvc.perform(signed(get("/api/internal/v1/tasks/{taskId}/execution-context", taskId), "GET",
+                        "/api/internal/v1/tasks/%d/execution-context".formatted(taskId), ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.providerCheckpointVersion").value(1))
+                .andExpect(jsonPath("$.data.providerCheckpoint.scenes.1.status").value("SUBMITTED"));
+
+        String versionOneBody = checkpointBody
+                .replace("\"expectedVersion\": 0", "\"expectedVersion\": 1");
+        jdbcTemplate.update("UPDATE ai_tasks SET lease_until = DATEADD('MINUTE', -1, CURRENT_TIMESTAMP) WHERE id = ?", taskId);
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/provider-checkpoint", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/provider-checkpoint".formatted(taskId), versionOneBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(versionOneBody))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("TASK_STATUS_INVALID"));
+
+        jdbcTemplate.update("""
+                        UPDATE ai_tasks
+                        SET claimed_by = 'worker-b',
+                            claim_token = 'checkpoint-claim-b',
+                            lease_until = DATEADD('MINUTE', 30, CURRENT_TIMESTAMP)
+                        WHERE id = ?
+                        """,
+                taskId);
+
+        String staleClaimBody = versionOneBody;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/provider-checkpoint", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/provider-checkpoint".formatted(taskId), staleClaimBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(staleClaimBody))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("TASK_STATUS_INVALID"));
+
+        String currentClaimBody = staleClaimBody.replace("checkpoint-claim-a", "checkpoint-claim-b");
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/provider-checkpoint", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/provider-checkpoint".formatted(taskId), currentClaimBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(currentClaimBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.version").value(2));
+
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/provider-checkpoint", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/provider-checkpoint".formatted(taskId), currentClaimBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(currentClaimBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.version").value(2));
+
+        String conflictingReplay = currentClaimBody.replace("provider-task-1", "provider-task-conflict");
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/provider-checkpoint", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/provider-checkpoint".formatted(taskId), conflictingReplay)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(conflictingReplay))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("TASK_STATUS_INVALID"));
+    }
+
+    @Test
     void workerCanWriteFailedStatus() throws Exception {
         String adminToken = login("/api/admin/v1/auth/login", "admin");
         Long toolId = createTool(adminToken, "worker_failed_tool", 1);
@@ -363,6 +461,7 @@ class WorkerInternalApiTest {
                                   "errorMessage": "provider charged but callback failed",
                                   "failureStage": "PROVIDER_SUBMITTED",
                                   "providerCostAmount": 0.030000,
+                                  "providerCostCurrency": "CNY",
                                   "providerErrorCode": "UPSTREAM_FAILED",
                                   "providerRequestId": "provider-request-1"
                                 }
