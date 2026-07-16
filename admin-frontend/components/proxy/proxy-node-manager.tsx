@@ -31,6 +31,7 @@ import {
   type ProxyConfigFormState,
   type ProxyFormErrors,
 } from "@/lib/proxy-config-form"
+import { mergeMihomoNodeTest } from "@/lib/mihomo-node-state"
 import {
   Activity,
   Check,
@@ -138,13 +139,14 @@ export function ProxyNodeManager({ onChanged }: { onChanged?: () => void }) {
     setMessage(null)
     try {
       const result = await testMihomoNode(nodeName)
-      setNodes((current) => current ? {
-        ...current,
-        nodes: current.nodes.map((node) => node.name === nodeName
-          ? { ...node, available: result.available, latencyMs: result.latencyMs }
-          : node),
-      } : current)
-      setMessage(result.available ? `${nodeName} 延迟 ${result.latencyMs} ms` : `${nodeName} 当前不可用`)
+      const nodeState = await fetchMihomoNodes()
+      setNodes({
+        ...nodeState,
+        nodes: mergeMihomoNodeTest(nodeState.nodes, result),
+      })
+      setMessage(result.available
+        ? `${nodeName} 延迟 ${result.latencyMs} ms`
+        : `${nodeName} 本次测速失败，已保留订阅健康状态`)
     } catch (testError) {
       setError(formatError(testError, "节点测速失败"))
     } finally {
