@@ -22,10 +22,6 @@ _ENV_PATCH_LINES = [
     "ADMIN_NEXT_PUBLIC_API_PROXY_TARGET=http://backend:8080",
     "CORS_ALLOWED_ORIGINS=http://wlcloudai.com,http://www.wlcloudai.com,http://8.134.93.203,https://wlcloudai.com,https://www.wlcloudai.com,https://8.134.93.203",
     "MIHOMO_ENABLED=true",
-    "HTTP_PROXY=http://host.docker.internal:7890",
-    "HTTPS_PROXY=http://host.docker.internal:7890",
-    "CONTAINER_HTTP_PROXY=http://host.docker.internal:7890",
-    "CONTAINER_HTTPS_PROXY=http://host.docker.internal:7890",
     "NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,.klingai.com,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat",
     "CONTAINER_NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,.klingai.com,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat",
     "PROMETHEUS_PORT=9091",
@@ -35,6 +31,11 @@ _ENV_PATCH_LINES = [
     "GRAFANA_ADMIN_USER=admin",
     "CADVISOR_IMAGE=m.daocloud.io/ghcr.io/google/cadvisor:v0.60.5",
 ]
+LEGACY_APPLICATION_PROXY_KEYS = {
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+    "http_proxy", "https_proxy", "all_proxy",
+    "CONTAINER_HTTP_PROXY", "CONTAINER_HTTPS_PROXY",
+}
 ENV_PATCH_SCRIPT = "\n".join(
     [
         "python3 - <<'PY'",
@@ -42,6 +43,7 @@ ENV_PATCH_SCRIPT = "\n".join(
         "from pathlib import Path",
         'path = Path("/root/ai_tool_market/.env")',
         f"patch_lines = {repr(_ENV_PATCH_LINES)}",
+        f"LEGACY_APPLICATION_PROXY_KEYS = {repr(LEGACY_APPLICATION_PROXY_KEYS)}",
         "patch = {}",
         "for line in patch_lines:",
         '    if "=" not in line:',
@@ -49,7 +51,7 @@ ENV_PATCH_SCRIPT = "\n".join(
         '    key, value = line.split("=", 1)',
         "    patch[key] = value",
         'lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.exists() else []',
-        "keys = set(patch)",
+        "keys = set(patch) | LEGACY_APPLICATION_PROXY_KEYS",
         "out = []",
         "for line in lines:",
         '    key = line.split("=", 1)[0].strip()',
@@ -84,9 +86,11 @@ ENV_PATCH_SCRIPT = "\n".join(
         '    if "=" not in line or line.strip().startswith("#"):',
         '        continue',
         '    key, value = line.split("=", 1)',
-        '    root_data[key.strip()] = value',
+        '    if key.strip() not in LEGACY_APPLICATION_PROXY_KEYS:',
+        '        root_data[key.strip()] = value',
         'deploy_lines = deploy_path.read_text(encoding="utf-8", errors="replace").splitlines() if deploy_path.exists() else []',
         'mirror_keys = set(patch) | {"GRAFANA_ADMIN_PASSWORD"}',
+        'deploy_lines = [line for line in deploy_lines if line.split("=", 1)[0].strip() not in LEGACY_APPLICATION_PROXY_KEYS]',
         'deploy_lines = [line for line in deploy_lines if line.split("=", 1)[0].strip() not in mirror_keys]',
         'for key in mirror_keys:',
         '    if key in root_data:',

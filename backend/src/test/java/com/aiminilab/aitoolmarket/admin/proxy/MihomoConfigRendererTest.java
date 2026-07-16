@@ -31,12 +31,12 @@ class MihomoConfigRendererTest {
         );
         assertThat(yaml).doesNotContain("proxies:\n  - name: 'manual-node'");
         assertThat(yaml.indexOf("DOMAIN-SUFFIX,aliyun.com,DIRECT"))
-                .isLessThan(yaml.indexOf("MATCH,PROXY"));
+                .isLessThan(yaml.indexOf("MATCH,DIRECT"));
         assertThat(yaml.indexOf("DOMAIN,backend,DIRECT"))
-                .isLessThan(yaml.indexOf("MATCH,PROXY"));
+                .isLessThan(yaml.indexOf("MATCH,DIRECT"));
         assertThat(yaml.indexOf("IP-CIDR,8.8.8.8/32,DIRECT,no-resolve"))
-                .isLessThan(yaml.indexOf("MATCH,PROXY"));
-        assertThat(yaml.trim()).endsWith("- 'MATCH,PROXY'");
+                .isLessThan(yaml.indexOf("MATCH,DIRECT"));
+        assertThat(yaml.trim()).endsWith("- 'MATCH,DIRECT'");
     }
 
     @Test
@@ -95,6 +95,43 @@ class MihomoConfigRendererTest {
                 "'DOMAIN,backend,DIRECT'",
                 "'DOMAIN-SUFFIX,aliyun.com,DIRECT'"
         );
+    }
+
+    @Test
+    void rendersPublicRoutingRulesBySpecificityBeforeFallbackAndUsesSafeAutoProbe() {
+        Map<String, String> settings = baseSettings();
+        settings.put("outbound.proxy.sourceType", "MANUAL");
+        settings.put("outbound.proxy.manualHost", "8.8.8.8");
+        settings.put("outbound.proxy.routing", """
+                {
+                  "rules": [
+                    {"id":"suffix","patternType":"SUFFIX","pattern":"example.com","strategy":"PROXY","priority":900,"enabled":true,"note":""},
+                    {"id":"exact","patternType":"EXACT","pattern":"api.example.com","strategy":"DIRECT","priority":10,"enabled":true,"note":""},
+                    {"id":"wild","patternType":"WILDCARD","pattern":"*.media.example.net","strategy":"AUTO","priority":500,"enabled":true,"note":"","probeUrl":"https://health.example.net/ping"},
+                    {"id":"disabled","patternType":"EXACT","pattern":"disabled.example.com","strategy":"DIRECT","priority":999,"enabled":false,"note":""}
+                  ],
+                  "autoSettings":{"timeoutMs":5000,"sampleSize":6,"switchThresholdMs":150,"hysteresisMs":80,"cooldownSeconds":300}
+                }
+                """);
+
+        String yaml = renderer.render(settings, "secret");
+
+        assertThat(yaml).contains(
+                "name: 'AUTO-wild'",
+                "type: url-test",
+                "url: 'https://health.example.net/ping'",
+                "interval: 300",
+                "tolerance: 80",
+                "'DOMAIN,api.example.com,DIRECT'",
+                "'DOMAIN-SUFFIX,example.com,PROXY'",
+                "'DOMAIN-WILDCARD,*.media.example.net,AUTO-wild'"
+        ).doesNotContain("disabled.example.com");
+        assertThat(yaml.indexOf("DOMAIN,api.example.com,DIRECT"))
+                .isLessThan(yaml.indexOf("DOMAIN-SUFFIX,example.com,PROXY"));
+        assertThat(yaml.indexOf("DOMAIN-WILDCARD,*.media.example.net,AUTO-wild"))
+                .isLessThan(yaml.indexOf("DOMAIN-SUFFIX,example.com,PROXY"));
+        assertThat(yaml.indexOf("DOMAIN-WILDCARD,*.media.example.net,AUTO-wild"))
+                .isLessThan(yaml.indexOf("MATCH,DIRECT"));
     }
 
     private Map<String, String> baseSettings() {

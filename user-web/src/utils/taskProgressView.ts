@@ -9,6 +9,11 @@ export interface TaskProgressView {
 
 const ACTIVE_STATUSES = new Set<TaskStatus>(["CREATED", "QUEUED", "PROCESSING", "RETRYING"])
 const REALTIME_PROGRESS_PATTERN = /实时进度|真实进度|厂商进度/i
+const PERCENT_PATTERN = /\d+(?:\.\d+)?\s*%/
+
+export function shouldShowProgressPercentLabel(caption: string, percentLabel: string): boolean {
+  return Boolean(percentLabel.trim()) && !PERCENT_PATTERN.test(caption)
+}
 
 function clampPercent(value?: number | null): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0

@@ -54,11 +54,12 @@ class ProxyConfigServiceTest {
         assertThat(saved).containsEntry("outbound.proxy.sourceType", "SUBSCRIPTION");
         assertThat(saved).containsEntry("outbound.proxy.subscriptionUrl",
                 "https://airport.example.com/api/v1/client/subscribe?token=secret-token");
-        assertThat(saved).containsEntry("outbound.proxy.url", "http://host.docker.internal:7890");
-        assertThat(saved).containsEntry("outbound.proxy.enabledByDefault", "true");
+        assertThat(saved).containsEntry("outbound.proxy.url", "");
+        assertThat(saved).containsEntry("outbound.proxy.enabledByDefault", "false");
+        assertThat(saved).containsEntry("outbound.proxy.routingEnabled", "true");
         assertThat(response.subscriptionConfigured()).isTrue();
         assertThat(response.subscriptionUrlMasked()).isEqualTo("https://airport.example.com/***?token=***");
-        assertThat(response.proxyUrlMasked()).isEqualTo("http://host.docker.internal:7890");
+        assertThat(response.proxyUrlMasked()).isEqualTo("http://mihomo:7890");
     }
 
     @Test
@@ -85,7 +86,8 @@ class ProxyConfigServiceTest {
         ArgumentCaptor<Map<String, String>> captor = ArgumentCaptor.forClass(Map.class);
         verify(systemSettingService).updateSettings(captor.capture(), org.mockito.ArgumentMatchers.eq(8L));
         assertThat(captor.getValue())
-                .containsEntry("outbound.proxy.url", "http://host.docker.internal:7890")
+                .containsEntry("outbound.proxy.url", "")
+                .containsEntry("outbound.proxy.enabledByDefault", "false")
                 .containsEntry("outbound.proxy.manualProtocol", "SOCKS5")
                 .containsEntry("outbound.proxy.manualHost", "8.8.8.8")
                 .containsEntry("outbound.proxy.manualPort", "1080")
@@ -93,7 +95,7 @@ class ProxyConfigServiceTest {
                 .containsEntry("outbound.proxy.manualPassword", "p@ss word");
         assertThat(response.manualPasswordConfigured()).isTrue();
         assertThat(response.manualUsernameMasked()).isEqualTo("pr***er");
-        assertThat(response.proxyUrlMasked()).isEqualTo("http://host.docker.internal:7890");
+        assertThat(response.proxyUrlMasked()).isEqualTo("http://mihomo:7890");
     }
 
     @Test

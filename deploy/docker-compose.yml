@@ -125,8 +125,12 @@ services:
       JAVA_TOOL_OPTIONS: ${BACKEND_JAVA_TOOL_OPTIONS:--XX:InitialRAMPercentage=10.0 -XX:MaxRAMPercentage=50.0 -XX:+UseG1GC -XX:+UseStringDeduplication -XX:MaxGCPauseMillis=200 -Djava.security.egd=file:/dev/./urandom}
       # OSS / ASSET_STORAGE_* 由 env_file ../.env 注入，勿在此写默认值以免覆盖
       # Use explicit container proxy vars only. Host HTTP_PROXY often points at 127.0.0.1, which is invalid inside containers.
-      HTTP_PROXY: ${CONTAINER_HTTP_PROXY:-}
-      HTTPS_PROXY: ${CONTAINER_HTTPS_PROXY:-}
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      all_proxy: ""
       NO_PROXY: ${CONTAINER_NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal}
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
@@ -161,8 +165,12 @@ services:
       NEXT_PUBLIC_API_BASE_URL: ${ADMIN_NEXT_PUBLIC_API_BASE_URL:-}
       NEXT_PUBLIC_ADMIN_BASE_PATH: ${NEXT_PUBLIC_ADMIN_BASE_PATH:-/admin}
       NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
-      HTTP_PROXY: ${CONTAINER_HTTP_PROXY:-}
-      HTTPS_PROXY: ${CONTAINER_HTTPS_PROXY:-}
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      all_proxy: ""
       NO_PROXY: ${CONTAINER_NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal}
     ports:
       - "127.0.0.1:${ADMIN_FRONTEND_PORT:-5174}:5174"
@@ -203,8 +211,12 @@ services:
       VITE_DEV_PROXY_TARGET: ${VITE_DEV_PROXY_TARGET:-http://backend:8080}
       CHOKIDAR_USEPOLLING: "true"
       NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
-      HTTP_PROXY: ${CONTAINER_HTTP_PROXY:-}
-      HTTPS_PROXY: ${CONTAINER_HTTPS_PROXY:-}
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      all_proxy: ""
       NO_PROXY: ${CONTAINER_NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal}
     ports:
       - "127.0.0.1:${USER_WEB_PORT:-5173}:5173"
@@ -279,8 +291,12 @@ services:
       GENERATED_MEDIA_DIR: /data/generated-media
       GENERATED_MEDIA_PUBLIC_BASE_URL: /generated
       # OSS / ASSET_STORAGE_* 由 env_file ../.env 注入，勿在此写默认值以免覆盖
-      HTTP_PROXY: ${CONTAINER_HTTP_PROXY:-}
-      HTTPS_PROXY: ${CONTAINER_HTTPS_PROXY:-}
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      all_proxy: ""
       NO_PROXY: ${CONTAINER_NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal}
     volumes:
       - ../worker:/app
@@ -324,8 +340,12 @@ services:
       AGENT_MAX_MODEL_CALLS: ${AGENT_MAX_MODEL_CALLS:-5}
       AGENT_MODEL_CALL_COST: ${AGENT_MODEL_CALL_COST:-1}
       AGENT_DEFAULT_CONSUMED_CREDITS: ${AGENT_DEFAULT_CONSUMED_CREDITS:-1}
-      HTTP_PROXY: ${CONTAINER_HTTP_PROXY:-}
-      HTTPS_PROXY: ${CONTAINER_HTTPS_PROXY:-}
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      all_proxy: ""
       NO_PROXY: ${CONTAINER_NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal}
     ports:
       - "127.0.0.1:${AGENT_SERVICE_PORT:-8090}:8090"

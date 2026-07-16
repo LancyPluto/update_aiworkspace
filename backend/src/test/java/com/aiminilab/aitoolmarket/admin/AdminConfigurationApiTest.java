@@ -150,7 +150,7 @@ class AdminConfigurationApiTest {
                 .andExpect(jsonPath("$.data.sourceType").value("SUBSCRIPTION"))
                 .andExpect(jsonPath("$.data.subscriptionConfigured").value(true))
                 .andExpect(jsonPath("$.data.subscriptionUrlMasked").value("https://example.com/***?token=***"))
-                .andExpect(jsonPath("$.data.proxyUrlMasked").value("http://host.docker.internal:7890"));
+                .andExpect(jsonPath("$.data.proxyUrlMasked").value("http://mihomo:7890"));
 
         mockMvc.perform(get("/api/admin/v1/proxy-config")
                         .header("Authorization", "Bearer " + adminToken))

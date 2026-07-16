@@ -1,8 +1,9 @@
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 WORKER_ROOT = Path(__file__).resolve().parents[1]
@@ -271,20 +272,37 @@ class SunoMusicClientTest(unittest.TestCase):
                 base_url="https://api.sunoapi.org",
                 api_key="secret",
                 params={},
-                model_config={"proxyPolicy": {"enabled": True, "proxyUrl": "http://127.0.0.1:7890"}},
+                model_config={"proxyPolicy": {"enabled": True, "projectProxyUrl": "http://mihomo:7890", "routingRules": [{"id": "suno", "patternType": "EXACT", "pattern": "api.sunoapi.org", "strategy": "PROXY", "priority": 100, "enabled": True}]}},
             )
 
         http = request.call_args_list[0].args[0]
-        self.assertEqual(http.proxies["http"], "http://127.0.0.1:7890")
-        self.assertEqual(http.proxies["https"], "http://127.0.0.1:7890")
+        self.assertEqual(http.proxies["http"], "http://mihomo:7890")
+        self.assertEqual(http.proxies["https"], "http://mihomo:7890")
         self.assertFalse(http.trust_env)
 
     def test_extra_auth_trust_env_false_disables_environment_proxy(self):
-        with patch.dict("utils.outbound_http.os.environ", {"HTTP_PROXY": "http://127.0.0.1:7890"}, clear=True):
+        with patch.dict(os.environ, {"HTTP_PROXY": "http://127.0.0.1:7890"}, clear=True):
             http = OutboundRequestsClient.from_model_config(extra_auth_json='{"trustEnv": false}')
 
         self.assertEqual(http.proxies, {})
         self.assertFalse(http.trust_env)
+
+    def test_generate_closes_outbound_client_after_failure(self):
+        http = Mock()
+        with (
+            patch.object(OutboundRequestsClient, "from_model_config", return_value=http),
+            patch.object(SunoMusicClient, "_create_task", side_effect=RuntimeError("failed")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "failed"):
+                SunoMusicClient().generate(
+                    model="suno-v3.5",
+                    prompt="test",
+                    base_url="https://api.sunoapi.org",
+                    api_key="secret",
+                    params={},
+                )
+
+        http.close.assert_called_once_with()
 
     def test_upload_cover_requires_reference_audio(self):
         client = SunoMusicClient()

@@ -31,8 +31,10 @@ public class ProxyConfigService {
     private static final String MANUAL_PORT_KEY = "outbound.proxy.manualPort";
     private static final String MANUAL_USERNAME_KEY = "outbound.proxy.manualUsername";
     private static final String MANUAL_PASSWORD_KEY = "outbound.proxy.manualPassword";
+    private static final String ROUTING_ENABLED_KEY = "outbound.proxy.routingEnabled";
 
     private static final String DEFAULT_MIHOMO_ENDPOINT = "http://host.docker.internal:7890";
+    private static final String PROJECT_MIHOMO_ENDPOINT = "http://mihomo:7890";
     private static final int DEFAULT_SUBSCRIPTION_INTERVAL = 360;
     private static final int DEFAULT_MANUAL_PORT = 7890;
 
@@ -86,8 +88,9 @@ public class ProxyConfigService {
         saved.put(MANUAL_PORT_KEY, String.valueOf(manualPort));
         saved.put(MANUAL_USERNAME_KEY, manualUsername);
         saved.put(MANUAL_PASSWORD_KEY, manualPassword);
-        saved.put(AgentOutboundProxySettings.PROXY_URL_KEY, mihomoEndpoint);
-        saved.put(AgentOutboundProxySettings.ENABLED_BY_DEFAULT_KEY, String.valueOf(request.enabled()));
+        saved.put(AgentOutboundProxySettings.PROXY_URL_KEY, "");
+        saved.put(AgentOutboundProxySettings.ENABLED_BY_DEFAULT_KEY, "false");
+        saved.put(ROUTING_ENABLED_KEY, String.valueOf(request.enabled()));
         saved.put(AgentOutboundProxySettings.NO_PROXY_HOSTS_KEY, noProxyHosts);
         systemSettingService.updateSettings(saved, operatorId);
 
@@ -117,7 +120,7 @@ public class ProxyConfigService {
         String password = trim(settings.get(MANUAL_PASSWORD_KEY));
         String proxyUrl = trim(settings.get(AgentOutboundProxySettings.PROXY_URL_KEY));
         return new ProxyConfigResponse(
-                Boolean.parseBoolean(settings.getOrDefault(AgentOutboundProxySettings.ENABLED_BY_DEFAULT_KEY, "false")),
+                Boolean.parseBoolean(settings.getOrDefault(ROUTING_ENABLED_KEY, "false")),
                 sourceType,
                 defaultIfBlank(settings.get(DISPLAY_NAME_KEY), "默认代理"),
                 !subscriptionUrl.isBlank(),
@@ -131,7 +134,8 @@ public class ProxyConfigService {
                 !password.isBlank(),
                 settings.getOrDefault(AgentOutboundProxySettings.NO_PROXY_HOSTS_KEY,
                         AgentOutboundProxySettings.DEFAULT_NO_PROXY_HOSTS),
-                maskProxyUrl(proxyUrl)
+                Boolean.parseBoolean(settings.getOrDefault(ROUTING_ENABLED_KEY, "false"))
+                        ? PROJECT_MIHOMO_ENDPOINT : ""
         );
     }
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { AdminHeader } from "@/components/admin/header"
 import { AdminLayout } from "@/components/admin/admin-layout"
+import { PublicRoutingPanel } from "@/components/proxy/public-routing-panel"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -197,8 +198,8 @@ export default function ProxyNodesPage() {
   return (
     <AdminLayout>
       <AdminHeader
-        title="代理节点"
-        description="维护 Mihomo 订阅来源与平台默认出站代理"
+        title="代理配置"
+        description="管理已接入统一出站客户端的公网域名路径与 Mihomo 上游节点"
       />
 
       <div className="space-y-6 p-6">
@@ -445,10 +446,10 @@ export default function ProxyNodesPage() {
             <section className="rounded-lg border bg-card p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h2 className="text-sm font-semibold">全局出站策略</h2>
-                  <p className="mt-1 text-xs text-muted-foreground">控制继承默认策略的模型请求。</p>
+                  <h2 className="text-sm font-semibold">应用公网访问代理</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">仅管理业务容器访问公网；Docker 内网服务发现保持直连。</p>
                 </div>
-                <Switch checked={form.enabled} onCheckedChange={(checked) => updateForm("enabled", checked)} aria-label="启用全局出站代理" />
+                <Switch checked={form.enabled} onCheckedChange={(checked) => updateForm("enabled", checked)} aria-label="启用应用公网访问代理" />
               </div>
 
               <Separator className="my-5" />
@@ -516,6 +517,7 @@ export default function ProxyNodesPage() {
             </Button>
           </aside>
         </div>
+        <PublicRoutingPanel />
       </div>
     </AdminLayout>
   )

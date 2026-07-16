@@ -141,10 +141,6 @@ ASSET_LEGACY_CACHE_CONTROL=public,max-age=300,must-revalidate
 MEDIA_VIDEO_PREVIEW_ENABLED=true
 VITE_MEDIA_DELIVERY_OPTIMIZATION=true
 MIHOMO_ENABLED=true
-HTTP_PROXY=http://host.docker.internal:7890
-HTTPS_PROXY=http://host.docker.internal:7890
-CONTAINER_HTTP_PROXY=http://host.docker.internal:7890
-CONTAINER_HTTPS_PROXY=http://host.docker.internal:7890
 NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,.klingai.com,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat
 CONTAINER_NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,.klingai.com,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat
 OSS_ENDPOINT=oss-cn-guangzhou.aliyuncs.com
@@ -166,6 +162,12 @@ for line in patch_lines:
         continue
     key, value = line.split("=", 1)
     patch[key] = value
+
+LEGACY_APPLICATION_PROXY_KEYS = {
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+    "http_proxy", "https_proxy", "all_proxy",
+    "CONTAINER_HTTP_PROXY", "CONTAINER_HTTPS_PROXY",
+}
 
 OSS_CREDENTIAL_KEYS = (
     "OSS_ACCESS_KEY_ID",
@@ -201,7 +203,7 @@ def has_oss_credentials(data: dict[str, str]) -> bool:
 
 
 def patch_env(path: Path) -> None:
-    existing = read_env(path)
+    existing = {key: value for key, value in read_env(path).items() if key not in LEGACY_APPLICATION_PROXY_KEYS}
     merged = {**existing, **patch}
     if has_oss_credentials(merged):
         merged["ASSET_STORAGE_PROVIDER"] = "oss"
@@ -210,7 +212,7 @@ def patch_env(path: Path) -> None:
         merged.pop("ASSET_STORAGE_PROVIDER", None)
         print("WARN: OSS credentials missing; not forcing ASSET_STORAGE_PROVIDER=oss", path)
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.exists() else []
-    keys = set(merged)
+    keys = set(merged) | LEGACY_APPLICATION_PROXY_KEYS
     out = []
     for line in lines:
         key = line.split("=", 1)[0].strip()

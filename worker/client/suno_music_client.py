@@ -63,6 +63,28 @@ class SunoMusicClient:
         model_config: dict[str, Any] | None = None,
     ) -> SunoGenerationResult:
         http = OutboundRequestsClient.from_model_config(model_config, extra_auth_json=extra_auth_json)
+        try:
+            return self._generate_with_http(
+                model=model,
+                prompt=prompt,
+                base_url=base_url,
+                api_key=api_key,
+                params=params,
+                http=http,
+            )
+        finally:
+            http.close()
+
+    def _generate_with_http(
+        self,
+        *,
+        model: str,
+        prompt: str,
+        base_url: str | None,
+        api_key: str | None,
+        params: dict[str, Any],
+        http: OutboundRequestsClient,
+    ) -> SunoGenerationResult:
         resolved_api_key = _resolve_api_key(api_key)
         if not resolved_api_key:
             raise SunoMusicError("Suno api key is not configured")

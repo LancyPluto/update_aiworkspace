@@ -58,6 +58,10 @@ public record ExecutionModelConfigResponse(
     }
 
     public static ExecutionModelConfigResponse from(ModelExecutionSnapshot snapshot) {
+        return from(snapshot, snapshot == null ? null : snapshot.proxyPolicy());
+    }
+
+    public static ExecutionModelConfigResponse from(ModelExecutionSnapshot snapshot, ProxyPolicy runtimeProxyPolicy) {
         if (snapshot == null) {
             return null;
         }
@@ -78,7 +82,7 @@ public record ExecutionModelConfigResponse(
                 snapshot.capabilities() == null ? List.of() : snapshot.capabilities(),
                 credentialSource(snapshot.vendorAccountId(), snapshot.apiKey(), snapshot.extraAuthJson()),
                 credentialFingerprint(snapshot.apiKey(), snapshot.extraAuthJson()),
-                snapshot.proxyPolicy()
+                runtimeProxyPolicy
         );
     }
 
