@@ -524,6 +524,7 @@ const autoMountedReference = computed<AgentReferenceMention | null>(() => {
 let runStreamAbort: AbortController | null = null
 let runStatusWatchdog: number | null = null
 let streamingAnimationTimer: number | null = null
+let paneLoadEpoch = 0
 const terminalEventFinalizingRunIds = new Set<number>()
 const CHAT_SCROLL_KEY_PREFIX = "ai_tool_market_agent_chat_scroll_v1:"
 
@@ -617,8 +618,7 @@ const showGenerationLoading = computed(() =>
     sending.value ||
     editingRegenerating.value ||
     regeneratingMessageId.value != null ||
-    runConnectionStatus.value === "running" ||
-    runConnectionStatus.value === "awaiting_confirmation"
+    hasActiveRun.value
   ),
 )
 const visibleRunTimelineEvents = computed(() => filterUserFacingRunEvents(events.value, true))
@@ -1039,37 +1039,66 @@ async function discoverActiveRunId(preferSessionId?: number | null): Promise<num
   return null
 }
 
+function isCurrentPaneLoad(sessionId: number, epoch: number) {
+  return props.sessionId === sessionId && paneLoadEpoch === epoch
+}
+
+function resetSessionTransientState() {
+  paneLoadEpoch += 1
+  stopRunEventStream()
+  stopRunStatusWatchdog()
+  stopStreamingAnimationTimer()
+  activeRunId.value = null
+  streamingAssistantMessageId.value = null
+  runConnectionStatus.value = "idle"
+  sending.value = false
+  events.value = []
+  runEventsByRunId.value = {}
+  submittedAttachmentJsonByRunId.value = {}
+  recoveryRunId.value = null
+  showActiveRunLimitHint.value = false
+  confirmationError.value = null
+  dismissedConfirmationIds.value = new Set()
+}
+
 async function loadPane() {
   if (!auth.isLoggedIn) return
+  const sessionId = props.sessionId
+  const loadEpoch = ++paneLoadEpoch
   paneLoading.value = true
   agentError.value = null
   try {
-    const res = await fetchAgentMessages(props.sessionId, { token: props.token })
+    const res = await fetchAgentMessages(sessionId, { token: props.token })
+    if (!isCurrentPaneLoad(sessionId, loadEpoch)) return
     loadPersistedMessageBranches()
     messages.value = applyActiveBranchView(res.list)
-    await loadFiles()
-    await hydrateHistoricalRunEvents()
-    await resumePendingRunForSession()
+    await loadFiles(sessionId, () => isCurrentPaneLoad(sessionId, loadEpoch))
+    if (!isCurrentPaneLoad(sessionId, loadEpoch)) return
+    await hydrateHistoricalRunEvents(() => isCurrentPaneLoad(sessionId, loadEpoch))
+    if (!isCurrentPaneLoad(sessionId, loadEpoch)) return
+    await resumePendingRunForSession(() => isCurrentPaneLoad(sessionId, loadEpoch))
   } finally {
-    paneLoading.value = false
-    await nextTick()
-    const persisted = loadPersistedChatScroll(props.sessionId)
-    if (persisted && messageContainerRef.value) {
-      stickToBottom.value = persisted.stickToBottom
-      scrollOffset.value = persisted.scrollTop
-      await withAutoScrollBehavior(async () => {
-        await nextTick()
-        messageContainerRef.value!.scrollTop = persisted.scrollTop
-      })
-      scheduleNavLayoutUpdate()
-    } else {
-      stickToBottom.value = true
-      await withAutoScrollBehavior(() => scrollBottom(true))
+    if (isCurrentPaneLoad(sessionId, loadEpoch)) {
+      paneLoading.value = false
+      await nextTick()
+      const persisted = loadPersistedChatScroll(sessionId)
+      if (persisted && messageContainerRef.value) {
+        stickToBottom.value = persisted.stickToBottom
+        scrollOffset.value = persisted.scrollTop
+        await withAutoScrollBehavior(async () => {
+          await nextTick()
+          messageContainerRef.value!.scrollTop = persisted.scrollTop
+        })
+        scheduleNavLayoutUpdate()
+      } else {
+        stickToBottom.value = true
+        await withAutoScrollBehavior(() => scrollBottom(true))
+      }
     }
   }
 }
 
-async function hydrateHistoricalRunEvents() {
+async function hydrateHistoricalRunEvents(isCurrent: () => boolean = () => true) {
   if (!auth.isLoggedIn) return
   const runIds = [...new Set(
     messages.value
@@ -1078,6 +1107,7 @@ async function hydrateHistoricalRunEvents() {
   )]
   await Promise.all(
     runIds.map(async (runId) => {
+      if (!isCurrent()) return
       const cached = runEventsByRunId.value[runId] ?? []
       if (cached.length > 0) return
       await syncRunEvents(runId)
@@ -1085,16 +1115,18 @@ async function hydrateHistoricalRunEvents() {
   )
 }
 
-async function resumePendingRunForSession() {
+async function resumePendingRunForSession(isCurrent: () => boolean = () => true) {
   if (!auth.isLoggedIn) return
   const runId = findLatestRunIdInMessages(messages.value)
   if (!runId) return
   try {
     const run = await fetchAgentRun(runId, { token: props.token })
+    if (!isCurrent()) return
     if (!isResumableRunStatus(run.status)) return
     activeRunId.value = runId
     recoveryRunId.value = runId
     await syncRunEvents(runId)
+    if (!isCurrent()) return
     if (run.status === "WAITING_USER_CONFIRMATION") {
       runConnectionStatus.value = "awaiting_confirmation"
       await scrollBottom()
@@ -1161,27 +1193,35 @@ async function cancelCurrentRun() {
   }
 }
 
-async function hydrateFilePreviews() {
+async function hydrateFilePreviews(
+  targetFiles: AgentFile[] = files.value,
+  isCurrent: () => boolean = () => true,
+) {
   if (!auth.isLoggedIn) return
   const next: Record<number, string> = {}
   await Promise.all(
-    files.value.map(async (file) => {
+    targetFiles.map(async (file) => {
       if (!isImageAttachment(file.contentType, file.originalFilename)) return
       const url = await fetchAgentFilePreviewUrl(file.downloadUrl, props.token)
       if (url) next[file.id] = url
     }),
   )
-  for (const file of files.value) {
+  if (!isCurrent()) return
+  for (const file of targetFiles) {
     if (!next[file.id]) revokeAgentFilePreviewUrl(file.downloadUrl)
   }
   filePreviewUrls.value = next
 }
 
-async function loadFiles() {
+async function loadFiles(
+  sessionId: number = props.sessionId,
+  isCurrent: () => boolean = () => props.sessionId === sessionId,
+) {
   if (!auth.isLoggedIn) return
-  const res = await fetchAgentFiles(props.sessionId, { token: props.token })
+  const res = await fetchAgentFiles(sessionId, { token: props.token })
+  if (!isCurrent()) return
   files.value = res.list
-  await hydrateFilePreviews()
+  await hydrateFilePreviews(res.list, isCurrent)
 }
 
 async function openMemoryPanel() {
@@ -2960,6 +3000,7 @@ watch(
 watch(
   () => props.sessionId,
   () => {
+    resetSessionTransientState()
     loadPersistedRunEventCache()
     dismissedAutoMountedReferenceKey.value = null
     stickToBottom.value = true
@@ -3162,19 +3203,18 @@ defineExpose({
           />
         </div>
 
-        <article v-if="showGenerationLoading" class="agent-message assistant generating-message">
-          <div class="generating-main">
-            <div class="assistant-name-row">
-              <AgentAvatar state="thinking" />
-              <strong>科创点AI</strong>
-            </div>
-            <div class="thinking-line">
-              <span>思考中</span>
-              <div class="typing-dots typing-dots--under-avatar" aria-hidden="true">
-                <i></i>
-                <i></i>
-                <i></i>
-              </div>
+        <article
+          v-if="showGenerationLoading"
+          class="agent-message assistant generating-message"
+          aria-live="polite"
+          aria-label="Agent 正在思考"
+        >
+          <div class="thinking-line">
+            <span>思考中</span>
+            <div class="typing-dots typing-dots--under-avatar" aria-hidden="true">
+              <i></i>
+              <i></i>
+              <i></i>
             </div>
           </div>
         </article>
@@ -4473,43 +4513,8 @@ defineExpose({
 }
 
 .generating-message {
+  min-height: 28px;
   animation: message-rise 0.18s ease-out;
-}
-
-.generating-main {
-  min-width: 0;
-  padding-top: 2px;
-  margin-left: -4px;
-}
-
-.assistant-name-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 0;
-  margin-bottom: 6px;
-}
-
-.assistant-name-row :deep(.agent-avatar) {
-  width: auto;
-  height: auto;
-}
-
-.assistant-name-row :deep(.agent-avatar--md) {
-  width: 28px;
-  height: 28px;
-}
-
-.assistant-name-row :deep(.agent-avatar__logo) {
-  width: 22px;
-  height: 22px;
-}
-
-.assistant-name-row strong {
-  margin: 0;
-  color: var(--agent-text-primary);
-  font-size: 16px;
-  font-weight: 700;
 }
 
 .thinking-line {
