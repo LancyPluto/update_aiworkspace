@@ -145,7 +145,7 @@ class CreditRechargeApiTest {
                                   "clientRequestId": "membership-same-key"
                                 }
                                 """))
-                .andExpect(status().isConflict())
+                .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("IDEMPOTENCY_CONFLICT"));
     }
 
