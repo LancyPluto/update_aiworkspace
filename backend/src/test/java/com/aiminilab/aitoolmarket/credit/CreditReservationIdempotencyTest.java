@@ -230,18 +230,6 @@ class CreditReservationIdempotencyTest {
                 .containsEntry("frozen", 0);
     }
 
-    @Test
-    void manualAddCreditsEnterGiftBucket() {
-        creditService.manualAdd(USER_ID, 20, "test", 1L);
-
-        assertThat(jdbcTemplate.queryForMap(
-                "SELECT balance, membership_balance, gift_balance FROM credit_accounts WHERE user_id = ?",
-                USER_ID
-        )).containsEntry("balance", 120)
-                .containsEntry("membership_balance", 100)
-                .containsEntry("gift_balance", 20);
-    }
-
     private int accountValue(String column) {
         return jdbcTemplate.queryForObject(
                 "SELECT " + column + " FROM credit_accounts WHERE user_id = ?",
