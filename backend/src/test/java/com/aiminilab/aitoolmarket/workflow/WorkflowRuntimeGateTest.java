@@ -4,7 +4,6 @@ import com.aiminilab.aitoolmarket.workflow.config.WorkflowRuntimeGate;
 import com.aiminilab.aitoolmarket.workflow.config.WorkflowRuntimeProperties;
 import org.junit.jupiter.api.Test;
 
-import java.math.BigDecimal;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -15,7 +14,7 @@ class WorkflowRuntimeGateTest {
     void defaultConfigurationBlocksEveryNewRun() {
         WorkflowRuntimeGate gate = new WorkflowRuntimeGate(new WorkflowRuntimeProperties());
 
-        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0, BigDecimal.ZERO))
+        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0))
                 .isEqualTo(WorkflowRuntimeGate.Decision.denied("runtime_disabled"));
     }
 
@@ -24,12 +23,12 @@ class WorkflowRuntimeGateTest {
         WorkflowRuntimeProperties properties = enabledProperties();
         WorkflowRuntimeGate gate = new WorkflowRuntimeGate(properties);
 
-        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0, BigDecimal.ZERO).reason())
+        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0).reason())
                 .isEqualTo("reconciliation_not_healthy");
 
         gate.markReconciliationHealthyAfterFullScan(gate.reconciliationFailureGeneration());
 
-        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0, BigDecimal.ZERO).allowed()).isTrue();
+        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0).allowed()).isTrue();
     }
 
     @Test
@@ -39,9 +38,9 @@ class WorkflowRuntimeGateTest {
         properties.setCanaryPercentage(10);
         WorkflowRuntimeGate gate = healthyGate(properties);
 
-        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0, BigDecimal.ZERO).allowed()).isTrue();
-        assertThat(gate.evaluateNewRun(105L, true, false, 0, 0, BigDecimal.ZERO).allowed()).isTrue();
-        assertThat(gate.evaluateNewRun(115L, true, false, 0, 0, BigDecimal.ZERO).reason())
+        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0).allowed()).isTrue();
+        assertThat(gate.evaluateNewRun(105L, true, false, 0, 0).allowed()).isTrue();
+        assertThat(gate.evaluateNewRun(115L, true, false, 0, 0).reason())
                 .isEqualTo("user_not_in_canary");
     }
 
@@ -49,7 +48,7 @@ class WorkflowRuntimeGateTest {
     void toolLevelExecutionSwitchIsEnforced() {
         WorkflowRuntimeGate gate = healthyGate(enabledProperties());
 
-        assertThat(gate.evaluateNewRun(11L, false, false, 0, 0, BigDecimal.ZERO).reason())
+        assertThat(gate.evaluateNewRun(11L, false, false, 0, 0).reason())
                 .isEqualTo("tool_execution_disabled");
     }
 
@@ -59,10 +58,9 @@ class WorkflowRuntimeGateTest {
         properties.setShadowBillingEnabled(true);
         properties.setMaxRunCostCredits(100);
         properties.setMaxUserDailyCostCredits(1000);
-        properties.setMaxProviderDailyCostCny(new BigDecimal("100"));
         WorkflowRuntimeGate gate = healthyGate(properties);
 
-        assertThat(gate.evaluateNewRun(11L, true, true, 10, 0, BigDecimal.ZERO).reason())
+        assertThat(gate.evaluateNewRun(11L, true, true, 10, 0).reason())
                 .isEqualTo("paid_run_requires_real_billing");
     }
 
@@ -73,10 +71,9 @@ class WorkflowRuntimeGateTest {
         properties.setShadowBillingEnabled(true);
         properties.setMaxRunCostCredits(100);
         properties.setMaxUserDailyCostCredits(1000);
-        properties.setMaxProviderDailyCostCny(new BigDecimal("100"));
         WorkflowRuntimeGate gate = healthyGate(properties);
 
-        assertThat(gate.evaluateNewRun(11L, true, true, 10, 0, BigDecimal.ZERO).reason())
+        assertThat(gate.evaluateNewRun(11L, true, true, 10, 0).reason())
                 .isEqualTo("billing_mode_conflict");
     }
 
@@ -87,36 +84,33 @@ class WorkflowRuntimeGateTest {
         properties.setCanaryPercentage(101);
         WorkflowRuntimeGate gate = healthyGate(properties);
 
-        assertThat(gate.evaluateNewRun(42L, true, false, 0, 0, BigDecimal.ZERO).reason())
+        assertThat(gate.evaluateNewRun(42L, true, false, 0, 0).reason())
                 .isEqualTo("user_not_in_canary");
     }
 
     @Test
-    void paidRunsRequireRealBillingAndBothCostBudgets() {
+    void paidRunsRequireRealBillingAndCreditBudgets() {
         WorkflowRuntimeProperties properties = enabledProperties();
         properties.setRealBillingEnabled(true);
         properties.setMaxRunCostCredits(100);
         properties.setMaxUserDailyCostCredits(150);
-        properties.setMaxProviderDailyCostCny(new BigDecimal("10.00"));
         WorkflowRuntimeGate gate = healthyGate(properties);
 
-        assertThat(gate.evaluateNewRun(11L, true, true, 101, 0, BigDecimal.ZERO).reason())
+        assertThat(gate.evaluateNewRun(11L, true, true, 101, 0).reason())
                 .isEqualTo("run_cost_limit_exceeded");
-        assertThat(gate.evaluateNewRun(11L, true, true, 60, 100, BigDecimal.ZERO).reason())
+        assertThat(gate.evaluateNewRun(11L, true, true, 60, 100).reason())
                 .isEqualTo("user_daily_cost_limit_exceeded");
-        assertThat(gate.evaluateNewRun(11L, true, true, 50, 100, new BigDecimal("9.99")).allowed()).isTrue();
-        assertThat(gate.evaluateNewRun(11L, true, true, 50, 100, new BigDecimal("10.00")).reason())
-                .isEqualTo("provider_daily_cost_limit_exceeded");
+        assertThat(gate.evaluateNewRun(11L, true, true, 50, 100).allowed()).isTrue();
     }
 
     @Test
     void reconciliationMismatchImmediatelyBlocksNewRuns() {
         WorkflowRuntimeGate gate = healthyGate(enabledProperties());
-        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0, BigDecimal.ZERO).allowed()).isTrue();
+        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0).allowed()).isTrue();
 
         gate.markReconciliationUnhealthy();
 
-        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0, BigDecimal.ZERO).reason())
+        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0).reason())
                 .isEqualTo("reconciliation_not_healthy");
     }
 

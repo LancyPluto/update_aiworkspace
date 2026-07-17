@@ -58,7 +58,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         "workflow.runtime.canary-percentage=100",
         "workflow.runtime.max-run-cost-credits=100",
         "workflow.runtime.max-user-daily-cost-credits=100",
-        "workflow.runtime.max-provider-daily-cost-cny=100.00",
         "spring.task.scheduling.enabled=false"
 })
 class WorkflowFailureInjectionTest {
@@ -141,7 +140,7 @@ class WorkflowFailureInjectionTest {
     }
 
     @Test
-    void providerActualCostLimitUsesShanghaiDayAndStopsNewPaidRuns() {
+    void providerActualCostDoesNotLimitUnifiedCreditBilling() {
         PublishedWorkflow published = insertWorkerWorkflow("p0_failure_provider_daily", 10, 5);
         LocalDate today = LocalDate.now(SHANGHAI);
         insertProviderUsage("provider-yesterday", "40.00", today.minusDays(1).atTime(23, 59, 59));
@@ -151,21 +150,15 @@ class WorkflowFailureInjectionTest {
         assertThat(admissionService.admitNewRun(USER_ID, published.toolId()).paidRun()).isTrue();
 
         insertProviderUsage("provider-limit", "0.01", today.atTime(12, 0));
-        assertBlocked(
-                () -> admissionService.admitNewRun(USER_ID, published.toolId()),
-                "provider_daily_cost_limit_exceeded"
-        );
+        assertThat(admissionService.admitNewRun(USER_ID, published.toolId()).paidRun()).isTrue();
     }
 
     @Test
-    void nonCnyProviderCostFailsClosedInsteadOfMixingCurrencies() {
+    void nonCnyProviderCostDoesNotBlockUnifiedCreditBilling() {
         PublishedWorkflow published = insertWorkerWorkflow("p0_failure_provider_currency", 10, 5);
         insertProviderUsage("provider-usd", "1.00", "USD", LocalDate.now(SHANGHAI).atStartOfDay());
 
-        assertBlocked(
-                () -> admissionService.admitNewRun(USER_ID, published.toolId()),
-                "provider_daily_cost_currency_unsupported"
-        );
+        assertThat(admissionService.admitNewRun(USER_ID, published.toolId()).paidRun()).isTrue();
     }
 
     @Test

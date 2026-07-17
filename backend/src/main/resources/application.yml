@@ -187,8 +187,6 @@ workflow:
     reconciliation-batch-size: ${WORKFLOW_RUNTIME_RECONCILIATION_BATCH_SIZE:100}
     max-run-cost-credits: ${WORKFLOW_RUNTIME_MAX_RUN_COST_CREDITS:0}
     max-user-daily-cost-credits: ${WORKFLOW_RUNTIME_MAX_USER_DAILY_COST_CREDITS:0}
-    max-provider-daily-cost-cny: ${WORKFLOW_RUNTIME_MAX_PROVIDER_DAILY_COST_CNY:0}
-    cost-alert-webhook-url: ${WORKFLOW_RUNTIME_COST_ALERT_WEBHOOK_URL:}
 
 ppt:
   engine:

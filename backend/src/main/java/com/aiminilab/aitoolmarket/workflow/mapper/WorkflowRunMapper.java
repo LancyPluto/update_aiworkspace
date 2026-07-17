@@ -3,41 +3,12 @@ package com.aiminilab.aitoolmarket.workflow.mapper;
 import com.aiminilab.aitoolmarket.workflow.entity.WorkflowRun;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Param;
-import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
-import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.util.Optional;
 
 public interface WorkflowRunMapper extends BaseMapper<WorkflowRun> {
-
-    @Insert("""
-            INSERT INTO workflow_provider_cost_budget_days(budget_date, created_at, updated_at)
-            VALUES (#{budgetDate}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON DUPLICATE KEY UPDATE updated_at = updated_at
-            """)
-    int acquireProviderCostBudgetDayLock(@Param("budgetDate") LocalDate budgetDate);
-
-    @Select("""
-            SELECT /*+ INDEX(workflow_runs PRIMARY) */ provider_cost_reserved_cny
-            FROM workflow_runs
-            WHERE status IN ('RUNNING', 'AWAITING_USER', 'AWAITING_FUNDS', 'CANCELLING')
-            ORDER BY id
-            FOR UPDATE
-            """)
-    java.util.List<BigDecimal> selectActiveProviderCostReservationsForUpdate();
-
-    @Select("""
-            SELECT /*+ INDEX(workflow_runs PRIMARY) */ id
-            FROM workflow_runs
-            WHERE status IN ('RUNNING', 'AWAITING_USER', 'AWAITING_FUNDS', 'CANCELLING')
-              AND (provider_cost_reserved_cny IS NULL OR provider_cost_reserved_cny <= 0)
-            ORDER BY id
-            FOR UPDATE
-            """)
-    java.util.List<Long> selectActiveRunsWithMissingProviderCostReservationForUpdate();
 
     @Select("SELECT * FROM workflow_runs WHERE root_task_id = #{rootTaskId} ORDER BY id DESC LIMIT 1")
     WorkflowRun selectByRootTaskId(@Param("rootTaskId") Long rootTaskId);

@@ -296,6 +296,15 @@ jobs:
       - name: Install sshpass
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
 
+      - name: Generate ephemeral MySQL preflight account
+        shell: bash
+        run: |
+          username="ci_pf_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          password="$(openssl rand -hex 24)"
+          echo "::add-mask::$password"
+          echo "PRODUCTION_PREFLIGHT_MYSQL_USER=$username" >> "$GITHUB_ENV"
+          echo "PRODUCTION_PREFLIGHT_MYSQL_PASSWORD=$password" >> "$GITHUB_ENV"
+
       - name: Detect changed services
         id: changes
         env:

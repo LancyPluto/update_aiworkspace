@@ -157,19 +157,6 @@ public interface WorkflowStepChargeMapper extends BaseMapper<WorkflowStepCharge>
                                       @Param("nextDayStart") LocalDateTime nextDayStart);
 
     @Select("""
-            SELECT usage_log.vendor_cost_amount
-            FROM billing_usage_logs usage_log
-            WHERE usage_log.source_type = 'WORKFLOW_STEP'
-              AND usage_log.provider_charged = 1
-              AND UPPER(TRIM(usage_log.provider_cost_currency)) = 'CNY'
-              AND usage_log.created_at >= #{dayStart}
-              AND usage_log.created_at < #{nextDayStart}
-            FOR UPDATE
-            """)
-    List<BigDecimal> selectProviderCostsBetweenForUpdate(@Param("dayStart") LocalDateTime dayStart,
-                                                          @Param("nextDayStart") LocalDateTime nextDayStart);
-
-    @Select("""
             SELECT COUNT(*)
             FROM billing_usage_logs usage_log
             WHERE usage_log.source_type = 'WORKFLOW_STEP'

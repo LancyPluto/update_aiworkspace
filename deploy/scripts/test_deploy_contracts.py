@@ -118,6 +118,14 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("backup bucket must be separate from application asset buckets", script)
         self.assertIn("production environment preflight failed", script)
 
+    def test_production_deploy_entries_configure_independent_backup_bucket(self) -> None:
+        backup_uri = "BACKUP_OSS_URI=oss://wlcloudai-db-backup-prod/mysql/full"
+        for deploy_entry in (
+            "deploy/scripts/ci_remote_deploy_light.sh",
+            "deploy/scripts/remote_deploy_production.py",
+        ):
+            self.assertIn(backup_uri, self.read(deploy_entry))
+
     def test_production_database_preflight_is_read_only_and_auditable(self) -> None:
         script = self.read("deploy/scripts/production_readonly_preflight.sh")
         self.assertIn("umask 077", script)

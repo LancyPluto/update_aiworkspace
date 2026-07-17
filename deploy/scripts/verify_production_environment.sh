@@ -50,15 +50,6 @@ require_boolean() {
   fi
 }
 
-require_positive_decimal() {
-  local name="$1"
-  local value
-  value="$(read_env_value "$name")"
-  if ! awk -v value="$value" 'BEGIN { exit !(value ~ /^[0-9]+([.][0-9]+)?$/ && value + 0 > 0) }'; then
-    fail "$name must be a positive number"
-  fi
-}
-
 production_mode="$(read_env_value APP_PRODUCTION_MODE)"
 app_env="$(read_env_value APP_ENV)"
 if [ "$production_mode" != "true" ] && [ "$app_env" != "production" ]; then
@@ -102,14 +93,6 @@ fi
 
 require_boolean WORKFLOW_RUNTIME_ENABLED
 require_boolean WORKFLOW_RUNTIME_EXECUTION_ENABLED
-require_positive_decimal WORKFLOW_RUNTIME_MAX_PROVIDER_DAILY_COST_CNY
-
-alert_webhook="$(read_env_value WORKFLOW_RUNTIME_COST_ALERT_WEBHOOK_URL)"
-if [[ "$alert_webhook" != https://* ]]; then
-  fail "cost alert webhook must use https://"
-elif [[ "$alert_webhook" == *localhost* ]] || [[ "$alert_webhook" == *127.0.0.1* ]] || [[ "$alert_webhook" == *example.* ]]; then
-  fail "cost alert webhook must point to a real production receiver"
-fi
 
 if [ "$(read_env_value WORKFLOW_RUNTIME_EXECUTION_ENABLED)" = "true" ]; then
   if [ "$(read_env_value WORKFLOW_RUNTIME_ENABLED)" != "true" ]; then

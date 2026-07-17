@@ -1,0 +1,23 @@
+groups:
+  - name: workflow-cost-audit
+    interval: 30s
+    rules:
+      - alert: WorkflowProviderActualCostUnknown
+        expr: increase(workflow_provider_cost_anomaly_total{reason="actual_cost_unknown"}[15m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: backend
+        annotations:
+          summary: Workflow provider cost audit data is missing
+          description: Paid workflow admission observed successful usage without optional provider cost audit data.
+
+      - alert: WorkflowProviderCostCurrencyUnexpected
+        expr: increase(workflow_provider_cost_anomaly_total{reason="currency_unsupported"}[15m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: backend
+        annotations:
+          summary: Workflow provider cost audit currency is unexpected
+          description: Paid workflow admission observed optional provider cost data outside the current CNY audit convention.

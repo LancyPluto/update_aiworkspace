@@ -2,8 +2,6 @@ package com.aiminilab.aitoolmarket.workflow.config;
 
 import org.springframework.stereotype.Component;
 
-import java.math.BigDecimal;
-
 @Component
 public class WorkflowRuntimeGate {
 
@@ -19,8 +17,7 @@ public class WorkflowRuntimeGate {
                                    boolean toolExecutionEnabled,
                                    boolean paidRun,
                                    long estimatedRunCredits,
-                                   long userDailyCredits,
-                                   BigDecimal providerDailyCostCny) {
+                                   long userDailyCredits) {
         Decision baseDecision = evaluateBaseNewRun(userId, toolExecutionEnabled);
         if (!baseDecision.allowed()) {
             return baseDecision;
@@ -46,14 +43,6 @@ public class WorkflowRuntimeGate {
                 || userDailyCredits > (long) properties.getMaxUserDailyCostCredits() - estimatedRunCredits) {
             return Decision.denied("user_daily_cost_limit_exceeded");
         }
-        BigDecimal providerLimit = properties.getMaxProviderDailyCostCny();
-        if (providerDailyCostCny == null
-                || providerDailyCostCny.signum() < 0
-                || providerLimit == null
-                || providerLimit.signum() <= 0
-                || providerDailyCostCny.compareTo(providerLimit) >= 0) {
-            return Decision.denied("provider_daily_cost_limit_exceeded");
-        }
         return Decision.allowedDecision();
     }
 
@@ -74,24 +63,6 @@ public class WorkflowRuntimeGate {
             return Decision.denied("user_not_in_canary");
         }
         return Decision.allowedDecision();
-    }
-
-    public Decision evaluateProviderCostReservation(BigDecimal settledCostCny,
-                                                      BigDecimal activeReservationsCny,
-                                                      BigDecimal candidateReservationCny) {
-        BigDecimal providerLimit = properties.getMaxProviderDailyCostCny();
-        if (providerLimit == null || providerLimit.signum() <= 0
-                || settledCostCny == null || settledCostCny.signum() < 0
-                || activeReservationsCny == null || activeReservationsCny.signum() < 0
-                || candidateReservationCny == null || candidateReservationCny.signum() <= 0) {
-            return Decision.denied("provider_daily_cost_limit_exceeded");
-        }
-        BigDecimal totalExposure = settledCostCny
-                .add(activeReservationsCny)
-                .add(candidateReservationCny);
-        return totalExposure.compareTo(providerLimit) <= 0
-                ? Decision.allowedDecision()
-                : Decision.denied("provider_daily_cost_limit_exceeded");
     }
 
     public boolean isConfirmationEnabled() {

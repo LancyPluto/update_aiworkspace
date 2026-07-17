@@ -38,8 +38,8 @@ public class WorkflowMetrics {
         meterRegistry.counter("workflow_billing_state_total", "state", tag(state)).increment();
     }
 
-    public void recordCostAlert(CostAlertResult result) {
-        meterRegistry.counter("workflow_cost_alert_total", "result", tag(result)).increment();
+    public void recordProviderCostAnomaly(ProviderCostAnomaly anomaly) {
+        meterRegistry.counter("workflow_provider_cost_anomaly_total", "reason", tag(anomaly)).increment();
     }
 
     private String tag(Enum<?> value) {
@@ -78,9 +78,8 @@ public class WorkflowMetrics {
         LOST
     }
 
-    public enum CostAlertResult {
-        DELIVERED,
-        FAILED,
-        SUPPRESSED
+    public enum ProviderCostAnomaly {
+        ACTUAL_COST_UNKNOWN,
+        CURRENCY_UNSUPPORTED
     }
 }

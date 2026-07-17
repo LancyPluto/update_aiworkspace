@@ -188,51 +188,6 @@ class StartupSecurityValidatorTest {
     }
 
     @Test
-    void productionWorkflowExecutionRequiresProviderDailyCostLimit() {
-        contextRunner("startup_security_workflow_provider_cost_limit_test")
-                .withPropertyValues(
-                        "app.production-mode=true",
-                        "app.jwt-secret=strong-jwt-secret-value-1234567890",
-                        "app.internal-api-token=strong-internal-token-value-123456",
-                        "app.cors.allowed-origins=http://localhost:5173",
-                        "app.task-queue-backend=rabbitmq",
-                        "workflow.runtime.enabled=true",
-                        "workflow.runtime.execution-enabled=true",
-                        "workflow.runtime.max-provider-daily-cost-cny=0"
-                )
-                .run(context -> {
-                    assertThat(context).hasFailed();
-                    assertThat(context.getStartupFailure())
-                            .hasRootCauseMessage(
-                                    "Production workflow execution requires a positive provider daily cost limit"
-                            );
-                });
-    }
-
-    @Test
-    void productionWorkflowExecutionRequiresCostAlertWebhook() {
-        contextRunner("startup_security_workflow_cost_alert_test")
-                .withPropertyValues(
-                        "app.production-mode=true",
-                        "app.jwt-secret=strong-jwt-secret-value-1234567890",
-                        "app.internal-api-token=strong-internal-token-value-123456",
-                        "app.cors.allowed-origins=http://localhost:5173",
-                        "app.task-queue-backend=rabbitmq",
-                        "workflow.runtime.enabled=true",
-                        "workflow.runtime.execution-enabled=true",
-                        "workflow.runtime.max-provider-daily-cost-cny=100.00",
-                        "workflow.runtime.cost-alert-webhook-url="
-                )
-                .run(context -> {
-                    assertThat(context).hasFailed();
-                    assertThat(context.getStartupFailure())
-                            .hasRootCauseMessage(
-                                    "Production workflow execution requires a cost alert webhook URL"
-                            );
-                });
-    }
-
-    @Test
     void developmentModeAllowsLocalDefaults() {
         contextRunner("startup_security_development_defaults_test")
                 .withPropertyValues(

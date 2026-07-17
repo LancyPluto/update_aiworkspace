@@ -51,7 +51,6 @@ public class StartupSecurityValidator implements InitializingBean {
             throw new IllegalStateException("Production mode requires RabbitMQ task queue backend");
         }
         validateRabbitMqCredentials();
-        validateWorkflowRuntimeSafety();
         String confirmationSecret = appProperties.getWorkflow().getConfirmation().getHmacSecret();
         if (workflowRuntimeProperties.isConfirmationEnabled()
                 && (confirmationSecret == null
@@ -77,20 +76,4 @@ public class StartupSecurityValidator implements InitializingBean {
         }
     }
 
-    private void validateWorkflowRuntimeSafety() {
-        if (!workflowRuntimeProperties.isEnabled() || !workflowRuntimeProperties.isExecutionEnabled()) {
-            return;
-        }
-        if (workflowRuntimeProperties.getMaxProviderDailyCostCny() == null
-                || workflowRuntimeProperties.getMaxProviderDailyCostCny().signum() <= 0) {
-            throw new IllegalStateException(
-                    "Production workflow execution requires a positive provider daily cost limit"
-            );
-        }
-        if (workflowRuntimeProperties.getCostAlertWebhookUrl().isBlank()) {
-            throw new IllegalStateException(
-                    "Production workflow execution requires a cost alert webhook URL"
-            );
-        }
-    }
 }
