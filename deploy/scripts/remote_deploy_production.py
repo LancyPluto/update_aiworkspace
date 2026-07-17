@@ -219,6 +219,10 @@ EOF
 rollback_on_failure() {{
   status=$?
   trap - ERR
+  if declare -F cleanup_preflight_user >/dev/null 2>&1; then
+    cleanup_preflight_user || true
+    trap - EXIT
+  fi
   echo "::error::Release failed; starting rollback to $OLD_SHA." >&2
   if ! REMOTE_DIR="$REMOTE_DIR" DEPLOY_SERVICES="$SERVICES" \
       bash "$REMOTE_DIR/deploy/scripts/rollback_release.sh"; then

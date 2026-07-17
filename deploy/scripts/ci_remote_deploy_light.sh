@@ -427,6 +427,10 @@ fi
 rollback_on_failure() {
   status=\$?
   trap - ERR
+  if declare -F cleanup_preflight_user >/dev/null 2>&1; then
+    cleanup_preflight_user || true
+    trap - EXIT
+  fi
   echo "::error::Release failed; starting application rollback." >&2
   if ! REMOTE_DIR="\$REMOTE_DIR" DEPLOY_SERVICES="\$DEPLOY_SERVICES" \
       bash "\$REMOTE_DIR/deploy/scripts/rollback_release.sh"; then
@@ -466,6 +470,12 @@ export PRODUCTION_PREFLIGHT_MYSQL_USER
 export PRODUCTION_PREFLIGHT_MYSQL_PASSWORD
 echo "Preparing persistent production credentials ..."
 bash "\$REMOTE_DIR/deploy/scripts/prepare_production_credentials.sh"
+CURRENT_SECRET_SNAPSHOT="\$(read_secret_snapshot)"
+if [ "\$CURRENT_SECRET_SNAPSHOT" != "\$SECRET_SNAPSHOT_AFTER" ]; then
+  DEPLOY_SERVICES="\$(bash "\$REMOTE_DIR/deploy/scripts/merge_deploy_services.sh" "\$DEPLOY_SERVICES" backend worker agent-service)"
+  SECRET_SNAPSHOT_AFTER="\$CURRENT_SECRET_SNAPSHOT"
+  echo "Persistent credentials changed; forcing dependent services to recreate"
+fi
 echo "Verifying production environment configuration ..."
 bash "\$REMOTE_DIR/deploy/scripts/verify_production_environment.sh"
 

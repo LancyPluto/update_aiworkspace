@@ -78,7 +78,8 @@ rabbit_password = ""
 rabbit_source = "generated"
 for username, password, source in rabbit_candidates:
     if (re.fullmatch(r"[A-Za-z0-9_.-]{3,64}", username or "") \
-            and username.lower() != "guest" and password and password.lower() != "guest":
+            and re.fullmatch(r"[A-Za-z0-9_.-]{16,128}", password or "") \
+            and username.lower() != "guest" and password.lower() != "guest"):
         rabbit_user, rabbit_password, rabbit_source = username, password, source
         break
 if not rabbit_user:
