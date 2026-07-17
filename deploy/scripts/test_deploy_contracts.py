@@ -180,6 +180,10 @@ class DeployContractTests(unittest.TestCase):
     def test_production_credentials_are_persisted_without_logging_values(self) -> None:
         script = self.read("deploy/scripts/prepare_production_credentials.sh")
         self.assertIn("ai-supermarket-rabbitmq", script)
+        self.assertIn("rabbitmq-diagnostics -q check_running", script)
+        self.assertNotIn("rabbitmq-diagnostics -q ping", script)
+        self.assertIn("command output suppressed to protect credentials", script)
+        self.assertIn(">/dev/null 2>&1", script)
         self.assertIn("BACKUP_ENCRYPTION_PASSWORD", script)
         self.assertIn("secrets.token_hex", script)
         self.assertIn("secrets.token_urlsafe", script)
