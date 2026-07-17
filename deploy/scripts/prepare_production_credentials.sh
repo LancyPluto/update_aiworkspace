@@ -150,21 +150,35 @@ read_env_value() {
 cd "$ROOT_DIR/deploy"
 docker compose --env-file "$ROOT_ENV_FILE" -f docker-compose.yml up -d mysql rabbitmq
 
+rabbitmq_ready=false
 for _ in $(seq 1 60); do
-  if docker exec ai-supermarket-rabbitmq rabbitmq-diagnostics -q ping >/dev/null 2>&1; then
+  if docker exec ai-supermarket-rabbitmq rabbitmq-diagnostics -q check_running >/dev/null 2>&1; then
+    rabbitmq_ready=true
     break
   fi
   sleep 2
 done
-docker exec ai-supermarket-rabbitmq rabbitmq-diagnostics -q ping >/dev/null
+if [ "$rabbitmq_ready" != true ]; then
+  echo "ERROR: RabbitMQ application did not become ready within 120 seconds" >&2
+  exit 1
+fi
 
 rabbit_user="$(read_env_value RABBITMQ_USERNAME)"
 rabbit_password="$(read_env_value RABBITMQ_PASSWORD)"
-if docker exec ai-supermarket-rabbitmq rabbitmqctl -q list_users \
-    | awk '{print $1}' | grep -Fxq "$rabbit_user"; then
-  docker exec ai-supermarket-rabbitmq rabbitmqctl change_password "$rabbit_user" "$rabbit_password" >/dev/null
-else
-  docker exec ai-supermarket-rabbitmq rabbitmqctl add_user "$rabbit_user" "$rabbit_password" >/dev/null
+rabbitmq_credential_error() {
+  echo "ERROR: RabbitMQ credential reconciliation failed; command output suppressed to protect credentials" >&2
+  exit 1
+}
+if ! rabbit_users="$(docker exec ai-supermarket-rabbitmq rabbitmqctl -q list_users 2>/dev/null)"; then
+  rabbitmq_credential_error
 fi
-docker exec ai-supermarket-rabbitmq rabbitmqctl set_permissions -p / "$rabbit_user" '.*' '.*' '.*' >/dev/null
+if printf '%s\n' "$rabbit_users" | awk '{print $1}' | grep -Fxq "$rabbit_user"; then
+  docker exec ai-supermarket-rabbitmq rabbitmqctl change_password \
+    "$rabbit_user" "$rabbit_password" >/dev/null 2>&1 || rabbitmq_credential_error
+else
+  docker exec ai-supermarket-rabbitmq rabbitmqctl add_user \
+    "$rabbit_user" "$rabbit_password" >/dev/null 2>&1 || rabbitmq_credential_error
+fi
+docker exec ai-supermarket-rabbitmq rabbitmqctl set_permissions -p / \
+  "$rabbit_user" '.*' '.*' '.*' >/dev/null 2>&1 || rabbitmq_credential_error
 echo "RabbitMQ production account reconciled; credentials were not logged"
