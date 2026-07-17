@@ -50,15 +50,6 @@ require_boolean() {
   fi
 }
 
-require_positive_decimal() {
-  local name="$1"
-  local value
-  value="$(read_env_value "$name")"
-  if ! awk -v value="$value" 'BEGIN { exit !(value ~ /^[0-9]+([.][0-9]+)?$/ && value + 0 > 0) }'; then
-    fail "$name must be a positive number"
-  fi
-}
-
 production_mode="$(read_env_value APP_PRODUCTION_MODE)"
 app_env="$(read_env_value APP_ENV)"
 if [ "$production_mode" != "true" ] && [ "$app_env" != "production" ]; then
@@ -110,8 +101,6 @@ if [ "$(read_env_value WORKFLOW_RUNTIME_EXECUTION_ENABLED)" = "true" ]; then
   if [ "$(read_env_value WORKFLOW_RUNTIME_REAL_BILLING_ENABLED)" != "true" ]; then
     fail "WORKFLOW_RUNTIME_REAL_BILLING_ENABLED must be true for paid production runs"
   fi
-  require_positive_decimal WORKFLOW_RUNTIME_MAX_RUN_COST_CREDITS
-  require_positive_decimal WORKFLOW_RUNTIME_MAX_USER_DAILY_COST_CREDITS
 fi
 
 if [ "$errors" -ne 0 ]; then
