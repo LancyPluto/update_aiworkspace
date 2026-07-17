@@ -6,6 +6,8 @@ set -euo pipefail
 : "${DEPLOY_HOST:?DEPLOY_HOST is required}"
 : "${DEPLOY_USER:?DEPLOY_USER is required}"
 : "${DEPLOY_PASSWORD:?DEPLOY_PASSWORD is required}"
+: "${PRODUCTION_PREFLIGHT_MYSQL_USER:?Runner-generated preflight MySQL user is required}"
+: "${PRODUCTION_PREFLIGHT_MYSQL_PASSWORD:?Runner-generated preflight MySQL password is required}"
 
 DEPLOY_SYNC_MODE="${DEPLOY_SYNC_MODE:-git}"
 REMOTE_DIR="/root/ai_tool_market"
@@ -74,6 +76,8 @@ set -euo pipefail
 REMOTE_DIR="$REMOTE_DIR"
 DEPLOY_SERVICES="$DEPLOY_SERVICES"
 GITHUB_SHA="${GITHUB_SHA:-unknown}"
+PRODUCTION_PREFLIGHT_MYSQL_USER="$PRODUCTION_PREFLIGHT_MYSQL_USER"
+PRODUCTION_PREFLIGHT_MYSQL_PASSWORD="$PRODUCTION_PREFLIGHT_MYSQL_PASSWORD"
 
 read_env_value() {
   python3 - "\$1" <<'PY'
@@ -98,9 +102,13 @@ PY
 
 read_secret_snapshot() {
   python3 - <<'PY'
+import hashlib
 from pathlib import Path
 
-SECRET_KEYS = ("JWT_SECRET", "INTERNAL_API_TOKEN", "MIHOMO_CONTROLLER_SECRET")
+SECRET_KEYS = (
+    "JWT_SECRET", "INTERNAL_API_TOKEN", "MIHOMO_CONTROLLER_SECRET",
+    "RABBITMQ_USERNAME", "RABBITMQ_PASSWORD",
+)
 root = Path("/root/ai_tool_market")
 merged: dict[str, str] = {}
 for rel in (".env", "deploy/.env"):
@@ -114,7 +122,10 @@ for rel in (".env", "deploy/.env"):
         key, value = key.strip(), value.strip()
         if key in SECRET_KEYS and value:
             merged[key] = value
-print("|".join(f"{key}={merged[key]}" for key in SECRET_KEYS if key in merged))
+print("|".join(
+    f"{key}={hashlib.sha256(merged[key].encode('utf-8')).hexdigest()}"
+    for key in SECRET_KEYS if key in merged
+))
 PY
 }
 
@@ -148,6 +159,7 @@ OSS_PUBLIC_BUCKET=wlcloudai-assets-public
 OSS_PRIVATE_BUCKET=wlcloudai-assets-private
 OSS_LEGACY_BUCKET=wlcloudai-assets-prod
 OSS_KEY_PREFIX=
+BACKUP_OSS_URI=oss://wlcloudai-db-backup-prod/mysql/full
 PROMETHEUS_PORT=9091
 GRAFANA_PORT=3001
 GRAFANA_ROOT_URL=https://wlcloudai.com/grafana/
@@ -415,6 +427,10 @@ fi
 rollback_on_failure() {
   status=\$?
   trap - ERR
+  if declare -F cleanup_preflight_user >/dev/null 2>&1; then
+    cleanup_preflight_user || true
+    trap - EXIT
+  fi
   echo "::error::Release failed; starting application rollback." >&2
   if ! REMOTE_DIR="\$REMOTE_DIR" DEPLOY_SERVICES="\$DEPLOY_SERVICES" \
       bash "\$REMOTE_DIR/deploy/scripts/rollback_release.sh"; then
@@ -423,6 +439,15 @@ rollback_on_failure() {
   exit "\$status"
 }
 trap rollback_on_failure ERR
+
+preflight_user_created=false
+cleanup_preflight_user() {
+  if [ "\$preflight_user_created" = true ]; then
+    bash "\$REMOTE_DIR/deploy/scripts/manage_preflight_mysql_user.sh" drop || true
+    preflight_user_created=false
+  fi
+}
+trap cleanup_preflight_user EXIT
 
 if docker inspect mihomo >/dev/null 2>&1; then
   echo "::error::Found unmanaged Mihomo container named mihomo; run the one-time managed-overlay migration before deployment." >&2
@@ -441,6 +466,16 @@ echo "DEPLOY_SERVICES=\$DEPLOY_SERVICES" | tee -a "\$REMOTE_DIR/deploy/logs/depl
 
 export APP_PRODUCTION_MODE="\$(read_env_value APP_PRODUCTION_MODE)"
 export APP_ENV="\$(read_env_value APP_ENV)"
+export PRODUCTION_PREFLIGHT_MYSQL_USER
+export PRODUCTION_PREFLIGHT_MYSQL_PASSWORD
+echo "Preparing persistent production credentials ..."
+bash "\$REMOTE_DIR/deploy/scripts/prepare_production_credentials.sh"
+CURRENT_SECRET_SNAPSHOT="\$(read_secret_snapshot)"
+if [ "\$CURRENT_SECRET_SNAPSHOT" != "\$SECRET_SNAPSHOT_AFTER" ]; then
+  DEPLOY_SERVICES="\$(bash "\$REMOTE_DIR/deploy/scripts/merge_deploy_services.sh" "\$DEPLOY_SERVICES" backend worker agent-service)"
+  SECRET_SNAPSHOT_AFTER="\$CURRENT_SECRET_SNAPSHOT"
+  echo "Persistent credentials changed; forcing dependent services to recreate"
+fi
 echo "Verifying production environment configuration ..."
 bash "\$REMOTE_DIR/deploy/scripts/verify_production_environment.sh"
 
@@ -454,10 +489,10 @@ export MYSQL_PASS="\$(read_env_value MYSQL_ROOT_PASSWORD)"
 export MYSQL_DB="\$(read_env_value MYSQL_DATABASE)"
 export BACKUP_ENCRYPTION_PASSWORD="\$(read_env_value BACKUP_ENCRYPTION_PASSWORD)"
 export BACKUP_OSS_URI="\$(read_env_value BACKUP_OSS_URI)"
-export PRODUCTION_PREFLIGHT_MYSQL_USER="\$(read_env_value PRODUCTION_PREFLIGHT_MYSQL_USER)"
-export PRODUCTION_PREFLIGHT_MYSQL_PASSWORD="\$(read_env_value PRODUCTION_PREFLIGHT_MYSQL_PASSWORD)"
 MYSQL_PASS="\${MYSQL_PASS:-root123456}"
 MYSQL_DB="\${MYSQL_DB:-ai_supermarket_v1}"
+bash "\$REMOTE_DIR/deploy/scripts/manage_preflight_mysql_user.sh" create
+preflight_user_created=true
 if [ "\$APP_PRODUCTION_MODE" = "true" ] || [ "\$APP_ENV" = "production" ]; then
   echo "Running historical data read-only preflight ..."
   bash "\$REMOTE_DIR/deploy/scripts/production_readonly_preflight.sh" historical
@@ -471,7 +506,8 @@ fi
 bash "\$REMOTE_DIR/deploy/scripts/apply_sql_migrations.sh"
 if [ "\$APP_PRODUCTION_MODE" = "true" ] || [ "\$APP_ENV" = "production" ]; then
   echo "Running post-migration read-only preflight ..."
-  bash "\$REMOTE_DIR/deploy/scripts/production_readonly_preflight.sh" post-migration
+bash "\$REMOTE_DIR/deploy/scripts/production_readonly_preflight.sh" post-migration
+cleanup_preflight_user
 fi
 
 # Parallel build: launch all builds concurrently, then wait.
@@ -550,10 +586,12 @@ if echo "\$DEPLOY_SERVICES" | grep -qw user-web; then
 fi
 docker compose "\${COMPOSE_ARGS[@]}" ps
 trap - ERR
+trap - EXIT
 
 if [ -n "\${SECRET_SNAPSHOT_AFTER:-}" ]; then
   mkdir -p "\$REMOTE_DIR/deploy/logs"
   printf '%s' "\$SECRET_SNAPSHOT_AFTER" > "\$LAST_SECRET_FILE"
+  chmod 600 "\$LAST_SECRET_FILE"
 fi
 REMOTE
 

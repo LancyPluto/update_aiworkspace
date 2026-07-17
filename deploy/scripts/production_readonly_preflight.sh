@@ -153,10 +153,9 @@ done
 check_historical_duplicates
 
 if [ "$PHASE" = "post-migration" ]; then
-  for table in _sql_migration_log workflow_runs workflow_run_steps workflow_step_attempts workflow_step_charges billing_usage_logs workflow_provider_cost_budget_days; do
+  for table in _sql_migration_log workflow_runs workflow_run_steps workflow_step_attempts workflow_step_charges billing_usage_logs; do
     require_table "$table"
   done
-  require_column workflow_runs provider_cost_reserved_cny
 
   if table_exists _sql_migration_log; then
     migration_count="$(mysql_readonly "SELECT COUNT(*) FROM _sql_migration_log WHERE name IN ('088_workflow_tools_p0.sql','089_workflow_credit_log_source.sql','090_workflow_billing_idempotency.sql','091_workflow_attempt_cancellation_generation.sql','092_workflow_charge_binding.sql','093_workflow_rollout_safety.sql','094_task_runtime_columns.sql','095_task_provider_checkpoint.sql','096_workflow_provider_accounting.sql','097_workflow_provider_cost_gate_index.sql','098_workflow_provider_cost_reservation.sql') AND checksum_sha256 IS NOT NULL AND checksum_sha256 <> ''" | tail -1 | tr -d '\r')"
@@ -174,18 +173,8 @@ if [ "$PHASE" = "post-migration" ]; then
       "SELECT COUNT(*) FROM workflow_step_charges charge_row LEFT JOIN workflow_runs run_row ON run_row.id = charge_row.run_id WHERE run_row.id IS NULL"
     check_zero "orphan_workflow_charge_step" \
       "SELECT COUNT(*) FROM workflow_step_charges charge_row LEFT JOIN workflow_run_steps step_row ON step_row.id = charge_row.step_id WHERE step_row.id IS NULL"
-    check_zero "captured_workflow_cost_missing" \
-      "SELECT COUNT(*) FROM workflow_step_charges WHERE status = 'CAPTURED' AND (provider_cost IS NULL OR provider_cost_currency IS NULL OR TRIM(provider_cost_currency) <> 'CNY')"
     check_zero "provider_charged_workflow_usage_binding_missing" \
       "SELECT COUNT(*) FROM workflow_step_charges charge_row LEFT JOIN billing_usage_logs usage_row ON usage_row.id = charge_row.billing_usage_id WHERE (charge_row.status = 'CAPTURED' OR (charge_row.status = 'RELEASED' AND charge_row.provider_cost IS NOT NULL)) AND (charge_row.billing_usage_id IS NULL OR usage_row.id IS NULL)"
-  fi
-  if table_exists billing_usage_logs; then
-    check_zero "successful_workflow_actual_provider_cost_unknown" \
-      "SELECT COUNT(*) FROM billing_usage_logs WHERE source_type = 'WORKFLOW_STEP' AND outcome IN ('SUCCESS', 'CANCELLED_LATE_SUCCESS') AND (provider_charged = 0 OR provider_cost_currency IS NULL OR TRIM(provider_cost_currency) = '' OR UPPER(TRIM(provider_cost_currency)) = 'UNKNOWN')"
-  fi
-  if table_exists workflow_runs && column_exists workflow_runs provider_cost_reserved_cny; then
-    check_zero "active_workflow_provider_reservation_missing" \
-      "SELECT COUNT(*) FROM workflow_runs WHERE status IN ('RUNNING','AWAITING_USER','AWAITING_FUNDS','CANCELLING') AND (provider_cost_reserved_cny IS NULL OR provider_cost_reserved_cny <= 0)"
   fi
 fi
 

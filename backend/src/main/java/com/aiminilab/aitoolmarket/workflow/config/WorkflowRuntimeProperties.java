@@ -2,7 +2,6 @@ package com.aiminilab.aitoolmarket.workflow.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,8 +24,6 @@ public class WorkflowRuntimeProperties {
     private int reconciliationBatchSize = 100;
     private int maxRunCostCredits;
     private int maxUserDailyCostCredits;
-    private BigDecimal maxProviderDailyCostCny = BigDecimal.ZERO;
-    private String costAlertWebhookUrl = "";
 
     public boolean isEnabled() {
         return enabled;
@@ -148,21 +145,4 @@ public class WorkflowRuntimeProperties {
         this.maxUserDailyCostCredits = maxUserDailyCostCredits;
     }
 
-    public BigDecimal getMaxProviderDailyCostCny() {
-        return maxProviderDailyCostCny;
-    }
-
-    public void setMaxProviderDailyCostCny(BigDecimal maxProviderDailyCostCny) {
-        this.maxProviderDailyCostCny = maxProviderDailyCostCny == null
-                ? BigDecimal.ZERO
-                : maxProviderDailyCostCny;
-    }
-
-    public String getCostAlertWebhookUrl() {
-        return costAlertWebhookUrl;
-    }
-
-    public void setCostAlertWebhookUrl(String costAlertWebhookUrl) {
-        this.costAlertWebhookUrl = costAlertWebhookUrl == null ? "" : costAlertWebhookUrl.trim();
-    }
 }

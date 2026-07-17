@@ -73,8 +73,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "workflow.runtime.confirmation-enabled=false",
         "workflow.runtime.canary-percentage=100",
         "workflow.runtime.max-run-cost-credits=100",
-        "workflow.runtime.max-user-daily-cost-credits=60",
-        "workflow.runtime.max-provider-daily-cost-cny=1000000"
+        "workflow.runtime.max-user-daily-cost-credits=60"
 })
 class WorkflowMySqlConcurrencyGateTest {
 
@@ -253,8 +252,7 @@ class WorkflowMySqlConcurrencyGateTest {
     }
 
     @RepeatedTest(5)
-    void concurrentUsersCannotOverbookTheGlobalProviderCostBudget() throws Exception {
-        runtimeProperties.setMaxProviderDailyCostCny(new BigDecimal("0.60"));
+    void concurrentUsersAreNotGloballyLimitedByOptionalProviderCost() throws Exception {
         PublishedWorkflow published = insertWorkerWorkflow(
                 TOOL_PREFIX + "provider_budget",
                 40,
@@ -277,17 +275,15 @@ class WorkflowMySqlConcurrencyGateTest {
                 }
             });
 
-            assertThat(results.stream().filter(WorkflowRunCreated.class::isInstance).count()).isOne();
-            assertThat(results.stream().filter(this::isProviderLimitRejection).count()).isOne();
+            assertThat(results.stream().filter(WorkflowRunCreated.class::isInstance).count()).isEqualTo(2);
             assertThat(jdbcTemplate.queryForObject(
                     "SELECT COALESCE(SUM(provider_cost_reserved_cny), 0) FROM workflow_runs "
                             + "WHERE user_id IN (?, ?) AND status = 'RUNNING'",
                     BigDecimal.class,
                     USER_ID,
                     OTHER_USER_ID
-            )).isEqualByComparingTo("0.400000");
+            )).isEqualByComparingTo("0.000000");
         } finally {
-            runtimeProperties.setMaxProviderDailyCostCny(new BigDecimal("1000000"));
         }
     }
 
@@ -388,24 +384,8 @@ class WorkflowMySqlConcurrencyGateTest {
                 SELECT COUNT(*)
                 FROM workflow_runs
                 WHERE status IN ('RUNNING', 'AWAITING_USER', 'AWAITING_FUNDS', 'CANCELLING')
-                  AND (provider_cost_reserved_cny IS NULL OR provider_cost_reserved_cny <= 0)
+                  AND provider_cost_reserved_cny <> 0
                 """, Integer.class)).isZero();
-        BigDecimal providerExposure = jdbcTemplate.queryForObject("""
-                SELECT
-                  COALESCE((
-                    SELECT SUM(vendor_cost_amount)
-                    FROM billing_usage_logs
-                    WHERE source_type = 'WORKFLOW_STEP'
-                      AND provider_charged = 1
-                      AND provider_cost_currency = 'CNY'
-                  ), 0)
-                  + COALESCE((
-                    SELECT SUM(provider_cost_reserved_cny)
-                    FROM workflow_runs
-                    WHERE status IN ('RUNNING', 'AWAITING_USER', 'AWAITING_FUNDS', 'CANCELLING')
-                  ), 0)
-                """, BigDecimal.class);
-        assertThat(providerExposure).isLessThanOrEqualTo(new BigDecimal("1000000"));
     }
 
     @RepeatedTest(5)
@@ -569,15 +549,6 @@ class WorkflowMySqlConcurrencyGateTest {
             return false;
         }
         return "user_daily_cost_limit_exceeded".equals(data.get("reason"));
-    }
-
-    private boolean isProviderLimitRejection(Object result) {
-        if (!(result instanceof BusinessException exception)
-                || exception.getErrorCode() != ErrorCode.WORKFLOW_RUNTIME_BLOCKED
-                || !(exception.getData() instanceof Map<?, ?> data)) {
-            return false;
-        }
-        return "provider_daily_cost_limit_exceeded".equals(data.get("reason"));
     }
 
     private PublishedWorkflow insertWorkerWorkflow(String toolCode,

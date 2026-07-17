@@ -20,7 +20,7 @@ class WorkflowMetricsTest {
         metrics.recordCasConflict(WorkflowMetrics.CasOperation.RECOVERY);
         metrics.recordLateCallback(WorkflowMetrics.LateCallbackResult.REJECTED_GENERATION);
         metrics.recordBillingState(WorkflowMetrics.BillingState.RESERVED);
-        metrics.recordCostAlert(WorkflowMetrics.CostAlertResult.DELIVERED);
+        metrics.recordProviderCostAnomaly(WorkflowMetrics.ProviderCostAnomaly.ACTUAL_COST_UNKNOWN);
 
         assertThat(registry.counter("workflow_recovery_total", "result", "recovered").count()).isEqualTo(1);
         assertThat(registry.counter(
@@ -31,7 +31,8 @@ class WorkflowMetricsTest {
         assertThat(registry.counter("workflow_cas_conflict_total", "operation", "recovery").count()).isEqualTo(1);
         assertThat(registry.counter("workflow_late_callback_total", "result", "rejected_generation").count()).isEqualTo(1);
         assertThat(registry.counter("workflow_billing_state_total", "state", "reserved").count()).isEqualTo(1);
-        assertThat(registry.counter("workflow_cost_alert_total", "result", "delivered").count()).isEqualTo(1);
+        assertThat(registry.counter(
+                "workflow_provider_cost_anomaly_total", "reason", "actual_cost_unknown").count()).isEqualTo(1);
         assertThat(registry.getMeters())
                 .allSatisfy(meter -> assertThat(meter.getId().getTags())
                         .allSatisfy(tag -> assertThat(tag.getKey()).doesNotContain("run", "user", "attempt", "tool")));

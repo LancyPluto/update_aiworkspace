@@ -11,7 +11,7 @@ import com.aiminilab.aitoolmarket.workflow.config.WorkflowRuntimeGate;
 import com.aiminilab.aitoolmarket.workflow.dsl.WorkflowDsl;
 import com.aiminilab.aitoolmarket.workflow.dsl.WorkflowNodeDefType;
 import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowStepChargeMapper;
-import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowRunMapper;
+import com.aiminilab.aitoolmarket.workflow.metrics.WorkflowMetrics;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,26 +36,24 @@ public class WorkflowRuntimeAdmissionService {
     private final ToolWorkflowMapper workflowMapper;
     private final ToolWorkflowVersionMapper versionMapper;
     private final WorkflowStepChargeMapper chargeMapper;
-    private final WorkflowRunMapper runMapper;
     private final CreditMapper creditMapper;
     private final WorkflowDslService dslService;
     private final WorkflowRuntimeGate gate;
     private final ObjectMapper objectMapper;
-    private final WorkflowCostAlertNotifier costAlertNotifier;
+    private final WorkflowMetrics metrics;
     private final Clock clock;
 
     @Autowired
     public WorkflowRuntimeAdmissionService(ToolWorkflowMapper workflowMapper,
                                            ToolWorkflowVersionMapper versionMapper,
                                            WorkflowStepChargeMapper chargeMapper,
-                                           WorkflowRunMapper runMapper,
                                            CreditMapper creditMapper,
                                            WorkflowDslService dslService,
                                            WorkflowRuntimeGate gate,
                                            ObjectMapper objectMapper,
-                                           WorkflowCostAlertNotifier costAlertNotifier) {
-        this(workflowMapper, versionMapper, chargeMapper, runMapper, creditMapper, dslService, gate, objectMapper,
-                costAlertNotifier,
+                                           WorkflowMetrics metrics) {
+        this(workflowMapper, versionMapper, chargeMapper, creditMapper, dslService, gate, objectMapper,
+                metrics,
                 Clock.system(SHANGHAI));
     }
 
@@ -66,30 +64,16 @@ public class WorkflowRuntimeAdmissionService {
                                            WorkflowDslService dslService,
                                            WorkflowRuntimeGate gate,
                                            ObjectMapper objectMapper,
+                                           WorkflowMetrics metrics,
                                            Clock clock) {
-        this(workflowMapper, versionMapper, chargeMapper, null, creditMapper, dslService, gate, objectMapper,
-                null, clock);
-    }
-
-    private WorkflowRuntimeAdmissionService(ToolWorkflowMapper workflowMapper,
-                                            ToolWorkflowVersionMapper versionMapper,
-                                            WorkflowStepChargeMapper chargeMapper,
-                                            WorkflowRunMapper runMapper,
-                                            CreditMapper creditMapper,
-                                            WorkflowDslService dslService,
-                                            WorkflowRuntimeGate gate,
-                                            ObjectMapper objectMapper,
-                                            WorkflowCostAlertNotifier costAlertNotifier,
-                                            Clock clock) {
         this.workflowMapper = workflowMapper;
         this.versionMapper = versionMapper;
         this.chargeMapper = chargeMapper;
-        this.runMapper = runMapper;
         this.creditMapper = creditMapper;
         this.dslService = dslService;
         this.gate = gate;
         this.objectMapper = objectMapper;
-        this.costAlertNotifier = costAlertNotifier;
+        this.metrics = metrics;
         this.clock = clock;
     }
 
@@ -130,66 +114,31 @@ public class WorkflowRuntimeAdmissionService {
         long estimatedRunCredits = estimatedRunCredits(version, dsl);
         boolean paidRun = estimatedRunCredits > 0;
         long committedToday = paidRun ? committedToday(userId) : 0L;
-        BigDecimal providerCostReservedCny = paidRun
-                ? providerCostReservation(version, dsl)
-                : BigDecimal.ZERO;
-        BigDecimal activeProviderReservations = paidRun
-                ? lockAndReadActiveProviderReservations()
-                : BigDecimal.ZERO;
-        BigDecimal providerCostToday = paidRun ? providerCostToday() : BigDecimal.ZERO;
         if (paidRun && unknownProviderCostsToday() > 0) {
-            if (costAlertNotifier != null) {
-                costAlertNotifier.notifyLimitReachedAsync(
-                        "provider_actual_cost_unknown",
-                        providerCostToday
-                );
+            if (metrics != null) {
+                metrics.recordProviderCostAnomaly(WorkflowMetrics.ProviderCostAnomaly.ACTUAL_COST_UNKNOWN);
             }
-            throw blocked("provider_actual_cost_unknown");
         }
         if (paidRun && unsupportedProviderCostCurrenciesToday() > 0) {
-            if (costAlertNotifier != null) {
-                costAlertNotifier.notifyLimitReachedAsync(
-                        "provider_daily_cost_currency_unsupported",
-                        providerCostToday
-                );
+            if (metrics != null) {
+                metrics.recordProviderCostAnomaly(WorkflowMetrics.ProviderCostAnomaly.CURRENCY_UNSUPPORTED);
             }
-            throw blocked("provider_daily_cost_currency_unsupported");
         }
         WorkflowRuntimeGate.Decision decision = gate.evaluateNewRun(
                 userId,
                 Boolean.TRUE.equals(workflow.getExecutionEnabled()),
                 paidRun,
                 estimatedRunCredits,
-                committedToday,
-                providerCostToday
+                committedToday
         );
-        if (!decision.allowed()
-                && "provider_daily_cost_limit_exceeded".equals(decision.reason())
-                && costAlertNotifier != null) {
-            costAlertNotifier.notifyLimitReachedAsync(decision.reason(), providerCostToday);
-        }
         requireAllowed(decision);
-        if (paidRun) {
-            WorkflowRuntimeGate.Decision providerReservationDecision = gate.evaluateProviderCostReservation(
-                    providerCostToday,
-                    activeProviderReservations,
-                    providerCostReservedCny
-            );
-            if (!providerReservationDecision.allowed() && costAlertNotifier != null) {
-                costAlertNotifier.notifyLimitReachedAsync(
-                        providerReservationDecision.reason(),
-                        providerCostToday.add(activeProviderReservations)
-                );
-            }
-            requireAllowed(providerReservationDecision);
-        }
         return new WorkflowRuntimeAdmission(
                 workflow,
                 version,
                 dsl,
                 paidRun,
                 estimatedRunCredits,
-                providerCostReservedCny
+                BigDecimal.ZERO.setScale(6)
         );
     }
 
@@ -198,8 +147,6 @@ public class WorkflowRuntimeAdmissionService {
         if (userId == null) {
             throw blocked("admission_identity_invalid");
         }
-        // New runs must wait behind existing run owners before taking the user's credit lock.
-        lockAndReadActiveProviderReservations();
         lockCreditAccount(userId);
     }
 
@@ -256,83 +203,6 @@ public class WorkflowRuntimeAdmissionService {
                 dayStart,
                 dayStart.plusDays(1)
         );
-    }
-
-    private BigDecimal providerCostToday() {
-        LocalDateTime dayStart = dayStart();
-        return sumNonNegative(
-                chargeMapper.selectProviderCostsBetweenForUpdate(dayStart, dayStart.plusDays(1)),
-                "provider_cost_ledger_invalid"
-        );
-    }
-
-    private BigDecimal providerCostReservation(ToolWorkflowVersion version, WorkflowDsl dsl) {
-        try {
-            JsonNode root = objectMapper.readTree(version.getBillingPolicyJson());
-            JsonNode nodePolicies = root == null ? null : root.get("nodePolicies");
-            if (nodePolicies == null || !nodePolicies.isObject()) {
-                throw blocked("provider_run_cost_unknown");
-            }
-            BigDecimal total = BigDecimal.ZERO.setScale(6);
-            for (var node : dsl.nodes()) {
-                if (!node.type().isWorkerStep()) {
-                    continue;
-                }
-                JsonNode value = nodePolicies.path(node.id()).get("maxProviderCostCny");
-                if (value == null || !value.isNumber()) {
-                    throw blocked("provider_run_cost_unknown");
-                }
-                BigDecimal amount = value.decimalValue();
-                if (amount.signum() <= 0 || amount.stripTrailingZeros().scale() > 6) {
-                    throw blocked("provider_run_cost_unknown");
-                }
-                amount = amount.setScale(6);
-                if (amount.precision() - amount.scale() > 12) {
-                    throw blocked("provider_run_cost_unknown");
-                }
-                total = total.add(amount);
-                if (total.precision() - total.scale() > 12) {
-                    throw blocked("provider_run_cost_unknown");
-                }
-            }
-            return total.signum() > 0 ? total : BigDecimal.ZERO.setScale(6);
-        } catch (BusinessException exception) {
-            throw exception;
-        } catch (Exception exception) {
-            throw blocked("provider_run_cost_unknown");
-        }
-    }
-
-    private BigDecimal lockAndReadActiveProviderReservations() {
-        if (runMapper == null) {
-            return BigDecimal.ZERO;
-        }
-        LocalDate budgetDate = dayStart().toLocalDate();
-        // The upsert requests an exclusive lock directly and avoids duplicate-key S-to-X upgrade deadlocks.
-        runMapper.acquireProviderCostBudgetDayLock(budgetDate);
-        java.util.List<Long> missingReservations =
-                runMapper.selectActiveRunsWithMissingProviderCostReservationForUpdate();
-        if (missingReservations == null || !missingReservations.isEmpty()) {
-            throw blocked("provider_active_reservation_unknown");
-        }
-        return sumNonNegative(
-                runMapper.selectActiveProviderCostReservationsForUpdate(),
-                "provider_cost_budget_invalid"
-        );
-    }
-
-    private BigDecimal sumNonNegative(java.util.List<BigDecimal> values, String invalidReason) {
-        if (values == null) {
-            throw blocked(invalidReason);
-        }
-        BigDecimal total = BigDecimal.ZERO.setScale(6);
-        for (BigDecimal value : values) {
-            if (value == null || value.signum() < 0) {
-                throw blocked(invalidReason);
-            }
-            total = total.add(value);
-        }
-        return total;
     }
 
     private int unsupportedProviderCostCurrenciesToday() {

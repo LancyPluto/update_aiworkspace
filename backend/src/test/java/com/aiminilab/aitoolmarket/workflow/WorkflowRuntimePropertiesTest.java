@@ -9,7 +9,6 @@ import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.env.SystemEnvironmentPropertySource;
 
 import java.time.Duration;
-import java.math.BigDecimal;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -30,8 +29,6 @@ class WorkflowRuntimePropertiesTest {
         assertThat(properties.getCanaryPercentage()).isZero();
         assertThat(properties.getMaxRunCostCredits()).isZero();
         assertThat(properties.getMaxUserDailyCostCredits()).isZero();
-        assertThat(properties.getMaxProviderDailyCostCny()).isEqualByComparingTo(BigDecimal.ZERO);
-        assertThat(properties.getCostAlertWebhookUrl()).isEmpty();
         assertThat(properties.getAttemptTimeout()).isEqualTo(Duration.ofMinutes(15));
         assertThat(properties.getRecoveryInterval()).isEqualTo(Duration.ofMinutes(1));
         assertThat(properties.getRecoveryBatchSize()).isEqualTo(100);
@@ -56,9 +53,7 @@ class WorkflowRuntimePropertiesTest {
                 Map.entry("workflow.runtime.reconciliation-interval", "PT6H"),
                 Map.entry("workflow.runtime.reconciliation-batch-size", "50"),
                 Map.entry("workflow.runtime.max-run-cost-credits", "500"),
-                Map.entry("workflow.runtime.max-user-daily-cost-credits", "1000"),
-                Map.entry("workflow.runtime.max-provider-daily-cost-cny", "88.50"),
-                Map.entry("workflow.runtime.cost-alert-webhook-url", "https://alerts.example.test/workflow")
+                Map.entry("workflow.runtime.max-user-daily-cost-credits", "1000")
         ));
 
         WorkflowRuntimeProperties properties = new Binder(source)
@@ -79,8 +74,6 @@ class WorkflowRuntimePropertiesTest {
         assertThat(properties.getReconciliationBatchSize()).isEqualTo(50);
         assertThat(properties.getMaxRunCostCredits()).isEqualTo(500);
         assertThat(properties.getMaxUserDailyCostCredits()).isEqualTo(1000);
-        assertThat(properties.getMaxProviderDailyCostCny()).isEqualByComparingTo("88.50");
-        assertThat(properties.getCostAlertWebhookUrl()).isEqualTo("https://alerts.example.test/workflow");
     }
 
     @Test

@@ -14,6 +14,7 @@ import com.aiminilab.aitoolmarket.workflow.dsl.WorkflowDsl;
 import com.aiminilab.aitoolmarket.workflow.dsl.WorkflowNodeDef;
 import com.aiminilab.aitoolmarket.workflow.dsl.WorkflowNodeDefType;
 import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowStepChargeMapper;
+import com.aiminilab.aitoolmarket.workflow.metrics.WorkflowMetrics;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowDslService;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowRuntimeAdmission;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowRuntimeAdmissionService;
@@ -28,7 +29,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -50,6 +50,7 @@ class WorkflowRuntimeAdmissionServiceTest {
     private WorkflowStepChargeMapper chargeMapper;
     private CreditMapper creditMapper;
     private WorkflowDslService dslService;
+    private WorkflowMetrics metrics;
     private WorkflowRuntimeProperties properties;
     private WorkflowRuntimeGate gate;
     private WorkflowRuntimeAdmissionService service;
@@ -63,6 +64,7 @@ class WorkflowRuntimeAdmissionServiceTest {
         chargeMapper = mock(WorkflowStepChargeMapper.class);
         creditMapper = mock(CreditMapper.class);
         dslService = mock(WorkflowDslService.class);
+        metrics = mock(WorkflowMetrics.class);
         properties = new WorkflowRuntimeProperties();
         gate = new WorkflowRuntimeGate(properties);
         service = new WorkflowRuntimeAdmissionService(
@@ -73,6 +75,7 @@ class WorkflowRuntimeAdmissionServiceTest {
                 dslService,
                 gate,
                 new ObjectMapper(),
+                metrics,
                 Clock.fixed(Instant.parse("2026-07-15T04:30:00Z"), SHANGHAI)
         );
 
@@ -90,8 +93,6 @@ class WorkflowRuntimeAdmissionServiceTest {
         when(versionMapper.selectById(41L)).thenReturn(version);
         when(creditMapper.selectByUserIdForUpdate(11L)).thenReturn(new CreditAccount());
         when(chargeMapper.sumCommittedCreditsForUserBetween(eq(11L), any(), any())).thenReturn(40L);
-        when(chargeMapper.selectProviderCostsBetweenForUpdate(any(), any()))
-                .thenReturn(List.of(new BigDecimal("12.50")));
         when(chargeMapper.countUnsupportedProviderCostCurrenciesBetween(any(), any())).thenReturn(0);
         when(chargeMapper.countUnknownProviderCostsBetween(any(), any())).thenReturn(0);
     }
@@ -125,12 +126,11 @@ class WorkflowRuntimeAdmissionServiceTest {
         assertThat(admitted.version()).isSameAs(version);
         assertThat(admitted.paidRun()).isTrue();
         assertThat(admitted.estimatedRunCredits()).isEqualTo(50L);
-        assertThat(admitted.providerCostReservedCny()).isEqualByComparingTo("0.500000");
+        assertThat(admitted.providerCostReservedCny()).isEqualByComparingTo("0.000000");
 
         ArgumentCaptor<LocalDateTime> start = ArgumentCaptor.forClass(LocalDateTime.class);
         ArgumentCaptor<LocalDateTime> end = ArgumentCaptor.forClass(LocalDateTime.class);
         verify(chargeMapper).sumCommittedCreditsForUserBetween(eq(11L), start.capture(), end.capture());
-        verify(chargeMapper).selectProviderCostsBetweenForUpdate(start.getValue(), end.getValue());
         assertThat(start.getValue()).isEqualTo(LocalDateTime.of(2026, 7, 15, 0, 0));
         assertThat(end.getValue()).isEqualTo(LocalDateTime.of(2026, 7, 16, 0, 0));
     }
@@ -153,7 +153,7 @@ class WorkflowRuntimeAdmissionServiceTest {
     }
 
     @Test
-    void paidRunWithoutPublishedProviderCostCapFailsClosed() {
+    void paidRunDoesNotRequirePublishedProviderCostCap() {
         enableHealthyRuntime(100, 100);
         version.setBillingPolicyJson(
                 "{\"mode\":\"WORKFLOW_STEP\",\"nodePolicies\":{\"writer\":{\"maxCreditCost\":10}}}"
@@ -161,7 +161,7 @@ class WorkflowRuntimeAdmissionServiceTest {
         when(dslService.parse(version.getNodesJson(), version.getEdgesJson(), version.getConfigJson()))
                 .thenReturn(dsl(worker("writer")));
 
-        assertBlocked(() -> service.admitNewRun(11L, 7L), "provider_run_cost_unknown");
+        assertThat(service.admitNewRun(11L, 7L).paidRun()).isTrue();
     }
 
     @Test
@@ -195,7 +195,7 @@ class WorkflowRuntimeAdmissionServiceTest {
     }
 
     @Test
-    void paidRunStopsWhenTodaysProviderCostCannotBeConvertedToCny() {
+    void paidRunRecordsUnsupportedProviderCurrencyWithoutBlocking() {
         enableHealthyRuntime(100, 100);
         version.setBillingPolicyJson(
                 "{\"mode\":\"WORKFLOW_STEP\",\"nodePolicies\":{\"writer\":{\"maxCreditCost\":10,\"maxProviderCostCny\":0.10}}}"
@@ -204,14 +204,12 @@ class WorkflowRuntimeAdmissionServiceTest {
                 .thenReturn(dsl(worker("writer")));
         when(chargeMapper.countUnsupportedProviderCostCurrenciesBetween(any(), any())).thenReturn(1);
 
-        assertBlocked(
-                () -> service.admitNewRun(11L, 7L),
-                "provider_daily_cost_currency_unsupported"
-        );
+        assertThat(service.admitNewRun(11L, 7L).paidRun()).isTrue();
+        verify(metrics).recordProviderCostAnomaly(WorkflowMetrics.ProviderCostAnomaly.CURRENCY_UNSUPPORTED);
     }
 
     @Test
-    void paidRunStopsWhenTodaysSuccessfulWorkflowHasUnknownActualProviderCost() {
+    void paidRunRecordsUnknownProviderCostWithoutBlocking() {
         enableHealthyRuntime(100, 100);
         version.setBillingPolicyJson(
                 "{\"mode\":\"WORKFLOW_STEP\",\"nodePolicies\":{\"writer\":{\"maxCreditCost\":10,\"maxProviderCostCny\":0.10}}}"
@@ -220,10 +218,8 @@ class WorkflowRuntimeAdmissionServiceTest {
                 .thenReturn(dsl(worker("writer")));
         when(chargeMapper.countUnknownProviderCostsBetween(any(), any())).thenReturn(1);
 
-        assertBlocked(
-                () -> service.admitNewRun(11L, 7L),
-                "provider_actual_cost_unknown"
-        );
+        assertThat(service.admitNewRun(11L, 7L).paidRun()).isTrue();
+        verify(metrics).recordProviderCostAnomaly(WorkflowMetrics.ProviderCostAnomaly.ACTUAL_COST_UNKNOWN);
     }
 
     private void enableHealthyRuntime(int maxRunCredits, int maxDailyCredits) {
@@ -233,7 +229,6 @@ class WorkflowRuntimeAdmissionServiceTest {
         properties.setAllowedUserIds(List.of(11L));
         properties.setMaxRunCostCredits(maxRunCredits);
         properties.setMaxUserDailyCostCredits(maxDailyCredits);
-        properties.setMaxProviderDailyCostCny(new BigDecimal("100.00"));
         gate.markReconciliationHealthyAfterFullScan(gate.reconciliationFailureGeneration());
     }
 

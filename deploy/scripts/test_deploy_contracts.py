@@ -107,16 +107,22 @@ class DeployContractTests(unittest.TestCase):
             "PRODUCTION_PREFLIGHT_MYSQL_USER",
             "PRODUCTION_PREFLIGHT_MYSQL_PASSWORD",
             "WORKFLOW_RUNTIME_EXECUTION_ENABLED",
-            "WORKFLOW_RUNTIME_MAX_PROVIDER_DAILY_COST_CNY",
-            "WORKFLOW_RUNTIME_COST_ALERT_WEBHOOK_URL",
         ):
             self.assertIn(required_setting, script)
         self.assertIn("guest RabbitMQ credentials are forbidden", script)
         self.assertIn("read-only preflight account cannot be root", script)
-        self.assertIn("require_positive_decimal", script)
-        self.assertIn("cost alert webhook must use https://", script)
+        self.assertNotIn("WORKFLOW_RUNTIME_MAX_PROVIDER_DAILY_COST_CNY", script)
+        self.assertNotIn("WORKFLOW_RUNTIME_COST_ALERT_WEBHOOK_URL", script)
         self.assertIn("backup bucket must be separate from application asset buckets", script)
         self.assertIn("production environment preflight failed", script)
+
+    def test_production_deploy_entries_configure_independent_backup_bucket(self) -> None:
+        backup_uri = "BACKUP_OSS_URI=oss://wlcloudai-db-backup-prod/mysql/full"
+        for deploy_entry in (
+            "deploy/scripts/ci_remote_deploy_light.sh",
+            "deploy/scripts/remote_deploy_production.py",
+        ):
+            self.assertIn(backup_uri, self.read(deploy_entry))
 
     def test_production_database_preflight_is_read_only_and_auditable(self) -> None:
         script = self.read("deploy/scripts/production_readonly_preflight.sh")
@@ -130,10 +136,9 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("information_schema", script)
         self.assertIn("workflow_step_charges", script)
         self.assertIn("billing_usage_logs", script)
-        self.assertIn("provider_cost IS NULL", script)
         self.assertIn("status = 'CAPTURED'", script)
-        self.assertIn("active_workflow_provider_reservation_missing", script)
-        self.assertIn("provider_cost_reserved_cny <= 0", script)
+        self.assertNotIn("active_workflow_provider_reservation_missing", script)
+        self.assertNotIn("successful_workflow_actual_provider_cost_unknown", script)
         self.assertNotIn("status = 'CHARGED'", script)
         self.assertIn("095_task_provider_checkpoint.sql", script)
         self.assertIn("096_workflow_provider_accounting.sql", script)
@@ -146,26 +151,41 @@ class DeployContractTests(unittest.TestCase):
         self.assertNotIn("DELETE FROM", script)
         self.assertNotIn("UPDATE workflow", script)
 
-    def test_production_database_preflight_blocks_unknown_actual_provider_cost(self) -> None:
-        script = self.read("deploy/scripts/production_readonly_preflight.sh")
-        self.assertIn("successful_workflow_actual_provider_cost_unknown", script)
-        self.assertIn("outcome IN ('SUCCESS', 'CANCELLED_LATE_SUCCESS')", script)
-        self.assertIn("provider_charged = 0", script)
-        self.assertIn("UPPER(TRIM(provider_cost_currency)) = 'UNKNOWN'", script)
-
-    def test_workflow_cost_guard_settings_are_deployable(self) -> None:
+    def test_provider_cost_limits_and_direct_webhook_are_not_runtime_configuration(self) -> None:
         root_environment = self.read(".env.example")
-        deploy_environment = self.read("deploy/.env.example")
-        compose = self.read("deploy/docker-compose.yml")
         application = self.read("backend/src/main/resources/application.yml")
+        preflight = self.read("deploy/scripts/verify_production_environment.sh")
         for setting in (
             "WORKFLOW_RUNTIME_MAX_PROVIDER_DAILY_COST_CNY",
             "WORKFLOW_RUNTIME_COST_ALERT_WEBHOOK_URL",
         ):
-            self.assertIn(setting + "=", root_environment)
-            self.assertIn("${" + setting + ":", application)
-            self.assertNotIn(setting + "=", deploy_environment)
-            self.assertNotIn(setting + ": ${" + setting, compose)
+            self.assertNotIn(setting, root_environment)
+            self.assertNotIn(setting, application)
+            self.assertNotIn(setting, preflight)
+
+    def test_deploy_uses_ephemeral_select_only_mysql_preflight_account(self) -> None:
+        workflow = self.read(".github/workflows/dev-delivery.yml")
+        linux_deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
+        windows_deploy = self.read("deploy/scripts/remote_deploy_production.py")
+        account_script = self.read("deploy/scripts/manage_preflight_mysql_user.sh")
+        self.assertIn("openssl rand -hex 24", workflow)
+        self.assertIn("PRODUCTION_PREFLIGHT_MYSQL_PASSWORD", workflow)
+        for deploy in (linux_deploy, windows_deploy):
+            self.assertIn("manage_preflight_mysql_user.sh\" create", deploy)
+            self.assertIn("manage_preflight_mysql_user.sh\" drop", deploy)
+        self.assertIn("GRANT SELECT ON", account_script)
+        self.assertIn("DROP USER IF EXISTS", account_script)
+        self.assertNotIn("GRANT ALL", account_script)
+
+    def test_production_credentials_are_persisted_without_logging_values(self) -> None:
+        script = self.read("deploy/scripts/prepare_production_credentials.sh")
+        self.assertIn("ai-supermarket-rabbitmq", script)
+        self.assertIn("BACKUP_ENCRYPTION_PASSWORD", script)
+        self.assertIn("secrets.token_hex", script)
+        self.assertIn("secrets.token_urlsafe", script)
+        self.assertIn("temporary.chmod(0o600)", script)
+        self.assertIn("WORKFLOW_RUNTIME_ENABLED\": \"true", script)
+        self.assertIn("WORKFLOW_RUNTIME_EXECUTION_ENABLED\": \"true", script)
 
     def test_provider_accounting_columns_are_migrated_before_backend_start(self) -> None:
         migration = self.read("sql/096_workflow_provider_accounting.sql")

@@ -74,6 +74,19 @@ class MonitoringContractTests(unittest.TestCase):
         self.assertIn("job_name: blackbox-http-nginx", prometheus)
         self.assertIn("job_name: blackbox-http-public", prometheus)
 
+    def test_provider_cost_audit_anomalies_are_visible_as_prometheus_alerts(self) -> None:
+        rules = self.read(
+            "deploy/monitoring/prometheus/rules/workflow-cost-audit.yml"
+        )
+        metrics = self.read(
+            "backend/src/main/java/com/aiminilab/aitoolmarket/workflow/metrics/WorkflowMetrics.java"
+        )
+        self.assertIn("workflow_provider_cost_anomaly_total", metrics)
+        self.assertIn("WorkflowProviderActualCostUnknown", rules)
+        self.assertIn("WorkflowProviderCostCurrencyUnexpected", rules)
+        self.assertIn("actual_cost_unknown", rules)
+        self.assertIn("currency_unsupported", rules)
+
     def test_cadvisor_and_health_ports_are_declared(self) -> None:
         compose = self.read("deploy/docker-compose.monitoring.yml")
         self.assertIn(

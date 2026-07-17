@@ -24,6 +24,7 @@ _ENV_PATCH_LINES = [
     "MIHOMO_ENABLED=true",
     "NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,.klingai.com,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat",
     "CONTAINER_NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,.klingai.com,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat",
+    "BACKUP_OSS_URI=oss://wlcloudai-db-backup-prod/mysql/full",
     "PROMETHEUS_PORT=9091",
     "GRAFANA_PORT=3001",
     "GRAFANA_ROOT_URL=https://wlcloudai.com/grafana/",
@@ -218,6 +219,10 @@ EOF
 rollback_on_failure() {{
   status=$?
   trap - ERR
+  if declare -F cleanup_preflight_user >/dev/null 2>&1; then
+    cleanup_preflight_user || true
+    trap - EXIT
+  fi
   echo "::error::Release failed; starting rollback to $OLD_SHA." >&2
   if ! REMOTE_DIR="$REMOTE_DIR" DEPLOY_SERVICES="$SERVICES" \
       bash "$REMOTE_DIR/deploy/scripts/rollback_release.sh"; then
@@ -276,12 +281,33 @@ SERVICES="$(bash "$REMOTE_DIR/deploy/scripts/merge_deploy_services.sh" "$SERVICE
 
 read_env_value() {{
   local name="$1"
-  awk -v key="$name" 'index($0, key "=") == 1 {{ value=substr($0, length(key) + 2) }} END {{ print value }}' \
-    "$REMOTE_DIR/.env" | tr -d '\r'
+  local file value
+  for file in "$REMOTE_DIR/.env" "$REMOTE_DIR/deploy/.env"; do
+    [ -f "$file" ] || continue
+    value="$(awk -v key="$name" 'index($0, key "=") == 1 {{ value=substr($0, length(key) + 2) }} END {{ print value }}' "$file" | tr -d '\r')"
+    if [ -n "$value" ]; then
+      printf '%s' "$value"
+      return
+    fi
+  done
 }}
 
 export APP_PRODUCTION_MODE="$(read_env_value APP_PRODUCTION_MODE)"
 export APP_ENV="$(read_env_value APP_ENV)"
+export PRODUCTION_PREFLIGHT_MYSQL_USER="ci_pf_manual_$(date -u +%Y%m%d%H%M%S)"
+export PRODUCTION_PREFLIGHT_MYSQL_PASSWORD="$(openssl rand -hex 24)"
+
+preflight_user_created=false
+cleanup_preflight_user() {{
+  if [ "$preflight_user_created" = true ]; then
+    bash "$REMOTE_DIR/deploy/scripts/manage_preflight_mysql_user.sh" drop || true
+    preflight_user_created=false
+  fi
+}}
+trap cleanup_preflight_user EXIT
+
+echo "Preparing persistent production credentials ..."
+bash "$REMOTE_DIR/deploy/scripts/prepare_production_credentials.sh"
 echo "Verifying production environment configuration ..."
 bash "$REMOTE_DIR/deploy/scripts/verify_production_environment.sh"
 
@@ -291,10 +317,10 @@ export MYSQL_PASS="$(read_env_value MYSQL_ROOT_PASSWORD)"
 export MYSQL_DB="$(read_env_value MYSQL_DATABASE)"
 export BACKUP_ENCRYPTION_PASSWORD="$(read_env_value BACKUP_ENCRYPTION_PASSWORD)"
 export BACKUP_OSS_URI="$(read_env_value BACKUP_OSS_URI)"
-export PRODUCTION_PREFLIGHT_MYSQL_USER="$(read_env_value PRODUCTION_PREFLIGHT_MYSQL_USER)"
-export PRODUCTION_PREFLIGHT_MYSQL_PASSWORD="$(read_env_value PRODUCTION_PREFLIGHT_MYSQL_PASSWORD)"
 MYSQL_PASS="${{MYSQL_PASS:-root123456}}"
 MYSQL_DB="${{MYSQL_DB:-ai_supermarket_v1}}"
+bash "$REMOTE_DIR/deploy/scripts/manage_preflight_mysql_user.sh" create
+preflight_user_created=true
 
 echo "Running historical data read-only preflight ..."
 bash "$REMOTE_DIR/deploy/scripts/production_readonly_preflight.sh" historical
@@ -303,6 +329,7 @@ bash "$REMOTE_DIR/deploy/scripts/backup_mysql.sh"
 bash "$REMOTE_DIR/deploy/scripts/apply_sql_migrations.sh"
 echo "Running post-migration read-only preflight ..."
 bash "$REMOTE_DIR/deploy/scripts/production_readonly_preflight.sh" post-migration
+cleanup_preflight_user
 
 for svc in $SERVICES; do
   case "$svc" in
@@ -357,6 +384,7 @@ echo "Verifying release health..."
 bash "$REMOTE_DIR/deploy/scripts/verify_release_health.sh"
 docker compose "${{COMPOSE_ARGS[@]}}" ps
 trap - ERR
+trap - EXIT
 echo "Deploy complete: $NEW_SHA"
 """
         _, stdout, stderr = ssh.exec_command(remote_script, timeout=1800)

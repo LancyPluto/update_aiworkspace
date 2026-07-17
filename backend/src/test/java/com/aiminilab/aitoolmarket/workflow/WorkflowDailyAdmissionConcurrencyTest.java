@@ -44,7 +44,6 @@ import static org.assertj.core.api.Assertions.assertThat;
         "workflow.runtime.canary-percentage=100",
         "workflow.runtime.max-run-cost-credits=100",
         "workflow.runtime.max-user-daily-cost-credits=60",
-        "workflow.runtime.max-provider-daily-cost-cny=1000000",
         "spring.task.scheduling.enabled=false"
 })
 class WorkflowDailyAdmissionConcurrencyTest {
@@ -97,7 +96,6 @@ class WorkflowDailyAdmissionConcurrencyTest {
         insertPaidWorkflow();
         insertCreditAccount(USER_ID);
         insertCreditAccount(OTHER_USER_ID);
-        runtimeProperties.setMaxProviderDailyCostCny(new BigDecimal("0.60"));
         runtimeGate.markReconciliationHealthyAfterFullScan(
                 runtimeGate.reconciliationFailureGeneration()
         );
@@ -167,7 +165,7 @@ class WorkflowDailyAdmissionConcurrencyTest {
     }
 
     @Test
-    void concurrentUsersShareOneAtomicProviderCostBudget() throws Exception {
+    void concurrentUsersAreNotGloballyLimitedByOptionalProviderCost() throws Exception {
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
         ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -197,8 +195,7 @@ class WorkflowDailyAdmissionConcurrencyTest {
                 results.add(future.get(30, TimeUnit.SECONDS));
             }
 
-            assertThat(results.stream().filter(WorkflowRunCreated.class::isInstance).count()).isOne();
-            assertThat(results.stream().filter(this::isProviderLimitRejection).count()).isOne();
+            assertThat(results.stream().filter(WorkflowRunCreated.class::isInstance).count()).isEqualTo(2);
         } finally {
             start.countDown();
             executor.shutdownNow();
@@ -209,14 +206,14 @@ class WorkflowDailyAdmissionConcurrencyTest {
                 Integer.class,
                 USER_ID,
                 OTHER_USER_ID
-        )).isOne();
+        )).isEqualTo(2);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COALESCE(SUM(provider_cost_reserved_cny), 0) FROM workflow_runs "
                         + "WHERE user_id IN (?, ?) AND status = 'RUNNING'",
                 BigDecimal.class,
                 USER_ID,
                 OTHER_USER_ID
-        )).isEqualByComparingTo("0.400000");
+        )).isEqualByComparingTo("0.000000");
     }
 
     private boolean isDailyLimitRejection(Object result) {
@@ -226,15 +223,6 @@ class WorkflowDailyAdmissionConcurrencyTest {
             return false;
         }
         return "user_daily_cost_limit_exceeded".equals(data.get("reason"));
-    }
-
-    private boolean isProviderLimitRejection(Object result) {
-        if (!(result instanceof BusinessException exception)
-                || exception.getErrorCode() != ErrorCode.WORKFLOW_RUNTIME_BLOCKED
-                || !(exception.getData() instanceof Map<?, ?> data)) {
-            return false;
-        }
-        return "provider_daily_cost_limit_exceeded".equals(data.get("reason"));
     }
 
     private CreateWorkflowRunCommand command(String requestId) {
