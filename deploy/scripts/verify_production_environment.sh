@@ -50,6 +50,15 @@ require_boolean() {
   fi
 }
 
+require_positive_decimal() {
+  local name="$1"
+  local value
+  value="$(read_env_value "$name")"
+  if ! awk -v value="$value" 'BEGIN { exit !(value ~ /^[0-9]+([.][0-9]+)?$/ && value + 0 > 0) }'; then
+    fail "$name must be a positive number"
+  fi
+}
+
 production_mode="$(read_env_value APP_PRODUCTION_MODE)"
 app_env="$(read_env_value APP_ENV)"
 if [ "$production_mode" != "true" ] && [ "$app_env" != "production" ]; then

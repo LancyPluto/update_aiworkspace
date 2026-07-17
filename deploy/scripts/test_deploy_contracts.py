@@ -111,6 +111,14 @@ class DeployContractTests(unittest.TestCase):
             self.assertIn(required_setting, script)
         self.assertIn("guest RabbitMQ credentials are forbidden", script)
         self.assertIn("read-only preflight account cannot be root", script)
+        self.assertIn("require_positive_decimal() {", script)
+        self.assertIn(
+            "require_positive_decimal WORKFLOW_RUNTIME_MAX_RUN_COST_CREDITS", script
+        )
+        self.assertIn(
+            "require_positive_decimal WORKFLOW_RUNTIME_MAX_USER_DAILY_COST_CREDITS",
+            script,
+        )
         self.assertNotIn("WORKFLOW_RUNTIME_MAX_PROVIDER_DAILY_COST_CNY", script)
         self.assertNotIn("WORKFLOW_RUNTIME_COST_ALERT_WEBHOOK_URL", script)
         self.assertIn("backup bucket must be separate from application asset buckets", script)
