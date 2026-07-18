@@ -31,11 +31,11 @@
         <div v-if="currentMode === 'smsLogin'" class="sms-form">
           <div class="phone-field input-group">
             <span class="country-code">+86</span>
-            <input type="tel" class="input-field" v-model="phone" placeholder="请输入手机号" autocomplete="tel" />
+            <input type="tel" class="input-field" v-model="phone" placeholder="请输入手机号" aria-label="手机号" autocomplete="tel" />
           </div>
           <div class="input-group code-field">
             <div class="code-row pill-field">
-              <input type="text" class="input-field" v-model="smsCode" placeholder="请输入验证码" maxlength="6" inputmode="numeric" />
+              <input type="text" class="input-field" v-model="smsCode" placeholder="请输入验证码" aria-label="短信验证码" maxlength="6" inputmode="numeric" />
               <button type="button" class="code-btn" :disabled="codeSending" @click="handleSendCode('login')">{{ codeBtnText }}</button>
             </div>
           </div>
@@ -49,10 +49,10 @@
 
         <div v-else-if="currentMode === 'passwordLogin'" class="password-form">
           <div class="input-group">
-            <input type="text" class="input-field pill-field" v-model="account" placeholder="请输入手机号/账号" autocomplete="username" />
+            <input type="text" class="input-field pill-field" v-model="account" placeholder="请输入手机号/账号" aria-label="手机号或账号" autocomplete="username" />
           </div>
           <div class="input-group password-field pill-field">
-            <input :type="showPassword ? 'text' : 'password'" class="input-field" v-model="password" placeholder="请输入密码" autocomplete="current-password" />
+            <input :type="showPassword ? 'text' : 'password'" class="input-field" v-model="password" placeholder="请输入密码" aria-label="密码" autocomplete="current-password" />
             <button type="button" class="eye-btn" @click="showPassword = !showPassword" aria-label="切换密码显示"><Eye class="eye-icon" /></button>
           </div>
           <p class="agreement-text password-agreement">
@@ -69,19 +69,19 @@
         <div v-else-if="currentMode === 'register'" class="register-form">
           <div class="phone-field input-group">
             <span class="country-code">+86</span>
-            <input type="tel" class="input-field" v-model="registerPhone" placeholder="请输入手机号" autocomplete="tel" />
+            <input type="tel" class="input-field" v-model="registerPhone" placeholder="请输入手机号" aria-label="注册手机号" autocomplete="tel" />
           </div>
           <div class="input-group password-field pill-field">
-            <input :type="showRegisterPassword ? 'text' : 'password'" class="input-field" v-model="registerPassword" placeholder="请输入密码" autocomplete="new-password" />
+            <input :type="showRegisterPassword ? 'text' : 'password'" class="input-field" v-model="registerPassword" placeholder="请输入密码" aria-label="注册密码" autocomplete="new-password" />
             <button type="button" class="eye-btn" @click="showRegisterPassword = !showRegisterPassword" aria-label="切换密码显示"><Eye class="eye-icon" /></button>
           </div>
           <div class="input-group password-field pill-field">
-            <input :type="showRegisterConfirmPassword ? 'text' : 'password'" class="input-field" v-model="registerConfirmPassword" placeholder="请再次输入密码" autocomplete="new-password" />
+            <input :type="showRegisterConfirmPassword ? 'text' : 'password'" class="input-field" v-model="registerConfirmPassword" placeholder="请再次输入密码" aria-label="确认注册密码" autocomplete="new-password" />
             <button type="button" class="eye-btn" @click="showRegisterConfirmPassword = !showRegisterConfirmPassword" aria-label="切换密码显示"><Eye class="eye-icon" /></button>
           </div>
           <div class="input-group code-field">
             <div class="code-row pill-field">
-              <input type="text" class="input-field" v-model="registerCode" placeholder="请输入验证码" maxlength="6" inputmode="numeric" />
+              <input type="text" class="input-field" v-model="registerCode" placeholder="请输入验证码" aria-label="注册验证码" maxlength="6" inputmode="numeric" />
               <button type="button" class="code-btn" :disabled="codeSending" @click="handleSendCode('register')">{{ codeBtnText }}</button>
             </div>
           </div>
@@ -94,11 +94,11 @@
 
         <div v-else-if="currentMode === 'forgotVerify'" class="forgot-form">
           <div class="input-group">
-            <input type="text" class="input-field pill-field" v-model="resetAccount" placeholder="请输入 +86 手机号" autocomplete="username" />
+            <input type="text" class="input-field pill-field" v-model="resetAccount" placeholder="请输入 +86 手机号" aria-label="重置密码手机号" autocomplete="username" />
           </div>
           <div class="input-group code-field">
             <div class="code-row pill-field">
-              <input type="text" class="input-field" v-model="resetCode" placeholder="请输入验证码" maxlength="6" inputmode="numeric" />
+              <input type="text" class="input-field" v-model="resetCode" placeholder="请输入验证码" aria-label="重置密码验证码" maxlength="6" inputmode="numeric" />
               <button type="button" class="code-btn" :disabled="codeSending" @click="handleSendCode('reset')">{{ codeBtnText }}</button>
             </div>
           </div>
@@ -106,11 +106,11 @@
 
         <div v-else class="forgot-reset-form">
           <div class="input-group password-field pill-field">
-            <input :type="showResetPassword ? 'text' : 'password'" class="input-field" v-model="resetPasswordValue" placeholder="请输入新密码" autocomplete="new-password" />
+            <input :type="showResetPassword ? 'text' : 'password'" class="input-field" v-model="resetPasswordValue" placeholder="请输入新密码" aria-label="新密码" autocomplete="new-password" />
             <button type="button" class="eye-btn" @click="showResetPassword = !showResetPassword" aria-label="切换密码显示"><Eye class="eye-icon" /></button>
           </div>
           <div class="input-group password-field pill-field">
-            <input :type="showResetConfirmPassword ? 'text' : 'password'" class="input-field" v-model="resetConfirmPassword" placeholder="请确认新密码" autocomplete="new-password" />
+            <input :type="showResetConfirmPassword ? 'text' : 'password'" class="input-field" v-model="resetConfirmPassword" placeholder="请确认新密码" aria-label="确认新密码" autocomplete="new-password" />
             <button type="button" class="eye-btn" @click="showResetConfirmPassword = !showResetConfirmPassword" aria-label="切换密码显示"><Eye class="eye-icon" /></button>
           </div>
         </div>
@@ -544,7 +544,7 @@
   }
 }
 
-/* 登录弹窗 — 与项目暗色 + 紫色 primary 风格一致 */
+/* 登录弹窗 — 与项目暗色 + 青蓝品牌风格一致 */
 .login-modal {
   position: fixed;
   top: 0;
@@ -563,14 +563,14 @@
   max-width: 400px;
   margin: 1.25rem;
   background:
-    radial-gradient(circle at 82% 0%, rgb(176 92 255 / 0.12), transparent 42%),
+    radial-gradient(circle at 82% 0%, rgb(var(--brand-primary-rgb) / 0.14), transparent 42%),
     linear-gradient(180deg, rgb(29 29 34 / 0.98), rgb(22 22 28 / 0.98));
   border: 1px solid rgb(255 255 255 / 0.1);
   border-radius: 28px;
   box-shadow:
     0 24px 80px rgb(0 0 0 / 0.55),
     0 0 0 1px rgb(255 255 255 / 0.04) inset,
-    0 12px 40px rgb(176 92 255 / 0.12);
+    0 12px 40px var(--brand-glow);
   overflow: hidden;
   color: var(--foreground);
 }
@@ -625,6 +625,13 @@
 .input-field:focus {
   outline: none;
 }
+
+.login-modal button:focus-visible,
+.login-modal a:focus-visible,
+.login-modal input:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 3px;
+}
 .input-field::placeholder {
   color: rgb(255 255 255 / 0.35);
 }
@@ -640,9 +647,9 @@
 }
 .pill-field:focus-within,
 .phone-field:focus-within {
-  border-color: rgb(176 92 255 / 0.55);
+  border-color: var(--brand-border);
   background: rgb(255 255 255 / 0.06);
-  box-shadow: 0 0 0 3px rgb(176 92 255 / 0.18);
+  box-shadow: 0 0 0 3px rgb(var(--brand-primary-rgb) / 0.18);
 }
 .phone-field {
   padding-left: 1rem;
@@ -699,7 +706,7 @@
 }
 .code-btn:hover:not(:disabled) {
   color: var(--foreground);
-  background: rgb(176 92 255 / 0.12);
+  background: var(--brand-softer);
 }
 .code-btn:disabled {
   opacity: 0.5;
@@ -768,19 +775,19 @@
   justify-content: center;
   gap: 0.5rem;
   border: none;
-  border-radius: 999px;
-  background: var(--primary);
+  border-radius: 10px;
+  background: var(--brand-gradient);
   color: var(--primary-foreground);
   font-size: 0.9375rem;
   font-weight: 600;
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, filter 0.2s ease;
-  box-shadow: 0 12px 28px rgb(176 92 255 / 0.32);
+  box-shadow: var(--brand-button-shadow);
 }
 .login-btn:hover:not(:disabled) {
   transform: translateY(-1px);
   filter: brightness(1.08);
-  box-shadow: 0 16px 36px rgb(176 92 255 / 0.4);
+  box-shadow: 0 16px 36px var(--brand-glow-strong);
 }
 .login-btn:disabled {
   opacity: 0.55;
@@ -809,5 +816,16 @@
 }
 .auth-switch.plain-link a:hover {
   color: var(--foreground);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-modal,
+  .login-container,
+  .login-btn,
+  .pill-field,
+  .phone-field {
+    animation: none;
+    transition: none;
+  }
 }
 </style>

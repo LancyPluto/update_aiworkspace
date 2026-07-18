@@ -4,7 +4,7 @@
   overflow: hidden;
   aspect-ratio: 4 / 5;
   border: 1px solid rgb(255 255 255 / 0.055);
-  border-radius: 22px;
+  border-radius: 16px;
   background: #0d0d12;
   box-shadow: 0 24px 60px rgb(0 0 0 / 0.24);
   cursor: pointer;
@@ -24,13 +24,18 @@ button.marketplace-tool-card {
 
 .marketplace-tool-card:hover {
   transform: translateY(-2px);
-  border-color: rgb(168 85 247 / 0.3);
+  border-color: var(--brand-border);
   box-shadow: 0 26px 70px rgb(0 0 0 / 0.45);
 }
 
+.marketplace-tool-card:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 3px;
+}
+
 .marketplace-tool-card--selected {
-  border-color: rgb(168 85 247 / 0.55);
-  box-shadow: 0 0 0 1px rgb(168 85 247 / 0.22), 0 24px 60px rgb(0 0 0 / 0.32);
+  border-color: rgb(var(--brand-primary-rgb) / 0.55);
+  box-shadow: 0 0 0 1px rgb(var(--brand-primary-rgb) / 0.22), 0 24px 60px rgb(0 0 0 / 0.32);
 }
 
 .marketplace-tool-media {
@@ -40,9 +45,8 @@ button.marketplace-tool-card {
   place-items: center;
   overflow: hidden;
   background:
-    radial-gradient(circle at 18% 14%, rgb(var(--brand-primary-rgb) / 0.32), transparent 34%),
-    radial-gradient(circle at 74% 34%, rgb(var(--brand-secondary-rgb) / 0.28), transparent 36%),
-    radial-gradient(circle at 48% 100%, rgb(var(--brand-tertiary-rgb) / 0.16), transparent 42%),
+    radial-gradient(circle at 30% 18%, rgb(var(--brand-primary-rgb) / 0.12), transparent 44%),
+    radial-gradient(circle at 72% 78%, rgb(var(--brand-secondary-rgb) / 0.10), transparent 48%),
     #0d0d12;
 }
 
@@ -70,16 +74,15 @@ button.marketplace-tool-card {
   display: grid;
   place-items: center;
   background:
-    linear-gradient(135deg, rgb(255 255 255 / 0.06), transparent 42%),
-    radial-gradient(circle at 25% 35%, rgb(var(--brand-primary-rgb) / 0.34), transparent 26%),
-    radial-gradient(circle at 70% 52%, rgb(var(--brand-secondary-rgb) / 0.34), transparent 30%),
-    radial-gradient(circle at 48% 82%, rgb(var(--brand-tertiary-rgb) / 0.18), transparent 32%);
+    radial-gradient(circle at 50% 34%, rgb(var(--brand-primary-rgb) / 0.10), transparent 58%),
+    linear-gradient(160deg, rgb(255 255 255 / 0.035), transparent 46%),
+    #0c0d11;
 }
 
 .marketplace-tool-empty img {
   width: 76px;
   height: 76px;
-  border-radius: 22px;
+  border-radius: 14px;
   background: rgb(255 255 255 / 0.9);
   object-fit: contain;
   padding: 14px;
@@ -114,10 +117,10 @@ button.marketplace-tool-card {
 .marketplace-cost-badge {
   right: 16px;
   gap: 3px;
-  border-color: rgb(168 85 247 / 0.28);
+  border-color: var(--brand-border);
   background: rgb(8 8 12 / 0.72);
   padding: 5px 10px;
-  color: rgb(216 180 254 / 0.92);
+  color: var(--brand-active-text);
   backdrop-filter: blur(10px);
 }
 
@@ -191,6 +194,22 @@ button.marketplace-tool-card {
   transform: translateY(0);
 }
 
+.marketplace-tool-card:focus-within .marketplace-hover-reveal {
+  max-height: 132px;
+  margin-top: 10px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (hover: none) {
+  .marketplace-hover-reveal {
+    max-height: none;
+    margin-top: 10px;
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .marketplace-tool-desc {
   display: -webkit-box;
   overflow: hidden;
@@ -211,23 +230,26 @@ button.marketplace-tool-card {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border: 1px solid rgb(255 255 255 / 0.14);
-  border-radius: 12px;
-  background: rgb(139 92 246 / 0.32);
+  border: 0;
+  border-radius: 10px;
+  background: var(--brand-gradient);
   padding: 0 16px;
-  color: rgb(255 255 255 / 0.96);
+  color: #fff;
   font-size: 12px;
   font-weight: 600;
   margin-top: 12px;
-  box-shadow: 0 8px 28px rgb(0 0 0 / 0.28);
-  backdrop-filter: blur(14px);
-  transition: background 180ms ease, border-color 180ms ease, transform 180ms ease;
+  box-shadow: 0 10px 26px var(--brand-glow);
+  transition: filter 180ms ease, transform 180ms ease;
 }
 
-.marketplace-tool-card:hover .marketplace-start-button:hover {
-  border-color: rgb(196 181 253 / 0.35);
-  background: rgb(139 92 246 / 0.44);
+.marketplace-start-button:hover {
+  filter: brightness(1.07);
   transform: translateY(-1px);
+}
+
+.marketplace-start-button:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
 }
 
 @keyframes comparison-wipe {
@@ -255,5 +277,27 @@ button.marketplace-tool-card {
   box-shadow: 0 0 8px rgb(0 0 0 / 0.5), 0 0 20px rgb(255 255 255 / 0.3);
   pointer-events: none;
   animation: comparison-pos 3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marketplace-tool-card,
+  .marketplace-tool-image,
+  .marketplace-hover-reveal,
+  .marketplace-tool-overlay {
+    transition-duration: 1ms;
+  }
+
+  .marketplace-tool-card:hover .marketplace-tool-image {
+    transform: none;
+  }
+
+  .marketplace-tool-image--effect {
+    animation: none;
+    clip-path: inset(0 0 0 0);
+  }
+
+  .marketplace-comparison-line {
+    display: none;
+  }
 }
 

@@ -12,10 +12,10 @@ const isScrolled = ref(false)
 const isMobileMenuOpen = ref(false)
 
 const navLinks = [
-  { name: 'AI 工具集', href: '#features' },
-  { name: '智能推荐', href: '#why-us' },
+  { name: '工具市场', href: '/marketplace' },
+  { name: '社区作品', href: '/community' },
+  { name: '工作流', href: '#features' },
   { name: '定价', href: '#pricing' },
-  { name: '关于我们', href: '#about' },
 ]
 
 const logoSrc = BRAND_LOGO_URL
@@ -57,14 +57,22 @@ const toggleMobileMenu = () => {
         
         <!-- Desktop Navigation -->
         <div class="hidden lg:flex items-center gap-8">
-          <a 
-            v-for="link in navLinks" 
-            :key="link.name"
-            :href="link.href"
-            class="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-          >
-            {{ link.name }}
-          </a>
+          <template v-for="link in navLinks" :key="link.name">
+            <RouterLink
+              v-if="link.href.startsWith('/')"
+              :to="link.href"
+              class="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {{ link.name }}
+            </RouterLink>
+            <a
+              v-else
+              :href="link.href"
+              class="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {{ link.name }}
+            </a>
+          </template>
         </div>
         
         <!-- Auth Buttons -->
@@ -74,8 +82,10 @@ const toggleMobileMenu = () => {
         </div>
         
         <!-- Mobile Menu Button -->
-        <button 
+        <button
           class="lg:hidden p-2"
+          :aria-label="isMobileMenuOpen ? '关闭导航菜单' : '打开导航菜单'"
+          :aria-expanded="isMobileMenuOpen"
           @click="toggleMobileMenu"
         >
           <Menu v-if="!isMobileMenuOpen" class="w-6 h-6" />
@@ -90,9 +100,19 @@ const toggleMobileMenu = () => {
       class="lg:hidden bg-background border-t border-border"
     >
       <div class="px-6 py-4 space-y-3">
-        <a 
+        <RouterLink
+          v-for="link in navLinks.filter((item) => item.href.startsWith('/'))"
+          :key="link.name"
+          :to="link.href"
+          class="block py-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+          @click="isMobileMenuOpen = false"
+        >
+          {{ link.name }}
+        </RouterLink>
+        <a
           v-for="link in navLinks" 
           :key="link.name"
+          v-show="!link.href.startsWith('/')"
           :href="link.href"
           class="block py-2 text-sm font-medium text-muted-foreground hover:text-foreground"
           @click="isMobileMenuOpen = false"

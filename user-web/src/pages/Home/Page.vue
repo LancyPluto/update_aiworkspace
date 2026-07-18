@@ -254,7 +254,6 @@ function launchWorkbench(modality: string) {
 function onPromptFocus() {
   promptInputFocused.value = true
   typingPlaceholder.pause()
-  promptText.value = ""
 }
 
 function onPromptBlur() {
@@ -340,7 +339,7 @@ watch(
           <div class="hero-content">
             <p class="hero-kicker">
               <Sparkles class="h-4 w-4" />
-              Smart Router · Launchpad
+              科创点AI · 一站式创作工作台
             </p>
             <h1>思维不停，创作不止</h1>
             <p class="hero-lead">输入想法并回车进入科创点AI 对话，或选择下方创作方向进入对应工作台。</p>
@@ -481,7 +480,17 @@ watch(
         <div v-else-if="featuredTools.length === 0" class="state-card">当前分类暂无上线工具</div>
 
         <div v-else class="tool-grid">
-          <article v-for="tool in featuredTools" :key="tool.toolCode" class="tool-card" @click="quickLaunch(tool)">
+          <article
+            v-for="tool in featuredTools"
+            :key="tool.toolCode"
+            class="tool-card"
+            role="link"
+            tabindex="0"
+            :aria-label="`使用 ${tool.toolName} 开始创作`"
+            @click="quickLaunch(tool)"
+            @keydown.enter.prevent="quickLaunch(tool)"
+            @keydown.space.prevent="quickLaunch(tool)"
+          >
             <div class="tool-cover">
               <ToolComparisonCover
                 v-if="usesComparison(tool)"
@@ -508,10 +517,11 @@ watch(
                 </div>
               </template>
               <span class="modality-badge">{{ modalityLabel(tool.outputModality) }}</span>
+              <span class="cost-badge">{{ costLabel(tool) }}</span>
               <button
                 type="button"
                 class="detail-icon"
-                aria-label="查看详情"
+                :aria-label="`查看 ${tool.toolName} 详情`"
                 title="查看详情"
                 @click.stop="openTool(tool)"
               >
@@ -600,7 +610,7 @@ watch(
   height: auto;
   min-height: 0;
   border: 1px solid rgb(255 255 255 / 0.06);
-  border-radius: 28px;
+  border-radius: 16px;
   background:
     linear-gradient(135deg, rgb(255 255 255 / 0.055), rgb(255 255 255 / 0.025)),
     #121216;
@@ -655,7 +665,7 @@ watch(
   align-items: center;
   gap: 8px;
   margin: 0;
-  color: rgb(255 255 255 / 0.44);
+  color: rgb(255 255 255 / 0.6);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.14em;
@@ -673,7 +683,7 @@ watch(
 .hero-lead {
   max-width: 560px;
   margin: 18px 0 0;
-  color: rgb(255 255 255 / 0.58);
+  color: rgb(255 255 255 / 0.66);
   font-size: 16px;
   line-height: 1.75;
 }
@@ -682,11 +692,11 @@ watch(
   max-width: 760px;
   margin-top: 26px;
   border: 1px solid rgb(255 255 255 / 0.08);
-  border-radius: 24px;
+  border-radius: 16px;
   background: rgb(10 10 14 / 0.62);
   padding: 12px;
   box-shadow: 0 20px 70px rgb(0 0 0 / 0.34);
-  backdrop-filter: blur(22px);
+  backdrop-filter: blur(14px);
 }
 
 .prompt-shell {
@@ -695,7 +705,7 @@ watch(
   height: 62px;
   align-items: center;
   gap: 12px;
-  border-radius: 18px;
+  border-radius: 12px;
   background: rgb(255 255 255 / 0.055);
   padding: 0 18px;
 }
@@ -711,7 +721,7 @@ watch(
 }
 
 .prompt-shell input::placeholder {
-  color: rgb(255 255 255 / 0.3);
+  color: rgb(255 255 255 / 0.45);
 }
 
 .router-actions {
@@ -728,7 +738,7 @@ watch(
   justify-content: center;
   gap: 8px;
   border: 1px solid rgb(255 255 255 / 0.08);
-  border-radius: 999px;
+  border-radius: 10px;
   background: rgb(255 255 255 / 0.045);
   padding: 0 16px;
   color: rgb(255 255 255 / 0.72);

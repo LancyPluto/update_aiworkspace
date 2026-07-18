@@ -13,7 +13,6 @@ import {
   LayoutGrid,
   Loader2,
   MessageSquareText,
-  MoreHorizontal,
   Music,
   Pause,
   Play,
@@ -1812,7 +1811,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 bg-black text-white">
+  <div class="flex h-full min-h-0 bg-background text-foreground">
       <DashboardModalityDock
         v-model:open="modalityDockOpen"
         :tabs="modalityTabs"
@@ -1826,19 +1825,17 @@ onUnmounted(() => {
 
       <section class="relative flex min-h-0 min-w-0 flex-1 flex-col">
         <div
-          class="mx-auto mt-4 flex h-9 w-full max-w-5xl items-center justify-center rounded-full border border-[#d7b77a]/12 bg-[#d7b77a]/[0.055] px-5 text-xs font-medium text-[#ead7aa]/85 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.04)] backdrop-blur-xl"
+          class="mx-auto mt-4 flex h-9 w-full max-w-5xl items-center justify-center gap-2 rounded-lg border border-white/8 bg-white/[0.03] px-5 text-xs font-medium text-white/55"
         >
-          SVIP限时体验 · 选择模态后模型列表会自动切换
+          选择左侧模态后，模型列表会自动切换
         </div>
 
-        <div class="absolute right-6 top-8 z-10 hidden items-center gap-2 rounded-2xl border border-white/10 bg-[#12131a]/90 p-2 backdrop-blur md:flex">
-          <button class="flex h-9 w-9 items-center justify-center rounded-xl text-white/70 hover:bg-white/8 hover:text-white" type="button">
-            <Search class="h-5 w-5" />
-          </button>
-          <span class="h-5 w-px bg-white/10" />
+        <div class="absolute right-6 top-8 z-10 hidden items-center gap-2 rounded-xl border border-white/10 bg-[#12131a]/90 p-2 backdrop-blur md:flex">
           <RouterLink
             :to="userRoutes.toolList"
-            class="flex h-9 w-9 items-center justify-center rounded-xl text-white/70 hover:bg-white/8 hover:text-white"
+            class="flex h-9 w-9 items-center justify-center rounded-lg text-white/70 transition hover:bg-white/8 hover:text-white"
+            aria-label="浏览全部工具"
+            title="浏览全部工具"
           >
             <Store class="h-5 w-5" />
           </RouterLink>
@@ -1858,9 +1855,9 @@ onUnmounted(() => {
               >
                 <div class="min-w-0">
                   <template v-if="activePanel === 'tasks'">
-                    <p class="text-xs font-medium uppercase tracking-[0.18em] text-white/32">HISTORY</p>
+                    <p class="text-xs font-medium uppercase tracking-[0.18em] text-white/50">HISTORY</p>
                     <h2 class="mt-1 text-xl font-semibold text-white">工作历史</h2>
-                    <p class="mt-1 hidden font-mono text-[12px] leading-5 text-white/36 sm:block">
+                    <p class="mt-1 hidden text-[12px] leading-5 text-white/50 sm:block">
                       {{ currentTools.length }} 个可用模型 · 可用算力 {{ credit?.balance ?? "--" }} · 进行中 {{ runningCount }}
                     </p>
                   </template>
@@ -1876,15 +1873,18 @@ onUnmounted(() => {
                 <div class="flex flex-wrap items-center justify-end gap-3">
                   <div
                     v-if="activePanel !== 'tasks'"
-                    class="hidden text-right font-mono text-[12px] leading-5 text-white/36 sm:block"
+                    class="hidden text-right text-[12px] leading-5 text-white/50 sm:block"
                   >
                     <p>{{ currentTools.length }} 个可用模型 · 可用算力 {{ credit?.balance ?? "--" }} · 进行中 {{ runningCount }}</p>
                   </div>
-                  <div
+                  <button
                     v-if="activePanel === 'tasks'"
-                    class="h-8 w-[110px] shrink-0"
-                    aria-hidden="true"
-                  />
+                    type="button"
+                    class="rounded-full border border-white/10 bg-white/[0.035] px-5 py-2.5 text-sm font-medium text-white/55 transition hover:bg-white/[0.06] hover:text-white"
+                    @click="activePanel = 'models'"
+                  >
+                    返回创作
+                  </button>
                   <button
                     v-else
                     type="button"
@@ -1893,22 +1893,6 @@ onUnmounted(() => {
                   >
                     工作历史
                     <span class="ml-1 text-xs opacity-70">{{ recentTasks.length }}</span>
-                  </button>
-                </div>
-              </div>
-
-              <div
-                v-if="activePanel === 'tasks'"
-                class="pointer-events-none absolute right-0 top-4 bottom-0 z-30 w-[120px]"
-              >
-                <div class="pointer-events-auto sticky top-4 flex justify-end">
-                  <button
-                    type="button"
-                    class="rounded-full border border-white/10 bg-zinc-800 px-4 py-2 text-xs font-semibold text-white/90 shadow-[0_4px_20px_rgba(0,0,0,0.5)] transition-all hover:scale-[1.02] hover:bg-zinc-700 active:scale-[0.98]"
-                    @click="activePanel = 'models'"
-                  >
-                    返回创作
-                    <span class="ml-1 opacity-70">{{ recentTasks.length }}</span>
                   </button>
                 </div>
               </div>
@@ -2035,7 +2019,7 @@ onUnmounted(() => {
                                 {{ taskStatusLabel(item.task.status) }}
                               </span>
                             </div>
-                            <p class="mt-0.5 truncate text-xs text-white/38">
+                            <p class="mt-0.5 truncate text-xs text-white/50">
                               {{ taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? "任务生成失败，可以重试。" : "任务正在生成，完成后自动展开版本。") }}
                             </p>
                           </div>
@@ -2049,8 +2033,8 @@ onUnmounted(() => {
                           />
                         </div>
                         <div class="mt-3 flex items-center justify-between gap-2">
-                          <p class="truncate text-xs text-white/30">{{ item.task.taskNo }}</p>
-                          <div class="flex shrink-0 items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                          <p class="truncate text-xs text-white/50">{{ item.task.taskNo }}</p>
+                          <div class="flex shrink-0 items-center gap-1 transition md:opacity-0 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
                             <button
                               v-if="canCancelTask(item.task.status)"
                               type="button"
@@ -2137,7 +2121,7 @@ onUnmounted(() => {
                         </span>
                         <span class="min-w-0">
                           <span class="block truncate text-sm font-medium text-white">{{ audioTaskTitle(track) }}</span>
-                          <span class="mt-0.5 block truncate text-xs text-white/38">
+                          <span class="mt-0.5 block truncate text-xs text-white/50">
                             {{ track.totalVersions > 1 ? `Version ${track.version}` : "Suno-Music" }} · {{ formatTaskTime(track.createdAt) }}
                           </span>
                         </span>
@@ -2156,21 +2140,16 @@ onUnmounted(() => {
                         <span class="whitespace-nowrap text-xs tabular-nums text-white/45">
                           {{ activeAudioTrack?.id === track.id ? activeAudioTimeLabel(track) : `0:00 / ${formatAudioDuration(track.duration) || "--:--"}` }}
                         </span>
-                        <span class="flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100">
+                        <span class="flex items-center justify-end gap-1 transition md:opacity-0 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
                           <button
                             type="button"
-                            class="inline-flex h-8 w-8 items-center justify-center rounded-full text-white/45 transition hover:bg-white/10 hover:text-white"
-                            title="下载"
+                            class="inline-flex h-8 w-8 items-center justify-center rounded-full text-white/60 transition hover:bg-white/10 hover:text-white"
+                            title="下载音频"
+                            aria-label="下载音频"
                             @click.stop="forceDownload(track.downloadUrl || normalizeMediaUrl(track.url), track.downloadName || `audio-${track.version}`)"
                           >
                             <Download class="h-4 w-4" />
                           </button>
-                          <span
-                            class="inline-flex h-8 w-8 items-center justify-center rounded-full text-white/45 transition hover:bg-white/10 hover:text-white"
-                            title="更多"
-                          >
-                            <MoreHorizontal class="h-4 w-4" />
-                          </span>
                         </span>
                       </button>
                     </div>
@@ -2295,7 +2274,7 @@ onUnmounted(() => {
                       </div>
 
                       <div class="flex flex-wrap items-center justify-between gap-3 border-t border-white/8 p-5">
-                        <div class="text-xs text-white/38">{{ activeAudioTrack?.taskNo }}</div>
+                        <div class="text-xs text-white/50">{{ activeAudioTrack?.taskNo }}</div>
                         <div class="flex gap-2">
                           <button
                             type="button"
@@ -2347,7 +2326,7 @@ onUnmounted(() => {
                             />
                           </div>
                           <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
-                            <p class="text-xs text-white/35">{{ primaryAudioStatusItem?.task.taskNo }}</p>
+                            <p class="text-xs text-white/50">{{ primaryAudioStatusItem?.task.taskNo }}</p>
                             <div v-if="primaryAudioStatusItem" class="flex gap-2">
                               <button
                                 v-if="canCancelTask(primaryAudioStatusItem.task.status)"
@@ -2421,10 +2400,10 @@ onUnmounted(() => {
                               {{ taskModelTag(item.task) }}
                             </span>
                           </div>
-                          <p class="mt-1 text-xs text-white/32">{{ item.task.taskNo }}</p>
+                          <p class="mt-1 text-xs text-white/50">{{ item.task.taskNo }}</p>
                         </div>
                       </div>
-                      <div class="flex shrink-0 items-center gap-2 text-xs text-white/38">
+                      <div class="flex shrink-0 items-center gap-2 text-xs text-white/50">
                         <span
                           class="rounded-full px-2 py-1"
                           :class="canRetryTask(item.task.status) ? 'bg-red-500/12 text-red-100' : 'bg-white/[0.045] text-white/52'"
@@ -2438,7 +2417,7 @@ onUnmounted(() => {
 
                     <section class="mt-4">
                       <div v-if="taskPrompt(item.task)" class="flex items-start gap-3">
-                        <MessageSquareText class="mt-1 h-4 w-4 shrink-0 text-white/32" />
+                        <MessageSquareText class="mt-1 h-4 w-4 shrink-0 text-white/50" />
                         <div class="min-w-0 flex-1">
                           <p
                             class="whitespace-pre-wrap text-sm font-medium leading-7 text-white/72"
@@ -2457,7 +2436,7 @@ onUnmounted(() => {
                           </button>
                         </div>
                       </div>
-                      <p v-else class="text-sm text-white/38">本次任务未记录提示词。</p>
+                      <p v-else class="text-sm text-white/50">本次任务未记录提示词。</p>
                     </section>
 
                     <section class="mt-5">
@@ -2508,7 +2487,7 @@ onUnmounted(() => {
                           class="rounded-2xl border border-white/8 bg-black/22 p-4"
                         >
                           <p class="truncate text-sm font-medium text-white">{{ track.title || `版本 ${trackIndex + 1}` }}</p>
-                          <p class="mt-1 text-xs text-white/38">{{ formatAudioDuration(track.duration) || "生成音频" }}</p>
+                          <p class="mt-1 text-xs text-white/50">{{ formatAudioDuration(track.duration) || "生成音频" }}</p>
                           <audio :src="track.url" controls preload="metadata" class="mt-3 w-full" />
                         </div>
                       </div>
@@ -2551,10 +2530,6 @@ onUnmounted(() => {
                         <Loader2 v-if="retryingTaskIds.has(item.task.taskId)" class="h-3.5 w-3.5 animate-spin" />
                         <WandSparkles v-else class="h-3.5 w-3.5" />
                         {{ canRetryTask(item.task.status) ? "重试" : "重新生成" }}
-                      </button>
-                      <button type="button" class="dashboard-feed-action opacity-55" disabled>
-                        <ImageIcon class="h-3.5 w-3.5" />
-                        局部重绘
                       </button>
                       <button
                         v-if="firstDownloadUrl(item.blocks)"
@@ -2724,7 +2699,7 @@ onUnmounted(() => {
                           <h3 class="truncate text-sm font-semibold text-white">{{ item.task.toolName }}</h3>
                           <p class="mt-1 truncate text-xs text-white/45">{{ item.task.taskNo }}</p>
                         </div>
-                        <div class="flex shrink-0 items-center gap-1 text-xs text-white/35">
+                        <div class="flex shrink-0 items-center gap-1 text-xs text-white/50">
                           <Clock class="h-3 w-3" />
                           {{ formatTaskTime(item.task.createdAt) }}
                         </div>
@@ -2882,15 +2857,8 @@ onUnmounted(() => {
             class="pointer-events-auto col-start-1 row-start-1 w-full self-end transition-all duration-200"
             :class="composerOpen ? 'translate-y-0 scale-100 opacity-100' : 'pointer-events-none translate-y-8 scale-[0.98] opacity-0'"
           >
-            <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <button
-                type="button"
-                class="inline-flex h-11 items-center gap-2 rounded-full border border-primary/35 bg-primary/15 px-5 text-sm font-medium text-white shadow-[0_0_32px_rgb(176_92_255_/_0.24)]"
-              >
-                <WandSparkles class="h-4 w-4" />
-                玩法
-              </button>
-              <div v-if="activePanel === 'tasks'" class="dashboard-floating-view-switch">
+            <div v-if="activePanel === 'tasks'" class="mb-3 flex items-center justify-end">
+              <div class="dashboard-floating-view-switch">
                 <button
                   type="button"
                   class="dashboard-floating-view-button"
@@ -3098,7 +3066,7 @@ onUnmounted(() => {
                     <span class="min-w-0 truncate text-left">
                       {{ selectedTool?.toolName || `${modalityLabel(selectedModality)}模型` }}
                     </span>
-                    <ChevronDown class="h-3.5 w-3.5 shrink-0 text-white/35" />
+                    <ChevronDown class="h-3.5 w-3.5 shrink-0 text-white/50" />
                   </button>
 
                   <div
@@ -3108,9 +3076,6 @@ onUnmounted(() => {
                     <div class="flex items-center justify-between border-b border-white/8 px-5 py-4">
                       <div class="flex gap-8 text-lg font-semibold">
                         <span class="border-b-2 border-primary pb-3 text-white">{{ modalityLabel(selectedModality) }}</span>
-                        <span class="pb-3 text-white/35">收藏</span>
-                        <span class="pb-3 text-white/35">我的</span>
-                        <span class="pb-3 text-white/35">最近使用</span>
                       </div>
                       <div class="flex h-10 w-64 items-center gap-2 rounded-xl bg-white/10 px-3">
                         <Search class="h-4 w-4 text-white/45" />
@@ -3716,15 +3681,15 @@ onUnmounted(() => {
 }
 
 .dashboard-feed-action--primary {
-  border-color: rgb(168 85 247 / 0.3);
-  background: rgb(168 85 247 / 0.12);
-  color: rgb(192 132 252);
+  border-color: var(--brand-border);
+  background: var(--brand-soft);
+  color: var(--brand-active-text);
   text-decoration: none;
 }
 
 .dashboard-feed-action--primary:hover {
-  border-color: rgb(168 85 247 / 0.5);
-  background: rgb(168 85 247 / 0.25);
+  border-color: rgb(var(--brand-primary-rgb) / 0.5);
+  background: rgb(var(--brand-primary-rgb) / 0.22);
   color: #fff;
   transform: translateY(-1px);
 }
@@ -3763,8 +3728,8 @@ onUnmounted(() => {
 
 .dashboard-scroll-bottom-button:hover {
   transform: translateY(-2px);
-  border-color: rgb(255 63 121 / 0.34);
-  background: rgb(255 63 121 / 0.18);
+  border-color: var(--brand-border);
+  background: var(--brand-soft);
   color: #fff;
 }
 
@@ -3813,10 +3778,10 @@ onUnmounted(() => {
 
 .dashboard-floating-view-button.is-active {
   color: #fff;
-  background: rgb(255 63 121 / 0.18);
+  background: var(--brand-soft);
   box-shadow:
-    inset 0 0 0 1px rgb(255 63 121 / 0.18),
-    0 8px 22px rgb(255 63 121 / 0.12);
+    inset 0 0 0 1px var(--brand-border),
+    0 8px 22px rgb(var(--brand-primary-rgb) / 0.12);
 }
 
 .dashboard-history-grid > .history-card-image {
@@ -3917,13 +3882,13 @@ onUnmounted(() => {
 }
 
 .audio-wave-bar.is-played {
-  background: rgb(176, 92, 255);
+  background: var(--brand-primary);
 }
 
 .audio-wave-bar.stage {
   width: 5px;
   min-height: 12%;
-  box-shadow: 0 0 18px rgba(176, 92, 255, 0.08);
+  box-shadow: 0 0 18px rgb(var(--brand-primary-rgb) / 0.08);
 }
 
 .audio-viz-bar {
@@ -3968,8 +3933,8 @@ onUnmounted(() => {
   margin-top: -5px;
   appearance: none;
   border-radius: 999px;
-  background: rgb(176, 92, 255);
-  box-shadow: 0 0 0 4px rgba(176, 92, 255, 0.16);
+  background: var(--brand-primary);
+  box-shadow: 0 0 0 4px rgb(var(--brand-primary-rgb) / 0.16);
 }
 
 .audio-volume-slider::-moz-range-track {
@@ -3983,8 +3948,8 @@ onUnmounted(() => {
   height: 14px;
   border: 0;
   border-radius: 999px;
-  background: rgb(176, 92, 255);
-  box-shadow: 0 0 0 4px rgba(176, 92, 255, 0.16);
+  background: var(--brand-primary);
+  box-shadow: 0 0 0 4px rgb(var(--brand-primary-rgb) / 0.16);
 }
 
 @keyframes audio-viz {
@@ -4035,8 +4000,8 @@ onUnmounted(() => {
 }
 
 .dashboard-pollo-upload-slot--empty:hover {
-  border-color: rgb(176 92 255 / 0.45);
-  background: rgb(176 92 255 / 0.08);
+  border-color: var(--brand-border);
+  background: var(--brand-softer);
   color: white;
 }
 
@@ -4100,8 +4065,8 @@ onUnmounted(() => {
 }
 
 .dashboard-pollo-media-slot__box:hover {
-  border-color: rgb(176 92 255 / 0.45);
-  background: rgb(176 92 255 / 0.08);
+  border-color: var(--brand-border);
+  background: var(--brand-softer);
   color: white;
 }
 
@@ -4183,12 +4148,12 @@ onUnmounted(() => {
   justify-content: center;
   gap: 8px;
   border-radius: 12px;
-  background: linear-gradient(135deg, rgb(124 58 237), rgb(147 51 234));
+  background: var(--brand-gradient);
   padding: 0 18px;
   font-size: 14px;
   font-weight: 600;
   color: #fff;
-  box-shadow: 0 14px 32px rgb(124 58 237 / 0.32);
+  box-shadow: var(--brand-button-shadow);
   transition: filter 160ms ease, opacity 160ms ease;
 }
 
@@ -4244,6 +4209,25 @@ onUnmounted(() => {
   .dashboard-pollo-generate {
     width: 100%;
     margin-left: 0;
+  }
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .audio-viz-bar {
+    animation: none;
+  }
+
+  .dashboard-scroll-bottom-enter-active,
+  .dashboard-scroll-bottom-leave-active {
+    transition-duration: 1ms;
   }
 }
 </style>

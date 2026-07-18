@@ -22,15 +22,15 @@ onMounted(() => {
   resize()
   window.addEventListener('resize', resize)
 
-  const centerX = canvas.offsetWidth / 2
-  const centerY = canvas.offsetHeight / 2
-  const radius = Math.min(centerX, centerY) * 0.8
+  let centerX = canvas.offsetWidth / 2
+  let centerY = canvas.offsetHeight / 2
+  let radius = Math.min(centerX, centerY) * 0.8
 
   let rotationX = 0
   let rotationY = 0
 
   const points: { x: number; y: number; z: number; brightness: number; hue: number }[] = []
-  const numPoints = 800
+  const numPoints = 420
 
   for (let i = 0; i < numPoints; i++) {
     const theta = Math.random() * Math.PI * 2
@@ -42,7 +42,7 @@ onMounted(() => {
       y: r * Math.sin(phi) * Math.sin(theta),
       z: r * Math.cos(phi),
       brightness: 0.3 + Math.random() * 0.7,
-      hue: 280 + Math.random() * 40
+      hue: 184 + Math.random() * 30
     })
   }
 
@@ -53,9 +53,9 @@ onMounted(() => {
     rotationY += 0.005
 
     const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius * 1.5)
-    gradient.addColorStop(0, 'rgba(168, 85, 247, 0.2)')
-    gradient.addColorStop(0.5, 'rgba(139, 92, 246, 0.1)')
-    gradient.addColorStop(1, 'rgba(139, 92, 246, 0)')
+    gradient.addColorStop(0, 'rgba(34, 211, 238, 0.16)')
+    gradient.addColorStop(0.5, 'rgba(37, 99, 235, 0.08)')
+    gradient.addColorStop(1, 'rgba(37, 99, 235, 0)')
     ctx.fillStyle = gradient
     ctx.beginPath()
     ctx.arc(centerX, centerY, radius * 1.5, 0, Math.PI * 2)
@@ -115,8 +115,9 @@ onMounted(() => {
       }
     }).filter(p => p.z > -radius * 0.5)
 
-    visiblePoints.forEach((p1, i) => {
-      visiblePoints.slice(i + 1).forEach((p2) => {
+    const connectionPoints = visiblePoints.filter((_, index) => index % 3 === 0)
+    connectionPoints.forEach((p1, i) => {
+      connectionPoints.slice(i + 1).forEach((p2) => {
         const dx = p1.x - p2.x
         const dy = p1.y - p2.y
         const distance = Math.sqrt(dx * dx + dy * dy)
@@ -134,7 +135,9 @@ onMounted(() => {
       })
     })
 
-    animationId = requestAnimationFrame(animate)
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      animationId = requestAnimationFrame(animate)
+    }
   }
 
   animate()

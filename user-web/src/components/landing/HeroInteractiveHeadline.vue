@@ -6,7 +6,7 @@ interface HeadlineSegment {
   text: string
   fontSize: string
   fontWeight: number
-  tone: 'white' | 'softPurple' | 'purple'
+  tone: 'white' | 'softCyan' | 'cyan'
   spacingBefore?: string
   spacingAfter?: string
 }
@@ -20,22 +20,15 @@ const LINES: HeadlineLine[] = [
   {
     lineIndex: 0,
     segments: [
-      { text: '一个平台', fontSize: 'clamp(2.2rem, 7.8vw, 68px)', fontWeight: 700, tone: 'white' },
+      { text: '找到工具，填入', fontSize: 'clamp(2.7rem, 6.6vw, 82px)', fontWeight: 740, tone: 'white' },
+      { text: '想法', fontSize: 'clamp(3rem, 7.2vw, 90px)', fontWeight: 800, tone: 'cyan', spacingBefore: '0.16em' },
     ],
   },
   {
     lineIndex: 1,
     segments: [
-      { text: '满足您的', fontSize: 'clamp(2.4rem, 9vw, 68px)', fontWeight: 600, tone: 'softPurple' },
-      {
-        text: '所有',
-        fontSize: 'clamp(2.85rem, 11vw, 96px)',
-        fontWeight: 800,
-        tone: 'purple',
-        spacingBefore: '0.28em',
-        spacingAfter: '0.28em',
-      },
-      { text: '创作需求', fontSize: 'clamp(2.4rem, 9vw, 68px)', fontWeight: 600, tone: 'softPurple' },
+      { text: '马上开始', fontSize: 'clamp(2.7rem, 6.6vw, 82px)', fontWeight: 740, tone: 'white' },
+      { text: '生成', fontSize: 'clamp(3rem, 7.2vw, 90px)', fontWeight: 800, tone: 'softCyan', spacingBefore: '0.16em' },
     ],
   },
 ]
@@ -316,8 +309,7 @@ onUnmounted(() => {
             class="hero-headline__segment"
             :class="[
               `hero-headline__segment--${segment.tone}`,
-              // 紫色「所有」单独叠加更强呼吸
-              segment.tone === 'purple' && animationReady && !pointerInside ? 'strong-breathe' : ''
+              segment.tone === 'cyan' && animationReady && !pointerInside ? 'strong-breathe' : ''
             ]"
             :style="{
               fontSize: segment.fontSize,
@@ -344,7 +336,7 @@ onUnmounted(() => {
 .hero-headline {
   position: relative;
   isolation: isolate;
-  cursor: pointer;
+  cursor: default;
   margin-left: 0;
 }
 
@@ -367,8 +359,8 @@ onUnmounted(() => {
   border-radius: 50%;
   background: radial-gradient(
     ellipse at center,
-    rgb(220 165 255 / 0.28) 0%,
-    rgb(186 115 240 / 0.15) 42%,
+    rgb(var(--brand-primary-rgb) / 0.24) 0%,
+    rgb(37 99 235 / 0.12) 42%,
     transparent 70%
   );
   pointer-events: none;
@@ -395,7 +387,19 @@ onUnmounted(() => {
   will-change: transform;
 }
 
-/* 所有二字更强、幅度更大的呼吸 */
+.hero-headline__segment--white {
+  --headline-end: rgb(255 255 255 / 0.92);
+}
+
+.hero-headline__segment--softCyan {
+  --headline-end: rgb(125 211 252);
+}
+
+.hero-headline__segment--cyan {
+  --headline-end: var(--brand-primary);
+}
+
+/* 重点词保持克制的呼吸反馈 */
 .strong-breathe {
   animation: strongWordBreathe 2.8s ease-in-out infinite;
 }
@@ -407,12 +411,12 @@ onUnmounted(() => {
   margin-top: 0.18em;
 }
 
-/* 每个字独立白→淡紫渐变 */
+/* 每个字独立白到品牌青蓝 */
 .hero-headline__char {
   display: inline-block;
   opacity: 0;
   transform: translateY(24px) scale(0.86);
-  background: linear-gradient(90deg, #ffffff, #b89aff);
+  background: linear-gradient(90deg, #ffffff, var(--headline-end, rgb(125 211 252)));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
