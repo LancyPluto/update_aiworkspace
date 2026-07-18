@@ -495,6 +495,14 @@ export MYSQL_PASS="\$(read_env_value MYSQL_ROOT_PASSWORD)"
 export MYSQL_DB="\$(read_env_value MYSQL_DATABASE)"
 export BACKUP_ENCRYPTION_PASSWORD="\$(read_env_value BACKUP_ENCRYPTION_PASSWORD)"
 export BACKUP_OSS_URI="\$(read_env_value BACKUP_OSS_URI)"
+export OSS_ENDPOINT="\$(read_env_value OSS_ENDPOINT)"
+export OSS_ACCESS_KEY_ID="\$(read_env_value OSS_ACCESS_KEY_ID)"
+export OSS_ACCESS_KEY_SECRET="\$(read_env_value OSS_ACCESS_KEY_SECRET)"
+if [ -z "\$OSS_ACCESS_KEY_ID" ]; then OSS_ACCESS_KEY_ID="\$(read_env_value ALIYUN_ACCESS_KEY_ID)"; fi
+if [ -z "\$OSS_ACCESS_KEY_ID" ]; then OSS_ACCESS_KEY_ID="\$(read_env_value ALIYUN_CAPTCHA_ACCESS_KEY_ID)"; fi
+if [ -z "\$OSS_ACCESS_KEY_SECRET" ]; then OSS_ACCESS_KEY_SECRET="\$(read_env_value ALIYUN_ACCESS_KEY_SECRET)"; fi
+if [ -z "\$OSS_ACCESS_KEY_SECRET" ]; then OSS_ACCESS_KEY_SECRET="\$(read_env_value ALIYUN_CAPTCHA_ACCESS_KEY_SECRET)"; fi
+export OSS_ACCESS_KEY_ID OSS_ACCESS_KEY_SECRET
 MYSQL_PASS="\${MYSQL_PASS:-root123456}"
 MYSQL_DB="\${MYSQL_DB:-ai_supermarket_v1}"
 bash "\$REMOTE_DIR/deploy/scripts/manage_preflight_mysql_user.sh" create

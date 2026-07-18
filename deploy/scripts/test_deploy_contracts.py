@@ -78,8 +78,36 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("sha256sum", script)
         self.assertIn("BACKUP_ENCRYPTION_PASSWORD is required", script)
         self.assertIn("BACKUP_OSS_URI is required in production", script)
-        self.assertIn('ossutil stat "$remote_encrypted"', script)
-        self.assertIn('ossutil stat "$remote_manifest"', script)
+        self.assertIn('ossutil stat --endpoint "$OSS_ENDPOINT" "$remote_encrypted"', script)
+        self.assertIn('ossutil stat --endpoint "$OSS_ENDPOINT" "$remote_manifest"', script)
+
+    def test_backup_bootstraps_verified_ossutil_and_receives_credentials(self) -> None:
+        backup = self.read("deploy/scripts/backup_mysql.sh")
+        self.assertIn("OSSUTIL_VERSION=\"${OSSUTIL_VERSION:-2.3.0}\"", backup)
+        self.assertIn("expected_ossutil_sha256", backup)
+        self.assertIn("ossutil archive checksum mismatch", backup)
+        self.assertIn('OSSUTIL="$ossutil_install_dir/ossutil"', backup)
+        self.assertIn('--endpoint "$OSS_ENDPOINT"', backup)
+        self.assertNotIn('-i "$OSS_ACCESS_KEY_ID"', backup)
+        self.assertNotIn('-k "$OSS_ACCESS_KEY_SECRET"', backup)
+
+        for deploy_entry in (
+            "deploy/scripts/ci_remote_deploy_light.sh",
+            "deploy/scripts/remote_deploy_production.py",
+        ):
+            deploy = self.read(deploy_entry)
+            expansion = "\\$(" if deploy_entry.endswith(".sh") else "$("
+            self.assertIn(
+                f'export OSS_ENDPOINT="{expansion}read_env_value OSS_ENDPOINT)"', deploy
+            )
+            self.assertIn(
+                f'export OSS_ACCESS_KEY_ID="{expansion}read_env_value OSS_ACCESS_KEY_ID)"',
+                deploy,
+            )
+            self.assertIn(
+                f'export OSS_ACCESS_KEY_SECRET="{expansion}read_env_value OSS_ACCESS_KEY_SECRET)"',
+                deploy,
+            )
 
     def test_restore_cannot_target_production_database(self) -> None:
         script = self.read("deploy/scripts/restore_mysql_to_staging.sh")
