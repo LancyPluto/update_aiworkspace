@@ -85,10 +85,6 @@ PY
   OSSUTIL="$ossutil_install_dir/ossutil"
 }
 
-ossutil() {
-  "$OSSUTIL" "$@"
-}
-
 if [ -z "$BACKUP_ENCRYPTION_PASSWORD" ]; then
   echo "ERROR: BACKUP_ENCRYPTION_PASSWORD is required" >&2
   exit 1
@@ -141,10 +137,10 @@ if [ -n "$BACKUP_OSS_URI" ]; then
   destination="${BACKUP_OSS_URI%/}/$timestamp/"
   remote_encrypted="$destination$(basename "$encrypted")"
   remote_manifest="$destination$(basename "$manifest")"
-  ossutil cp -f --endpoint "$OSS_ENDPOINT" "$encrypted" "$remote_encrypted"
-  ossutil cp -f --endpoint "$OSS_ENDPOINT" "$manifest" "$remote_manifest"
-  ossutil stat --endpoint "$OSS_ENDPOINT" "$remote_encrypted" >/dev/null
-  ossutil stat --endpoint "$OSS_ENDPOINT" "$remote_manifest" >/dev/null
+  "$OSSUTIL" cp -f --endpoint "$OSS_ENDPOINT" "$encrypted" "$remote_encrypted"
+  "$OSSUTIL" cp -f --endpoint "$OSS_ENDPOINT" "$manifest" "$remote_manifest"
+  "$OSSUTIL" stat --endpoint "$OSS_ENDPOINT" "$remote_encrypted" >/dev/null
+  "$OSSUTIL" stat --endpoint "$OSS_ENDPOINT" "$remote_manifest" >/dev/null
 fi
 
 find "$BACKUP_DIR" -type f \( -name '*.sql.gz.enc' -o -name '*.manifest' \) \
