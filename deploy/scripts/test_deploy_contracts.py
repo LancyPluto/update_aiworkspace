@@ -78,8 +78,8 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("sha256sum", script)
         self.assertIn("BACKUP_ENCRYPTION_PASSWORD is required", script)
         self.assertIn("BACKUP_OSS_URI is required in production", script)
-        self.assertIn('ossutil stat --endpoint "$OSS_ENDPOINT" "$remote_encrypted"', script)
-        self.assertIn('ossutil stat --endpoint "$OSS_ENDPOINT" "$remote_manifest"', script)
+        self.assertIn('"$OSSUTIL" stat --endpoint "$OSS_ENDPOINT" "$remote_encrypted"', script)
+        self.assertIn('"$OSSUTIL" stat --endpoint "$OSS_ENDPOINT" "$remote_manifest"', script)
 
     def test_backup_bootstraps_verified_ossutil_and_receives_credentials(self) -> None:
         backup = self.read("deploy/scripts/backup_mysql.sh")
@@ -88,6 +88,8 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("ossutil archive checksum mismatch", backup)
         self.assertIn('OSSUTIL="$ossutil_install_dir/ossutil"', backup)
         self.assertIn('--endpoint "$OSS_ENDPOINT"', backup)
+        self.assertIn('"$OSSUTIL" cp -f', backup)
+        self.assertNotIn("\nossutil() {", backup)
         self.assertNotIn('-i "$OSS_ACCESS_KEY_ID"', backup)
         self.assertNotIn('-k "$OSS_ACCESS_KEY_SECRET"', backup)
 
