@@ -266,6 +266,29 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("&& worker_media_runtime_ready", health)
         self.assertNotIn("http_ok http://127.0.0.1/", health)
 
+    def test_linux_remote_deploy_materializes_script_before_execution(self) -> None:
+        deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
+        self.assertIn("run_remote_script() {", deploy)
+        self.assertIn('cat > "$remote_script"', deploy)
+        self.assertIn('bash "$remote_script"', deploy)
+        self.assertIn("run_remote_script <<REMOTE", deploy)
+        self.assertNotIn('ssh_cmd "bash -s" <<REMOTE', deploy)
+
+    def test_external_smoke_check_fails_on_non_success_responses(self) -> None:
+        workflow = self.read(".github/workflows/dev-delivery.yml")
+        self.assertIn("curl --silent --show-error --location", workflow)
+        self.assertIn('[[ ! "$code" =~ ^2[0-9]{2}$ ]]', workflow)
+        self.assertIn("External smoke check failed", workflow)
+        self.assertIn("https://wlcloudai.com/build-info.json", workflow)
+        self.assertIn('if [ "$deployed_sha" != "$GITHUB_SHA" ]', workflow)
+        self.assertIn("Production release SHA mismatch", workflow)
+
+        deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
+        marker = deploy.index("Writing production release build-info.json")
+        health = deploy.index("verify_release_health.sh")
+        self.assertGreater(marker, health)
+        self.assertNotIn('if echo "\\$DEPLOY_SERVICES" | grep -qw user-web; then\n  echo "Writing user-web build-info.json', deploy)
+
     def test_monitoring_is_blocking_in_every_deploy_entry(self) -> None:
         linux_deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
         windows_deploy = self.read("deploy/scripts/remote_deploy_production.py")

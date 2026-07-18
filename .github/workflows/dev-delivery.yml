@@ -343,9 +343,22 @@ jobs:
       - name: External smoke check
         run: |
           for url in http://wlcloudai.com/ http://wlcloudai.com/api/health; do
-            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$url" || echo 000)"
+            if ! code="$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' --max-time 30 "$url")"; then
+              code=000
+            fi
             echo "$url -> $code"
-            if [ "$code" = "000" ]; then
-              echo "::warning::Could not reach $url from GitHub runner (DNS/firewall may block external check)."
+            if [[ ! "$code" =~ ^2[0-9]{2}$ ]]; then
+              echo "::error::External smoke check failed for $url (HTTP $code)."
+              exit 1
             fi
           done
+          if ! build_info="$(curl --silent --show-error --location --fail --max-time 30 https://wlcloudai.com/build-info.json)"; then
+            echo "::error::External smoke check failed to read production build-info.json."
+            exit 1
+          fi
+          deployed_sha="$(python3 -c 'import json, sys; print(json.load(sys.stdin).get("gitSha", ""))' <<<"$build_info")"
+          echo "Production release SHA: ${deployed_sha:-missing}"
+          if [ "$deployed_sha" != "$GITHUB_SHA" ]; then
+            echo "::error::Production release SHA mismatch: expected $GITHUB_SHA, got ${deployed_sha:-missing}."
+            exit 1
+          fi

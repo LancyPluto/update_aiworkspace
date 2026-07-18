@@ -28,6 +28,12 @@ scp_cmd() {
   sshpass -p "$DEPLOY_PASSWORD" scp "${SSH_OPTS[@]}" "$@"
 }
 
+run_remote_script() {
+  # Materialize the complete payload before executing it. Commands such as
+  # `docker exec -i` must never be able to consume the remaining shell source.
+  ssh_cmd 'set -eu; umask 077; remote_script="$(mktemp /tmp/ai-tool-market-deploy.XXXXXX)"; trap "rm -f -- \"$remote_script\"" EXIT HUP INT TERM; cat > "$remote_script"; chmod 700 "$remote_script"; bash "$remote_script"'
+}
+
 if [ -z "${DEPLOY_SERVICES:-}" ]; then
   CHANGED_FILES="$(bash "$SCRIPT_DIR/detect_deploy_changes.sh" || true)"
   if [ -n "$CHANGED_FILES" ]; then
@@ -71,7 +77,7 @@ else
 fi
 
 # Remote: patch env, rebuild only changed services, health check
-ssh_cmd "bash -s" <<REMOTE
+run_remote_script <<REMOTE
 set -euo pipefail
 REMOTE_DIR="$REMOTE_DIR"
 DEPLOY_SERVICES="$DEPLOY_SERVICES"
@@ -566,19 +572,14 @@ docker compose "\${COMPOSE_ARGS[@]}" up -d \$MONITORING_STACK
 # nginx 反代静态资源；任意前端/配置变更后都 reload，避免 user_web_dist 已更新但 nginx 仍握旧连接。
 docker compose "\${COMPOSE_ARGS[@]}" restart nginx
 
-if echo "\$DEPLOY_SERVICES" | grep -qw user-web; then
-  echo "Writing user-web build-info.json ..."
-  docker exec ai-supermarket-user-web sh -c "printf '%s\\n' '{\"gitSha\":\"'\$GITHUB_SHA'\",\"builtAt\":\"'\"\$(date -Iseconds)\"'\"}' > /dist-out/build-info.json" || true
-  echo "Reloading nginx after user-web rebuild ..."
-  docker compose "\${COMPOSE_ARGS[@]}" restart nginx
-fi
-
 echo "Verifying release health..."
 bash "\$REMOTE_DIR/deploy/scripts/verify_release_health.sh"
 if echo "\$DEPLOY_SERVICES" | grep -qw agent-service; then
   echo "Checking agent-service outbound model connectivity ..."
   python3 "\$REMOTE_DIR/deploy/scripts/check_outbound_proxy.py"
 fi
+echo "Writing production release build-info.json ..."
+docker exec ai-supermarket-user-web sh -c "printf '%s\\n' '{\"gitSha\":\"'\$GITHUB_SHA'\",\"builtAt\":\"'\"\$(date -Iseconds)\"'\"}' > /dist-out/build-info.json"
 if echo "\$DEPLOY_SERVICES" | grep -qw user-web; then
   echo "build-info:" && curl -sf http://127.0.0.1/build-info.json || echo "(build-info pending)"
   js_bundle="\$(docker exec ai-supermarket-nginx sh -c 'ls /usr/share/nginx/user-web/assets/index-*.js 2>/dev/null | head -1' || true)"
