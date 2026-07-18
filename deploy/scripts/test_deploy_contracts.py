@@ -78,8 +78,8 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("sha256sum", script)
         self.assertIn("BACKUP_ENCRYPTION_PASSWORD is required", script)
         self.assertIn("BACKUP_OSS_URI is required in production", script)
-        self.assertIn('"$OSSUTIL" stat --endpoint "$OSS_ENDPOINT" "$remote_encrypted"', script)
-        self.assertIn('"$OSSUTIL" stat --endpoint "$OSS_ENDPOINT" "$remote_manifest"', script)
+        self.assertIn('"$OSSUTIL" stat --endpoint "$OSS_ENDPOINT" --region "$OSS_REGION" "$remote_encrypted"', script)
+        self.assertIn('"$OSSUTIL" stat --endpoint "$OSS_ENDPOINT" --region "$OSS_REGION" "$remote_manifest"', script)
 
     def test_backup_bootstraps_verified_ossutil_and_receives_credentials(self) -> None:
         backup = self.read("deploy/scripts/backup_mysql.sh")
@@ -90,6 +90,9 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn('--endpoint "$OSS_ENDPOINT"', backup)
         self.assertIn('"$OSSUTIL" cp -f', backup)
         self.assertNotIn("\nossutil() {", backup)
+        self.assertIn('OSS_REGION="${OSS_REGION:-}"', backup)
+        self.assertIn('OSS_REGION="${endpoint_region#oss-}"', backup)
+        self.assertIn('--region "$OSS_REGION"', backup)
         self.assertNotIn('-i "$OSS_ACCESS_KEY_ID"', backup)
         self.assertNotIn('-k "$OSS_ACCESS_KEY_SECRET"', backup)
 
@@ -101,6 +104,9 @@ class DeployContractTests(unittest.TestCase):
             expansion = "\\$(" if deploy_entry.endswith(".sh") else "$("
             self.assertIn(
                 f'export OSS_ENDPOINT="{expansion}read_env_value OSS_ENDPOINT)"', deploy
+            )
+            self.assertIn(
+                f'export OSS_REGION="{expansion}read_env_value OSS_REGION)"', deploy
             )
             self.assertIn(
                 f'export OSS_ACCESS_KEY_ID="{expansion}read_env_value OSS_ACCESS_KEY_ID)"',

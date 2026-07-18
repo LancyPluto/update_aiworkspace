@@ -12,6 +12,7 @@ BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 BACKUP_OSS_URI="${BACKUP_OSS_URI:-}"
 BACKUP_ENCRYPTION_PASSWORD="${BACKUP_ENCRYPTION_PASSWORD:-}"
 OSS_ENDPOINT="${OSS_ENDPOINT:-}"
+OSS_REGION="${OSS_REGION:-}"
 OSS_ACCESS_KEY_ID="${OSS_ACCESS_KEY_ID:-${ALIYUN_ACCESS_KEY_ID:-${ALIYUN_CAPTCHA_ACCESS_KEY_ID:-}}}"
 OSS_ACCESS_KEY_SECRET="${OSS_ACCESS_KEY_SECRET:-${ALIYUN_ACCESS_KEY_SECRET:-${ALIYUN_CAPTCHA_ACCESS_KEY_SECRET:-}}}"
 OSSUTIL_VERSION="${OSSUTIL_VERSION:-2.3.0}"
@@ -95,6 +96,21 @@ if { [ "$APP_PRODUCTION_MODE" = "true" ] || [ "$APP_ENV" = "production" ]; } && 
 fi
 if [ -n "$BACKUP_OSS_URI" ]; then
   [ -n "$OSS_ENDPOINT" ] || { echo "ERROR: OSS_ENDPOINT is required for BACKUP_OSS_URI" >&2; exit 1; }
+  if [ -z "$OSS_REGION" ]; then
+    endpoint_region="${OSS_ENDPOINT#http://}"
+    endpoint_region="${endpoint_region#https://}"
+    endpoint_region="${endpoint_region%%.*}"
+    case "$endpoint_region" in
+      oss-*-internal|oss-cn-*)
+        OSS_REGION="${endpoint_region#oss-}"
+        OSS_REGION="${OSS_REGION%-internal}"
+        ;;
+      *)
+        echo "ERROR: OSS_REGION is required when it cannot be derived from OSS_ENDPOINT" >&2
+        exit 1
+        ;;
+    esac
+  fi
   [ -n "$OSS_ACCESS_KEY_ID" ] || { echo "ERROR: OSS access key ID is required for BACKUP_OSS_URI" >&2; exit 1; }
   [ -n "$OSS_ACCESS_KEY_SECRET" ] || { echo "ERROR: OSS access key secret is required for BACKUP_OSS_URI" >&2; exit 1; }
   export OSS_ACCESS_KEY_ID OSS_ACCESS_KEY_SECRET
@@ -137,10 +153,10 @@ if [ -n "$BACKUP_OSS_URI" ]; then
   destination="${BACKUP_OSS_URI%/}/$timestamp/"
   remote_encrypted="$destination$(basename "$encrypted")"
   remote_manifest="$destination$(basename "$manifest")"
-  "$OSSUTIL" cp -f --endpoint "$OSS_ENDPOINT" "$encrypted" "$remote_encrypted"
-  "$OSSUTIL" cp -f --endpoint "$OSS_ENDPOINT" "$manifest" "$remote_manifest"
-  "$OSSUTIL" stat --endpoint "$OSS_ENDPOINT" "$remote_encrypted" >/dev/null
-  "$OSSUTIL" stat --endpoint "$OSS_ENDPOINT" "$remote_manifest" >/dev/null
+  "$OSSUTIL" cp -f --endpoint "$OSS_ENDPOINT" --region "$OSS_REGION" "$encrypted" "$remote_encrypted"
+  "$OSSUTIL" cp -f --endpoint "$OSS_ENDPOINT" --region "$OSS_REGION" "$manifest" "$remote_manifest"
+  "$OSSUTIL" stat --endpoint "$OSS_ENDPOINT" --region "$OSS_REGION" "$remote_encrypted" >/dev/null
+  "$OSSUTIL" stat --endpoint "$OSS_ENDPOINT" --region "$OSS_REGION" "$remote_manifest" >/dev/null
 fi
 
 find "$BACKUP_DIR" -type f \( -name '*.sql.gz.enc' -o -name '*.manifest' \) \
