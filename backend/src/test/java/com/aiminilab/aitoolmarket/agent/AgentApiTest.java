@@ -71,6 +71,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 })
 class AgentApiTest {
 
+    private static final String EMPTY_WORKFLOW_INPUT_SCHEMA = """
+            {"type":"object","properties":{},"required":[]}
+            """;
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -2350,9 +2354,10 @@ class AgentApiTest {
                   canonical_dsl_json, dsl_version, node_registry_version, dsl_hash,
                   input_schema_snapshot_json, dependency_manifest_json, billing_policy_json,
                   risk_policy_json, source_draft_revision, published_at, published_by, created_at
-                ) VALUES (?, 1, ?, ?, NULL, '{}', '{}', '1', 'p0', ?, '{}', '{}',
+                ) VALUES (?, 1, ?, ?, NULL, '{}', '{}', '1', 'p0', ?, ?, '{}',
                           '{"mode":"WORKFLOW_STEP","nodePolicies":{}}', '{}', 1, CURRENT_TIMESTAMP, 1, CURRENT_TIMESTAMP)
-                """, workflowId, nodes, edges, "agent-workflow-" + workflowId);
+                """, workflowId, nodes, edges, "agent-workflow-" + workflowId,
+                EMPTY_WORKFLOW_INPUT_SCHEMA);
         Long versionId = jdbcTemplate.queryForObject(
                 "SELECT id FROM tool_workflow_versions WHERE workflow_id = ? AND version = 1",
                 Long.class,

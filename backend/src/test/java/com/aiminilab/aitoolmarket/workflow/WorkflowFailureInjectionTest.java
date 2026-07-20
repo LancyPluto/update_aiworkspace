@@ -64,6 +64,9 @@ class WorkflowFailureInjectionTest {
 
     private static final long USER_ID = 7201L;
     private static final ZoneId SHANGHAI = ZoneId.of("Asia/Shanghai");
+    private static final String INPUT_SCHEMA = """
+            {"type":"object","properties":{},"required":[]}
+            """;
 
     @Autowired
     private WorkflowRunApplicationService runApplicationService;
@@ -577,9 +580,9 @@ class WorkflowFailureInjectionTest {
                   canonical_dsl_json, dsl_version, node_registry_version, dsl_hash,
                   input_schema_snapshot_json, dependency_manifest_json, billing_policy_json,
                   risk_policy_json, source_draft_revision, published_at, published_by, created_at
-                ) VALUES (?, 1, ?, '[]', '{}', '{}', '1', 'p0', ?, '{}', '{}', ?,
+                ) VALUES (?, 1, ?, '[]', '{}', '{}', '1', 'p0', ?, ?, '{}', ?,
                           '{}', 1, CURRENT_TIMESTAMP, 1, CURRENT_TIMESTAMP)
-                """, workflowId, nodes, "p0-failure-" + workflowId, billingPolicy);
+                """, workflowId, nodes, "p0-failure-" + workflowId, INPUT_SCHEMA, billingPolicy);
         Long versionId = jdbcTemplate.queryForObject(
                 "SELECT id FROM tool_workflow_versions WHERE workflow_id = ? AND version = 1",
                 Long.class,
