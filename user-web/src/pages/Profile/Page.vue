@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
 import { useRouter } from "vue-router"
-import { Camera, Check, ClipboardCopy, ExternalLink, Loader2, Shield, Sparkles, ToggleLeft, Trash2, X } from "lucide-vue-next"
+import { Camera, Check, ClipboardCopy, ExternalLink, Loader2, Sparkles, ToggleLeft, Trash2, X } from "lucide-vue-next"
 import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import { fetchCreditAccount, fetchMyGiftCards, redeemGiftCard, redeemGiftCardByCode } from "@/api/creditApi"
@@ -26,7 +26,6 @@ const error = ref("")
 const success = ref("")
 const credit = ref<CreditAccount | null>(null)
 const totalTasks = ref<number | null>(null)
-const successTasks = ref<number | null>(null)
 const cancelDialogOpen = ref(false)
 const cancelSmsCode = ref("")
 const cancelConfirmText = ref("")
@@ -107,10 +106,6 @@ const completedProfileItems = computed(() => {
   return count
 })
 const profileCompletion = computed(() => Math.round((completedProfileItems.value / 4) * 100))
-const successRateLabel = computed(() => {
-  if (!totalTasks.value || successTasks.value == null) return "--"
-  return `${Math.round((successTasks.value / totalTasks.value) * 100)}%`
-})
 const unusedGiftCards = computed(() => giftCards.value.filter((card) => card.status === "UNUSED").length)
 const giftCardCreditTotal = computed(() =>
   giftCards.value
@@ -122,14 +117,12 @@ async function loadProfileStats() {
   if (!auth.isLoggedIn) return
   loadingStats.value = true
   try {
-    const [creditRes, allTasks, completedTasks] = await Promise.all([
+    const [creditRes, allTasks] = await Promise.all([
       fetchCreditAccount({ token: auth.token }),
       fetchTasks({ token: auth.token, query: { pageNo: 1, pageSize: 1 } }),
-      fetchTasks({ token: auth.token, query: { pageNo: 1, pageSize: 1, status: "SUCCESS" } }),
     ])
     credit.value = creditRes
     totalTasks.value = allTasks.total
-    successTasks.value = completedTasks.total
     window.dispatchEvent(new CustomEvent("credits:updated", { detail: creditRes }))
   } finally {
     loadingStats.value = false
@@ -393,11 +386,6 @@ onMounted(async () => {
             <strong>{{ totalTasks ?? "--" }}</strong>
           </div>
           <div class="metric-card">
-            <Shield class="h-4 w-4" />
-            <span>成功率</span>
-            <strong>{{ successRateLabel }}</strong>
-          </div>
-          <div class="metric-card">
             <CreditPowerIcon :size="16" />
             <span>可用算力</span>
             <strong>{{ credit?.balance ?? "--" }}</strong>
@@ -502,10 +490,6 @@ onMounted(async () => {
               <div>
                 <span>账号状态</span>
                 <strong>{{ accountStatusLabel }}</strong>
-              </div>
-              <div>
-                <span>冻结算力</span>
-                <strong>{{ credit?.frozen ?? "--" }}</strong>
               </div>
             </div>
           </section>
@@ -612,7 +596,7 @@ onMounted(async () => {
             </section>
             <section>
               <h3>充值余额不会退款</h3>
-              <p>注销不会要求余额为 0，但当前账号剩余余额和冻结算力会随账号关闭失效，系统不会自动退款。</p>
+              <p>注销不会要求余额为 0，但当前账号剩余算力会随账号关闭失效，系统不会自动退款。</p>
             </section>
             <section>
               <h3>请勿频繁重复注销</h3>
@@ -624,10 +608,6 @@ onMounted(async () => {
             <div>
               <span>余额</span>
               <strong>{{ credit?.balance ?? "--" }}</strong>
-            </div>
-            <div>
-              <span>冻结算力</span>
-              <strong>{{ credit?.frozen ?? "--" }}</strong>
             </div>
           </div>
 
@@ -1428,7 +1408,7 @@ onMounted(async () => {
 
 .cancel-checks {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 10px;
   margin-top: 18px;
 }
@@ -1757,7 +1737,7 @@ onMounted(async () => {
 
 .summary-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -2208,7 +2188,7 @@ onMounted(async () => {
   }
 
   .summary-metrics {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
