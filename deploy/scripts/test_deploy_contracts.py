@@ -358,7 +358,9 @@ class DeployContractTests(unittest.TestCase):
             }
         )
 
-        with tempfile.TemporaryDirectory(dir=ROOT / "deploy/logs") as temp_dir:
+        temp_root = ROOT / "deploy/logs"
+        temp_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=temp_root) as temp_dir:
             temp = pathlib.Path(temp_dir)
             origin = temp / "origin.git"
             seed = temp / "seed"
