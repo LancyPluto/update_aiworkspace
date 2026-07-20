@@ -416,7 +416,19 @@ echo "Verifying release health..."
 bash "$REMOTE_DIR/deploy/scripts/verify_release_health.sh"
 if echo "$SERVICES" | grep -qw user-web; then
   docker exec ai-supermarket-user-web sh -c "printf '%s\\n' '{{\"gitSha\":\"'$NEW_SHA'\",\"builtAt\":\"'\"$(date -Iseconds)\"'\"}}' > /dist-out/build-info.json"
-  BUILD_INFO_SHA="$(curl --silent --show-error --fail --max-time 15 http://127.0.0.1/build-info.json | python3 -c 'import json, sys; print(json.load(sys.stdin).get(\"gitSha\", \"\"))')"
+  BUILD_INFO_JSON=""
+  for build_info_attempt in $(seq 1 10); do
+    if BUILD_INFO_JSON="$(curl --silent --show-error --fail --max-time 10 http://127.0.0.1/build-info.json)" && [ -n "$BUILD_INFO_JSON" ]; then
+      break
+    fi
+    echo "build-info read attempt $build_info_attempt/10 failed; retrying in 2s" >&2
+    sleep 2
+  done
+  if [ -z "$BUILD_INFO_JSON" ]; then
+    echo "::error::manual user-web build-info remained unavailable after retries" >&2
+    false
+  fi
+  BUILD_INFO_SHA="$(printf '%s' "$BUILD_INFO_JSON" | python3 -c 'import json, sys; print(json.load(sys.stdin).get(\"gitSha\", \"\"))')"
   if [ "$BUILD_INFO_SHA" != "$NEW_SHA" ]; then
     echo "::error::manual user-web build-info SHA mismatch" >&2
     false

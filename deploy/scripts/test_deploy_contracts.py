@@ -559,6 +559,17 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn('if [ "$DEPLOY_SYNC_MODE" != "git" ]; then', deploy)
         self.assertNotIn("rsync -az --delete", deploy)
 
+    def test_build_info_readback_retries_transient_nginx_disconnects(self) -> None:
+        for path in (
+            "deploy/scripts/ci_remote_deploy_light.sh",
+            "deploy/scripts/remote_deploy_production.py",
+        ):
+            deploy = self.read(path)
+            self.assertIn("for build_info_attempt in", deploy)
+            self.assertIn("build-info read attempt", deploy)
+            self.assertIn("retrying in 2s", deploy)
+            self.assertIn("remained unavailable after retries", deploy)
+
     def test_external_smoke_check_fails_on_non_success_responses(self) -> None:
         workflow = self.read(".github/workflows/dev-delivery.yml")
         deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
