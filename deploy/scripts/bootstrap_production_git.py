@@ -86,11 +86,11 @@ for rel in .env engines/banana-slides/.env; do
   fi
 done
 NEW_SHA="$(git rev-parse HEAD)"
-echo "$NEW_SHA" > .deploy_revision
-printf 'bootstrap\\n%s\\n\\n' "$GIT_BRANCH" > .deploy_meta
+rm -f .deploy_revision .deploy_meta .deploy_revision.pending .deploy_meta.pending
 git log -1 --oneline
 rm -f "$BUNDLE"
 echo "Bootstrap complete: $NEW_SHA"
+echo "No successful release is recorded; the first deployment will rebuild all services."
 """
         _, stdout, stderr = ssh.exec_command(remote_script, timeout=300)
         out = stdout.read().decode()

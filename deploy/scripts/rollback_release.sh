@@ -229,6 +229,9 @@ if [ "$require_monitoring" -eq 1 ]; then
 else
   REQUIRE_MONITORING=0 bash "$health_script"
 fi
+if [[ " ${app_services[*]} " == *" user-web "* ]]; then
+  docker exec ai-supermarket-user-web sh -c "printf '%s\\n' '{\"gitSha\":\"'$old_sha'\",\"builtAt\":\"'\"$(date -Iseconds)\"'\"}' > /dist-out/build-info.json"
+fi
 rolled_back_services=("${app_services[@]}")
 if [ "$nginx_requested" = true ]; then
   rolled_back_services+=(nginx)
@@ -238,5 +241,12 @@ if [ "$monitoring_requested" = true ] || [ "$require_monitoring" -eq 1 ]; then
 fi
 printf '[%s] rollback to %s services=%s\n' "$(date -Iseconds)" "$old_sha" "${rolled_back_services[*]}" \
   >> "$REMOTE_DIR/deploy/logs/deploy-history.log"
-echo "$old_sha" > "$REMOTE_DIR/.deploy_revision"
+meta_tmp="$(mktemp "$REMOTE_DIR/.deploy_meta.XXXXXX")"
+revision_tmp="$(mktemp "$REMOTE_DIR/.deploy_revision.XXXXXX")"
+printf 'rollback\n\n\n' > "$meta_tmp"
+printf '%s\n' "$old_sha" > "$revision_tmp"
+chmod 600 "$meta_tmp" "$revision_tmp"
+mv -f "$meta_tmp" "$REMOTE_DIR/.deploy_meta"
+mv -f "$revision_tmp" "$REMOTE_DIR/.deploy_revision"
+rm -f "$REMOTE_DIR/.deploy_meta.pending" "$REMOTE_DIR/.deploy_revision.pending"
 echo "Rollback completed: $old_sha"

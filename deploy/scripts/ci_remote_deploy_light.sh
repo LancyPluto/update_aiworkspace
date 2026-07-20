@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Lightweight production deploy: git incremental sync (default) or rsync fallback.
+# Lightweight production deploy using an authoritative Git release baseline.
 # Password from env only — never commit credentials.
 set -euo pipefail
 
@@ -10,9 +10,12 @@ set -euo pipefail
 : "${PRODUCTION_PREFLIGHT_MYSQL_PASSWORD:?Runner-generated preflight MySQL password is required}"
 
 DEPLOY_SYNC_MODE="${DEPLOY_SYNC_MODE:-git}"
+if [ "$DEPLOY_SYNC_MODE" != "git" ]; then
+  echo "Unsupported DEPLOY_SYNC_MODE=$DEPLOY_SYNC_MODE; production releases require git" >&2
+  exit 1
+fi
 REMOTE_DIR="/root/ai_tool_market"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=30 -o ServerAliveCountMax=120 -o TCPKeepAlive=yes)
 GIT_REPO="${DEPLOY_GIT_REPO:-https://github.com/AI-miniLab/ai-tool-market.git}"
 GIT_BRANCH="${DEPLOY_GIT_BRANCH:-dev}"
@@ -43,47 +46,78 @@ if [ -z "${DEPLOY_SERVICES:-}" ]; then
     DEPLOY_SERVICES="$(bash "$SCRIPT_DIR/detect_deploy_services.sh")"
   fi
 fi
-
 echo "Deploy mode=$DEPLOY_SYNC_MODE services=$DEPLOY_SERVICES ref=$DEPLOY_GIT_REF event=$DEPLOY_EVENT"
 echo "$DEPLOY_SERVICES" > /tmp/ai_tool_market_deploy_services.txt
 
-if [ "$DEPLOY_SYNC_MODE" = "rsync" ]; then
-  ssh_cmd "mkdir -p '$REMOTE_DIR'"
-  rsync -az --delete \
-    --exclude-from="$SCRIPT_DIR/rsync_exclude.txt" \
-    -e "sshpass -p '$DEPLOY_PASSWORD' ssh ${SSH_OPTS[*]}" \
-    "$ROOT/" "${DEPLOY_USER}@${DEPLOY_HOST}:${REMOTE_DIR}/"
-elif [ "$DEPLOY_SYNC_MODE" = "git" ]; then
-  CLONE_URL="$GIT_REPO"
-  if [ -n "${GITHUB_TOKEN:-}" ]; then
-    CLONE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/AI-miniLab/ai-tool-market.git"
-  fi
-  scp_cmd "$SCRIPT_DIR/remote_production_git_sync.sh" "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/production_git_sync.sh"
-  ssh_cmd "chmod +x /tmp/production_git_sync.sh"
-  ssh_cmd env \
-    REMOTE_DIR="$REMOTE_DIR" \
-    GIT_REPO_URL="$CLONE_URL" \
-    DEPLOY_GIT_REF="$DEPLOY_GIT_REF" \
-    DEPLOY_EVENT="$DEPLOY_EVENT" \
-    DEPLOY_GIT_BRANCH="$GIT_BRANCH" \
-    DEPLOY_PR_NUMBER="$DEPLOY_PR_NUMBER" \
-    GITHUB_SHA="${GITHUB_SHA:-}" \
-    GITHUB_RUN_ID="${GITHUB_RUN_ID:-}" \
-    GITHUB_ACTOR="${GITHUB_ACTOR:-}" \
-    /tmp/production_git_sync.sh
-else
-  echo "Unknown DEPLOY_SYNC_MODE=$DEPLOY_SYNC_MODE (use rsync or git)" >&2
-  exit 1
+CLONE_URL="$GIT_REPO"
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  CLONE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/AI-miniLab/ai-tool-market.git"
 fi
+scp_cmd "$SCRIPT_DIR/remote_production_git_sync.sh" "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/production_git_sync.sh"
+ssh_cmd "chmod +x /tmp/production_git_sync.sh"
+ssh_cmd env \
+  REMOTE_DIR="$REMOTE_DIR" \
+  GIT_REPO_URL="$CLONE_URL" \
+  DEPLOY_GIT_REF="$DEPLOY_GIT_REF" \
+  DEPLOY_EVENT="$DEPLOY_EVENT" \
+  DEPLOY_GIT_BRANCH="$GIT_BRANCH" \
+  DEPLOY_PR_NUMBER="$DEPLOY_PR_NUMBER" \
+  GITHUB_SHA="${GITHUB_SHA:-}" \
+  GITHUB_RUN_ID="${GITHUB_RUN_ID:-}" \
+  GITHUB_ACTOR="${GITHUB_ACTOR:-}" \
+  /tmp/production_git_sync.sh
+
+full_rollback_services="$(DEPLOY_SERVICES= bash "$SCRIPT_DIR/detect_deploy_services.sh" "")"
+FULL_ROLLBACK_SERVICES="$(bash "$SCRIPT_DIR/merge_deploy_services.sh" "$DEPLOY_SERVICES" "$full_rollback_services")"
+rollback_after_public_gate_failure() {
+  status="${1:-$?}"
+  trap - ERR HUP INT TERM
+  echo "::error::Release interrupted; checking for a pending production rollback." >&2
+  ssh_cmd "if [ -s '$REMOTE_DIR/.deploy_revision.pending' ]; then services=\$(cat '$REMOTE_DIR/deploy/logs/last-deploy.services.txt' 2>/dev/null || true); if [ -z \"\$services\" ]; then services='$FULL_ROLLBACK_SERVICES'; fi; REMOTE_DIR='$REMOTE_DIR' DEPLOY_SERVICES=\"\$services\" bash '$REMOTE_DIR/deploy/scripts/rollback_release.sh'; else echo 'No pending production release to roll back'; fi" || \
+    echo "::error::Rollback check after release interruption failed." >&2
+  exit "$status"
+}
+trap 'rollback_after_public_gate_failure $?' ERR
+trap 'rollback_after_public_gate_failure 129' HUP
+trap 'rollback_after_public_gate_failure 130' INT TERM
 
 # Remote: patch env, rebuild only changed services, health check
 run_remote_script <<REMOTE
 set -euo pipefail
 REMOTE_DIR="$REMOTE_DIR"
 DEPLOY_SERVICES="$DEPLOY_SERVICES"
+DEPLOY_SYNC_MODE="$DEPLOY_SYNC_MODE"
+DEPLOY_EVENT="$DEPLOY_EVENT"
+DEPLOY_GIT_BRANCH="$GIT_BRANCH"
+DEPLOY_PR_NUMBER="$DEPLOY_PR_NUMBER"
 GITHUB_SHA="${GITHUB_SHA:-unknown}"
 PRODUCTION_PREFLIGHT_MYSQL_USER="$PRODUCTION_PREFLIGHT_MYSQL_USER"
 PRODUCTION_PREFLIGHT_MYSQL_PASSWORD="$PRODUCTION_PREFLIGHT_MYSQL_PASSWORD"
+
+if [ "\$DEPLOY_SYNC_MODE" = "git" ]; then
+  diff_status_file="\$REMOTE_DIR/deploy/logs/deploy-diff-base.status"
+  diff_status="full"
+  if [ -s "\$diff_status_file" ]; then
+    diff_status="\$(tr -d '\r\n' < "\$diff_status_file")"
+  fi
+  if [ "\$diff_status" != "valid" ]; then
+    full_services="\$(DEPLOY_SERVICES= bash "\$REMOTE_DIR/deploy/scripts/detect_deploy_services.sh" "")"
+    DEPLOY_SERVICES="\$(bash "\$REMOTE_DIR/deploy/scripts/merge_deploy_services.sh" "\$DEPLOY_SERVICES" "\$full_services")"
+    echo "No trusted production diff base; forcing services: \$DEPLOY_SERVICES"
+  elif [ -s "\$REMOTE_DIR/deploy/logs/last-deploy.files.txt" ]; then
+    mapfile -t actual_changed_files < "\$REMOTE_DIR/deploy/logs/last-deploy.files.txt"
+    DEPLOY_SERVICES="\$(
+      bash "\$REMOTE_DIR/deploy/scripts/resolve_deploy_services.sh" \
+        "\$DEPLOY_SERVICES" "\${actual_changed_files[@]}"
+    )"
+    echo "Deploy services after production diff reconciliation: \$DEPLOY_SERVICES"
+  fi
+fi
+RELEASE_SHA="\$(git -C "\$REMOTE_DIR" rev-parse HEAD)"
+if [ "\$GITHUB_SHA" != "unknown" ] && [ "\$RELEASE_SHA" != "\$GITHUB_SHA" ]; then
+  echo "::error::Checked-out release SHA mismatch: expected \$GITHUB_SHA, got \$RELEASE_SHA" >&2
+  exit 1
+fi
 
 read_env_value() {
   python3 - "\$1" <<'PY'
@@ -432,8 +466,8 @@ if echo "\$DEPLOY_SERVICES" | grep -qw banana-slides; then
 fi
 
 rollback_on_failure() {
-  status=\$?
-  trap - ERR
+  status="\${1:-\$?}"
+  trap - ERR HUP INT TERM
   if declare -F cleanup_preflight_user >/dev/null 2>&1; then
     cleanup_preflight_user || true
     trap - EXIT
@@ -446,6 +480,8 @@ rollback_on_failure() {
   exit "\$status"
 }
 trap rollback_on_failure ERR
+trap 'rollback_on_failure 129' HUP
+trap 'rollback_on_failure 130' INT TERM
 
 preflight_user_created=false
 cleanup_preflight_user() {
@@ -525,6 +561,8 @@ if [ "\$APP_PRODUCTION_MODE" = "true" ] || [ "\$APP_ENV" = "production" ]; then
 bash "\$REMOTE_DIR/deploy/scripts/production_readonly_preflight.sh" post-migration
 cleanup_preflight_user
 fi
+printf '%s\n' "\$DEPLOY_SERVICES" > "\$REMOTE_DIR/deploy/logs/last-deploy.services.txt"
+chmod 600 "\$REMOTE_DIR/deploy/logs/last-deploy.services.txt"
 
 # Parallel build: launch all builds concurrently, then wait.
 echo "Building services in parallel: \$DEPLOY_SERVICES"
@@ -549,6 +587,10 @@ if [ "\$failed" -ne 0 ]; then
   echo "::error::One or more builds failed; aborting deploy before force-recreate." >&2
   exit 1
 fi
+EXPECTED_USER_WEB_IMAGE_ID=""
+if echo "\$DEPLOY_SERVICES" | grep -qw user-web; then
+  EXPECTED_USER_WEB_IMAGE_ID="\$(docker image inspect --format '{{.Id}}' deploy-user-web:latest)"
+fi
 
 APP_SERVICES=""
 MONITORING_SERVICES=""
@@ -570,6 +612,14 @@ if [ -n "\$APP_SERVICES" ]; then
   echo "Force-recreating application containers:\$APP_SERVICES"
   docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate --no-deps \$APP_SERVICES
 fi
+if [ -n "\$EXPECTED_USER_WEB_IMAGE_ID" ]; then
+  RUNNING_USER_WEB_IMAGE_ID="\$(docker inspect --format '{{.Image}}' ai-supermarket-user-web)"
+  if [ "\$RUNNING_USER_WEB_IMAGE_ID" != "\$EXPECTED_USER_WEB_IMAGE_ID" ]; then
+    echo "::error::user-web container is not running the image built by this release" >&2
+    false
+  fi
+  echo "Verified user-web image: \$RUNNING_USER_WEB_IMAGE_ID"
+fi
 
 if [ -n "\$MONITORING_SERVICES" ]; then
   echo "Starting/updating monitoring containers:\$MONITORING_SERVICES"
@@ -588,22 +638,72 @@ if echo "\$DEPLOY_SERVICES" | grep -qw agent-service; then
   echo "Checking agent-service outbound model connectivity ..."
   python3 "\$REMOTE_DIR/deploy/scripts/check_outbound_proxy.py"
 fi
-echo "Writing production release build-info.json ..."
-docker exec ai-supermarket-user-web sh -c "printf '%s\\n' '{\"gitSha\":\"'\$GITHUB_SHA'\",\"builtAt\":\"'\"\$(date -Iseconds)\"'\"}' > /dist-out/build-info.json"
 if echo "\$DEPLOY_SERVICES" | grep -qw user-web; then
-  echo "build-info:" && curl -sf http://127.0.0.1/build-info.json || echo "(build-info pending)"
+  echo "Writing user-web build-info.json ..."
+  docker exec ai-supermarket-user-web sh -c "printf '%s\\n' '{\"gitSha\":\"'\$RELEASE_SHA'\",\"builtAt\":\"'\"\$(date -Iseconds)\"'\"}' > /dist-out/build-info.json"
+  BUILD_INFO_JSON="\$(curl --silent --show-error --fail --max-time 15 http://127.0.0.1/build-info.json)"
+  BUILD_INFO_SHA="\$(printf '%s' "\$BUILD_INFO_JSON" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("gitSha", ""))')"
+  if [ "\$BUILD_INFO_SHA" != "\$RELEASE_SHA" ]; then
+    echo "::error::Production user-web build-info SHA mismatch: expected \$RELEASE_SHA, got \${BUILD_INFO_SHA:-missing}" >&2
+    false
+  fi
+  echo "user-web build-info: \$BUILD_INFO_JSON"
   js_bundle="\$(docker exec ai-supermarket-nginx sh -c 'ls /usr/share/nginx/user-web/assets/index-*.js 2>/dev/null | head -1' || true)"
   echo "user-web bundle: \${js_bundle:-unknown}"
+else
+  echo "user-web was not deployed; preserving its existing build-info.json"
 fi
 docker compose "\${COMPOSE_ARGS[@]}" ps
-trap - ERR
-trap - EXIT
 
 if [ -n "\${SECRET_SNAPSHOT_AFTER:-}" ]; then
   mkdir -p "\$REMOTE_DIR/deploy/logs"
-  printf '%s' "\$SECRET_SNAPSHOT_AFTER" > "\$LAST_SECRET_FILE"
-  chmod 600 "\$LAST_SECRET_FILE"
+  SECRET_TMP="\$(mktemp "\$REMOTE_DIR/deploy/logs/.last-secret-keys.XXXXXX")"
+  printf '%s' "\$SECRET_SNAPSHOT_AFTER" > "\$SECRET_TMP"
+  chmod 600 "\$SECRET_TMP"
+  mv -f "\$SECRET_TMP" "\$LAST_SECRET_FILE"
 fi
+
+# The runner promotes these files only after the public production gate.
+PENDING_META_TMP="\$(mktemp "\$REMOTE_DIR/.deploy_meta.pending.XXXXXX")"
+PENDING_REVISION_TMP="\$(mktemp "\$REMOTE_DIR/.deploy_revision.pending.XXXXXX")"
+printf '%s\n' "\$DEPLOY_EVENT" "\$DEPLOY_GIT_BRANCH" "\$DEPLOY_PR_NUMBER" > "\$PENDING_META_TMP"
+printf '%s\n' "\$RELEASE_SHA" > "\$PENDING_REVISION_TMP"
+chmod 600 "\$PENDING_META_TMP" "\$PENDING_REVISION_TMP"
+mv -f "\$PENDING_META_TMP" "\$REMOTE_DIR/.deploy_meta.pending"
+mv -f "\$PENDING_REVISION_TMP" "\$REMOTE_DIR/.deploy_revision.pending"
+echo "Internal release gate passed; awaiting public verification for \$RELEASE_SHA"
+trap - ERR HUP INT TERM
+trap - EXIT
 REMOTE
 
-echo "Light deploy finished (mode=$DEPLOY_SYNC_MODE)."
+ACTUAL_DEPLOY_SERVICES="$(ssh_cmd "cat '$REMOTE_DIR/deploy/logs/last-deploy.services.txt'")"
+if [[ -z "$ACTUAL_DEPLOY_SERVICES" || ! "$ACTUAL_DEPLOY_SERVICES" =~ ^[a-z0-9-]+([[:space:]][a-z0-9-]+)*$ ]]; then
+  echo "Invalid actual deploy services from production: ${ACTUAL_DEPLOY_SERVICES:-missing}" >&2
+  false
+fi
+echo "Actual production services: $ACTUAL_DEPLOY_SERVICES"
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  printf 'services=%s\n' "$ACTUAL_DEPLOY_SERVICES" >> "$GITHUB_OUTPUT"
+fi
+
+for url in http://wlcloudai.com/ http://wlcloudai.com/api/health; do
+  code="$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' --max-time 30 "$url")"
+  echo "$url -> $code"
+  if [[ ! "$code" =~ ^2[0-9]{2}$ ]]; then
+    echo "::error::Public release gate failed for $url (HTTP $code)." >&2
+    false
+  fi
+done
+if [[ " $ACTUAL_DEPLOY_SERVICES " == *" user-web "* ]]; then
+  public_build_info="$(curl --silent --show-error --location --fail --max-time 30 https://wlcloudai.com/build-info.json)"
+  public_user_web_sha="$(printf '%s' "$public_build_info" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("gitSha", ""))')"
+  if [ "$public_user_web_sha" != "${GITHUB_SHA:-unknown}" ]; then
+    echo "::error::Public user-web SHA mismatch: expected ${GITHUB_SHA:-unknown}, got ${public_user_web_sha:-missing}." >&2
+    false
+  fi
+fi
+
+ssh_cmd env REMOTE_DIR="$REMOTE_DIR" EXPECTED_SHA="${GITHUB_SHA:-unknown}" \
+  bash "$REMOTE_DIR/deploy/scripts/finalize_production_release.sh"
+trap - ERR HUP INT TERM
+echo "Light deploy finished and publicly verified (mode=$DEPLOY_SYNC_MODE)."
