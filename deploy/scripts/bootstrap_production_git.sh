@@ -74,11 +74,11 @@ for rel in .env engines/banana-slides/.env; do
 done
 
 NEW_SHA="$(git rev-parse HEAD)"
-echo "$NEW_SHA" > .deploy_revision
-printf 'bootstrap\n%s\n\n' "$GIT_BRANCH" > .deploy_meta
+rm -f .deploy_revision .deploy_meta .deploy_revision.pending .deploy_meta.pending
 date -Iseconds > deploy/logs/last-bootstrap.txt 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S%z' > deploy/logs/last-bootstrap.txt
 
 echo "Bootstrap complete: branch=$GIT_BRANCH sha=$NEW_SHA"
+echo "No successful release is recorded; the first deployment will rebuild all services."
 git log -1 --oneline
 rm -f "$BUNDLE"
 REMOTE

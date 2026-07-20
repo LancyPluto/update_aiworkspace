@@ -199,7 +199,18 @@ if [ ! -d .git ]; then
   git remote add origin "https://github.com/AI-miniLab/ai-tool-market.git" 2>/dev/null || true
 fi
 
-OLD_SHA="$(git rev-parse HEAD 2>/dev/null || echo '')"
+OLD_SHA=""
+if [ -s .deploy_revision ]; then
+  IFS= read -r recorded_sha < .deploy_revision || true
+  recorded_sha="${{recorded_sha//$'\\r'/}}"
+  if [[ "$recorded_sha" =~ ^[0-9a-fA-F]{{7,40}}$ ]] && git cat-file -e "${{recorded_sha}}^{{commit}}" 2>/dev/null; then
+    OLD_SHA="$(git rev-parse "${{recorded_sha}}^{{commit}}")"
+  else
+    echo "WARN: no reachable successful release is available for automatic rollback" >&2
+  fi
+else
+  echo "WARN: no successful release is recorded for automatic rollback" >&2
+fi
 if ! git fetch "$BUNDLE" "$GIT_REF:refs/heads/deploy-target" 2>/dev/null; then
   if ! git fetch "$BUNDLE" "HEAD:refs/heads/deploy-target" 2>/dev/null; then
     git fetch "$BUNDLE" "refs/remotes/origin/$GIT_BRANCH:refs/heads/deploy-target"
@@ -218,8 +229,8 @@ cat > "$REMOTE_DIR/deploy/logs/last-deploy.json" <<EOF
 EOF
 
 rollback_on_failure() {{
-  status=$?
-  trap - ERR
+  status="${{1:-$?}}"
+  trap - ERR HUP INT TERM
   if declare -F cleanup_preflight_user >/dev/null 2>&1; then
     cleanup_preflight_user || true
     trap - EXIT
@@ -232,6 +243,8 @@ rollback_on_failure() {{
   exit "$status"
 }}
 trap rollback_on_failure ERR
+trap 'rollback_on_failure 129' HUP
+trap 'rollback_on_failure 130' INT TERM
 
 git checkout -B "$GIT_BRANCH" deploy-target -f
 git reset --hard deploy-target
@@ -246,8 +259,6 @@ for rel in .env engines/banana-slides/.env; do
   fi
 done
 
-echo "$NEW_SHA" > .deploy_revision
-printf 'manual\\n%s\\n\\n' "$GIT_BRANCH" > .deploy_meta
 git log -1 --oneline
 rm -f "$BUNDLE"
 
@@ -352,6 +363,10 @@ for svc in $SERVICES; do
   echo "Building $svc ..."
   docker compose "${{COMPOSE_ARGS[@]}}" build "$svc"
 done
+EXPECTED_USER_WEB_IMAGE_ID=""
+if echo "$SERVICES" | grep -qw user-web; then
+  EXPECTED_USER_WEB_IMAGE_ID="$(docker image inspect --format '{{{{.Id}}}}' deploy-user-web:latest)"
+fi
 
 APP_SERVICES=""
 MONITORING_SERVICES=""
@@ -371,6 +386,13 @@ done
 
 if [ -n "$APP_SERVICES" ]; then
   docker compose "${{COMPOSE_ARGS[@]}}" up -d --force-recreate --no-deps $APP_SERVICES
+fi
+if [ -n "$EXPECTED_USER_WEB_IMAGE_ID" ]; then
+  RUNNING_USER_WEB_IMAGE_ID="$(docker inspect --format '{{{{.Image}}}}' ai-supermarket-user-web)"
+  if [ "$RUNNING_USER_WEB_IMAGE_ID" != "$EXPECTED_USER_WEB_IMAGE_ID" ]; then
+    echo "::error::user-web container is not running the image built by this release" >&2
+    false
+  fi
 fi
 
 if [ -n "$MONITORING_SERVICES" ]; then
@@ -392,8 +414,23 @@ done
 
 echo "Verifying release health..."
 bash "$REMOTE_DIR/deploy/scripts/verify_release_health.sh"
+if echo "$SERVICES" | grep -qw user-web; then
+  docker exec ai-supermarket-user-web sh -c "printf '%s\\n' '{{\"gitSha\":\"'$NEW_SHA'\",\"builtAt\":\"'\"$(date -Iseconds)\"'\"}}' > /dist-out/build-info.json"
+  BUILD_INFO_SHA="$(curl --silent --show-error --fail --max-time 15 http://127.0.0.1/build-info.json | python3 -c 'import json, sys; print(json.load(sys.stdin).get(\"gitSha\", \"\"))')"
+  if [ "$BUILD_INFO_SHA" != "$NEW_SHA" ]; then
+    echo "::error::manual user-web build-info SHA mismatch" >&2
+    false
+  fi
+fi
 docker compose "${{COMPOSE_ARGS[@]}}" ps
-trap - ERR
+META_TMP="$(mktemp "$REMOTE_DIR/.deploy_meta.XXXXXX")"
+REVISION_TMP="$(mktemp "$REMOTE_DIR/.deploy_revision.XXXXXX")"
+printf 'manual\\n%s\\n\\n' "$GIT_BRANCH" > "$META_TMP"
+printf '%s\\n' "$NEW_SHA" > "$REVISION_TMP"
+chmod 600 "$META_TMP" "$REVISION_TMP"
+mv -f "$META_TMP" "$REMOTE_DIR/.deploy_meta"
+mv -f "$REVISION_TMP" "$REMOTE_DIR/.deploy_revision"
+trap - ERR HUP INT TERM
 trap - EXIT
 echo "Deploy complete: $NEW_SHA"
 """

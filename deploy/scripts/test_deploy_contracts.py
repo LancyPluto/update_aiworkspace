@@ -1,4 +1,8 @@
+import os
 import pathlib
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 
@@ -310,20 +314,267 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("run_remote_script <<REMOTE", deploy)
         self.assertNotIn('ssh_cmd "bash -s" <<REMOTE', deploy)
 
+    def test_actual_remote_diff_adds_services_missed_by_runner_detection(self) -> None:
+        resolver = ROOT / "deploy/scripts/resolve_deploy_services.sh"
+        bash = shutil.which("bash") or "bash"
+        if os.name == "nt":
+            git = shutil.which("git")
+            if git:
+                git_bash = pathlib.Path(git).resolve().parent.parent / "bin/bash.exe"
+                if git_bash.exists():
+                    bash = str(git_bash)
+        result = subprocess.run(
+            [
+                bash,
+                resolver.relative_to(ROOT).as_posix(),
+                "backend",
+                "backend/src/main/java/Example.java",
+                "user-web/src/pages/Dashboard/Page.vue",
+            ],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        self.assertEqual("backend user-web nginx", result.stdout.strip())
+
+    def test_cancelled_sync_remains_in_next_authoritative_diff(self) -> None:
+        bash = shutil.which("bash") or "bash"
+        if os.name == "nt":
+            git_command = shutil.which("git")
+            if git_command:
+                git_bash = pathlib.Path(git_command).resolve().parent.parent / "bin/bash.exe"
+                if git_bash.exists():
+                    bash = str(git_bash)
+        git_env = os.environ.copy()
+        git_env.update(
+            {
+                "GIT_AUTHOR_NAME": "Deploy Test",
+                "GIT_AUTHOR_EMAIL": "deploy-test@example.com",
+                "GIT_COMMITTER_NAME": "Deploy Test",
+                "GIT_COMMITTER_EMAIL": "deploy-test@example.com",
+            }
+        )
+
+        temp_root = ROOT / "deploy/logs"
+        temp_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=temp_root) as temp_dir:
+            temp = pathlib.Path(temp_dir)
+            origin = temp / "origin.git"
+            seed = temp / "seed"
+            production = temp / "production"
+
+            def bash_path(path: pathlib.Path) -> str:
+                value = path.resolve().as_posix()
+                if os.name == "nt":
+                    return f"/{value[0].lower()}{value[2:]}"
+                return value
+
+            def git(cwd: pathlib.Path, *args: str) -> str:
+                result = subprocess.run(
+                    ["git", *args],
+                    cwd=cwd,
+                    env=git_env,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                )
+                return result.stdout.strip()
+
+            subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True)
+            seed.mkdir()
+            git(seed, "init")
+            git(seed, "checkout", "-b", "dev")
+            (seed / "README.md").write_text("baseline\n", encoding="utf-8")
+            git(seed, "add", ".")
+            git(seed, "commit", "-m", "release A")
+            release_a = git(seed, "rev-parse", "HEAD")
+
+            user_page = seed / "user-web/src/pages/中文页面.vue"
+            user_page.parent.mkdir(parents=True)
+            user_page.write_text("<template>aligned</template>\n", encoding="utf-8")
+            git(seed, "add", ".")
+            git(seed, "commit", "-m", "cancelled release B")
+            release_b = git(seed, "rev-parse", "HEAD")
+
+            backend_file = seed / "backend/src/main/java/Example.java"
+            backend_file.parent.mkdir(parents=True)
+            backend_file.write_text("final class Example {}\n", encoding="utf-8")
+            git(seed, "add", ".")
+            git(seed, "commit", "-m", "release C")
+            release_c = git(seed, "rev-parse", "HEAD")
+            git(seed, "remote", "add", "origin", str(origin))
+            git(seed, "push", "-u", "origin", "dev")
+
+            subprocess.run(["git", "clone", str(origin), str(production)], check=True, capture_output=True)
+            git(production, "checkout", "-B", "dev", release_b)
+            (production / ".deploy_revision").write_text(release_a + "\n", encoding="ascii")
+
+            sync_env = git_env.copy()
+            sync_env.update(
+                {
+                    "REMOTE_DIR": str(production),
+                    "GIT_REPO_URL": bash_path(origin),
+                    "DEPLOY_GIT_REF": release_c,
+                    "DEPLOY_GIT_BRANCH": "dev",
+                    "DEPLOY_EVENT": "push",
+                    "GITHUB_SHA": release_c,
+                }
+            )
+            sync_script = ROOT / "deploy/scripts/remote_production_git_sync.sh"
+            sync_env["REMOTE_DIR"] = bash_path(production)
+
+            def run_sync() -> None:
+                result = subprocess.run(
+                    [bash, sync_script.relative_to(ROOT).as_posix()],
+                    cwd=ROOT,
+                    env=sync_env,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+            for _ in range(2):
+                run_sync()
+                changed = (production / "deploy/logs/last-deploy.files.txt").read_text(encoding="utf-8")
+                self.assertIn("user-web/src/pages/中文页面.vue", changed)
+                self.assertIn("backend/src/main/java/Example.java", changed)
+                self.assertEqual(
+                    release_a,
+                    (production / ".deploy_revision").read_text(encoding="ascii").strip(),
+                )
+                self.assertEqual(
+                    "valid",
+                    (production / "deploy/logs/deploy-diff-base.status").read_text(encoding="ascii").strip(),
+                )
+
+            revision_file = production / ".deploy_revision"
+            for invalid_revision in (None, "not-a-sha", "d" * 40):
+                if invalid_revision is None:
+                    revision_file.unlink(missing_ok=True)
+                else:
+                    revision_file.write_text(invalid_revision + "\n", encoding="ascii")
+                run_sync()
+                self.assertEqual(
+                    "full",
+                    (production / "deploy/logs/deploy-diff-base.status").read_text(encoding="ascii").strip(),
+                )
+
+            revision_file.write_text(release_a + "\n", encoding="ascii")
+            pending_revision = production / ".deploy_revision.pending"
+            pending_meta = production / ".deploy_meta.pending"
+            finalize_script = ROOT / "deploy/scripts/finalize_production_release.sh"
+            finalize_env = sync_env.copy()
+            finalize_env["EXPECTED_SHA"] = release_c
+
+            pending_revision.write_text(release_b + "\n", encoding="ascii")
+            pending_meta.write_text("push\ndev\n\n", encoding="utf-8")
+            failed_finalize = subprocess.run(
+                [bash, finalize_script.relative_to(ROOT).as_posix()],
+                cwd=ROOT,
+                env=finalize_env,
+                check=False,
+                capture_output=True,
+            )
+            self.assertNotEqual(0, failed_finalize.returncode)
+            self.assertEqual(release_a, revision_file.read_text(encoding="ascii").strip())
+
+            pending_revision.write_text(release_c + "\n", encoding="ascii")
+            successful_finalize = subprocess.run(
+                [bash, finalize_script.relative_to(ROOT).as_posix()],
+                cwd=ROOT,
+                env=finalize_env,
+                check=False,
+                capture_output=True,
+            )
+            self.assertEqual(0, successful_finalize.returncode)
+            self.assertEqual(release_c, revision_file.read_text(encoding="ascii").strip())
+
+    def test_deploy_revision_advances_only_after_release_gate(self) -> None:
+        deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
+        health = deploy.index('bash "\\$REMOTE_DIR/deploy/scripts/verify_release_health.sh"')
+        build_info = deploy.index("Writing user-web build-info.json")
+        pending = deploy.index('mv -f "\\$PENDING_REVISION_TMP" "\\$REMOTE_DIR/.deploy_revision.pending"')
+        disable_remote_rollback = deploy.index("trap - ERR", pending)
+        self.assertLess(health, build_info)
+        self.assertLess(build_info, pending)
+        self.assertLess(pending, disable_remote_rollback)
+        self.assertNotIn('mv -f "\\$REVISION_TMP" "\\$REMOTE_DIR/.deploy_revision"', deploy)
+        self.assertIn("EXPECTED_USER_WEB_IMAGE_ID", deploy)
+        self.assertIn("RUNNING_USER_WEB_IMAGE_ID", deploy)
+        self.assertIn("rollback_after_public_gate_failure", deploy)
+        self.assertIn("trap 'rollback_on_failure 129' HUP", deploy)
+        self.assertIn("trap 'rollback_on_failure 130' INT TERM", deploy)
+        self.assertIn("last-deploy.services.txt", deploy)
+        self.assertLess(
+            deploy.index("for url in http://wlcloudai.com/"),
+            deploy.index("finalize_production_release.sh"),
+        )
+
+        finalize = self.read("deploy/scripts/finalize_production_release.sh")
+        self.assertIn('pending_sha" != "$EXPECTED_SHA', finalize)
+        self.assertIn('head_sha" != "$EXPECTED_SHA', finalize)
+        self.assertLess(
+            finalize.index('mv -f "$PENDING_META" "$REMOTE_DIR/.deploy_meta"'),
+            finalize.index('mv -f "$PENDING_REVISION" "$REMOTE_DIR/.deploy_revision"'),
+        )
+
+        sync = self.read("deploy/scripts/remote_production_git_sync.sh")
+        self.assertIn('DEPLOY_REVISION_FILE="$REMOTE_DIR/.deploy_revision"', sync)
+        self.assertIn('DIFF_BASE_STATUS="full"', sync)
+        self.assertIn("core.quotePath=false", sync)
+        self.assertNotIn('echo "$NEW_SHA" > .deploy_revision', sync)
+
+        for bootstrap in ("deploy/scripts/bootstrap_production_git.sh", "deploy/scripts/bootstrap_production_git.py"):
+            self.assertIn("rm -f .deploy_revision .deploy_meta", self.read(bootstrap))
+
+        manual = self.read("deploy/scripts/remote_deploy_production.py")
+        self.assertIn("recorded_sha", manual)
+        self.assertIn("EXPECTED_USER_WEB_IMAGE_ID", manual)
+        self.assertIn("manual user-web build-info SHA mismatch", manual)
+        self.assertIn("trap 'rollback_on_failure 129' HUP", manual)
+        self.assertIn("trap 'rollback_on_failure 130' INT TERM", manual)
+        self.assertLess(
+            manual.index('bash "$REMOTE_DIR/deploy/scripts/verify_release_health.sh"'),
+            manual.index('mv -f "$REVISION_TMP" "$REMOTE_DIR/.deploy_revision"'),
+        )
+
+        rollback = self.read("deploy/scripts/rollback_release.sh")
+        self.assertIn("/dist-out/build-info.json", rollback)
+        self.assertLess(
+            rollback.index('bash "$health_script"'),
+            rollback.index('mv -f "$revision_tmp" "$REMOTE_DIR/.deploy_revision"'),
+        )
+
+    def test_production_cd_rejects_rsync_mode(self) -> None:
+        workflow = self.read(".github/workflows/dev-delivery.yml")
+        deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
+        self.assertNotIn("          - rsync", workflow)
+        self.assertIn('if [ "$DEPLOY_SYNC_MODE" != "git" ]; then', deploy)
+        self.assertNotIn("rsync -az --delete", deploy)
+
     def test_external_smoke_check_fails_on_non_success_responses(self) -> None:
         workflow = self.read(".github/workflows/dev-delivery.yml")
-        self.assertIn("curl --silent --show-error --location", workflow)
-        self.assertIn('[[ ! "$code" =~ ^2[0-9]{2}$ ]]', workflow)
-        self.assertIn("External smoke check failed", workflow)
-        self.assertIn("https://wlcloudai.com/build-info.json", workflow)
-        self.assertIn('if [ "$deployed_sha" != "$GITHUB_SHA" ]', workflow)
-        self.assertIn("Production release SHA mismatch", workflow)
-
         deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
-        marker = deploy.index("Writing production release build-info.json")
+        self.assertIn("run: bash deploy/scripts/ci_remote_deploy_light.sh", workflow)
+        self.assertIn("curl --silent --show-error --location", deploy)
+        self.assertIn('[[ ! "$code" =~ ^2[0-9]{2}$ ]]', deploy)
+        self.assertIn("Public release gate failed", deploy)
+        self.assertIn("https://wlcloudai.com/build-info.json", deploy)
+        self.assertIn("ACTUAL_DEPLOY_SERVICES", deploy)
+        self.assertIn('if [ "$public_user_web_sha" != "${GITHUB_SHA:-unknown}" ]', deploy)
+        self.assertIn("Public user-web SHA mismatch", deploy)
+        marker = deploy.index("Writing user-web build-info.json")
         health = deploy.index("verify_release_health.sh")
         self.assertGreater(marker, health)
-        self.assertNotIn('if echo "\\$DEPLOY_SERVICES" | grep -qw user-web; then\n  echo "Writing user-web build-info.json', deploy)
+        self.assertIn('if echo "\\$DEPLOY_SERVICES" | grep -qw user-web; then\n  echo "Writing user-web build-info.json', deploy)
+        self.assertIn("preserving its existing build-info.json", deploy)
 
     def test_monitoring_is_blocking_in_every_deploy_entry(self) -> None:
         linux_deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
