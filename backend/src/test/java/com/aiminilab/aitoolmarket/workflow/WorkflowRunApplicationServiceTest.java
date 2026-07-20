@@ -55,6 +55,9 @@ class WorkflowRunApplicationServiceTest {
     private static final String EDGES = """
             [{"id":"edge-1","source":"start","target":"output"}]
             """;
+    private static final String INPUT_SCHEMA = """
+            {"type":"object","properties":{"prompt":{"type":"string"}},"required":[]}
+            """;
     private static final String AWAITING_NODES = """
             [
               {"id":"start","data":{"nodeDefType":"start","title":"Start"}},
@@ -196,6 +199,102 @@ class WorkflowRunApplicationServiceTest {
                 Integer.class,
                 first.runId()
         )).isEqualTo(2);
+
+        jdbcTemplate.update("UPDATE ai_tools SET status = 'OFFLINE', agent_surface_enabled = 0 WHERE id = ?", toolId);
+        jdbcTemplate.update("UPDATE tool_workflows SET execution_enabled = 0 WHERE id = ?", workflowId);
+        WorkflowRunCreated afterToolOffline = service.create(command);
+        assertThat(afterToolOffline.runId()).isEqualTo(first.runId());
+        assertThat(afterToolOffline.workflowVersionId()).isEqualTo(firstVersionId);
+    }
+
+    @Test
+    void firstCreationRejectsEveryUnavailableWorkflowToolState() {
+        String[] unavailableUpdates = {
+                "UPDATE ai_tools SET status = 'OFFLINE' WHERE id = ?",
+                "UPDATE ai_tools SET execution_mode = 'DIRECT' WHERE id = ?",
+                "UPDATE ai_tools SET billing_mode = 'FIXED' WHERE id = ?",
+                "UPDATE ai_tools SET agent_surface_enabled = 0 WHERE id = ?"
+        };
+        for (int index = 0; index < unavailableUpdates.length; index++) {
+            jdbcTemplate.update("""
+                    UPDATE ai_tools
+                    SET status = 'ONLINE', execution_mode = 'WORKFLOW',
+                        billing_mode = 'WORKFLOW_STEP', agent_surface_enabled = 1
+                    WHERE id = ?
+                    """, toolId);
+            jdbcTemplate.update(unavailableUpdates[index], toolId);
+            CreateWorkflowRunCommand command = new CreateWorkflowRunCommand(
+                    1L,
+                    TOOL_CODE,
+                    objectMapper.createObjectNode().put("prompt", "blocked"),
+                    "workflow-app-unavailable-" + index,
+                    "AGENTS_PAGE",
+                    null
+            );
+            assertThatThrownBy(() -> service.create(command))
+                    .isInstanceOfSatisfying(BusinessException.class, exception ->
+                            assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.TOOL_NOT_FOUND));
+        }
+    }
+
+    @Test
+    void validatesNewRunInputAgainstPinnedPublishedSchema() throws Exception {
+        jdbcTemplate.update(
+                "UPDATE tool_workflow_versions SET input_schema_snapshot_json = ? WHERE id = ?",
+                """
+                {"type":"object","properties":{"prompt":{"type":"string","enum":["allowed"]}},"required":["prompt"]}
+                """,
+                firstVersionId
+        );
+
+        CreateWorkflowRunCommand missing = new CreateWorkflowRunCommand(
+                1L, TOOL_CODE, objectMapper.createObjectNode(),
+                "workflow-app-schema-missing", "AGENTS_PAGE", null
+        );
+        assertThatThrownBy(() -> service.create(missing))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.PARAM_ERROR);
+                    assertThat(exception.getMessage()).contains("$.prompt is required");
+                });
+
+        CreateWorkflowRunCommand wrongType = new CreateWorkflowRunCommand(
+                1L, TOOL_CODE, objectMapper.createObjectNode().put("prompt", 7),
+                "workflow-app-schema-type", "AGENTS_PAGE", null
+        );
+        assertThatThrownBy(() -> service.create(wrongType))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.PARAM_ERROR);
+                    assertThat(exception.getMessage()).contains("$.prompt must be string");
+                });
+
+        WorkflowRunCreated created = service.create(new CreateWorkflowRunCommand(
+                1L, TOOL_CODE, objectMapper.createObjectNode().put("prompt", "allowed"),
+                "workflow-app-schema-valid", "AGENTS_PAGE", null
+        ));
+        assertThat(created.workflowVersionId()).isEqualTo(firstVersionId);
+    }
+
+    @Test
+    void rejectsNewRunWhenPublishedInputSchemaIsInvalid() {
+        jdbcTemplate.update(
+                "UPDATE tool_workflow_versions SET input_schema_snapshot_json = '{}' WHERE id = ?",
+                firstVersionId
+        );
+        CreateWorkflowRunCommand command = new CreateWorkflowRunCommand(
+                1L, TOOL_CODE, objectMapper.createObjectNode(),
+                "workflow-app-schema-invalid", "AGENTS_PAGE", null
+        );
+
+        assertThatThrownBy(() -> service.create(command))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.WORKFLOW_RUNTIME_BLOCKED);
+                    assertThat(exception.getData()).isEqualTo(
+                            java.util.Map.of("reason", "published_input_schema_invalid"));
+                });
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workflow_runs WHERE client_request_id = 'workflow-app-schema-invalid'",
+                Integer.class
+        )).isZero();
     }
 
     @Test
@@ -661,9 +760,9 @@ class WorkflowRunApplicationServiceTest {
                   canonical_dsl_json, dsl_version, node_registry_version, dsl_hash,
                   input_schema_snapshot_json, dependency_manifest_json, billing_policy_json,
                   risk_policy_json, source_draft_revision, published_at, published_by, created_at
-                ) VALUES (?, 1, ?, ?, NULL, '{}', '{}', '1', 'p0', ?, '{}', '{}',
+                ) VALUES (?, 1, ?, ?, NULL, '{}', '{}', '1', 'p0', ?, ?, '{}',
                           '{"mode":"WORKFLOW_STEP","nodePolicies":{}}', '{}', 1, CURRENT_TIMESTAMP, 1, CURRENT_TIMESTAMP)
-                """, insertedWorkflowId, NODES, EDGES, "hash-" + insertedWorkflowId + "-1");
+                """, insertedWorkflowId, NODES, EDGES, "hash-" + insertedWorkflowId + "-1", INPUT_SCHEMA);
         long insertedVersionId = jdbcTemplate.queryForObject(
                 "SELECT id FROM tool_workflow_versions WHERE workflow_id = ? AND version = 1",
                 Long.class,
@@ -687,9 +786,10 @@ class WorkflowRunApplicationServiceTest {
                   canonical_dsl_json, dsl_version, node_registry_version, dsl_hash,
                   input_schema_snapshot_json, dependency_manifest_json, billing_policy_json,
                   risk_policy_json, source_draft_revision, published_at, published_by, created_at
-                ) VALUES (?, ?, ?, ?, NULL, '{}', '{}', '1', 'p0', ?, '{}', '{}',
+                ) VALUES (?, ?, ?, ?, NULL, '{}', '{}', '1', 'p0', ?, ?, '{}',
                           '{"mode":"WORKFLOW_STEP","nodePolicies":{}}', '{}', ?, CURRENT_TIMESTAMP, 1, CURRENT_TIMESTAMP)
-                """, workflowId, version, nodes, edges, "hash-" + workflowId + "-" + version, sourceDraftRevision);
+                """, workflowId, version, nodes, edges, "hash-" + workflowId + "-" + version,
+                INPUT_SCHEMA, sourceDraftRevision);
         return jdbcTemplate.queryForObject(
                 "SELECT id FROM tool_workflow_versions WHERE workflow_id = ? AND version = ?",
                 Long.class,

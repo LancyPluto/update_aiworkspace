@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.admin;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -35,6 +36,9 @@ class AdminConfigurationApiTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Test
     void adminCanLoadUnifiedApiOverview() throws Exception {
@@ -683,6 +687,118 @@ class AdminConfigurationApiTest {
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[?(@.fieldKey=='prompt')].fieldName").value("Prompt"));
+    }
+
+    @Test
+    void configBundleDraftWorkflowImportKeepsOnlinePublishedVersionExecutable() throws Exception {
+        String adminToken = loginAdmin();
+        Long categoryId = jdbcTemplate.queryForObject(
+                "SELECT id FROM tool_categories ORDER BY id LIMIT 1", Long.class);
+        String categoryCode = jdbcTemplate.queryForObject(
+                "SELECT category_code FROM tool_categories WHERE id = ?", String.class, categoryId);
+        String toolResponse = mockMvc.perform(post("/api/admin/v1/tools")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "config_bundle_online_workflow",
+                                  "toolName": "Config Bundle Online Workflow",
+                                  "categoryId": %d,
+                                  "description": "config bundle workflow regression",
+                                  "toolType": "TEXT_GENERATION",
+                                  "inputModality": "TEXT",
+                                  "outputModality": "TEXT",
+                                  "estimatedCreditCost": 1,
+                                  "executionHandler": "TEXT_GENERATION"
+                                }
+                                """.formatted(categoryId)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long toolId = Long.parseLong(toolResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+        String publishedNodes = """
+                [
+                  {"id":"start","data":{"nodeDefType":"start","title":"Start"}},
+                  {"id":"output","data":{"nodeDefType":"video_output","title":"Published output"}}
+                ]
+                """;
+        String edges = """
+                [{"id":"e1","source":"start","target":"output"}]
+                """;
+
+        mockMvc.perform(put("/api/admin/v1/tools/{toolId}/workflow", toolId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "workflowName": "default",
+                                  "nodesJson": %s,
+                                  "edgesJson": %s,
+                                  "expectedDraftRevision": 0
+                                }
+                                """.formatted(
+                                objectMapper.writeValueAsString(publishedNodes),
+                                objectMapper.writeValueAsString(edges))))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.workflowExecutionEnabled").value(true));
+        Long publishedVersionId = jdbcTemplate.queryForObject(
+                "SELECT published_version_id FROM tool_workflows WHERE tool_id = ? AND workflow_name = 'default'",
+                Long.class,
+                toolId);
+
+        mockMvc.perform(post("/api/admin/v1/config-bundles/import")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "format": "ai-tool-market-config-bundle",
+                                  "version": 1,
+                                  "exportScope": "SELECTED_TOOLS",
+                                  "secretsRedacted": true,
+                                  "settings": {},
+                                  "categories": [],
+                                  "modelConfigs": [],
+                                  "tools": [
+                                    {
+                                      "toolCode": "config_bundle_online_workflow",
+                                      "toolName": "Config Bundle Online Workflow",
+                                      "categoryCode": "%s",
+                                      "description": "imported draft",
+                                      "toolType": "TEXT_GENERATION",
+                                      "inputModality": "TEXT",
+                                      "outputModality": "TEXT",
+                                      "status": "DRAFT",
+                                      "estimatedCreditCost": 1,
+                                      "executionHandler": "TEXT_GENERATION",
+                                      "workflow": {
+                                        "workflowName": "default",
+                                        "nodes": [
+                                          {"id":"start","data":{"nodeDefType":"start","title":"Imported draft"}},
+                                          {"id":"output","data":{"nodeDefType":"video_output","title":"Draft output"}}
+                                        ],
+                                        "edges": [{"id":"e1","source":"start","target":"output"}],
+                                        "status": "DRAFT",
+                                        "version": 1
+                                      }
+                                    }
+                                  ]
+                                }
+                                """.formatted(categoryCode)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.tools").value(1))
+                .andExpect(jsonPath("$.data.workflows").value(1));
+
+        mockMvc.perform(get("/api/admin/v1/tools/{toolId}/workflow", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PUBLISHED"))
+                .andExpect(jsonPath("$.data.publishedVersionId").value(publishedVersionId))
+                .andExpect(jsonPath("$.data.executionEnabled").value(true))
+                .andExpect(jsonPath("$.data.hasUnpublishedChanges").value(true));
     }
 
     @Test

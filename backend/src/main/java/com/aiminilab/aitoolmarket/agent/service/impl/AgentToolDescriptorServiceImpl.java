@@ -233,10 +233,12 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
     }
 
     private AgentToolDescriptorResponse toDescriptor(AiTool tool, AgentToolDescriptorExtension ext) {
-        List<ToolFieldResponse> fields = toolFieldItemMapper.findActiveFields(tool.getId()).stream()
-                .map(field -> ToolFieldResponse.from(field, objectMapper))
-                .toList();
         JsonNode publishedInputSchema = publishedWorkflowInputSchema(tool);
+        List<ToolFieldResponse> fields = publishedInputSchema == null
+                ? toolFieldItemMapper.findActiveFields(tool.getId()).stream()
+                        .map(field -> ToolFieldResponse.from(field, objectMapper))
+                        .toList()
+                : List.of();
         List<AgentToolFieldDescriptorResponse> fieldDescriptors = publishedInputSchema != null
                 ? fieldDescriptorsFromSchema(publishedInputSchema)
                 : isGptImageTool(tool.getToolCode())

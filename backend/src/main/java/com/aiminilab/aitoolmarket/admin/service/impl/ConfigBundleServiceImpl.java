@@ -310,8 +310,17 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 categories);
         for (ConfigBundleDto.Tool tool : safeList(bundle.tools())) {
             try {
-                transactionTemplate.executeWithoutResult(status ->
+                Long toolIdToPublish = transactionTemplate.execute(status ->
                         importTool(tool, operatorId, modelIdsByCode, categoryIdsByCode, counter, warnings));
+                if (toolIdToPublish != null) {
+                    try {
+                        toolService.publishTool(toolIdToPublish, operatorId);
+                    } catch (BusinessException exception) {
+                        warnings.add("Tool " + tool.toolCode()
+                                + " kept as draft because it could not be published: "
+                                + importPublishWarningMessage(exception));
+                    }
+                }
             } catch (Exception exception) {
                 String toolCode = tool == null || isBlank(tool.toolCode()) ? "<missing>" : tool.toolCode();
                 warnings.add("Tool " + toolCode + " import failed: " + rootMessage(exception));
@@ -1098,7 +1107,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         return count;
     }
 
-    private void importTool(ConfigBundleDto.Tool item,
+    private Long importTool(ConfigBundleDto.Tool item,
                             Long operatorId,
                             Map<String, Long> modelIdsByCode,
                             Map<String, Long> categoryIdsByCode,
@@ -1106,22 +1115,22 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                             List<String> warnings) {
         if (isBlank(item.toolCode()) || isBlank(item.toolName())) {
             warnings.add("Skipped tool with missing toolCode/toolName");
-            return;
+            return null;
         }
         if (LEGACY_KLING_TOOL_CODES.contains(item.toolCode().trim())) {
             warnings.add("Skipped legacy Kling tool " + item.toolCode()
                     + ": use consolidated kling-* gateway tools instead");
-            return;
+            return null;
         }
         if (isLegacyVolcengineToolCode(item.toolCode())) {
             warnings.add("Skipped legacy Volcengine tool " + item.toolCode()
                     + ": use consolidated volcengine-* gateway tools instead");
-            return;
+            return null;
         }
         Long categoryId = categoryIdsByCode.get(item.categoryCode());
         if (categoryId == null) {
             warnings.add("Skipped tool " + item.toolCode() + ": categoryCode not found: " + item.categoryCode());
-            return;
+            return null;
         }
         Long modelConfigId = isBlank(item.modelConfigCode()) ? null : modelIdsByCode.get(item.modelConfigCode());
         if (!isBlank(item.modelConfigCode()) && modelConfigId == null) {
@@ -1192,16 +1201,11 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
 
         String status = item.status() == null ? "" : item.status().trim().toUpperCase(Locale.ROOT);
         if ("ONLINE".equals(status)) {
-            try {
-                toolService.publishTool(saved.id(), operatorId);
-            } catch (BusinessException exception) {
-                warnings.add("Tool " + item.toolCode()
-                        + " kept as draft because it could not be published: "
-                        + importPublishWarningMessage(exception));
-            }
+            return saved.id();
         } else if ("OFFLINE".equals(status)) {
             toolService.offlineTool(saved.id(), operatorId);
         }
+        return null;
     }
 
     private String importedCoverUrl(ConfigBundleDto.Tool item, AiTool existing, List<String> warnings) {
@@ -1351,8 +1355,6 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         ), operatorId);
         if ("PUBLISHED".equalsIgnoreCase(workflow.status())) {
             workflowService.publish(saved.id(), operatorId);
-        } else if (current != null && current.executionEnabled()) {
-            workflowService.updateStatus(saved.id(), "DRAFT", operatorId);
         }
         counter.workflows++;
     }

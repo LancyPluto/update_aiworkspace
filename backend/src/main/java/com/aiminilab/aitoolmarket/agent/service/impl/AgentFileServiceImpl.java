@@ -18,14 +18,19 @@ import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -34,6 +39,7 @@ import java.util.UUID;
 @Service
 public class AgentFileServiceImpl implements AgentFileService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(AgentFileServiceImpl.class);
     private static final long MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
     private static final int DEFAULT_FILE_LIST_SIZE = 20;
     private static final int RECENT_MEDIA_LIST_SIZE = 60;
@@ -82,7 +88,9 @@ public class AgentFileServiceImpl implements AgentFileService {
         file.setOriginalFilename(safeFilename(multipartFile.getOriginalFilename()));
         file.setContentType(multipartFile.getContentType());
         file.setFileSize(multipartFile.getSize());
-        file.setStoragePath(storeFile(sessionId, file.getOriginalFilename(), bytes));
+        String storagePath = storeFile(sessionId, file.getOriginalFilename(), bytes);
+        file.setStoragePath(storagePath);
+        registerRollbackCleanup(storagePath);
         file.setStatus("PARSING");
         file.setCreatedAt(now);
         file.setUpdatedAt(now);
@@ -134,7 +142,9 @@ public class AgentFileServiceImpl implements AgentFileService {
         file.setOriginalFilename(filename);
         file.setContentType(request.contentType());
         file.setFileSize((long) bytes.length);
-        file.setStoragePath(storeFile(run.getSessionId(), filename, bytes));
+        String storagePath = storeFile(run.getSessionId(), filename, bytes);
+        file.setStoragePath(storagePath);
+        registerRollbackCleanup(storagePath);
         file.setStatus("READY");
         file.setAttachedRunId(runId);
         file.setExtractedText(content);
@@ -177,7 +187,7 @@ public class AgentFileServiceImpl implements AgentFileService {
         if (affected == 0) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "Agent file not found");
         }
-        deleteStoredFile(file.getStoragePath());
+        deleteStoredFileAfterCommit(file.getStoragePath());
     }
 
     @Override
@@ -244,28 +254,76 @@ public class AgentFileServiceImpl implements AgentFileService {
     }
 
     private String storeFile(Long sessionId, String filename, byte[] bytes) {
+        Path stored = null;
+        boolean created = false;
         try {
-            Path stored = resolveStoredPath(sessionId, filename);
-            Files.write(stored, bytes);
+            stored = resolveStoredPath(sessionId, filename);
+            Files.createFile(stored);
+            created = true;
+            Files.write(stored, bytes, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING);
             return stored.toString();
         } catch (IOException exception) {
+            if (created) {
+                deleteStoredFile(stored == null ? null : stored.toString(), "failed file write");
+            }
             throw new BusinessException(ErrorCode.PARAM_ERROR, "could not store uploaded file");
         }
     }
 
-    private void deleteStoredFile(String storagePath) {
+    private void registerRollbackCleanup(String storagePath) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            LOGGER.error("Transaction synchronization is not active; removing newly stored agent file: storagePath={}",
+                    storagePath);
+            deleteStoredFile(storagePath, "missing transaction synchronization");
+            throw new IllegalStateException("Transaction synchronization is required for agent file creation");
+        }
+        try {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
+                        deleteStoredFile(storagePath, "transaction rollback");
+                    } else if (status == TransactionSynchronization.STATUS_UNKNOWN) {
+                        LOGGER.warn("Agent file transaction outcome is unknown; retaining stored file: storagePath={}",
+                                storagePath);
+                    }
+                }
+            });
+        } catch (RuntimeException exception) {
+            deleteStoredFile(storagePath, "rollback cleanup registration failure");
+            throw exception;
+        }
+    }
+
+    private void deleteStoredFileAfterCommit(String storagePath) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            deleteStoredFile(storagePath, "database deletion without transaction synchronization");
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                deleteStoredFile(storagePath, "database commit");
+            }
+        });
+    }
+
+    private void deleteStoredFile(String storagePath, String phase) {
         if (storagePath == null || storagePath.isBlank()) {
+            LOGGER.warn("Could not delete agent file during {}: storage path is blank", phase);
             return;
         }
         try {
             Path stored = Path.of(storagePath).toAbsolutePath().normalize();
             Path root = Path.of(appProperties.getAgent().getFileStorageDir()).toAbsolutePath().normalize();
-            if (!stored.startsWith(root)) {
+            if (stored.equals(root) || !stored.startsWith(root)) {
+                LOGGER.warn("Refusing to delete agent file outside configured storage during {}: storagePath={}, root={}",
+                        phase, stored, root);
                 return;
             }
             Files.deleteIfExists(stored);
-        } catch (IOException ignored) {
-            // Best effort: DB rows are already removed.
+        } catch (IOException | RuntimeException exception) {
+            LOGGER.warn("Could not delete agent file during {}: storagePath={}", phase, storagePath, exception);
         }
     }
 

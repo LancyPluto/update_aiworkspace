@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 @Service
 public class SystemSettingServiceImpl implements SystemSettingService {
@@ -136,10 +137,15 @@ public class SystemSettingServiceImpl implements SystemSettingService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "仅支持 JPG、PNG、WebP、GIF 格式的二维码图片");
         }
 
-        String filename = "customer-service-" + LocalDateTime.now().format(QR_FILENAME_TIME) + "." + extension;
+        String filename = "customer-service-"
+                + LocalDateTime.now().format(QR_FILENAME_TIME)
+                + "-"
+                + UUID.randomUUID().toString().replace("-", "")
+                + "."
+                + extension;
         StoredAsset stored;
         try {
-            stored = assetStorageService.storeMultipartPublic("customer-service/" + filename, file);
+            stored = assetStorageService.storeMultipartPublicUnique("customer-service/" + filename, file);
         } catch (BusinessException ex) {
             throw ex;
         } catch (RuntimeException ex) {

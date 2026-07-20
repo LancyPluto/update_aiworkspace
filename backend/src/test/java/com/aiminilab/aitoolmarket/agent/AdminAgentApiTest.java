@@ -244,6 +244,7 @@ class AdminAgentApiTest {
                 .getContentAsString();
         assertThat(listResponse).contains("\"toolCode\":\"agent_access_toggle\"");
         assertThat(listResponse).contains("\"agentEnabled\":true");
+        assertThat(listResponse).contains("\"executionMode\":\"DIRECT\"");
 
         String userToken = login("/api/v1/auth/login", "user1");
         Long sessionId = createSession(userToken, "Agent Tool Access");

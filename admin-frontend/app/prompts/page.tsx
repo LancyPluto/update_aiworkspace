@@ -27,6 +27,12 @@ import {
 import { fetchAgentModelConfigs, testAgentModelConfig } from "@/lib/api/agent-model"
 import { ApiError } from "@/lib/api/http"
 import {
+  filterIndependentAgentAccessTools,
+  hasIndependentAgentAccess,
+  isAgentEffectivelyEnabled,
+  matchesAgentToolStatus,
+} from "./tool-access-policy"
+import {
   fetchSettingVersions,
   fetchSettings,
   restoreDefaultSetting,
@@ -144,17 +150,6 @@ function healthMeta(tool: AgentToolAccess) {
   if (status === "FAILED") return { label: "Failed", variant: "destructive" as const, help: "最近调用失败，默认不会进入 Agent 工具清单。" }
   if (status === "HEALTHY") return { label: "Healthy", variant: "default" as const, help: "最近测试或调用成功。" }
   return { label: "Unknown", variant: "outline" as const, help: "尚无健康检查结果。" }
-}
-
-function toolMatchesStatus(tool: AgentToolAccess, statusFilter: string) {
-  const hasModel = tool.modelConfigId != null || Boolean(tool.modelName)
-  const status = (tool.healthStatus || "UNKNOWN").toUpperCase()
-  if (statusFilter === "enabled") return tool.agentEnabled
-  if (statusFilter === "disabled") return !tool.agentEnabled
-  if (statusFilter === "unbound") return !hasModel
-  if (statusFilter === "failed") return status === "FAILED"
-  if (statusFilter === "unknown") return status === "UNKNOWN"
-  return true
 }
 
 function formatTime(value?: string | null) {
@@ -567,6 +562,10 @@ export default function PromptsPage() {
   }
 
   async function toggleToolAccess(tool: AgentToolAccess, agentEnabled: boolean) {
+    if (!hasIndependentAgentAccess(tool)) {
+      toast.info("工作流工具由工具上下线统一管理", { description: tool.toolName })
+      return
+    }
     setUpdatingToolCode(tool.toolCode)
     setError(null)
     const previousTools = tools
@@ -586,12 +585,17 @@ export default function PromptsPage() {
   }
 
   async function bulkUpdateFilteredTools(agentEnabled: boolean) {
-    const targets = filteredTools.filter((tool) => tool.agentEnabled !== agentEnabled)
+    const independentlyManagedTools = filterIndependentAgentAccessTools(filteredTools)
+    const targets = independentlyManagedTools.filter((tool) => tool.agentEnabled !== agentEnabled)
     if (!targets.length) {
-      toast.info(agentEnabled ? "当前筛选结果已全部启用" : "当前筛选结果已全部禁用")
+      toast.info(
+        independentlyManagedTools.length
+          ? (agentEnabled ? "当前筛选结果中的普通工具已全部启用" : "当前筛选结果中的普通工具已全部禁用")
+          : "当前筛选结果没有可独立管理的普通工具",
+      )
       return
     }
-    if (!window.confirm(`${agentEnabled ? "启用" : "禁用"}当前筛选出的 ${targets.length} 个工具？`)) return
+    if (!window.confirm(`${agentEnabled ? "启用" : "禁用"}当前筛选出的 ${targets.length} 个普通工具？工作流工具将保持不变。`)) return
     setBulkUpdatingTools(true)
     setError(null)
     const toastId = toast.loading(agentEnabled ? "正在批量启用工具..." : "正在批量禁用工具...")
@@ -677,11 +681,12 @@ export default function PromptsPage() {
     }
   }
 
-  const modelBoundToolCount = useMemo(() => tools.filter((tool) => tool.modelConfigId != null || tool.modelName).length, [tools])
-  const agentEnabledToolCount = useMemo(() => tools.filter((tool) => tool.agentEnabled).length, [tools])
-  const failedToolCount = useMemo(() => tools.filter((tool) => (tool.healthStatus || "UNKNOWN").toUpperCase() === "FAILED").length, [tools])
-  const unknownToolCount = useMemo(() => tools.filter((tool) => (tool.healthStatus || "UNKNOWN").toUpperCase() === "UNKNOWN").length, [tools])
-  const unboundToolCount = useMemo(() => tools.filter((tool) => tool.modelConfigId == null && !tool.modelName).length, [tools])
+  const toolLevelConfigTools = useMemo(() => filterIndependentAgentAccessTools(tools), [tools])
+  const modelBoundToolCount = useMemo(() => toolLevelConfigTools.filter((tool) => tool.modelConfigId != null || tool.modelName).length, [toolLevelConfigTools])
+  const agentEnabledToolCount = useMemo(() => tools.filter(isAgentEffectivelyEnabled).length, [tools])
+  const failedToolCount = useMemo(() => toolLevelConfigTools.filter((tool) => (tool.healthStatus || "UNKNOWN").toUpperCase() === "FAILED").length, [toolLevelConfigTools])
+  const unknownToolCount = useMemo(() => toolLevelConfigTools.filter((tool) => (tool.healthStatus || "UNKNOWN").toUpperCase() === "UNKNOWN").length, [toolLevelConfigTools])
+  const unboundToolCount = useMemo(() => toolLevelConfigTools.filter((tool) => tool.modelConfigId == null && !tool.modelName).length, [toolLevelConfigTools])
   const modalityOptions = useMemo(() => Array.from(new Set(tools.map((tool) => modalityKey(tool.outputModality)))).sort(), [tools])
   const filteredTools = useMemo(() => {
     const query = toolQuery.trim().toLowerCase()
@@ -695,7 +700,7 @@ export default function PromptsPage() {
         tool.executionHandler,
       ].some((value) => String(value || "").toLowerCase().includes(query))
       const matchesModality = toolModalityFilter === "all" || modalityKey(tool.outputModality) === toolModalityFilter
-      return matchesQuery && matchesModality && toolMatchesStatus(tool, toolStatusFilter)
+      return matchesQuery && matchesModality && matchesAgentToolStatus(tool, toolStatusFilter)
     })
   }, [tools, toolQuery, toolModalityFilter, toolStatusFilter])
   const groupedTools = useMemo(() => {
@@ -947,7 +952,7 @@ function OverviewSection({
       <Card className="rounded-lg">
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Wrench className="h-5 w-5" />工具状态</CardTitle>
-          <CardDescription>快速确认可见工具、模型绑定和健康风险。</CardDescription>
+          <CardDescription>查看可见工具，以及普通工具的模型绑定和健康状态。</CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-3">
           <SmallStat label="在线工具" value={loading ? "-" : tools.length} />
@@ -1456,11 +1461,13 @@ function ToolConsole(props: {
   onBulkUpdate: (agentEnabled: boolean) => void
   onTestBoundModel: (tool: AgentToolAccess) => void
 }) {
+  const hasBulkEditableTools = props.filteredTools.some(hasIndependentAgentAccess)
+
   return (
     <Card className="rounded-lg">
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><SlidersHorizontal className="h-5 w-5" />工具读取范围</CardTitle>
-        <CardDescription>按输出模态管理 Agent 可见工具；禁用后不会进入 Agent 运行时工具清单。</CardDescription>
+        <CardDescription>当前在线工具的 Agent 可见状态</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -1487,8 +1494,8 @@ function ToolConsole(props: {
               {TOOL_STATUS_FILTERS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Button variant="outline" disabled={props.loading || props.bulkUpdatingTools || !props.filteredTools.length} onClick={() => props.onBulkUpdate(true)}>启用当前筛选</Button>
-          <Button variant="outline" disabled={props.loading || props.bulkUpdatingTools || !props.filteredTools.length} onClick={() => props.onBulkUpdate(false)}>禁用当前筛选</Button>
+          <Button variant="outline" disabled={props.loading || props.bulkUpdatingTools || !hasBulkEditableTools} onClick={() => props.onBulkUpdate(true)}>启用当前筛选</Button>
+          <Button variant="outline" disabled={props.loading || props.bulkUpdatingTools || !hasBulkEditableTools} onClick={() => props.onBulkUpdate(false)}>禁用当前筛选</Button>
         </div>
         <div className="space-y-4">
           {props.loading ? Array.from({ length: 6 }).map((_, index) => <Skeleton key={index} className="h-24 w-full" />) : null}
@@ -1499,7 +1506,7 @@ function ToolConsole(props: {
             <div key={group.key} className="space-y-2">
               <div className="flex items-center justify-between text-sm">
                 <span className="font-medium">{group.label}</span>
-                <span className="text-muted-foreground">{group.tools.filter((tool) => tool.agentEnabled).length}/{group.tools.length}</span>
+                <span className="text-muted-foreground">{group.tools.filter(isAgentEffectivelyEnabled).length}/{group.tools.length}</span>
               </div>
               <div className="grid gap-3 xl:grid-cols-2">
                 {group.tools.map((tool) => (
@@ -1534,8 +1541,10 @@ function ToolCard({
   onToggle: (tool: AgentToolAccess, agentEnabled: boolean) => void
   onTestBoundModel: (tool: AgentToolAccess) => void
 }) {
-  const hasModel = tool.modelConfigId != null || Boolean(tool.modelName)
-  const health = healthMeta(tool)
+  const independentAgentAccess = hasIndependentAgentAccess(tool)
+  const hasModel = independentAgentAccess && (tool.modelConfigId != null || Boolean(tool.modelName))
+  const health = independentAgentAccess ? healthMeta(tool) : null
+  const agentEffectivelyEnabled = isAgentEffectivelyEnabled(tool)
   return (
     <div className="rounded-lg border px-4 py-3">
       <div className="flex items-start justify-between gap-3">
@@ -1545,31 +1554,45 @@ function ToolCard({
             <div className="truncate text-xs text-muted-foreground">{tool.toolCode}</div>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            <Badge variant={hasModel ? "default" : "outline"}>{hasModel ? "有模型" : "未绑定"}</Badge>
+            {independentAgentAccess ? <Badge variant={hasModel ? "default" : "outline"}>{hasModel ? "有模型" : "未绑定"}</Badge> : null}
             <Badge variant="secondary">{modalityLabel(tool.outputModality)}</Badge>
-            <Badge variant={health.variant}>{health.label}</Badge>
+            {health ? <Badge variant={health.variant}>{health.label}</Badge> : null}
+            {!independentAgentAccess ? <Badge variant="outline">工作流</Badge> : null}
           </div>
-          <div className="grid gap-1 text-xs text-muted-foreground">
-            <div className="truncate">执行器：{tool.executionHandler || tool.toolType || "未配置"}</div>
-            <div className="truncate">绑定模型：{tool.modelConfigName || tool.modelName || "未绑定"}</div>
-            <div className="truncate">Base URL：{tool.modelBaseUrl || "未配置"}</div>
-            <div>超时：连接 {tool.modelConnectTimeoutSeconds ?? "默认"}s / 读取 {tool.modelReadTimeoutSeconds ?? tool.modelTimeoutSeconds ?? "默认"}s / 代理 {tool.modelProxyConfigured ? "已配置" : "未配置"}</div>
-            <div>{health.help}</div>
-          </div>
-          {tool.healthMessage ? <div className="line-clamp-2 text-xs text-destructive">{tool.healthMessage}</div> : null}
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={!tool.modelConfigId || testingModel}
-            onClick={() => onTestBoundModel(tool)}
-          >
-            {testingModel ? "测试中..." : "测试绑定模型"}
-          </Button>
+          {independentAgentAccess && health ? (
+            <>
+              <div className="grid gap-1 text-xs text-muted-foreground">
+                <div className="truncate">执行器：{tool.executionHandler || tool.toolType || "未配置"}</div>
+                <div className="truncate">绑定模型：{tool.modelConfigName || tool.modelName || "未绑定"}</div>
+                <div className="truncate">Base URL：{tool.modelBaseUrl || "未配置"}</div>
+                <div>超时：连接 {tool.modelConnectTimeoutSeconds ?? "默认"}s / 读取 {tool.modelReadTimeoutSeconds ?? tool.modelTimeoutSeconds ?? "默认"}s / 代理 {tool.modelProxyConfigured ? "已配置" : "未配置"}</div>
+                <div>{health.help}</div>
+              </div>
+              {tool.healthMessage ? <div className="line-clamp-2 text-xs text-destructive">{tool.healthMessage}</div> : null}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={!tool.modelConfigId || testingModel}
+                onClick={() => onTestBoundModel(tool)}
+              >
+                {testingModel ? "测试中..." : "测试绑定模型"}
+              </Button>
+            </>
+          ) : null}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
-          <Switch checked={tool.agentEnabled} disabled={updating} aria-label={`${tool.agentEnabled ? "禁用" : "启用"} ${tool.toolName}`} onCheckedChange={(checked) => onToggle(tool, checked)} />
-          <span className="text-xs text-muted-foreground">{tool.agentEnabled ? "启用" : "禁用"}</span>
+          <Switch
+            checked={agentEffectivelyEnabled}
+            disabled={updating || !independentAgentAccess}
+            aria-label={independentAgentAccess
+              ? `${agentEffectivelyEnabled ? "禁用" : "启用"} ${tool.toolName}`
+              : `${tool.toolName} 的 Agent 可见性由工具上下线管理`}
+            onCheckedChange={(checked) => onToggle(tool, checked)}
+          />
+          <span className="w-24 text-right text-xs leading-4 text-muted-foreground">
+            {independentAgentAccess ? (agentEffectivelyEnabled ? "启用" : "禁用") : "随工具上下线"}
+          </span>
         </div>
       </div>
     </div>

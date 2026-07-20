@@ -34,8 +34,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.Ordered;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -48,6 +51,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -78,6 +82,8 @@ public class CommunityServiceImpl implements CommunityService {
     private final UserMapper userMapper;
     private final ObjectMapper objectMapper;
     private final AssetStorageService assetStorageService;
+    // DB row locks are released before afterCommit, so serialize OSS moves in this instance through afterCompletion.
+    private final ReentrantLock assetMigrationLock = new ReentrantLock(true);
 
     public CommunityServiceImpl(CommunityPostMapper postMapper, CommunityCollectionMapper collectionMapper,
                                 CommunityEventMapper eventMapper, CommunityPostReportMapper reportMapper,
@@ -145,22 +151,19 @@ public class CommunityServiceImpl implements CommunityService {
         if (request == null || request.taskId() == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "taskId is required");
         }
+        lockAssetMigrationUntilCompletion();
         AiTask task = taskMapper.findByIdAndUserId(request.taskId(), userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TASK_NOT_FOUND, "Task not found"));
         if (!TaskStatus.SUCCESS.name().equals(task.getStatus())) {
             throw new BusinessException(ErrorCode.TASK_STATUS_INVALID, "Only successful tasks can be published");
         }
-        Optional<CommunityPost> existing = postMapper.findByTaskId(task.getId());
+        Optional<CommunityPost> existing = postMapper.findByTaskIdForUpdate(task.getId());
         if (existing.isPresent()) {
             CommunityPost post = existing.get();
             if (!post.getUserId().equals(userId)) {
                 throw new BusinessException(ErrorCode.FORBIDDEN, "Post owner mismatch");
             }
-            try {
-                migratePostAssets(post, true);
-            } catch (Exception e) {
-                log.warn("Failed to migrate post assets during re-publish (postId={}): {}", post.getId(), e.getMessage());
-            }
+            migratePostAssets(post, true);
             postMapper.updateOwnerStatus(post.getId(), userId, "PUBLISHED");
             postMapper.updateOwnerMetadata(
                     post.getId(),
@@ -184,11 +187,7 @@ public class CommunityServiceImpl implements CommunityService {
                 ? Boolean.TRUE.equals(request.promptVisible())
                 : Boolean.TRUE.equals(user.getPromptPublicByDefault());
         CommunityPost post = createPost(task, null, null, title, request.description(), promptVisible, "PUBLISHED");
-        try {
-            migratePostAssets(post, true);
-        } catch (Exception e) {
-            log.warn("Failed to migrate post assets during publish (postId={}): {}", post.getId(), e.getMessage());
-        }
+        migratePostAssets(post, true);
         post = requirePost(post.getId());
         if (request.topic() != null) {
             postMapper.updateTopic(post.getId(), normalizeTopic(request.topic()));
@@ -225,12 +224,9 @@ public class CommunityServiceImpl implements CommunityService {
     @Override
     @Transactional
     public void unpublish(Long userId, Long postId) {
-        CommunityPost post = requireOwnedPost(postId, userId);
-        try {
-            migratePostAssets(post, false);
-        } catch (Exception e) {
-            log.warn("Failed to migrate post assets during unpublish (postId={}): {}", postId, e.getMessage());
-        }
+        lockAssetMigrationUntilCompletion();
+        CommunityPost post = requireOwnedPostForUpdate(postId, userId);
+        migratePostAssets(post, false);
         if (postMapper.updateOwnerStatus(postId, userId, "UNPUBLISHED") == 0) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "Post not found");
         }
@@ -570,17 +566,14 @@ public class CommunityServiceImpl implements CommunityService {
         if (!assetStorageService.isOssMode()) {
             return 0;
         }
+        lockAssetMigrationUntilCompletion();
         var wrapper = new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<CommunityPost>()
                 .eq("status", "PUBLISHED");
         List<CommunityPost> posts = postMapper.selectList(wrapper);
         int migrated = 0;
         for (CommunityPost post : posts) {
-            try {
-                migratePostAssets(post, true);
-                migrated++;
-            } catch (Exception e) {
-                // skip failed post, continue with others
-            }
+            migratePostAssets(post, true);
+            migrated++;
         }
         return migrated;
     }
@@ -779,7 +772,9 @@ public class CommunityServiceImpl implements CommunityService {
             }
             String migrated = migrateUrlsInText(resource.getContentText(), publish, migratedUrls);
             if (!Objects.equals(migrated, resource.getContentText())) {
-                taskMapper.updateResultContent(resource.getId(), migrated);
+                if (taskMapper.updateResultContent(resource.getId(), migrated) == 0) {
+                    throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Community asset metadata update failed");
+                }
                 if (Objects.equals(coverUrl, post.getCoverUrl())) {
                     coverUrl = moveMediaUrl(extractCoverUrl(migrated), publish, migratedUrls);
                 }
@@ -794,7 +789,9 @@ public class CommunityServiceImpl implements CommunityService {
             }
         }
         if (mediaChanged) {
-            postMapper.updateMedia(post.getId(), coverUrl, mediaUrl);
+            if (postMapper.updateMedia(post.getId(), coverUrl, mediaUrl) == 0) {
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Community post media update failed");
+            }
         }
     }
 
@@ -830,6 +827,35 @@ public class CommunityServiceImpl implements CommunityService {
         return migrated;
     }
 
+    private void lockAssetMigrationUntilCompletion() {
+        if (!assetStorageService.isOssMode()) {
+            return;
+        }
+        assetMigrationLock.lock();
+        boolean registered = false;
+        try {
+            if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+                throw new IllegalStateException("Community asset migration requires transaction synchronization");
+            }
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public int getOrder() {
+                    return Ordered.LOWEST_PRECEDENCE;
+                }
+
+                @Override
+                public void afterCompletion(int status) {
+                    assetMigrationLock.unlock();
+                }
+            });
+            registered = true;
+        } finally {
+            if (!registered) {
+                assetMigrationLock.unlock();
+            }
+        }
+    }
+
     private CommunityPost requirePost(Long postId) {
         return postMapper.findPostById(postId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Post not found"));
@@ -837,6 +863,15 @@ public class CommunityServiceImpl implements CommunityService {
 
     private CommunityPost requireOwnedPost(Long postId, Long userId) {
         CommunityPost post = requirePost(postId);
+        if (!post.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "Post owner mismatch");
+        }
+        return post;
+    }
+
+    private CommunityPost requireOwnedPostForUpdate(Long postId, Long userId) {
+        CommunityPost post = postMapper.findPostByIdForUpdate(postId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Post not found"));
         if (!post.getUserId().equals(userId)) {
             throw new BusinessException(ErrorCode.FORBIDDEN, "Post owner mismatch");
         }

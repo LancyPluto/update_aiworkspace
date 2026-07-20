@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -51,6 +52,7 @@ public class UserUploadController {
     }
 
     @PostMapping("/tool-upload")
+    @Transactional
     public ApiResponse<FileUploadResponse> upload(@RequestParam("file") MultipartFile file) {
         Long userId = AuthContext.get().userId();
         if (file == null || file.isEmpty()) {
@@ -75,7 +77,7 @@ public class UserUploadController {
         String relativeKey = "uploads/" + datePath + "/" + filename;
         StoredAsset stored;
         try {
-            stored = assetStorageService.storeMultipart(relativeKey, file);
+            stored = assetStorageService.storeMultipartPrivateUnique(relativeKey, file);
         } catch (BusinessException ex) {
             throw ex;
         } catch (RuntimeException ex) {

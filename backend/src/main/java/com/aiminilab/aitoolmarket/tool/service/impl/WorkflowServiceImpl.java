@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.tool.service.impl;
 
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
+import com.aiminilab.aitoolmarket.common.cache.BypassCacheService;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.common.util.Utf8TextRepair;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertWorkflowRequest;
@@ -30,6 +31,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -45,8 +48,10 @@ import java.util.TreeMap;
 @Service
 public class WorkflowServiceImpl implements WorkflowService {
 
-    private static final String DRAFT = "DRAFT";
-    private static final String PUBLISHED = "PUBLISHED";
+    private static final String DSL_VERSION = "1";
+    private static final String NODE_REGISTRY_VERSION = "p0";
+    private static final String RISK_POLICY_JSON =
+            "{\"confirmationPolicy\":\"WORKFLOW_DEFINED\",\"level\":\"MEDIUM\"}";
 
     private final ToolWorkflowMapper workflowMapper;
     private final ToolWorkflowVersionMapper versionMapper;
@@ -56,6 +61,7 @@ public class WorkflowServiceImpl implements WorkflowService {
     private final ToolFieldItemMapper toolFieldItemMapper;
     private final AgentModelConfigMapper modelConfigMapper;
     private final PricingService pricingService;
+    private final BypassCacheService bypassCacheService;
 
     public WorkflowServiceImpl(ToolWorkflowMapper workflowMapper,
                                ToolWorkflowVersionMapper versionMapper,
@@ -64,7 +70,8 @@ public class WorkflowServiceImpl implements WorkflowService {
                                ToolMapper toolMapper,
                                ToolFieldItemMapper toolFieldItemMapper,
                                AgentModelConfigMapper modelConfigMapper,
-                               PricingService pricingService) {
+                               PricingService pricingService,
+                               BypassCacheService bypassCacheService) {
         this.workflowMapper = workflowMapper;
         this.versionMapper = versionMapper;
         this.objectMapper = objectMapper;
@@ -73,6 +80,7 @@ public class WorkflowServiceImpl implements WorkflowService {
         this.toolFieldItemMapper = toolFieldItemMapper;
         this.modelConfigMapper = modelConfigMapper;
         this.pricingService = pricingService;
+        this.bypassCacheService = bypassCacheService;
     }
 
     @Override
@@ -166,9 +174,11 @@ public class WorkflowServiceImpl implements WorkflowService {
     @Transactional
     public WorkflowResponse publish(Long workflowId, Long operatorId) {
         ToolWorkflow draft = requireWorkflow(workflowId);
-        if (toolMapper.selectByIdForUpdate(draft.getToolId()) == null) {
+        AiTool lockedTool = toolMapper.selectByIdForUpdate(draft.getToolId());
+        if (lockedTool == null) {
             throw new BusinessException(ErrorCode.TOOL_NOT_FOUND, "Tool not found");
         }
+        boolean executionEnabled = isWorkflowToolOnline(lockedTool);
         long draftRevision = revision(draft);
         WorkflowDslValidationResult validation = workflowDslService.validate(draft);
         if (!validation.valid()) {
@@ -178,75 +188,62 @@ public class WorkflowServiceImpl implements WorkflowService {
             );
         }
 
-        String inputSchemaSnapshotJson = inputSchemaSnapshotJson(draft.getToolId());
+        PublicationArtifacts artifacts = publicationArtifacts(draft);
+        if (toolMapper.updateWorkflowMinimumRequiredCredits(
+                draft.getToolId(), artifacts.minimumRequiredCredits(), operatorId) != 1) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Workflow minimum credits update failed");
+        }
+        if (executionEnabled) {
+            workflowMapper.disableAllExecutionsPreservingPublication(draft.getToolId(), operatorId);
+        }
 
         ToolWorkflowVersion currentPublished = draft.getPublishedVersionId() == null
                 ? null
                 : versionMapper.selectById(draft.getPublishedVersionId());
         if (currentPublished != null
                 && Objects.equals(currentPublished.getSourceDraftRevision(), draftRevision)
-                && sameJson(currentPublished.getInputSchemaSnapshotJson(), inputSchemaSnapshotJson)) {
-            bindPublishedVersion(draft, currentPublished, operatorId);
+                && Objects.equals(currentPublished.getDslHash(), artifacts.fingerprint())) {
+            bindPublishedVersion(draft, currentPublished, executionEnabled, operatorId);
+            invalidateToolCatalogAfterCommit(lockedTool.getToolCode());
             return toResponse(requireWorkflow(workflowId));
         }
 
-        String canonicalDsl = canonicalDsl(draft);
-        String dslHash = sha256(canonicalDsl);
-        ToolWorkflowVersion identical = versionMapper.selectByWorkflowIdAndDslHash(workflowId, dslHash);
+        ToolWorkflowVersion identical = versionMapper.selectByWorkflowIdAndDslHash(
+                workflowId, artifacts.fingerprint());
         if (identical != null
-                && Objects.equals(identical.getSourceDraftRevision(), draftRevision)
-                && sameJson(identical.getInputSchemaSnapshotJson(), inputSchemaSnapshotJson)) {
-            bindPublishedVersion(draft, identical, operatorId);
+                && Objects.equals(identical.getSourceDraftRevision(), draftRevision)) {
+            bindPublishedVersion(draft, identical, executionEnabled, operatorId);
+            invalidateToolCatalogAfterCommit(lockedTool.getToolCode());
             return toResponse(requireWorkflow(workflowId));
         }
 
         ToolWorkflowVersion published = publishedSnapshot(
                 draft,
                 versionMapper.selectMaxVersion(workflowId) + 1,
-                canonicalDsl,
-                dslHash,
-                inputSchemaSnapshotJson,
+                artifacts,
                 operatorId
         );
         versionMapper.insert(published);
-        bindPublishedVersion(draft, published, operatorId);
+        bindPublishedVersion(draft, published, executionEnabled, operatorId);
+        invalidateToolCatalogAfterCommit(lockedTool.getToolCode());
         return toResponse(requireWorkflow(workflowId));
     }
 
     @Override
     @Transactional
-    public WorkflowResponse disableExecutionPreservingPublication(Long workflowId, Long operatorId) {
-        ToolWorkflow current = requireWorkflow(workflowId);
-        if (workflowMapper.disableExecutionPreservingPublication(current.getId(), operatorId) != 1) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Workflow offline failed");
-        }
-        return toResponse(requireWorkflow(workflowId));
-    }
-
-    @Override
-    @Transactional
-    public WorkflowResponse updateStatus(Long workflowId, String status, Long operatorId) {
-        String normalized = normalizeStatus(status);
-        if (normalized == null) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "工作流状态不能为空");
-        }
-        if (PUBLISHED.equals(normalized)) {
-            return publish(workflowId, operatorId);
-        }
-        ToolWorkflow current = requireWorkflow(workflowId);
-        if (workflowMapper.disableExecution(current.getId(), operatorId) != 1) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "工作流下线失败");
-        }
-        return toResponse(requireWorkflow(workflowId));
+    public void disableExecutionsForToolPreservingPublication(Long toolId, Long operatorId) {
+        workflowMapper.disableAllExecutionsPreservingPublication(toolId, operatorId);
     }
 
     private void bindPublishedVersion(ToolWorkflow draft,
                                       ToolWorkflowVersion published,
+                                      boolean executionEnabled,
                                       Long operatorId) {
         int changed = workflowMapper.bindPublishedVersion(
                 draft.getId(),
                 published.getId(),
                 published.getVersion(),
+                executionEnabled,
                 revision(draft),
                 operatorId
         );
@@ -257,9 +254,7 @@ public class WorkflowServiceImpl implements WorkflowService {
 
     private ToolWorkflowVersion publishedSnapshot(ToolWorkflow draft,
                                                    int version,
-                                                   String canonicalDsl,
-                                                   String dslHash,
-                                                   String inputSchemaSnapshotJson,
+                                                   PublicationArtifacts artifacts,
                                                    Long operatorId) {
         LocalDateTime now = LocalDateTime.now();
         ToolWorkflowVersion snapshot = new ToolWorkflowVersion();
@@ -269,14 +264,14 @@ public class WorkflowServiceImpl implements WorkflowService {
         snapshot.setEdgesJson(repairJson(draft.getEdgesJson()));
         snapshot.setGroupsJson(repairJson(draft.getGroupsJson()));
         snapshot.setConfigJson(repairJson(draft.getConfigJson()));
-        snapshot.setCanonicalDslJson(canonicalDsl);
-        snapshot.setDslVersion("1");
-        snapshot.setNodeRegistryVersion("p0");
-        snapshot.setDslHash(dslHash);
-        snapshot.setInputSchemaSnapshotJson(inputSchemaSnapshotJson);
-        snapshot.setDependencyManifestJson(canonicalJson(draft.getConfigJson(), "{}"));
-        snapshot.setBillingPolicyJson(billingPolicyJson(draft));
-        snapshot.setRiskPolicyJson("{\"confirmationPolicy\":\"WORKFLOW_DEFINED\",\"level\":\"MEDIUM\"}");
+        snapshot.setCanonicalDslJson(artifacts.canonicalDslJson());
+        snapshot.setDslVersion(DSL_VERSION);
+        snapshot.setNodeRegistryVersion(NODE_REGISTRY_VERSION);
+        snapshot.setDslHash(artifacts.fingerprint());
+        snapshot.setInputSchemaSnapshotJson(artifacts.inputSchemaSnapshotJson());
+        snapshot.setDependencyManifestJson(artifacts.dependencyManifestJson());
+        snapshot.setBillingPolicyJson(artifacts.billingPolicyJson());
+        snapshot.setRiskPolicyJson(artifacts.riskPolicyJson());
         snapshot.setSourceDraftRevision(revision(draft));
         snapshot.setSnapshotLabel("Published v" + version);
         snapshot.setPublishedAt(now);
@@ -291,12 +286,9 @@ public class WorkflowServiceImpl implements WorkflowService {
         int estimated = tool == null || tool.getEstimatedCreditCost() == null
                 ? 0
                 : Math.max(0, tool.getEstimatedCreditCost());
-        int minimum = tool == null || tool.getMinimumRequiredCredits() == null
-                ? 0
-                : Math.max(0, tool.getMinimumRequiredCredits());
         ObjectNode policy = objectMapper.createObjectNode();
         policy.put("mode", "WORKFLOW_STEP");
-        policy.put("fallbackMaxCreditCost", Math.max(estimated, minimum));
+        policy.put("fallbackMaxCreditCost", estimated);
         policy.put("fallbackChargeCredits", estimated);
         ObjectNode nodePolicies = objectMapper.createObjectNode();
         WorkflowDsl dsl = workflowDslService.parse(
@@ -321,7 +313,7 @@ public class WorkflowServiceImpl implements WorkflowService {
             int explicitCap = node.parameters() != null && node.parameters().hasNonNull("maxCreditCost")
                     ? Math.max(0, node.parameters().get("maxCreditCost").asInt())
                     : 0;
-            int maxCreditCost = explicitCap > 0 ? explicitCap : Math.max(estimated, minimum);
+            int maxCreditCost = explicitCap > 0 ? explicitCap : estimated;
             if (maxCreditCost <= 0) {
                 throw new BusinessException(
                         ErrorCode.PARAM_ERROR,
@@ -462,6 +454,58 @@ public class WorkflowServiceImpl implements WorkflowService {
         }
     }
 
+    private boolean isWorkflowToolOnline(AiTool tool) {
+        return "ONLINE".equalsIgnoreCase(tool.getStatus())
+                && "WORKFLOW".equalsIgnoreCase(tool.getExecutionMode())
+                && "WORKFLOW_STEP".equalsIgnoreCase(tool.getBillingMode())
+                && Boolean.TRUE.equals(tool.getAgentSurfaceEnabled());
+    }
+
+    private PublicationArtifacts publicationArtifacts(ToolWorkflow draft) {
+        String canonicalDslJson = canonicalDsl(draft);
+        String inputSchemaSnapshotJson = inputSchemaSnapshotJson(draft.getToolId());
+        String dependencyManifestJson = canonicalJson(draft.getConfigJson(), "{}");
+        String billingPolicyJson = billingPolicyJson(draft);
+        String riskPolicyJson = canonicalJson(RISK_POLICY_JSON, "{}");
+        int minimumRequiredCredits = minimumRequiredCredits(draft, billingPolicyJson);
+        ObjectNode publication = objectMapper.createObjectNode();
+        publication.set("canonicalDsl", readJson(canonicalDslJson, objectMapper.createObjectNode()));
+        publication.put("dslVersion", DSL_VERSION);
+        publication.put("nodeRegistryVersion", NODE_REGISTRY_VERSION);
+        publication.set("inputSchema", readJson(inputSchemaSnapshotJson, objectMapper.createObjectNode()));
+        publication.set("dependencies", readJson(dependencyManifestJson, objectMapper.createObjectNode()));
+        publication.set("billingPolicy", readJson(billingPolicyJson, objectMapper.createObjectNode()));
+        publication.set("riskPolicy", readJson(riskPolicyJson, objectMapper.createObjectNode()));
+        String fingerprint = sha256(writeJson(canonicalNode(publication)));
+        return new PublicationArtifacts(
+                canonicalDslJson,
+                inputSchemaSnapshotJson,
+                dependencyManifestJson,
+                billingPolicyJson,
+                riskPolicyJson,
+                minimumRequiredCredits,
+                fingerprint
+        );
+    }
+
+    private int minimumRequiredCredits(ToolWorkflow draft, String billingPolicyJson) {
+        WorkflowDsl dsl = workflowDslService.parse(
+                draft.getNodesJson(), draft.getEdgesJson(), draft.getConfigJson());
+        JsonNode nodePolicies = readJson(
+                billingPolicyJson, objectMapper.createObjectNode()).path("nodePolicies");
+        for (String nodeId : dsl.executionOrder()) {
+            WorkflowNodeDef node = dsl.requireNode(nodeId);
+            if (!node.type().isWorkerStep()) {
+                continue;
+            }
+            int maxCreditCost = nodePolicies.path(nodeId).path("maxCreditCost").asInt(0);
+            if (maxCreditCost > 0) {
+                return maxCreditCost;
+            }
+        }
+        return 0;
+    }
+
     private void applyDefaultValue(ObjectNode property, String defaultValue) {
         if (defaultValue == null || defaultValue.isBlank()) {
             return;
@@ -537,18 +581,6 @@ public class WorkflowServiceImpl implements WorkflowService {
                 || "1".equals(value)
                 || "yes".equalsIgnoreCase(value)
                 || "on".equalsIgnoreCase(value);
-    }
-
-    private boolean sameJson(String left, String right) {
-        if (left == null || right == null) {
-            return Objects.equals(left, right);
-        }
-        try {
-            return canonicalNode(objectMapper.readTree(repairJson(left)))
-                    .equals(canonicalNode(objectMapper.readTree(repairJson(right))));
-        } catch (JsonProcessingException exception) {
-            return Objects.equals(left, right);
-        }
     }
 
     private String canonicalDsl(ToolWorkflow draft) {
@@ -637,11 +669,17 @@ public class WorkflowServiceImpl implements WorkflowService {
                 : versionMapper.selectById(workflow.getPublishedVersionId());
         long draftRevision = revision(workflow);
         boolean hasUnpublishedChanges = published == null
-                || !Objects.equals(published.getSourceDraftRevision(), draftRevision)
-                || !sameJson(
-                        published.getInputSchemaSnapshotJson(),
-                        inputSchemaSnapshotJson(workflow.getToolId())
+                || !Objects.equals(published.getSourceDraftRevision(), draftRevision);
+        if (!hasUnpublishedChanges) {
+            try {
+                hasUnpublishedChanges = !Objects.equals(
+                        published.getDslHash(),
+                        publicationArtifacts(workflow).fingerprint()
                 );
+            } catch (BusinessException exception) {
+                hasUnpublishedChanges = true;
+            }
+        }
         return new WorkflowResponse(
                 workflow.getId(),
                 workflow.getToolId(),
@@ -667,16 +705,28 @@ public class WorkflowServiceImpl implements WorkflowService {
         return workflow.getDraftRevision() == null ? 0L : workflow.getDraftRevision();
     }
 
-    private static String normalizeStatus(String status) {
-        if (status == null) {
-            return null;
+    private void invalidateToolCatalogAfterCommit(String toolCode) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            bypassCacheService.invalidateToolCatalog(toolCode);
+            return;
         }
-        String normalized = status.trim().toUpperCase();
-        if (!DRAFT.equals(normalized) && !PUBLISHED.equals(normalized)) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "不支持的工作流状态: " + status);
-        }
-        return normalized;
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                bypassCacheService.invalidateToolCatalog(toolCode);
+            }
+        });
     }
+
+    private record PublicationArtifacts(
+            String canonicalDslJson,
+            String inputSchemaSnapshotJson,
+            String dependencyManifestJson,
+            String billingPolicyJson,
+            String riskPolicyJson,
+            int minimumRequiredCredits,
+            String fingerprint
+    ) {}
 
     private static String repairJson(String json) {
         return Utf8TextRepair.repairIfNeeded(json);

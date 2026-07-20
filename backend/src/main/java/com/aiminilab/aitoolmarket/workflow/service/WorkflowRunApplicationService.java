@@ -42,15 +42,17 @@ public class WorkflowRunApplicationService {
     private final TaskService taskService;
     private final TaskMapper taskMapper;
     private final AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService;
+    private final WorkflowInputSchemaValidator inputSchemaValidator;
 
     public WorkflowRunApplicationService(ToolMapper toolMapper,
                                          WorkflowRunMapper runMapper,
                                          WorkflowRunStepMapper stepMapper,
                                          WorkflowRuntimeAdmissionService admissionService,
                                          WorkflowExecutionService executionService,
-                                         TaskService taskService,
-                                         TaskMapper taskMapper,
-                                         AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService) {
+                                          TaskService taskService,
+                                          TaskMapper taskMapper,
+                                          AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService,
+                                          WorkflowInputSchemaValidator inputSchemaValidator) {
         this.toolMapper = toolMapper;
         this.runMapper = runMapper;
         this.stepMapper = stepMapper;
@@ -59,6 +61,7 @@ public class WorkflowRunApplicationService {
         this.taskService = taskService;
         this.taskMapper = taskMapper;
         this.delegatedToolCallLifecycleService = delegatedToolCallLifecycleService;
+        this.inputSchemaValidator = inputSchemaValidator;
     }
 
     @Transactional(
@@ -84,10 +87,20 @@ public class WorkflowRunApplicationService {
             return reuseExisting(command, existing);
         }
 
-        AiTool tool = toolMapper.findOnlineByCode(command.toolCode())
+        AiTool tool = java.util.Optional.ofNullable(toolMapper.selectAnyByCodeForUpdate(command.toolCode()))
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工作流工具不存在或未上线"));
-        if (!"WORKFLOW".equalsIgnoreCase(tool.getExecutionMode())) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "该工具不是工作流执行模式");
+        WorkflowRun concurrentAfterToolLock = runMapper.selectByUserAndClientRequestIdAfterAdmissionLock(
+                command.userId(),
+                command.clientRequestId()
+        );
+        if (concurrentAfterToolLock != null) {
+            return reuseExisting(command, concurrentAfterToolLock);
+        }
+        if (!"ONLINE".equalsIgnoreCase(tool.getStatus())
+                || !"WORKFLOW".equalsIgnoreCase(tool.getExecutionMode())
+                || !"WORKFLOW_STEP".equalsIgnoreCase(tool.getBillingMode())
+                || !Boolean.TRUE.equals(tool.getAgentSurfaceEnabled())) {
+            throw new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工作流工具不存在或未上线");
         }
 
         admissionService.lockNewRunAdmission(command.userId());
@@ -104,6 +117,7 @@ public class WorkflowRunApplicationService {
         ToolWorkflow workflow = admission.workflow();
         ToolWorkflowVersion version = admission.version();
         WorkflowDsl dsl = admission.dsl();
+        inputSchemaValidator.validate(version, command.input());
 
         TaskStatusResponse rootTask = taskService.createWorkflowRoot(
                 command.userId(),

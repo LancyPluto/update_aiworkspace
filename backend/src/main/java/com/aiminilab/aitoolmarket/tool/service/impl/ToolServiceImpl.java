@@ -369,7 +369,8 @@ public class ToolServiceImpl implements ToolService {
         toolTemplateService.applyToTool(toolId, request, operatorId);
         AiTool persisted = toolMapper.findById(toolId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
-        if (ToolStatus.ONLINE.name().equalsIgnoreCase(persisted.getStatus())) {
+        if (workflowService.getWorkflow(toolId) == null
+                && ToolStatus.ONLINE.name().equalsIgnoreCase(persisted.getStatus())) {
             validatePublishable(persisted);
         }
     }
@@ -389,10 +390,12 @@ public class ToolServiceImpl implements ToolService {
         }
         tool.setConfigNote(ConfigNoteMergeSupport.mergePreservingIntegrationMarkers(
                 existing.getConfigNote(), tool.getConfigNote()));
-        if (ToolStatus.ONLINE.name().equalsIgnoreCase(existing.getStatus())) {
-            validatePublishable(tool);
-        } else {
-            modelCapabilityService.validateToolModelBindingAvailable(tool);
+        if (workflowService.getWorkflow(toolId) == null) {
+            if (ToolStatus.ONLINE.name().equalsIgnoreCase(existing.getStatus())) {
+                validatePublishable(tool);
+            } else {
+                modelCapabilityService.validateToolModelBindingAvailable(tool);
+            }
         }
         toolMapper.updateTool(toolId, tool, operatorId);
         ToolSummaryResponse summary = findToolSummary(toolId);
@@ -418,15 +421,15 @@ public class ToolServiceImpl implements ToolService {
     public ToolSummaryResponse publishTool(Long toolId, Long operatorId) {
         AiTool tool = toolMapper.findByIdForUpdate(toolId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "Tool not found"));
-        validatePublishable(tool);
         WorkflowResponse workflow = workflowService.getWorkflow(toolId);
         if (workflow == null) {
+            validatePublishable(tool);
             toolMapper.updateToolStatus(toolId, ToolStatus.ONLINE, operatorId);
         } else {
-            workflowService.publish(workflow.id(), operatorId);
             if (toolMapper.activateWorkflowTool(toolId, operatorId) != 1) {
                 throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Workflow tool publish failed");
             }
+            workflowService.publish(workflow.id(), operatorId);
         }
         ToolSummaryResponse summary = findAdminToolSummary(toolId);
         invalidateToolCatalogAfterCommit(summary.toolCode());
@@ -442,7 +445,7 @@ public class ToolServiceImpl implements ToolService {
         if (workflow == null) {
             toolMapper.updateToolStatus(toolId, ToolStatus.OFFLINE, operatorId);
         } else {
-            workflowService.disableExecutionPreservingPublication(workflow.id(), operatorId);
+            workflowService.disableExecutionsForToolPreservingPublication(toolId, operatorId);
             if (toolMapper.deactivateWorkflowTool(toolId, operatorId) != 1) {
                 throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Workflow tool offline failed");
             }

@@ -2,9 +2,16 @@ package com.aiminilab.aitoolmarket.storage;
 
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.model.CopyObjectRequest;
+import com.aliyun.oss.model.PutObjectRequest;
+import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.core.Ordered;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.lang.reflect.Field;
 import java.net.URL;
@@ -14,8 +21,11 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -24,6 +34,13 @@ class AssetStorageServiceTest {
 
     @TempDir
     Path tempDir;
+
+    @AfterEach
+    void clearTransactionSynchronization() {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
 
     @Test
     void recognizesOnlyContentAddressedMediaKeysAsImmutable() {
@@ -77,6 +94,7 @@ class AssetStorageServiceTest {
         Field field = AssetStorageService.class.getDeclaredField("ossClient");
         field.setAccessible(true);
         field.set(service, oss);
+        TransactionSynchronizationManager.initSynchronization();
 
         String migrated = service.moveUrlToPublic(
                 "https://wlcloudai-assets-private.oss-cn-guangzhou.aliyuncs.com/tasks/1/result.png");
@@ -88,7 +106,150 @@ class AssetStorageServiceTest {
                         && "wlcloudai-assets-public".equals(request.getDestinationBucketName())
                         && "tasks/1/result.png".equals(request.getDestinationKey())
                         && "public,max-age=300,must-revalidate".equals(request.getNewObjectMetadata().getCacheControl())));
+        verify(oss, never()).deleteObject("wlcloudai-assets-private", "tasks/1/result.png");
+
+        TransactionSynchronizationManager.getSynchronizations().get(0).afterCommit();
+
         verify(oss).deleteObject("wlcloudai-assets-private", "tasks/1/result.png");
+    }
+
+    @Test
+    void removesUniqueLocalUploadWhenDatabaseTransactionRollsBack() {
+        AppProperties properties = new AppProperties();
+        properties.setGeneratedMediaDir(tempDir.toString());
+        properties.getAssetStorage().setProvider("local");
+        properties.getAssetStorage().setPublicBaseUrl("/generated");
+        AssetStorageService service = new AssetStorageService(properties);
+        TransactionSynchronizationManager.initSynchronization();
+
+        StoredAsset stored = service.storeMultipartPrivateUnique(
+                "uploads/unique-file.txt",
+                new MockMultipartFile("file", "unique-file.txt", "text/plain", "temporary".getBytes())
+        );
+        Path storedPath = Path.of(stored.storagePath());
+        assertTrue(Files.exists(storedPath));
+
+        TransactionSynchronizationManager.getSynchronizations().get(0)
+                .afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+
+        assertFalse(Files.exists(storedPath));
+    }
+
+    @Test
+    void failsMoveWhenOssCopyFailsAndKeepsSourceObject() throws Exception {
+        AppProperties properties = new AppProperties();
+        properties.getAssetStorage().setProvider("oss");
+        properties.getAssetStorage().setOssPublicBucket("wlcloudai-assets-public");
+        properties.getAssetStorage().setOssPrivateBucket("wlcloudai-assets-private");
+        properties.getAssetStorage().setPublicBaseUrl("https://wlcloudai-assets-public.oss.example.com");
+        properties.getAssetStorage().setPrivateBaseUrl("https://wlcloudai-assets-private.oss.example.com");
+        AssetStorageService service = new AssetStorageService(properties);
+        OSS oss = mock(OSS.class);
+        Field field = AssetStorageService.class.getDeclaredField("ossClient");
+        field.setAccessible(true);
+        field.set(service, oss);
+        when(oss.copyObject(any(CopyObjectRequest.class))).thenThrow(new RuntimeException("copy failed"));
+        TransactionSynchronizationManager.initSynchronization();
+
+        assertThrows(BusinessException.class, () -> service.moveUrlToPublic(
+                "https://wlcloudai-assets-private.oss.example.com/tasks/1/result.png"));
+
+        verify(oss).deleteObject("wlcloudai-assets-public", "tasks/1/result.png");
+        verify(oss, never()).deleteObject("wlcloudai-assets-private", "tasks/1/result.png");
+    }
+
+    @Test
+    void removesNewOssCopyWhenDatabaseTransactionRollsBack() throws Exception {
+        AppProperties properties = ossProperties();
+        AssetStorageService service = new AssetStorageService(properties);
+        OSS oss = mock(OSS.class);
+        Field field = AssetStorageService.class.getDeclaredField("ossClient");
+        field.setAccessible(true);
+        field.set(service, oss);
+        TransactionSynchronizationManager.initSynchronization();
+
+        service.moveUrlToPublic(
+                "https://wlcloudai-assets-private.oss.example.com/tasks/1/result.png");
+        TransactionSynchronization synchronization = TransactionSynchronizationManager.getSynchronizations().get(0);
+        assertEquals(Ordered.HIGHEST_PRECEDENCE, synchronization.getOrder());
+        synchronization.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+
+        verify(oss).deleteObject("wlcloudai-assets-public", "tasks/1/result.png");
+        verify(oss, never()).deleteObject("wlcloudai-assets-private", "tasks/1/result.png");
+    }
+
+    @Test
+    void keepsPreexistingOssTargetWhenDatabaseTransactionRollsBack() throws Exception {
+        AppProperties properties = ossProperties();
+        AssetStorageService service = new AssetStorageService(properties);
+        OSS oss = mock(OSS.class);
+        Field field = AssetStorageService.class.getDeclaredField("ossClient");
+        field.setAccessible(true);
+        field.set(service, oss);
+        when(oss.doesObjectExist("wlcloudai-assets-public", "tasks/1/result.png")).thenReturn(true);
+        TransactionSynchronizationManager.initSynchronization();
+
+        service.moveUrlToPublic(
+                "https://wlcloudai-assets-private.oss.example.com/tasks/1/result.png");
+        TransactionSynchronizationManager.getSynchronizations().get(0)
+                .afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+
+        verify(oss, never()).copyObject(any(CopyObjectRequest.class));
+        verify(oss, never()).deleteObject("wlcloudai-assets-public", "tasks/1/result.png");
+        verify(oss, never()).deleteObject("wlcloudai-assets-private", "tasks/1/result.png");
+    }
+
+    @Test
+    void usesAtomicOssCreateAndDeletesOwnedUploadOnRollback() throws Exception {
+        AppProperties properties = ossProperties();
+        AssetStorageService service = new AssetStorageService(properties);
+        OSS oss = mock(OSS.class);
+        Field field = AssetStorageService.class.getDeclaredField("ossClient");
+        field.setAccessible(true);
+        field.set(service, oss);
+        TransactionSynchronizationManager.initSynchronization();
+
+        service.storeMultipartPrivateUnique(
+                "uploads/unique-file.txt",
+                new MockMultipartFile("file", "unique-file.txt", "text/plain", "temporary".getBytes())
+        );
+
+        verify(oss).putObject(argThat((PutObjectRequest request) ->
+                "wlcloudai-assets-private".equals(request.getBucketName())
+                        && "uploads/unique-file.txt".equals(request.getKey())
+                        && "true".equals(request.getHeaders().get("x-oss-forbid-overwrite"))));
+        TransactionSynchronizationManager.getSynchronizations().get(0)
+                .afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+        verify(oss).deleteObject("wlcloudai-assets-private", "uploads/unique-file.txt");
+    }
+
+    @Test
+    void doesNotDeleteOssObjectWhenAtomicCreateFails() throws Exception {
+        AppProperties properties = ossProperties();
+        AssetStorageService service = new AssetStorageService(properties);
+        OSS oss = mock(OSS.class);
+        Field field = AssetStorageService.class.getDeclaredField("ossClient");
+        field.setAccessible(true);
+        field.set(service, oss);
+        when(oss.putObject(any(PutObjectRequest.class))).thenThrow(new RuntimeException("already exists"));
+        TransactionSynchronizationManager.initSynchronization();
+
+        assertThrows(BusinessException.class, () -> service.storeMultipartPrivateUnique(
+                "uploads/unique-file.txt",
+                new MockMultipartFile("file", "unique-file.txt", "text/plain", "temporary".getBytes())
+        ));
+
+        verify(oss, never()).deleteObject("wlcloudai-assets-private", "uploads/unique-file.txt");
+    }
+
+    private AppProperties ossProperties() {
+        AppProperties properties = new AppProperties();
+        properties.getAssetStorage().setProvider("oss");
+        properties.getAssetStorage().setOssPublicBucket("wlcloudai-assets-public");
+        properties.getAssetStorage().setOssPrivateBucket("wlcloudai-assets-private");
+        properties.getAssetStorage().setPublicBaseUrl("https://wlcloudai-assets-public.oss.example.com");
+        properties.getAssetStorage().setPrivateBaseUrl("https://wlcloudai-assets-private.oss.example.com");
+        return properties;
     }
 
     @Test

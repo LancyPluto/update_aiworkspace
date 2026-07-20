@@ -8,8 +8,12 @@ import com.aiminilab.aitoolmarket.agent.service.impl.AgentToolDescriptorServiceI
 import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
+import com.aiminilab.aitoolmarket.tool.entity.ToolWorkflow;
+import com.aiminilab.aitoolmarket.tool.entity.ToolWorkflowVersion;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolWorkflowMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolWorkflowVersionMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -32,6 +36,10 @@ class AgentToolDescriptorServiceImplTest {
     @Mock
     ToolFieldItemMapper toolFieldItemMapper;
     @Mock
+    ToolWorkflowMapper workflowMapper;
+    @Mock
+    ToolWorkflowVersionMapper workflowVersionMapper;
+    @Mock
     AgentToolDescriptorExtensionMapper extensionMapper;
     @Mock
     AgentToolPreferenceMapper preferenceMapper;
@@ -41,11 +49,13 @@ class AgentToolDescriptorServiceImplTest {
     TaskCreditEstimateService taskCreditEstimateService;
 
     @Test
-    void workflowDescriptorExposesInternalExecutionContract() {
+    void workflowDescriptorExposesInternalExecutionContract() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         AgentToolDescriptorServiceImpl service = new AgentToolDescriptorServiceImpl(
                 toolMapper,
                 toolFieldItemMapper,
+                workflowMapper,
+                workflowVersionMapper,
                 extensionMapper,
                 preferenceMapper,
                 modelConfigMapper,
@@ -58,7 +68,17 @@ class AgentToolDescriptorServiceImplTest {
         tool.setToolName("AI Comic Drama");
         tool.setExecutionMode("WORKFLOW");
         tool.setBillingMode("WORKFLOW_STEP");
+        tool.setAgentSurfaceEnabled(true);
         tool.setMinimumRequiredCredits(12);
+        ToolWorkflow workflow = new ToolWorkflow();
+        workflow.setId(31L);
+        workflow.setToolId(tool.getId());
+        workflow.setPublishedVersionId(41L);
+        workflow.setExecutionEnabled(true);
+        ToolWorkflowVersion version = new ToolWorkflowVersion();
+        version.setId(41L);
+        version.setWorkflowId(workflow.getId());
+        version.setInputSchemaSnapshotJson("{\"type\":\"object\",\"properties\":{\"story\":{\"type\":\"string\",\"title\":\"Story\",\"x-field-type\":\"textarea\",\"x-user-required\":true,\"x-agent-fill-strategy\":\"ask_user\",\"x-risk-level\":\"LOW\"}},\"required\":[\"story\"]}");
         AgentToolDescriptorExtension extension = new AgentToolDescriptorExtension();
         extension.setRiskLevel("MEDIUM");
         extension.setConfirmationPolicy("WORKFLOW_DEFINED");
@@ -66,7 +86,8 @@ class AgentToolDescriptorServiceImplTest {
         when(toolMapper.findOnlineByCode(tool.getToolCode())).thenReturn(Optional.of(tool));
         when(extensionMapper.findByToolCode(tool.getToolCode())).thenReturn(Optional.of(extension));
         when(preferenceMapper.findByUserIdAndToolCode(7L, tool.getToolCode())).thenReturn(null);
-        when(toolFieldItemMapper.findActiveFields(tool.getId())).thenReturn(List.of());
+        when(workflowMapper.selectExecutableCanonicalByToolId(tool.getId())).thenReturn(workflow);
+        when(workflowVersionMapper.selectById(workflow.getPublishedVersionId())).thenReturn(version);
         when(taskCreditEstimateService.estimateUserFacingTaskCredits(tool)).thenReturn(12);
 
         var descriptor = service.getToolForAgent(7L, tool.getToolCode());
@@ -77,6 +98,8 @@ class AgentToolDescriptorServiceImplTest {
         assertThat(descriptor.runRouteTemplate()).isEqualTo("/agents/runs/{taskId}");
         assertThat(descriptor.riskLevel()).isEqualTo("MEDIUM");
         assertThat(descriptor.confirmationPolicy()).isEqualTo("WORKFLOW_DEFINED");
+        assertThat((JsonNode) descriptor.inputSchema()).isEqualTo(objectMapper.readTree(version.getInputSchemaSnapshotJson()));
+        assertThat(descriptor.fields()).extracting(field -> field.fieldKey()).containsExactly("story");
     }
 
     @Test
@@ -85,6 +108,8 @@ class AgentToolDescriptorServiceImplTest {
         AgentToolDescriptorServiceImpl service = new AgentToolDescriptorServiceImpl(
                 toolMapper,
                 toolFieldItemMapper,
+                workflowMapper,
+                workflowVersionMapper,
                 extensionMapper,
                 preferenceMapper,
                 modelConfigMapper,
@@ -117,6 +142,8 @@ class AgentToolDescriptorServiceImplTest {
         AgentToolDescriptorServiceImpl service = new AgentToolDescriptorServiceImpl(
                 toolMapper,
                 toolFieldItemMapper,
+                workflowMapper,
+                workflowVersionMapper,
                 extensionMapper,
                 preferenceMapper,
                 modelConfigMapper,

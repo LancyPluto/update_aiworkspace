@@ -9,7 +9,13 @@ import java.util.List;
 
 public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
 
-    @Select("SELECT * FROM tool_workflows WHERE tool_id = #{toolId} LIMIT 1")
+    @Select("""
+            SELECT *
+            FROM tool_workflows
+            WHERE tool_id = #{toolId}
+            ORDER BY CASE WHEN workflow_name = 'default' THEN 0 ELSE 1 END, id DESC
+            LIMIT 1
+            """)
     ToolWorkflow selectByToolId(@Param("toolId") Long toolId);
 
     default Optional<ToolWorkflow> findByToolId(Long toolId) {
@@ -80,6 +86,7 @@ public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
             FROM tool_workflows w
             JOIN tool_workflow_versions v ON v.id = w.published_version_id
             WHERE w.tool_id = #{toolId} AND w.execution_enabled = 1
+            ORDER BY CASE WHEN w.workflow_name = 'default' THEN 0 ELSE 1 END, w.id DESC
             LIMIT 1
             """)
     ToolWorkflow selectPublishedByToolId(@Param("toolId") Long toolId);
@@ -131,7 +138,7 @@ public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
     @Update("""
             UPDATE tool_workflows
             SET published_version_id = #{publishedVersionId},
-                execution_enabled = 1,
+                execution_enabled = #{executionEnabled},
                 status = 'PUBLISHED',
                 version = #{version},
                 updated_by = #{operatorId},
@@ -141,29 +148,20 @@ public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
     int bindPublishedVersion(@Param("workflowId") Long workflowId,
                              @Param("publishedVersionId") Long publishedVersionId,
                              @Param("version") int version,
+                             @Param("executionEnabled") boolean executionEnabled,
                              @Param("expectedDraftRevision") Long expectedDraftRevision,
                              @Param("operatorId") Long operatorId);
 
     @Update("""
             UPDATE tool_workflows
             SET execution_enabled = 0,
-                status = 'DRAFT',
                 updated_by = #{operatorId},
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = #{workflowId}
+            WHERE tool_id = #{toolId}
+              AND execution_enabled = 1
             """)
-    int disableExecution(@Param("workflowId") Long workflowId,
-                         @Param("operatorId") Long operatorId);
-
-    @Update("""
-            UPDATE tool_workflows
-            SET execution_enabled = 0,
-                updated_by = #{operatorId},
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = #{workflowId}
-            """)
-    int disableExecutionPreservingPublication(@Param("workflowId") Long workflowId,
-                                              @Param("operatorId") Long operatorId);
+    int disableAllExecutionsPreservingPublication(@Param("toolId") Long toolId,
+                                                  @Param("operatorId") Long operatorId);
 
     @Update("""
             UPDATE tool_workflows

@@ -235,6 +235,17 @@ public interface ToolMapper extends BaseMapper<AiTool> {
 
     @Update("""
             UPDATE ai_tools
+            SET minimum_required_credits = #{minimumRequiredCredits},
+                updated_by = #{operatorId},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{toolId} AND is_deleted = 0
+            """)
+    int updateWorkflowMinimumRequiredCredits(@Param("toolId") Long toolId,
+                                             @Param("minimumRequiredCredits") int minimumRequiredCredits,
+                                             @Param("operatorId") Long operatorId);
+
+    @Update("""
+            UPDATE ai_tools
             SET is_deleted = 1,
                 status = 'OFFLINE',
                 updated_by = #{operatorId},

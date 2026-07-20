@@ -1,0 +1,6 @@
+interface:
+  display_name: "设计前端 UI"
+  short_description: "基于项目证据设计、美化并验证专业可靠的前端界面"
+  default_prompt: "使用 $design-frontend-ui 设计、美化并验证当前前端界面。"
+policy:
+  allow_implicit_invocation: true

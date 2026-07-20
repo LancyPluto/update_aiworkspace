@@ -58,7 +58,7 @@ public class AdminWorkflowController {
         return ApiResponse.success(new WorkflowValidationResponse(result.valid(), result.errors()));
     }
 
-    /** 校验通过后将工作流置为 PUBLISHED；运行端（WorkflowExecutionService）只执行 PUBLISHED 工作流。 */
+    /** 生成或复用不可变正式版本；工具离线时不会借此重新上线。 */
     @PostMapping("/publish")
     public ApiResponse<WorkflowResponse> publish(@PathVariable Long toolId) {
         WorkflowResponse workflow = workflowService.getWorkflow(toolId);
@@ -74,7 +74,7 @@ public class AdminWorkflowController {
         return ApiResponse.success(workflowService.publish(workflow.id(), operatorId));
     }
 
-    /** 将工作流退回 DRAFT，运行端会回退到工具原有的执行 handler。 */
+    /** 兼容入口：按工具下线语义关闭新运行，同时保留正式工作流版本。 */
     @PostMapping("/unpublish")
     public ApiResponse<WorkflowResponse> unpublish(@PathVariable Long toolId) {
         WorkflowResponse workflow = workflowService.getWorkflow(toolId);

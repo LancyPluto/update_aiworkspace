@@ -30,10 +30,17 @@ test("true workflow agents remain classified as workflow tools", () => {
   assert.equal(isWorkflowTool({ toolCode: "banana_ppt_generator" }), true)
 })
 
+test("explicit workflow execution mode classifies new workflow tools before legacy heuristics", () => {
+  assert.equal(isWorkflowTool({ toolCode: "scene_builder_v2", toolType: "CUSTOM", executionMode: "WORKFLOW" }), true)
+  assert.equal(isWorkflowTool({ toolCode: "suno_music", executionMode: " workflow " }), true)
+  assert.equal(isWorkflowTool({ toolCode: "scene_builder_v2", toolType: "CUSTOM", executionMode: "DIRECT" }), false)
+})
+
 test("workflow availability prefers the backend runtime verdict over tool status", () => {
   assert.equal(isToolAvailableToUsers({ toolCode: "ai_comic_drama_agent", status: "ONLINE", workflowConfigured: true, workflowUsable: false }), false)
   assert.equal(isToolAvailableToUsers({ toolCode: "ai_comic_drama_agent", status: "ONLINE", workflowConfigured: true, workflowUsable: true }), true)
   assert.equal(isToolAvailableToUsers({ toolCode: "ai_comic_drama_agent", status: "ONLINE", workflowConfigured: false, workflowUsable: false }), true)
+  assert.equal(isToolAvailableToUsers({ toolCode: "scene_builder_v2", status: "ONLINE", executionMode: "WORKFLOW", workflowConfigured: false }), false)
 })
 
 test("workflow availability supports transition fields and legacy responses", () => {

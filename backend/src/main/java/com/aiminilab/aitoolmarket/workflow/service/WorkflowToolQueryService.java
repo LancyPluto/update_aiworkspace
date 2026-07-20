@@ -144,11 +144,6 @@ public class WorkflowToolQueryService {
     }
 
     @Transactional(readOnly = true)
-    public void assertLaunchable(String toolCode) {
-        requirePublishedTool(toolCode);
-    }
-
-    @Transactional(readOnly = true)
     public WorkflowRunDetailResponse runDetail(Long rootTaskId, Long userId) {
         WorkflowRun run = runMapper.selectByRootTaskId(rootTaskId);
         if (run == null) {
