@@ -118,6 +118,28 @@ class WorkflowStepSchedulerTest {
     }
 
     @Test
+    void dispatchPassesStableHandlerKeyAndOperationPayloadToChildTask() {
+        jdbcTemplate.update("""
+                UPDATE tool_workflow_versions
+                SET nodes_json = '[{"id":"worker","data":{"nodeDefType":"llm_text","title":"Worker","parameters":{"handlerKey":"comic.shot.video","maxCreditCost":1}}}]'
+                WHERE id = (SELECT workflow_version_id FROM workflow_runs WHERE id = ?)
+                """, runId);
+        jdbcTemplate.update(
+                "UPDATE workflow_run_steps SET input_json = ? WHERE id = ?",
+                "{\"operationInput\":{\"shot\":{\"id\":7}}}",
+                stepId
+        );
+
+        WorkflowStepAttempt attempt = scheduler.dispatch(stepId);
+        String paramsJson = jdbcTemplate.queryForObject(
+                "SELECT params_json FROM ai_tasks WHERE id = ?", String.class, attempt.getChildTaskId()
+        );
+
+        assertThat(paramsJson).contains("handlerKey").contains("comic.shot.video");
+        assertThat(paramsJson).contains("operation").contains("operationInput");
+    }
+
+    @Test
     void insufficientFundsPausesBeforeAttemptChildChargeOrOutbox() {
         configurePaidStep(20, 10);
 

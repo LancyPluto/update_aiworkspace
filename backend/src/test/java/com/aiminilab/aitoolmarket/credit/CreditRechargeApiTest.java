@@ -5,6 +5,9 @@ import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayClient;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayRequest;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayResponse;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayTradeQueryResult;
+import com.aiminilab.aitoolmarket.credit.entity.ReferralRegistrationReward;
+import com.aiminilab.aitoolmarket.credit.mapper.ReferralRegistrationRewardMapper;
+import com.aiminilab.aitoolmarket.credit.service.ReferralService;
 import com.aiminilab.aitoolmarket.credit.wechat.NativePrepayRequest;
 import com.aiminilab.aitoolmarket.credit.wechat.NativePrepayResponse;
 import com.aiminilab.aitoolmarket.credit.wechat.WechatNativePayClient;
@@ -13,6 +16,7 @@ import com.aiminilab.aitoolmarket.credit.wechat.WechatPayNotification;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
@@ -26,6 +30,8 @@ import java.util.concurrent.TimeUnit;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -73,6 +79,12 @@ class CreditRechargeApiTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ReferralService referralService;
+
+    @SpyBean
+    private ReferralRegistrationRewardMapper referralRegistrationRewardMapper;
 
     @Test
     void membershipOrderRequiresClientRequestId() throws Exception {
@@ -546,11 +558,48 @@ class CreditRechargeApiTest {
     }
 
     @Test
-    void invitedUserRechargeGrantsReferralBonusOnce() throws Exception {
+    void validInviteCodeGrantsFixedRegistrationRewardsOnceWithoutRechargeCommission() throws Exception {
         when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
                 .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=referral"));
         RegisteredUser inviter = registerUser("referral_inviter");
-        RegisteredUser invitee = registerUser("referral_invitee", "WLCLOUD%05d".formatted(inviter.userId()));
+        String inviteCode = "WLCLOUD%05d".formatted(inviter.userId());
+        RegisteredUser invitee = registerUser("referral_invitee", inviteCode);
+
+        mockMvc.perform(get("/api/v1/credits/account")
+                        .header("Authorization", "Bearer " + inviter.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.balance").value(300))
+                .andExpect(jsonPath("$.data.totalGranted").value(300));
+        mockMvc.perform(get("/api/v1/credits/account")
+                        .header("Authorization", "Bearer " + invitee.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.balance").value(400))
+                .andExpect(jsonPath("$.data.totalGranted").value(400));
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM referral_registration_rewards WHERE referral_id = "
+                        + "(SELECT id FROM user_referrals WHERE invitee_user_id = ?)",
+                Integer.class, invitee.userId())).isEqualTo(2);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT reward_credits FROM referral_registration_rewards WHERE referral_id = "
+                        + "(SELECT id FROM user_referrals WHERE invitee_user_id = ?) AND beneficiary_role = 'INVITEE'",
+                Integer.class, invitee.userId())).isEqualTo(200);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT reward_credits FROM referral_registration_rewards WHERE referral_id = "
+                        + "(SELECT id FROM user_referrals WHERE invitee_user_id = ?) AND beneficiary_role = 'INVITER'",
+                Integer.class, invitee.userId())).isEqualTo(100);
+
+        referralService.bindInviteCode(invitee.userId(), inviteCode);
+
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT balance FROM credit_accounts WHERE user_id = ?", Integer.class, inviter.userId()))
+                .isEqualTo(300);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT balance FROM credit_accounts WHERE user_id = ?", Integer.class, invitee.userId()))
+                .isEqualTo(400);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM referral_registration_rewards WHERE referral_id = "
+                        + "(SELECT id FROM user_referrals WHERE invitee_user_id = ?)",
+                Integer.class, invitee.userId())).isEqualTo(2);
 
         String orderResponse = mockMvc.perform(post("/api/v1/credits/recharge-orders")
                         .header("Authorization", "Bearer " + invitee.token())
@@ -588,6 +637,11 @@ class CreditRechargeApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.balance").value(300))
                 .andExpect(jsonPath("$.data.totalGranted").value(300));
+        mockMvc.perform(get("/api/v1/credits/account")
+                        .header("Authorization", "Bearer " + invitee.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.balance").value(1400))
+                .andExpect(jsonPath("$.data.totalGranted").value(1400));
 
         mockMvc.perform(get("/api/v1/credits/logs")
                         .param("logType", "REFERRAL_BONUS")
@@ -595,7 +649,68 @@ class CreditRechargeApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1))
                 .andExpect(jsonPath("$.data.list[0].amount").value(100))
-                .andExpect(jsonPath("$.data.list[0].reason").value(org.hamcrest.Matchers.containsString(orderNo)));
+                .andExpect(jsonPath("$.data.list[0].reason").value(org.hamcrest.Matchers.containsString("邀请码")));
+        mockMvc.perform(get("/api/v1/credits/logs")
+                        .param("logType", "REFERRAL_BONUS")
+                        .header("Authorization", "Bearer " + invitee.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].amount").value(200))
+                .andExpect(jsonPath("$.data.list[0].reason").value(org.hamcrest.Matchers.containsString("邀请码")));
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM referral_rewards r JOIN credit_recharge_orders o "
+                        + "ON o.id = r.recharge_order_id WHERE o.order_no = ?",
+                Integer.class, orderNo)).isZero();
+    }
+
+    @Test
+    void referralRewardFailureRollsBackUserBindingAndFirstBenefit() throws Exception {
+        RegisteredUser inviter = registerUser("referral_tx_inviter");
+        String inviteCode = "WLCLOUD%05d".formatted(inviter.userId());
+        String failedUsername = "referral_tx_rollback_invitee";
+        int rewardCountBefore = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM referral_registration_rewards", Integer.class);
+        int registrationLogCountBefore = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM credit_logs WHERE idempotency_key LIKE 'REFERRAL_REGISTRATION:%'",
+                Integer.class);
+        int accountCountBefore = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM credit_accounts", Integer.class);
+        doThrow(new IllegalStateException("forced inviter reward failure"))
+                .when(referralRegistrationRewardMapper)
+                .insert(org.mockito.ArgumentMatchers.<ReferralRegistrationReward>argThat(
+                        reward -> "INVITER".equals(reward.getBeneficiaryRole())));
+
+        try {
+            mockMvc.perform(post("/api/v1/auth/register")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "username": "%s",
+                                      "password": "123456",
+                                      "nickname": "%s",
+                                      "inviteCode": "%s"
+                                    }
+                                    """.formatted(failedUsername, failedUsername, inviteCode)))
+                    .andExpect(status().is5xxServerError());
+        } finally {
+            reset(referralRegistrationRewardMapper);
+        }
+
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM users WHERE username = ?", Integer.class, failedUsername)).isZero();
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_referrals WHERE inviter_user_id = ? AND invite_code = ?",
+                Integer.class, inviter.userId(), inviteCode)).isZero();
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM referral_registration_rewards rr JOIN user_referrals r "
+                        + "ON r.id = rr.referral_id WHERE r.inviter_user_id = ? AND r.invite_code = ?",
+                Integer.class, inviter.userId(), inviteCode)).isZero();
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM referral_registration_rewards", Integer.class)).isEqualTo(rewardCountBefore);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM credit_logs WHERE idempotency_key LIKE 'REFERRAL_REGISTRATION:%'",
+                Integer.class)).isEqualTo(registrationLogCountBefore);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM credit_accounts", Integer.class)).isEqualTo(accountCountBefore);
     }
 
     @Test

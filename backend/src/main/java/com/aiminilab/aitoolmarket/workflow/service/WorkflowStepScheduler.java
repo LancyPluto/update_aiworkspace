@@ -185,6 +185,15 @@ public class WorkflowStepScheduler {
         params.put("parentTaskId", run.getRootTaskId());
         params.put("nodeId", step.getNodeId());
         params.put("nodeDefType", node.type().name());
+        params.set("nodeParameters", node.parameters());
+        String handlerKey = text(node.parameters(), "handlerKey");
+        if (handlerKey == null) {
+            handlerKey = text(node.parameters(), "operation");
+        }
+        if (handlerKey != null) {
+            params.put("handlerKey", handlerKey);
+            params.put("operation", handlerKey);
+        }
         params.set("workflowInputs", readJson(step.getInputJson()));
         params.put("workflowStep", true);
 
@@ -287,6 +296,14 @@ public class WorkflowStepScheduler {
 
     private int value(Integer value) {
         return value == null ? 0 : value;
+    }
+
+    private String text(JsonNode node, String field) {
+        if (node == null || node.isMissingNode() || !node.hasNonNull(field)) {
+            return null;
+        }
+        String value = node.get(field).asText().trim();
+        return value.isBlank() ? null : value;
     }
 
     private long revision(WorkflowRunStep step) {

@@ -41,6 +41,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         "workflow.runtime.enabled=true",
         "workflow.runtime.execution-enabled=true",
         "workflow.runtime.canary-percentage=100",
+        "workflow.runtime.real-billing-enabled=true",
+        "workflow.runtime.confirmation-enabled=true",
+        "workflow.runtime.max-run-cost-credits=1",
+        "workflow.runtime.max-user-daily-cost-credits=10000",
         "spring.task.scheduling.enabled=false"
 })
 class WorkflowRunApplicationServiceTest {
@@ -412,6 +416,69 @@ class WorkflowRunApplicationServiceTest {
                 Integer.class,
                 created.rootTaskId()
         )).isZero();
+    }
+
+    @Test
+    void trustedOperationRunCreatesAndDispatchesOnlyTheMatchingWorkerStep() throws Exception {
+        String nodes = """
+                [
+                  {"id":"start","data":{"nodeDefType":"start","title":"Start"}},
+                  {"id":"script","data":{"nodeDefType":"llm_text","title":"Script","parameters":{"handlerKey":"comic.script","maxCreditCost":1}}},
+                  {"id":"review","data":{"nodeDefType":"user_confirm","title":"Review","parameters":{}}},
+                  {"id":"shot-videos","data":{"nodeDefType":"video_model","title":"Shot video","parameters":{"handlerKey":"comic.shot_video","maxCreditCost":1}}},
+                  {"id":"output","data":{"nodeDefType":"video_output","title":"Output"}}
+                ]
+                """;
+        String edges = """
+                [
+                  {"source":"start","target":"script"},
+                  {"source":"script","target":"review"},
+                  {"source":"review","target":"shot-videos"},
+                  {"source":"shot-videos","target":"output"}
+                ]
+                """;
+        String billing = """
+                {"mode":"WORKFLOW_STEP","nodePolicies":{
+                  "script":{"maxCreditCost":1},
+                  "shot-videos":{"maxCreditCost":1}
+                }}
+                """;
+        jdbcTemplate.update(
+                "UPDATE tool_workflow_versions SET nodes_json = ?, edges_json = ?, billing_policy_json = ? WHERE id = ?",
+                nodes, edges, billing, firstVersionId
+        );
+        jdbcTemplate.update("DELETE FROM credit_logs WHERE user_id = 1");
+        jdbcTemplate.update("DELETE FROM credit_accounts WHERE user_id = 1");
+        jdbcTemplate.update("""
+                INSERT INTO credit_accounts(
+                  user_id, balance, membership_balance, gift_balance, frozen,
+                  total_granted, total_consumed, status
+                ) VALUES (1, 100, 100, 0, 0, 100, 0, 'ACTIVE')
+                """);
+
+        WorkflowRunCreated created = service.create(new CreateWorkflowRunCommand(
+                1L,
+                TOOL_CODE,
+                objectMapper.readTree("{\"operationHandlerKey\":\"comic.shot_video\",\"comicShotId\":7}"),
+                "workflow-operation-shot-7",
+                "COMIC_PROJECT",
+                null
+        ));
+
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT node_id, status FROM workflow_run_steps WHERE run_id = ?",
+                created.runId()
+        )).containsExactly(java.util.Map.of("node_id", "shot-videos", "status", "QUEUED"));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workflow_step_attempts a JOIN workflow_run_steps s ON s.id = a.step_id WHERE s.run_id = ?",
+                Integer.class,
+                created.runId()
+        )).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT params_json FROM ai_tasks WHERE id = (SELECT task_id FROM workflow_run_steps WHERE run_id = ?)",
+                String.class,
+                created.runId()
+        )).contains("comic.shot_video");
     }
 
     @Test

@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import logging
 import re
@@ -16,6 +17,7 @@ from providers import registry as provider_registry
 from handlers.digital_human_postprocessor import DigitalHumanPostprocessError, DigitalHumanPostprocessor
 from handlers.digital_human_video_handler import DigitalHumanVideoHandler
 from handlers.generated_image_persister import GeneratedImagePersister
+from handlers.generated_audio_persister import GeneratedAudioPersister
 from handlers.generated_video_persister import GeneratedVideoPersister
 from storage.asset_storage import asset_storage
 
@@ -27,6 +29,32 @@ TERMINAL_TASK_STATUSES = {"SUCCESS", "FAILED", "CANCELLED"}
 SCENE_SECONDS = 5
 MAX_SCENES = 18
 DEFAULT_EPISODE_SECONDS = 30
+
+COMIC_CHECKPOINT_KIND = "COMIC_OPERATION_V1"
+COMIC_HANDLER_KEYS = {
+    "comic.script",
+    "comic.storyboard",
+    "comic.character_reference",
+    "comic.scene_reference",
+    "comic.shot_keyframe",
+    "comic.shot_video",
+    "comic.shot_tts",
+    "comic.compose",
+}
+COMIC_HANDLER_ALIASES = {
+    "comic_script": "comic.script",
+    "comic_storyboard": "comic.storyboard",
+    "comic_character_reference": "comic.character_reference",
+    "comic_scene_reference": "comic.scene_reference",
+    "comic_shot_keyframe": "comic.shot_keyframe",
+    "comic_shot_video": "comic.shot_video",
+    "comic_shot_tts": "comic.shot_tts",
+    "comic_compose": "comic.compose",
+}
+
+
+class ComicOperationAmbiguousError(RuntimeError):
+    """The provider may already have accepted a synchronous comic operation."""
 
 
 class WorkflowStepHandler:
@@ -62,10 +90,24 @@ class WorkflowStepHandler:
             workflow_inputs = params.get("workflowInputs") or {}
             form = _merge_form(workflow_inputs)
             model_config = context.get("modelConfig") or {}
+            handler_key = _resolve_comic_handler_key(params, workflow_inputs)
 
             self.backend_client.mark_processing(task_id, progress=12, progress_message="工作流节点执行中", trace_id=trace_id)
 
-            if node_def_type in {"LLM_TEXT", "MODEL_CALL"}:
+            if handler_key:
+                output = self._run_comic_operation(
+                    handler_key=handler_key,
+                    params=params,
+                    workflow_inputs=workflow_inputs,
+                    form=form,
+                    model_config=model_config,
+                    task_id=task_id,
+                    trace_id=trace_id,
+                    provider_checkpoint=context.get("providerCheckpoint"),
+                    provider_checkpoint_version=context.get("providerCheckpointVersion"),
+                    claim_token=claim_token,
+                )
+            elif node_def_type in {"LLM_TEXT", "MODEL_CALL"}:
                 output = self._run_script_planner(form, workflow_inputs, model_config)
             elif node_def_type == "IMAGE_MODEL":
                 output = self._run_keyframe(form, workflow_inputs, model_config, task_id, trace_id)
@@ -93,11 +135,911 @@ class WorkflowStepHandler:
             }
             success_payload.update(_provider_accounting_payload(output))
             self.backend_client.mark_success(task_id, success_payload, trace_id=trace_id)
-            return {"status": "SUCCESS", "taskId": task_id, "nodeDefType": node_def_type}
+            response = {"status": "SUCCESS", "taskId": task_id, "nodeDefType": node_def_type}
+            if handler_key:
+                response["handlerKey"] = handler_key
+            return response
         except Exception as error:
             LOGGER.exception("workflow step failed taskId=%s", task_id)
             self._mark_failed_safe(task_id, error, trace_id=trace_id)
             return {"status": "FAILED", "taskId": task_id, "error": str(error)}
+
+    def _run_comic_operation(
+        self,
+        *,
+        handler_key: str,
+        params: dict[str, Any],
+        workflow_inputs: dict[str, Any],
+        form: dict[str, Any],
+        model_config: dict[str, Any],
+        task_id: int,
+        trace_id: str | None,
+        provider_checkpoint: dict[str, Any] | None,
+        provider_checkpoint_version: int | None,
+        claim_token: str | None,
+    ) -> dict[str, Any]:
+        operation_input = _comic_operation_input(params, workflow_inputs)
+        common = {
+            "operation_input": operation_input,
+            "form": form,
+            "model_config": model_config,
+            "task_id": task_id,
+            "trace_id": trace_id,
+            "provider_checkpoint": provider_checkpoint,
+            "provider_checkpoint_version": provider_checkpoint_version,
+            "claim_token": claim_token,
+        }
+        if handler_key == "comic.script":
+            return self._run_comic_script(**common)
+        if handler_key == "comic.storyboard":
+            return self._run_comic_storyboard(**common)
+        if handler_key == "comic.character_reference":
+            return self._run_comic_reference(handler_key=handler_key, asset_type="CHARACTER", **common)
+        if handler_key == "comic.scene_reference":
+            return self._run_comic_reference(handler_key=handler_key, asset_type="SCENE", **common)
+        if handler_key == "comic.shot_keyframe":
+            return self._run_comic_shot_keyframe(**common)
+        if handler_key == "comic.shot_video":
+            return self._run_comic_shot_video(**common)
+        if handler_key == "comic.shot_tts":
+            return self._run_comic_shot_tts(**common)
+        if handler_key == "comic.compose":
+            return self._run_comic_compose(**common)
+        raise RuntimeError(f"unsupported comic handlerKey: {handler_key}")
+
+    def _begin_comic_operation(
+        self,
+        *,
+        handler_key: str,
+        item_key: str,
+        operation_input: dict[str, Any],
+        model_config: dict[str, Any],
+        task_id: int,
+        trace_id: str | None,
+        provider_checkpoint: dict[str, Any] | None,
+        provider_checkpoint_version: int | None,
+        claim_token: str | None,
+        replay_started: bool = False,
+    ) -> tuple[dict[str, Any], int, dict[str, Any] | None, bool]:
+        fingerprint = _comic_input_fingerprint(handler_key, operation_input, model_config)
+        checkpoint_version = max(0, int(provider_checkpoint_version or 0))
+        existing = provider_checkpoint if isinstance(provider_checkpoint, dict) else None
+        if existing:
+            matches = (
+                existing.get("kind") == COMIC_CHECKPOINT_KIND
+                and existing.get("handlerKey") == handler_key
+                and existing.get("itemKey") == item_key
+                and existing.get("inputFingerprint") == fingerprint
+            )
+            if not matches:
+                raise ComicOperationAmbiguousError(
+                    f"comic operation checkpoint does not match current input: {handler_key}/{item_key}"
+                )
+            status = str(existing.get("status") or "").upper()
+            result = existing.get("result")
+            if status == "COMPLETED" and isinstance(result, dict):
+                return json.loads(json.dumps(existing)), checkpoint_version, result, False
+            if status == "SUBMITTED" and isinstance(existing.get("providerState"), dict):
+                return json.loads(json.dumps(existing)), checkpoint_version, None, False
+            if status == "STARTED" and replay_started:
+                return json.loads(json.dumps(existing)), checkpoint_version, None, False
+            raise ComicOperationAmbiguousError(
+                f"comic operation may already have reached provider: {handler_key}/{item_key}"
+            )
+
+        checkpoint = {
+            "kind": COMIC_CHECKPOINT_KIND,
+            "schemaVersion": 1,
+            "handlerKey": handler_key,
+            "itemKey": item_key,
+            "inputFingerprint": fingerprint,
+            "provider": str(model_config.get("provider") or ""),
+            "protocol": _provider_protocol(model_config),
+            "model": str(model_config.get("modelName") or ""),
+            "status": "STARTED",
+        }
+        checkpoint_version = self._save_comic_checkpoint(
+            task_id=task_id,
+            checkpoint=checkpoint,
+            expected_version=checkpoint_version,
+            trace_id=trace_id,
+            claim_token=claim_token,
+        )
+        return checkpoint, checkpoint_version, None, True
+
+    def _complete_comic_operation(
+        self,
+        *,
+        task_id: int,
+        checkpoint: dict[str, Any],
+        checkpoint_version: int,
+        result: dict[str, Any],
+        trace_id: str | None,
+        claim_token: str | None,
+    ) -> int:
+        checkpoint["status"] = "COMPLETED"
+        checkpoint["result"] = result
+        accounting = _provider_accounting_payload(result)
+        if accounting:
+            checkpoint["providerAccounting"] = accounting
+        return self._save_comic_checkpoint(
+            task_id=task_id,
+            checkpoint=checkpoint,
+            expected_version=checkpoint_version,
+            trace_id=trace_id,
+            claim_token=claim_token,
+        )
+
+    def _save_comic_checkpoint(
+        self,
+        *,
+        task_id: int,
+        checkpoint: dict[str, Any],
+        expected_version: int,
+        trace_id: str | None,
+        claim_token: str | None,
+    ) -> int:
+        saved = self.backend_client.save_provider_checkpoint(
+            task_id,
+            checkpoint,
+            expected_version=expected_version,
+            trace_id=trace_id,
+            claim_token=claim_token,
+        )
+        return int(saved.get("version") or expected_version + 1)
+
+    def _run_comic_script(
+        self,
+        *,
+        operation_input: dict[str, Any],
+        form: dict[str, Any],
+        model_config: dict[str, Any],
+        task_id: int,
+        trace_id: str | None,
+        provider_checkpoint: dict[str, Any] | None,
+        provider_checkpoint_version: int | None,
+        claim_token: str | None,
+    ) -> dict[str, Any]:
+        script_payload = _comic_script_payload(operation_input)
+        imported_text = _comic_script_text(script_payload)
+        requested_version_id = str(
+            script_payload.get("scriptVersionId")
+            or script_payload.get("versionId")
+            or operation_input.get("scriptVersionId")
+            or ""
+        ).strip()
+        if imported_text:
+            script_version_id = requested_version_id or f"script:{_short_hash(imported_text)}"
+            normalized = {
+                **script_payload,
+                "scriptVersionId": script_version_id,
+                "title": str(script_payload.get("title") or operation_input.get("title") or "导入剧本"),
+                "screenplay": imported_text,
+                "sourceMode": str(script_payload.get("sourceMode") or operation_input.get("sourceMode") or "IMPORT"),
+            }
+            return {
+                "handlerKey": "comic.script",
+                "itemKey": script_version_id,
+                "scriptVersionId": script_version_id,
+                "script": normalized,
+                "screenplay": imported_text,
+            }
+
+        item_key = requested_version_id or str(operation_input.get("projectId") or "script")
+        checkpoint, checkpoint_version, cached, _ = self._begin_comic_operation(
+            handler_key="comic.script",
+            item_key=item_key,
+            operation_input=operation_input,
+            model_config=model_config,
+            task_id=task_id,
+            trace_id=trace_id,
+            provider_checkpoint=provider_checkpoint,
+            provider_checkpoint_version=provider_checkpoint_version,
+            claim_token=claim_token,
+        )
+        if cached is not None:
+            return cached
+        script_form = {**form}
+        for key in (
+            "storyTheme",
+            "plotOutline",
+            "visualStyle",
+            "genre",
+            "episodeLength",
+            "episodeDuration",
+        ):
+            if operation_input.get(key) is not None:
+                script_form[key] = operation_input[key]
+        prompt = _build_comic_script_prompt(script_form)
+        parsed: dict[str, Any] | None = None
+        errors: list[str] = []
+        previous = ""
+        for attempt in range(2):
+            attempt_prompt = prompt
+            if attempt:
+                attempt_prompt += (
+                    "\n上一次输出不符合完整剧本 JSON 契约，请完整重写。"
+                    f"\n错误：{'；'.join(errors)}\n上一次输出：{previous[:12000]}"
+                )
+            previous = self.model_client.generate(
+                attempt_prompt,
+                system_prompt="你是专业漫剧编剧。只输出合法 JSON，不要 Markdown，不要提前拆分镜头。",
+                provider=model_config.get("provider"),
+                model_name=model_config.get("modelName"),
+                base_url=model_config.get("baseUrl"),
+                api_key=model_config.get("apiKey"),
+                timeout_seconds=max(180, int(model_config.get("timeoutSeconds") or 0)),
+                max_tokens=12000,
+            )
+            parsed = _extract_json(previous)
+            errors = _comic_script_errors(parsed)
+            if not errors:
+                break
+        if parsed is None or errors:
+            raise ModelClientError("剧本模型连续两次未返回有效结构: " + "；".join(errors or ["无法解析 JSON"]))
+        generated = {
+            **parsed,
+            "characters": _normalize_assets(parsed.get("characters"), "character"),
+            "props": _normalize_assets(parsed.get("props"), "prop"),
+            "locations": _normalize_assets(parsed.get("locations"), "location"),
+        }
+        script_version_id = requested_version_id or f"script:{_short_hash(generated.get('screenplay') or '')}"
+        script = {
+            key: generated.get(key)
+            for key in ("title", "synopsis", "screenplay", "genre", "characters", "props", "locations")
+        }
+        script.update({"scriptVersionId": script_version_id, "sourceMode": "GENERATED"})
+        result = {
+            "handlerKey": "comic.script",
+            "itemKey": script_version_id,
+            "scriptVersionId": script_version_id,
+            "script": script,
+            "screenplay": script.get("screenplay") or "",
+            "providerCalls": [_comic_provider_call("comic.script", script_version_id, model_config, generated)],
+        }
+        self._complete_comic_operation(
+            task_id=task_id,
+            checkpoint=checkpoint,
+            checkpoint_version=checkpoint_version,
+            result=result,
+            trace_id=trace_id,
+            claim_token=claim_token,
+        )
+        return result
+
+    def _run_comic_storyboard(
+        self,
+        *,
+        operation_input: dict[str, Any],
+        form: dict[str, Any],
+        model_config: dict[str, Any],
+        task_id: int,
+        trace_id: str | None,
+        provider_checkpoint: dict[str, Any] | None,
+        provider_checkpoint_version: int | None,
+        claim_token: str | None,
+    ) -> dict[str, Any]:
+        direct_storyboard = _comic_storyboard_payload(operation_input)
+        if direct_storyboard:
+            return _normalize_comic_storyboard(direct_storyboard, form=form)
+
+        script_payload = _comic_script_payload(operation_input)
+        script_text = _comic_script_text(script_payload)
+        if not script_text:
+            raise ModelClientError("comic.storyboard requires script text or a structured storyboard")
+        item_key = str(
+            script_payload.get("scriptVersionId")
+            or script_payload.get("versionId")
+            or operation_input.get("scriptVersionId")
+            or "script"
+        )
+        checkpoint, checkpoint_version, cached, _ = self._begin_comic_operation(
+            handler_key="comic.storyboard",
+            item_key=item_key,
+            operation_input=operation_input,
+            model_config=model_config,
+            task_id=task_id,
+            trace_id=trace_id,
+            provider_checkpoint=provider_checkpoint,
+            provider_checkpoint_version=provider_checkpoint_version,
+            claim_token=claim_token,
+        )
+        if cached is not None:
+            return cached
+
+        requested_shots = _positive_int(
+            operation_input.get("shotCount") or operation_input.get("targetShotCount"),
+            fallback=_resolve_scene_count(form),
+            maximum=60,
+        )
+        prompt = _build_comic_storyboard_prompt(
+            script_text=script_text,
+            shot_count=requested_shots,
+            visual_style=str(operation_input.get("visualStyle") or form.get("visualStyle") or "电影感漫剧"),
+        )
+        parsed: dict[str, Any] | None = None
+        errors: list[str] = []
+        previous = ""
+        for attempt in range(2):
+            attempt_prompt = prompt
+            if attempt:
+                attempt_prompt += (
+                    "\n上一次输出不符合分镜 JSON 契约，请完整重写。"
+                    f"\n错误：{'；'.join(errors)}\n上一次输出：{previous[:12000]}"
+                )
+            previous = self.model_client.generate(
+                attempt_prompt,
+                system_prompt="你是专业漫剧分镜导演。只输出合法 JSON，不要 Markdown。",
+                provider=model_config.get("provider"),
+                model_name=model_config.get("modelName"),
+                base_url=model_config.get("baseUrl"),
+                api_key=model_config.get("apiKey"),
+                timeout_seconds=max(180, int(model_config.get("timeoutSeconds") or 0)),
+                max_tokens=min(16000, max(5000, 700 * requested_shots)),
+            )
+            parsed = _extract_json(previous)
+            errors = _comic_storyboard_errors(parsed)
+            if not errors:
+                break
+        if parsed is None or errors:
+            raise ModelClientError("分镜模型连续两次未返回有效结构: " + "；".join(errors or ["无法解析 JSON"]))
+
+        result = _normalize_comic_storyboard(parsed, form=form)
+        result["handlerKey"] = "comic.storyboard"
+        result["scriptVersionId"] = item_key
+        result["providerCalls"] = [
+            _comic_provider_call("comic.storyboard", item_key, model_config, result)
+        ]
+        self._complete_comic_operation(
+            task_id=task_id,
+            checkpoint=checkpoint,
+            checkpoint_version=checkpoint_version,
+            result=result,
+            trace_id=trace_id,
+            claim_token=claim_token,
+        )
+        return result
+
+    def _run_comic_reference(
+        self,
+        *,
+        handler_key: str,
+        asset_type: str,
+        operation_input: dict[str, Any],
+        form: dict[str, Any],
+        model_config: dict[str, Any],
+        task_id: int,
+        trace_id: str | None,
+        provider_checkpoint: dict[str, Any] | None,
+        provider_checkpoint_version: int | None,
+        claim_token: str | None,
+    ) -> dict[str, Any]:
+        asset = _comic_asset_payload(operation_input, asset_type)
+        asset_id = str(asset.get("assetId") or asset.get("id") or "").strip()
+        if not asset_id:
+            raise RuntimeError(f"{handler_key} requires assetId")
+        asset_version_id = str(
+            asset.get("assetVersionId")
+            or asset.get("versionId")
+            or operation_input.get("assetVersionId")
+            or f"{asset_id}:v1"
+        ).strip()
+        checkpoint, checkpoint_version, cached, _ = self._begin_comic_operation(
+            handler_key=handler_key,
+            item_key=asset_version_id,
+            operation_input=operation_input,
+            model_config=model_config,
+            task_id=task_id,
+            trace_id=trace_id,
+            provider_checkpoint=provider_checkpoint,
+            provider_checkpoint_version=provider_checkpoint_version,
+            claim_token=claim_token,
+        )
+        if cached is not None:
+            return cached
+
+        spec = {
+            "assetType": "location" if asset_type == "SCENE" else "character",
+            "assetId": asset_id,
+            "name": str(asset.get("name") or asset.get("title") or asset_id),
+            "description": str(
+                asset.get("appearance")
+                or asset.get("description")
+                or asset.get("visualDescription")
+                or ""
+            ),
+        }
+        prompt = _build_three_view_reference_prompt(spec, {**form, **operation_input})
+        generator = _resolve_image_generator(model_config)
+        source_url = generator(prompt, reference_images=[])
+        if not source_url:
+            raise RuntimeError(f"{handler_key} returned no image")
+        persisted = GeneratedImagePersister().persist_images(task_id=task_id, urls=[source_url])
+        image_url = persisted[0]["url"] if persisted else source_url
+        view_role = "three_view_board" if asset_type == "CHARACTER" else "scene_anchor_board"
+        asset_version = {
+            "assetId": asset_id,
+            "assetType": asset_type,
+            "assetVersionId": asset_version_id,
+            "status": "GENERATED",
+            "views": [{"role": view_role, "url": image_url}],
+            "referenceImages": [image_url],
+            "prompt": prompt,
+            "modelSnapshot": _comic_model_snapshot(model_config),
+        }
+        result = {
+            "handlerKey": handler_key,
+            "itemKey": asset_version_id,
+            "referenceAssetVersion": asset_version,
+            "referenceAssetVersions": [asset_version],
+            "providerCalls": [_comic_provider_call(handler_key, asset_version_id, model_config, {})],
+        }
+        self._complete_comic_operation(
+            task_id=task_id,
+            checkpoint=checkpoint,
+            checkpoint_version=checkpoint_version,
+            result=result,
+            trace_id=trace_id,
+            claim_token=claim_token,
+        )
+        return result
+
+    def _run_comic_shot_keyframe(
+        self,
+        *,
+        operation_input: dict[str, Any],
+        form: dict[str, Any],
+        model_config: dict[str, Any],
+        task_id: int,
+        trace_id: str | None,
+        provider_checkpoint: dict[str, Any] | None,
+        provider_checkpoint_version: int | None,
+        claim_token: str | None,
+    ) -> dict[str, Any]:
+        shot = _comic_shot_payload(operation_input)
+        shot_id = str(shot.get("shotId") or "").strip()
+        shot_version_id = str(shot.get("shotVersionId") or "").strip()
+        if not shot_id or not shot_version_id:
+            raise RuntimeError("comic.shot_keyframe requires shotId and shotVersionId")
+        reference_images, reference_version_ids = _comic_reference_images_for_shot(operation_input, shot)
+        checkpoint, checkpoint_version, cached, _ = self._begin_comic_operation(
+            handler_key="comic.shot_keyframe",
+            item_key=shot_version_id,
+            operation_input=operation_input,
+            model_config=model_config,
+            task_id=task_id,
+            trace_id=trace_id,
+            provider_checkpoint=provider_checkpoint,
+            provider_checkpoint_version=provider_checkpoint_version,
+            claim_token=claim_token,
+        )
+        if cached is not None:
+            return cached
+
+        prompt = _build_comic_shot_image_prompt(shot, form)
+        generator = _resolve_image_generator(model_config)
+        source_url = generator(prompt, reference_images=reference_images)
+        if not source_url:
+            raise RuntimeError("comic.shot_keyframe returned no image")
+        persisted = GeneratedImagePersister().persist_images(task_id=task_id, urls=[source_url])
+        image_url = persisted[0]["url"] if persisted else source_url
+        keyframe_version_id = str(
+            operation_input.get("keyframeVersionId")
+            or f"{shot_version_id}:keyframe:{_short_hash(prompt)}"
+        )
+        keyframe_version = {
+            "shotId": shot_id,
+            "shotVersionId": shot_version_id,
+            "keyframeVersionId": keyframe_version_id,
+            "imageUrl": image_url,
+            "referenceAssetVersionIds": reference_version_ids,
+            "referenceImages": reference_images,
+            "prompt": prompt,
+            "modelSnapshot": _comic_model_snapshot(model_config),
+        }
+        result = {
+            "handlerKey": "comic.shot_keyframe",
+            "itemKey": shot_version_id,
+            "shotId": shot_id,
+            "shotVersionId": shot_version_id,
+            "keyframeVersion": keyframe_version,
+            "imageUrl": image_url,
+            "referenceImages": reference_images,
+            "providerCalls": [
+                _comic_provider_call("comic.shot_keyframe", shot_version_id, model_config, {})
+            ],
+        }
+        self._complete_comic_operation(
+            task_id=task_id,
+            checkpoint=checkpoint,
+            checkpoint_version=checkpoint_version,
+            result=result,
+            trace_id=trace_id,
+            claim_token=claim_token,
+        )
+        return result
+
+    def _run_comic_shot_video(
+        self,
+        *,
+        operation_input: dict[str, Any],
+        form: dict[str, Any],
+        model_config: dict[str, Any],
+        task_id: int,
+        trace_id: str | None,
+        provider_checkpoint: dict[str, Any] | None,
+        provider_checkpoint_version: int | None,
+        claim_token: str | None,
+    ) -> dict[str, Any]:
+        shot = _comic_shot_payload(operation_input)
+        shot_id = str(shot.get("shotId") or "").strip()
+        shot_version_id = str(shot.get("shotVersionId") or "").strip()
+        if not shot_id or not shot_version_id:
+            raise RuntimeError("comic.shot_video requires shotId and shotVersionId")
+        keyframe = _comic_keyframe_payload(operation_input, shot_id)
+        image_url = str(keyframe.get("imageUrl") or keyframe.get("url") or "").strip()
+        keyframe_version_id = str(keyframe.get("keyframeVersionId") or "").strip()
+        if not image_url or not keyframe_version_id:
+            raise SeedanceVideoError("comic.shot_video requires a selected keyframe version")
+
+        reference_images, reference_version_ids = _comic_reference_images_for_shot(operation_input, shot)
+        reference_images = _dedupe([
+            *reference_images,
+            *_as_string_list(keyframe.get("referenceImages")),
+        ])
+        item_key = f"{shot_version_id}@{keyframe_version_id}"
+        checkpoint, checkpoint_version, cached, created = self._begin_comic_operation(
+            handler_key="comic.shot_video",
+            item_key=item_key,
+            operation_input=operation_input,
+            model_config=model_config,
+            task_id=task_id,
+            trace_id=trace_id,
+            provider_checkpoint=provider_checkpoint,
+            provider_checkpoint_version=provider_checkpoint_version,
+            claim_token=claim_token,
+        )
+        if cached is not None:
+            return cached
+
+        provider_state = checkpoint.get("providerState")
+        resume = provider_state if not created and isinstance(provider_state, dict) else None
+        generator = _resolve_video_generator(model_config)
+        prompt = _build_comic_shot_video_prompt(shot, form)
+        duration_seconds = _comic_shot_duration_seconds(shot)
+        aspect_ratio = str(operation_input.get("aspectRatio") or form.get("aspectRatio") or "16:9")
+
+        def submitted_callback(submission: dict[str, Any]) -> None:
+            nonlocal checkpoint_version
+            checkpoint["status"] = "SUBMITTED"
+            checkpoint["providerState"] = {
+                **(provider_state if isinstance(provider_state, dict) else {}),
+                **(submission or {}),
+            }
+            checkpoint_version = self._save_comic_checkpoint(
+                task_id=task_id,
+                checkpoint=checkpoint,
+                expected_version=checkpoint_version,
+                trace_id=trace_id,
+                claim_token=claim_token,
+            )
+
+        result_from_provider = generator(
+            prompt=prompt,
+            image=image_url,
+            reference_images=reference_images,
+            duration=duration_seconds,
+            aspect_ratio=aspect_ratio,
+            resume=resume,
+            submitted_callback=submitted_callback,
+        )
+        provider_video_url = str(result_from_provider.get("videoUrl") or "").strip()
+        if not provider_video_url:
+            raise SeedanceVideoError("comic.shot_video returned no video")
+        persisted = GeneratedVideoPersister().persist_video_url(
+            task_id=task_id,
+            source_url=provider_video_url,
+            index=1,
+        )
+        accounting = _provider_accounting_payload({
+            **(checkpoint.get("providerState") or {}),
+            **result_from_provider,
+        })
+        clip_version_id = str(
+            operation_input.get("clipVersionId")
+            or f"{shot_version_id}:clip:{_short_hash(keyframe_version_id + prompt)}"
+        )
+        clip_version = {
+            "shotId": shot_id,
+            "shotVersionId": shot_version_id,
+            "keyframeVersionId": keyframe_version_id,
+            "clipVersionId": clip_version_id,
+            "videoUrl": persisted["url"],
+            "sourceVideoUrl": provider_video_url,
+            "durationSeconds": duration_seconds,
+            "referenceAssetVersionIds": reference_version_ids,
+            "referenceImages": reference_images,
+            "prompt": prompt,
+            "modelSnapshot": _comic_model_snapshot(model_config),
+            **accounting,
+        }
+        result = {
+            "handlerKey": "comic.shot_video",
+            "itemKey": item_key,
+            "shotId": shot_id,
+            "shotVersionId": shot_version_id,
+            "clipVersion": clip_version,
+            "videoUrl": clip_version["videoUrl"],
+            "sourceVideoUrl": provider_video_url,
+            "providerCalls": [
+                _comic_provider_call("comic.shot_video", item_key, model_config, clip_version)
+            ],
+        }
+        if accounting:
+            result["providerAccounting"] = accounting
+        else:
+            result["providerAccounting"] = {
+                "status": "UNKNOWN",
+                "reason": "PROVIDER_DID_NOT_REPORT_ITEMIZED_ACCOUNTING",
+                "providerCallCount": 1,
+            }
+        checkpoint["providerState"] = {
+            **(checkpoint.get("providerState") or {}),
+            "requestId": (
+                result_from_provider.get("requestId")
+                or (checkpoint.get("providerState") or {}).get("requestId")
+            ),
+        }
+        self._complete_comic_operation(
+            task_id=task_id,
+            checkpoint=checkpoint,
+            checkpoint_version=checkpoint_version,
+            result=result,
+            trace_id=trace_id,
+            claim_token=claim_token,
+        )
+        return result
+
+    def _run_comic_shot_tts(
+        self,
+        *,
+        operation_input: dict[str, Any],
+        form: dict[str, Any],
+        model_config: dict[str, Any],
+        task_id: int,
+        trace_id: str | None,
+        provider_checkpoint: dict[str, Any] | None,
+        provider_checkpoint_version: int | None,
+        claim_token: str | None,
+    ) -> dict[str, Any]:
+        shot = _comic_shot_payload(operation_input)
+        shot_id = str(shot.get("shotId") or "").strip()
+        shot_version_id = str(shot.get("shotVersionId") or "").strip()
+        if not shot_id or not shot_version_id:
+            raise RuntimeError("comic.shot_tts requires shotId and shotVersionId")
+        audio = shot.get("audio") if isinstance(shot.get("audio"), dict) else {}
+        speech_text = str(
+            audio.get("dialogue")
+            or shot.get("dialogue")
+            or audio.get("narration")
+            or shot.get("narration")
+            or ""
+        ).strip()
+        if not speech_text:
+            return {
+                "handlerKey": "comic.shot_tts",
+                "itemKey": shot_version_id,
+                "shotId": shot_id,
+                "shotVersionId": shot_version_id,
+                "skipped": True,
+                "reason": "SHOT_HAS_NO_SPEECH",
+                "audioVersion": None,
+            }
+
+        checkpoint, checkpoint_version, cached, _ = self._begin_comic_operation(
+            handler_key="comic.shot_tts",
+            item_key=shot_version_id,
+            operation_input=operation_input,
+            model_config=model_config,
+            task_id=task_id,
+            trace_id=trace_id,
+            provider_checkpoint=provider_checkpoint,
+            provider_checkpoint_version=provider_checkpoint_version,
+            claim_token=claim_token,
+        )
+        if cached is not None:
+            return cached
+
+        presenter_gender = str(
+            audio.get("speakerGender")
+            or shot.get("presenterGender")
+            or DigitalHumanVideoHandler._resolve_presenter_gender(form)
+        )
+        voice = str(
+            operation_input.get("voice")
+            or audio.get("voiceId")
+            or DigitalHumanVideoHandler._resolve_voice(form, presenter_gender)
+        )
+        client = SiliconFlowVideoClient(
+            api_key=resolve_siliconflow_api_key(model_config),
+            base_url=model_config.get("baseUrl"),
+        )
+        audio_data_url = client.generate_speech_data_url(
+            input_text=speech_text,
+            model=model_config.get("modelName"),
+            voice=voice,
+        )
+        persisted = GeneratedAudioPersister().persist_audio_url(
+            task_id=task_id,
+            source_url=audio_data_url,
+            index=1,
+        )
+        audio_version_id = str(
+            operation_input.get("audioVersionId")
+            or f"{shot_version_id}:audio:{_short_hash(voice + speech_text)}"
+        )
+        audio_version = {
+            "shotId": shot_id,
+            "shotVersionId": shot_version_id,
+            "audioVersionId": audio_version_id,
+            "audioUrl": persisted["url"],
+            "speechText": speech_text,
+            "voice": voice,
+            "modelSnapshot": _comic_model_snapshot(model_config),
+        }
+        result = {
+            "handlerKey": "comic.shot_tts",
+            "itemKey": shot_version_id,
+            "shotId": shot_id,
+            "shotVersionId": shot_version_id,
+            "audioVersion": audio_version,
+            "audioUrl": audio_version["audioUrl"],
+            "speechText": speech_text,
+            "voice": voice,
+            "providerCalls": [_comic_provider_call("comic.shot_tts", shot_version_id, model_config, {})],
+        }
+        self._complete_comic_operation(
+            task_id=task_id,
+            checkpoint=checkpoint,
+            checkpoint_version=checkpoint_version,
+            result=result,
+            trace_id=trace_id,
+            claim_token=claim_token,
+        )
+        return result
+
+    def _run_comic_compose(
+        self,
+        *,
+        operation_input: dict[str, Any],
+        form: dict[str, Any],
+        model_config: dict[str, Any],
+        task_id: int,
+        trace_id: str | None,
+        provider_checkpoint: dict[str, Any] | None,
+        provider_checkpoint_version: int | None,
+        claim_token: str | None,
+    ) -> dict[str, Any]:
+        selected = _comic_selected_shot_versions(operation_input)
+        manifest_key = str(
+            operation_input.get("compositionVersionId")
+            or "compose:"
+            + _short_hash(
+                "|".join(
+                    f"{item['shotVersionId']}@{item['clipVersionId']}@{item.get('audioVersionId') or ''}"
+                    for item in selected
+                )
+            )
+        )
+        checkpoint, checkpoint_version, cached, _ = self._begin_comic_operation(
+            handler_key="comic.compose",
+            item_key=manifest_key,
+            operation_input=operation_input,
+            model_config=model_config,
+            task_id=task_id,
+            trace_id=trace_id,
+            provider_checkpoint=provider_checkpoint,
+            provider_checkpoint_version=provider_checkpoint_version,
+            claim_token=claim_token,
+            replay_started=True,
+        )
+        if cached is not None:
+            return cached
+
+        segment_paths = []
+        segments: list[dict[str, Any]] = []
+        total = len(selected)
+        for position, item in enumerate(selected, start=1):
+            self.backend_client.mark_processing(
+                task_id,
+                progress=70 + int(20 * position / max(total, 1)),
+                progress_message=f"正在合成已选镜头 {position}/{total}",
+                trace_id=trace_id,
+            )
+            segment = self.postprocessor.process(
+                task_id=task_id,
+                video_url=item["videoUrl"],
+                audio_url=item.get("audioUrl") or "",
+                subtitle_text=item.get("subtitleZh") or "",
+                segment=f"shot-{position}-{_safe_segment_name(item['shotId'])}",
+            )
+            segment_paths.append(segment.video_path)
+            segments.append(
+                {
+                    **item,
+                    "renderedVideoUrl": segment.video_url,
+                    "subtitleUrl": segment.subtitle_url,
+                }
+            )
+
+        if total > 1:
+            self.backend_client.mark_processing(
+                task_id,
+                progress=94,
+                progress_message="正在拼接已选镜头版本",
+                trace_id=trace_id,
+            )
+            _, final_video_url = self.postprocessor.concat_videos(
+                task_id=task_id,
+                video_paths=segment_paths,
+                output_name="comic-final.mp4",
+            )
+        else:
+            final_video_url = segments[0]["renderedVideoUrl"]
+
+        title = str(operation_input.get("title") or form.get("storyTheme") or "AI 漫剧成片")
+        markdown = _build_delivery_markdown(
+            title=title,
+            final_video_url=final_video_url,
+            subtitle_zh=segments[0].get("subtitleZh") or "",
+            subtitle_en=segments[0].get("subtitleEn") or "",
+            image_url=segments[0].get("keyframeImageUrl") or None,
+            scenes=[
+                {
+                    "index": item["order"],
+                    "subtitleZh": item.get("subtitleZh") or "",
+                    "subtitleEn": item.get("subtitleEn") or "",
+                }
+                for item in segments
+            ] if total > 1 else None,
+        )
+        manifest = {
+            "compositionVersionId": manifest_key,
+            "selectedShotVersions": [
+                {
+                    key: item.get(key)
+                    for key in (
+                        "shotId",
+                        "shotVersionId",
+                        "order",
+                        "clipVersionId",
+                        "audioVersionId",
+                    )
+                }
+                for item in selected
+            ],
+            "finalVideoUrl": final_video_url,
+        }
+        result = {
+            "handlerKey": "comic.compose",
+            "itemKey": manifest_key,
+            "compositionManifest": manifest,
+            "finalVideoUrl": final_video_url,
+            "videoUrl": final_video_url,
+            "subtitleUrl": segments[0]["subtitleUrl"],
+            "segments": segments,
+            "shotCount": total,
+            "markdown": markdown,
+        }
+        self._complete_comic_operation(
+            task_id=task_id,
+            checkpoint=checkpoint,
+            checkpoint_version=checkpoint_version,
+            result=result,
+            trace_id=trace_id,
+            claim_token=claim_token,
+        )
+        return result
 
     def _run_script_planner(self, form: dict[str, Any], workflow_inputs: dict[str, Any], model_config: dict[str, Any]) -> dict[str, Any]:
         story_theme = form.get("storyTheme") or "温情漫剧"
@@ -623,6 +1565,639 @@ class WorkflowStepHandler:
             raise
 
 
+def _resolve_comic_handler_key(
+    params: dict[str, Any],
+    workflow_inputs: dict[str, Any],
+) -> str | None:
+    containers = [
+        params,
+        params.get("parameters") if isinstance(params.get("parameters"), dict) else {},
+        workflow_inputs.get("parameters") if isinstance(workflow_inputs.get("parameters"), dict) else {},
+    ]
+    for container in containers:
+        raw = container.get("handlerKey") or container.get("operation")
+        if raw is None:
+            continue
+        normalized = str(raw).strip().lower()
+        normalized = COMIC_HANDLER_ALIASES.get(normalized, normalized)
+        if normalized in COMIC_HANDLER_KEYS:
+            return normalized
+        if normalized.startswith("comic.") or normalized.startswith("comic_"):
+            raise RuntimeError(f"unsupported comic handlerKey: {raw}")
+    return None
+
+
+def _comic_operation_input(
+    params: dict[str, Any],
+    workflow_inputs: dict[str, Any],
+) -> dict[str, Any]:
+    parameter_block = params.get("parameters") if isinstance(params.get("parameters"), dict) else {}
+    for container in (params, parameter_block, workflow_inputs):
+        for key in ("operationInput", "comicInput", "item"):
+            value = container.get(key) if isinstance(container, dict) else None
+            if isinstance(value, dict):
+                return value
+    return workflow_inputs if isinstance(workflow_inputs, dict) else {}
+
+
+def _comic_input_fingerprint(
+    handler_key: str,
+    operation_input: dict[str, Any],
+    model_config: dict[str, Any],
+) -> str:
+    payload = {
+        "handlerKey": handler_key,
+        "operationInput": operation_input,
+        "model": _comic_model_snapshot(model_config),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _comic_model_snapshot(model_config: dict[str, Any]) -> dict[str, str]:
+    return {
+        "provider": str(model_config.get("provider") or ""),
+        "protocol": _provider_protocol(model_config),
+        "model": str(model_config.get("modelName") or ""),
+        "baseUrl": str(model_config.get("baseUrl") or ""),
+    }
+
+
+def _short_hash(value: Any) -> str:
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def _find_named_value(value: Any, names: tuple[str, ...]) -> Any:
+    if isinstance(value, dict):
+        for name in names:
+            if name in value and value[name] is not None:
+                return value[name]
+        for nested in value.values():
+            found = _find_named_value(nested, names)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for nested in value:
+            found = _find_named_value(nested, names)
+            if found is not None:
+                return found
+    return None
+
+
+def _find_named_dict(value: Any, names: tuple[str, ...]) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        for name in names:
+            nested = value.get(name)
+            if isinstance(nested, dict):
+                return nested
+        for nested in value.values():
+            found = _find_named_dict(nested, names)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for nested in value:
+            found = _find_named_dict(nested, names)
+            if found is not None:
+                return found
+    return None
+
+
+def _collect_named_list_items(value: Any, names: tuple[str, ...]) -> list[Any]:
+    collected: list[Any] = []
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if key in names and isinstance(nested, list):
+                collected.extend(nested)
+            else:
+                collected.extend(_collect_named_list_items(nested, names))
+    elif isinstance(value, list):
+        for nested in value:
+            collected.extend(_collect_named_list_items(nested, names))
+    return collected
+
+
+def _comic_script_payload(operation_input: dict[str, Any]) -> dict[str, Any]:
+    value = _find_named_dict(operation_input, ("script", "scriptVersion"))
+    if value is not None:
+        return value
+    if isinstance(value, str) and value.strip():
+        return {"text": value.strip()}
+    if any(operation_input.get(key) is not None for key in ("scriptText", "screenplay", "rawText")):
+        return operation_input
+    return {}
+
+
+def _comic_script_text(script_payload: dict[str, Any]) -> str:
+    for key in ("screenplay", "text", "scriptText", "rawText", "content"):
+        value = script_payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _positive_int(value: Any, *, fallback: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = fallback
+    return max(1, min(parsed, maximum))
+
+
+def _comic_provider_call(
+    handler_key: str,
+    item_key: str,
+    model_config: dict[str, Any],
+    source: dict[str, Any],
+) -> dict[str, Any]:
+    call = {
+        "handlerKey": handler_key,
+        "itemKey": item_key,
+        "status": "COMPLETED",
+        **_comic_model_snapshot(model_config),
+    }
+    call.update(_provider_accounting_payload(source))
+    if "providerRequestId" not in call:
+        call["accountingStatus"] = "UNKNOWN"
+    return call
+
+
+def _comic_storyboard_payload(operation_input: dict[str, Any]) -> dict[str, Any] | None:
+    value = _find_named_value(operation_input, ("storyboard", "storyboardVersion"))
+    if isinstance(value, dict) and isinstance(value.get("shots") or value.get("scenes"), list):
+        return value
+    if isinstance(operation_input.get("shots") or operation_input.get("scenes"), list):
+        return operation_input
+    return None
+
+
+def _comic_storyboard_errors(value: dict[str, Any] | None) -> list[str]:
+    if not isinstance(value, dict):
+        return ["无法解析 JSON 对象"]
+    shots = value.get("shots") or value.get("scenes")
+    if not isinstance(shots, list) or not shots:
+        return ["shots 必须是非空数组"]
+    errors: list[str] = []
+    seen_ids: set[str] = set()
+    for index, raw in enumerate(shots, start=1):
+        if not isinstance(raw, dict):
+            errors.append(f"分镜{index}不是对象")
+            continue
+        shot_id = str(raw.get("shotId") or raw.get("id") or f"shot-{index:03}").strip()
+        if shot_id in seen_ids:
+            errors.append(f"分镜 ID 重复: {shot_id}")
+        seen_ids.add(shot_id)
+        description = str(raw.get("visualDescription") or raw.get("sceneDescription") or "").strip()
+        if not description:
+            errors.append(f"分镜{index}缺少 visualDescription")
+    return errors
+
+
+def _normalize_comic_storyboard(
+    payload: dict[str, Any],
+    *,
+    form: dict[str, Any],
+) -> dict[str, Any]:
+    nested = payload.get("storyboard") if isinstance(payload.get("storyboard"), dict) else payload
+    raw_shots = nested.get("shots") or nested.get("scenes")
+    if not isinstance(raw_shots, list) or not raw_shots:
+        raise ModelClientError("storyboard shots must be a non-empty array")
+    shots: list[dict[str, Any]] = []
+    cursor_ms = 0
+    seen_ids: set[str] = set()
+    for index, raw in enumerate(raw_shots, start=1):
+        if not isinstance(raw, dict):
+            raise ModelClientError(f"storyboard shot {index} must be an object")
+        shot = _normalize_comic_shot(raw, index=index, cursor_ms=cursor_ms)
+        if shot["shotId"] in seen_ids:
+            raise ModelClientError(f"duplicate storyboard shotId: {shot['shotId']}")
+        seen_ids.add(shot["shotId"])
+        shots.append(shot)
+        cursor_ms = shot["timecode"]["endMs"]
+    source_version = str(
+        nested.get("storyboardVersionId")
+        or payload.get("storyboardVersionId")
+        or ""
+    ).strip()
+    version_id = source_version or f"storyboard:{_short_hash(shots)}"
+    return {
+        "handlerKey": "comic.storyboard",
+        "storyboardVersionId": version_id,
+        "title": str(nested.get("title") or payload.get("title") or form.get("storyTheme") or "AI 漫剧"),
+        "shotCount": len(shots),
+        "durationMs": shots[-1]["timecode"]["endMs"],
+        "shots": shots,
+    }
+
+
+def _normalize_comic_shot(raw: dict[str, Any], *, index: int, cursor_ms: int) -> dict[str, Any]:
+    shot_id = str(raw.get("shotId") or raw.get("id") or f"shot-{index:03}").strip()
+    shot_version_id = str(raw.get("shotVersionId") or raw.get("versionId") or f"{shot_id}:v1").strip()
+    timecode = raw.get("timecode") if isinstance(raw.get("timecode"), dict) else {}
+    start_ms = _int_or_none(timecode.get("startMs") if timecode else raw.get("startMs"))
+    end_ms = _int_or_none(timecode.get("endMs") if timecode else raw.get("endMs"))
+    duration_ms = _int_or_none(
+        timecode.get("targetDurationMs")
+        if timecode
+        else raw.get("targetDurationMs") or raw.get("durationMs")
+    )
+    if duration_ms is None:
+        seconds = _float_or_none(raw.get("durationSeconds"))
+        if seconds is not None:
+            duration_ms = max(1, int(round(seconds * 1000)))
+    start_ms = max(0, start_ms if start_ms is not None else cursor_ms)
+    if duration_ms is None and end_ms is not None and end_ms > start_ms:
+        duration_ms = end_ms - start_ms
+    duration_ms = max(1, duration_ms or SCENE_SECONDS * 1000)
+    end_ms = max(start_ms + 1, end_ms if end_ms is not None else start_ms + duration_ms)
+
+    camera_raw = raw.get("camera") if isinstance(raw.get("camera"), dict) else {}
+    performance_raw = raw.get("performance") if isinstance(raw.get("performance"), dict) else {}
+    audio_raw = raw.get("audio") if isinstance(raw.get("audio"), dict) else {}
+    prompts_raw = raw.get("prompts") if isinstance(raw.get("prompts"), dict) else {}
+    references_raw = raw.get("references") if isinstance(raw.get("references"), dict) else {}
+    visual_description = str(
+        raw.get("visualDescription")
+        or raw.get("sceneDescription")
+        or prompts_raw.get("image")
+        or ""
+    ).strip()
+    if not visual_description:
+        raise ModelClientError(f"storyboard shot {index} requires visualDescription")
+    dialogue = str(audio_raw.get("dialogue") if "dialogue" in audio_raw else raw.get("dialogue") or "")
+    narration = str(audio_raw.get("narration") if "narration" in audio_raw else raw.get("narration") or "")
+    subtitle_zh = str(audio_raw.get("subtitleZh") or raw.get("subtitleZh") or dialogue or narration)
+    subtitle_en = str(audio_raw.get("subtitleEn") or raw.get("subtitleEn") or "")
+    references = {
+        **references_raw,
+        "characterVersionIds": _dedupe(
+            _as_string_list(references_raw.get("characterVersionIds"))
+            + _as_string_list(raw.get("characterVersionIds"))
+        ),
+        "sceneVersionIds": _dedupe(
+            _as_string_list(references_raw.get("sceneVersionIds") or references_raw.get("sceneVersionId"))
+            + _as_string_list(raw.get("sceneVersionIds") or raw.get("sceneVersionId"))
+        ),
+        "propVersionIds": _dedupe(
+            _as_string_list(references_raw.get("propVersionIds"))
+            + _as_string_list(raw.get("propVersionIds"))
+        ),
+        "assetVersionIds": _dedupe(
+            _as_string_list(references_raw.get("assetVersionIds"))
+            + _as_string_list(raw.get("referenceAssetVersionIds"))
+        ),
+    }
+    return {
+        "shotId": shot_id,
+        "shotVersionId": shot_version_id,
+        "order": _positive_int(raw.get("order") or raw.get("index") or index, fallback=index, maximum=10000),
+        "timecode": {
+            "startMs": start_ms,
+            "endMs": end_ms,
+            "targetDurationMs": duration_ms,
+        },
+        "camera": {
+            "shotSize": str(camera_raw.get("shotSize") or raw.get("shotSize") or ""),
+            "angle": str(camera_raw.get("angle") or raw.get("cameraAngle") or ""),
+            "movement": str(camera_raw.get("movement") or raw.get("cameraMovement") or ""),
+            "composition": str(camera_raw.get("composition") or raw.get("composition") or ""),
+            "notes": str(camera_raw.get("notes") or raw.get("cameraLanguage") or ""),
+        },
+        "performance": {
+            "emotion": str(performance_raw.get("emotion") or raw.get("emotion") or ""),
+            "action": str(performance_raw.get("action") or raw.get("action") or ""),
+        },
+        "visualDescription": visual_description,
+        "audio": {
+            **audio_raw,
+            "dialogue": dialogue,
+            "narration": narration,
+            "subtitleZh": subtitle_zh,
+            "subtitleEn": subtitle_en,
+            "sfx": _as_string_list(audio_raw.get("sfx") or raw.get("sfx")),
+            "bgmMood": str(audio_raw.get("bgmMood") or raw.get("bgmMood") or ""),
+        },
+        "references": references,
+        "prompts": {
+            **prompts_raw,
+            "image": str(prompts_raw.get("image") or raw.get("imagePrompt") or visual_description),
+            "video": str(
+                prompts_raw.get("video")
+                or raw.get("imageToVideoPrompt")
+                or raw.get("textToVideoPrompt")
+                or visual_description
+            ),
+            "negative": str(prompts_raw.get("negative") or raw.get("negativePrompt") or ""),
+        },
+        "continuity": raw.get("continuity") if isinstance(raw.get("continuity"), dict) else {},
+        # Compatibility fields for existing result viewers and legacy adapters.
+        "index": index,
+        "sceneTitle": str(raw.get("sceneTitle") or f"分镜{index}"),
+        "sceneDescription": visual_description,
+        "cameraLanguage": str(raw.get("cameraLanguage") or camera_raw.get("notes") or ""),
+        "dialogue": dialogue,
+        "narration": narration,
+        "subtitleZh": subtitle_zh,
+        "subtitleEn": subtitle_en,
+        "presenterGender": str(raw.get("presenterGender") or audio_raw.get("speakerGender") or ""),
+        "durationSeconds": max(1, int(round(duration_ms / 1000))),
+    }
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None and str(value).strip() else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value) if value is not None and str(value).strip() else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _comic_script_errors(value: dict[str, Any] | None) -> list[str]:
+    if not isinstance(value, dict):
+        return ["无法解析 JSON 对象"]
+    errors: list[str] = []
+    for field in ("title", "synopsis", "screenplay"):
+        if not str(value.get(field) or "").strip():
+            errors.append(f"缺少 {field}")
+    screenplay = re.sub(r"\s+", "", str(value.get("screenplay") or ""))
+    if screenplay and len(screenplay) < 240:
+        errors.append("screenplay 过短，至少需要 240 字")
+    return errors
+
+
+def _build_comic_script_prompt(form: dict[str, Any]) -> str:
+    return (
+        "请创作一份完整、可继续拆分镜头的 AI 漫剧剧本。只输出合法 JSON 对象，不要 Markdown。\n"
+        "此步骤只负责完整剧本，不要输出分镜表。剧本必须有开场钩子、冲突升级、关键转折、高潮和结尾。\n"
+        "输出结构：{\"title\":\"...\",\"synopsis\":\"...\",\"screenplay\":\"不少于240字的完整剧本\","
+        "\"genre\":\"...\",\"characters\":[{\"id\":\"...\",\"name\":\"...\",\"appearance\":\"...\","
+        "\"personality\":\"...\"}],\"locations\":[{\"id\":\"...\",\"name\":\"...\","
+        "\"description\":\"...\"}],\"props\":[]}。\n"
+        f"主题：{form.get('storyTheme') or '请自行设计'}\n"
+        f"剧情梗概：{form.get('plotOutline') or '请自行设计'}\n"
+        f"题材：{form.get('genre') or '未指定'}\n"
+        f"视觉风格：{form.get('visualStyle') or '电影感漫剧'}\n"
+        f"目标时长：{form.get('episodeLength') or form.get('episodeDuration') or '60秒'}"
+    )
+
+
+def _build_comic_storyboard_prompt(*, script_text: str, shot_count: int, visual_style: str) -> str:
+    return (
+        "请把完整剧本拆成可直接生产的漫剧分镜。只输出合法 JSON 对象。\n"
+        f"目标约 {shot_count} 镜；允许根据剧情在 1 到 60 镜内调整。视觉风格：{visual_style}。\n"
+        "每镜必须包含 shotId、shotVersionId、order、timecode(startMs/endMs/targetDurationMs)、"
+        "camera(shotSize/angle/movement/composition)、performance(emotion/action)、"
+        "visualDescription、audio(dialogue/narration/subtitleZh/subtitleEn/sfx/bgmMood)、"
+        "references(characterVersionIds/sceneVersionIds/propVersionIds)、"
+        "prompts(image/video/negative)、continuity。\n"
+        "时间码必须连续；每镜画面必须具体且推动剧情，不得写“同上”或“保持不变”。\n"
+        "输出结构：{\"title\":\"...\",\"shots\":[{...}]}。\n\n"
+        f"完整剧本：\n{script_text}"
+    )
+
+
+def _comic_shot_payload(operation_input: dict[str, Any]) -> dict[str, Any]:
+    raw = _find_named_dict(operation_input, ("shot", "shotSpec"))
+    if raw is None and operation_input.get("shotId"):
+        raw = operation_input
+    if raw is None:
+        raise RuntimeError("comic shot operation requires a single shot object")
+    return _normalize_comic_shot(raw, index=_positive_int(raw.get("order") or raw.get("index"), fallback=1, maximum=10000), cursor_ms=0)
+
+
+def _comic_asset_payload(operation_input: dict[str, Any], asset_type: str) -> dict[str, Any]:
+    names = ("character", "asset") if asset_type == "CHARACTER" else ("scene", "location", "asset")
+    raw = _find_named_dict(operation_input, names)
+    if raw is not None:
+        return raw
+    if operation_input.get("assetId") or operation_input.get("id"):
+        return operation_input
+    raise RuntimeError(f"comic {asset_type.lower()} reference operation requires one asset")
+
+
+def _comic_keyframe_payload(operation_input: dict[str, Any], shot_id: str) -> dict[str, Any]:
+    raw = _find_named_dict(
+        operation_input,
+        ("selectedKeyframeVersion", "keyframeVersion"),
+    )
+    if raw is not None:
+        raw_shot_id = str(raw.get("shotId") or "").strip()
+        if raw_shot_id and raw_shot_id != shot_id:
+            raise RuntimeError(f"selected keyframe belongs to another shot: {raw_shot_id}")
+        return raw
+    if operation_input.get("keyframeVersionId") and operation_input.get("imageUrl"):
+        return operation_input
+    raise RuntimeError("comic.shot_video requires selectedKeyframeVersion")
+
+
+def _comic_reference_images_for_shot(
+    operation_input: dict[str, Any],
+    shot: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    raw_versions = _collect_named_list_items(operation_input, ("referenceAssetVersions",))
+    versions = [item for item in raw_versions if isinstance(item, dict)]
+    single = _find_named_value(operation_input, ("referenceAssetVersion",))
+    if isinstance(single, dict) and not versions:
+        versions = [single]
+    references = shot.get("references") if isinstance(shot.get("references"), dict) else {}
+    requested_ids = _dedupe([
+        *_as_string_list(references.get("characterVersionIds")),
+        *_as_string_list(references.get("sceneVersionIds") or references.get("sceneVersionId")),
+        *_as_string_list(references.get("propVersionIds")),
+        *_as_string_list(references.get("assetVersionIds")),
+    ])
+    direct_urls = _dedupe(
+        _as_string_list(
+            _collect_named_list_items(
+                operation_input,
+                (
+                    "characterReferenceAssetUrls",
+                    "sceneReferenceAssetUrls",
+                    "referenceAssetUrls",
+                    "referenceImages",
+                ),
+            )
+        )
+    )
+    by_version: dict[str, dict[str, Any]] = {}
+    for version in versions:
+        version_id = str(version.get("assetVersionId") or version.get("versionId") or "").strip()
+        if version_id:
+            by_version[version_id] = version
+    if requested_ids:
+        missing = [version_id for version_id in requested_ids if version_id not in by_version]
+        if missing and not versions and direct_urls:
+            return direct_urls, requested_ids
+        if missing:
+            raise RuntimeError("missing reference asset versions: " + ", ".join(missing))
+        selected_ids = requested_ids
+    else:
+        selected_ids = list(by_version)
+
+    urls: list[str] = []
+    for version_id in selected_ids:
+        version = by_version[version_id]
+        status = str(version.get("status") or "").upper()
+        if status and status not in {"APPROVED", "LOCKED", "READY", "PUBLISHED"}:
+            raise RuntimeError(f"reference asset version is not approved: {version_id}/{status}")
+        urls.extend(_comic_media_urls(version))
+    if not versions:
+        urls.extend(direct_urls)
+    urls = _dedupe([url for url in urls if url])
+    if requested_ids and not urls:
+        raise RuntimeError("selected reference asset versions contain no image URLs")
+    return urls, selected_ids
+
+
+def _comic_media_urls(value: Any) -> list[str]:
+    urls: list[str] = []
+    if isinstance(value, str):
+        candidate = value.strip()
+        if candidate.startswith(("http://", "https://", "/", "data:image/")):
+            urls.append(candidate)
+    elif isinstance(value, list):
+        for item in value:
+            urls.extend(_comic_media_urls(item))
+    elif isinstance(value, dict):
+        for key, nested in value.items():
+            normalized = str(key).lower()
+            if normalized in {"url", "imageurl", "resourceurl", "referenceimages", "views", "anchors"}:
+                urls.extend(_comic_media_urls(nested))
+            elif isinstance(nested, (dict, list)) and normalized in {"front", "side", "back", "board"}:
+                urls.extend(_comic_media_urls(nested))
+    return _dedupe(urls)
+
+
+def _build_comic_shot_image_prompt(shot: dict[str, Any], form: dict[str, Any]) -> str:
+    prompts = shot.get("prompts") if isinstance(shot.get("prompts"), dict) else {}
+    camera = shot.get("camera") if isinstance(shot.get("camera"), dict) else {}
+    performance = shot.get("performance") if isinstance(shot.get("performance"), dict) else {}
+    continuity = shot.get("continuity") if isinstance(shot.get("continuity"), dict) else {}
+    base = str(prompts.get("image") or shot.get("visualDescription") or "").strip()
+    details = ", ".join(
+        value
+        for value in (
+            str(camera.get("shotSize") or "").strip(),
+            str(camera.get("angle") or "").strip(),
+            str(camera.get("movement") or "").strip(),
+            str(camera.get("composition") or "").strip(),
+            str(performance.get("emotion") or "").strip(),
+            str(performance.get("action") or "").strip(),
+        )
+        if value
+    )
+    negative = str(prompts.get("negative") or "").strip()
+    prompt = (
+        f"{base}. {details}. Visual style: {form.get('visualStyle') or 'cinematic comic'}. "
+        "Use every supplied reference image to preserve exact character identity, wardrobe, props, and scene layout. "
+        f"Continuity state: {json.dumps(continuity, ensure_ascii=False)}. No text, no watermark."
+    )
+    if negative:
+        prompt += f" Negative prompt: {negative}."
+    return prompt
+
+
+def _build_comic_shot_video_prompt(shot: dict[str, Any], form: dict[str, Any]) -> str:
+    prompts = shot.get("prompts") if isinstance(shot.get("prompts"), dict) else {}
+    camera = shot.get("camera") if isinstance(shot.get("camera"), dict) else {}
+    performance = shot.get("performance") if isinstance(shot.get("performance"), dict) else {}
+    base = str(prompts.get("video") or shot.get("visualDescription") or "").strip()
+    return (
+        f"{base}. Camera movement: {camera.get('movement') or 'natural controlled motion'}. "
+        f"Performance: {performance.get('action') or ''}; emotion: {performance.get('emotion') or ''}. "
+        "Preserve the selected keyframe and every supplied character/scene reference exactly. "
+        f"Aspect ratio: {form.get('aspectRatio') or '16:9'}."
+    )
+
+
+def _comic_shot_duration_seconds(shot: dict[str, Any]) -> int:
+    timecode = shot.get("timecode") if isinstance(shot.get("timecode"), dict) else {}
+    duration_ms = _int_or_none(timecode.get("targetDurationMs"))
+    if duration_ms is None:
+        duration_ms = _int_or_none(timecode.get("endMs")) or SCENE_SECONDS * 1000
+        duration_ms -= _int_or_none(timecode.get("startMs")) or 0
+    return max(1, min(15, int(round(max(duration_ms, 1) / 1000))))
+
+
+def _comic_selected_shot_versions(operation_input: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_items = operation_input.get("selectedShotVersions")
+    if not isinstance(raw_items, list):
+        found = _find_named_value(operation_input, ("selectedShotVersions",))
+        raw_items = found if isinstance(found, list) else None
+    if not raw_items:
+        raise DigitalHumanPostprocessError("comic.compose requires selectedShotVersions")
+
+    selected: list[dict[str, Any]] = []
+    seen_shots: set[str] = set()
+    for position, raw in enumerate(raw_items, start=1):
+        if not isinstance(raw, dict) or raw.get("selected") is False:
+            continue
+        shot = raw.get("shot") if isinstance(raw.get("shot"), dict) else {}
+        clip = (
+            raw.get("selectedClipVersion")
+            if isinstance(raw.get("selectedClipVersion"), dict)
+            else raw.get("clipVersion") if isinstance(raw.get("clipVersion"), dict) else {}
+        )
+        audio = (
+            raw.get("selectedAudioVersion")
+            if isinstance(raw.get("selectedAudioVersion"), dict)
+            else raw.get("audioVersion") if isinstance(raw.get("audioVersion"), dict) else {}
+        )
+        keyframe = (
+            raw.get("selectedKeyframeVersion")
+            if isinstance(raw.get("selectedKeyframeVersion"), dict)
+            else raw.get("keyframeVersion") if isinstance(raw.get("keyframeVersion"), dict) else {}
+        )
+        shot_id = str(raw.get("shotId") or shot.get("shotId") or "").strip()
+        shot_version_id = str(raw.get("shotVersionId") or shot.get("shotVersionId") or "").strip()
+        clip_version_id = str(raw.get("clipVersionId") or clip.get("clipVersionId") or "").strip()
+        video_url = str(raw.get("videoUrl") or clip.get("videoUrl") or "").strip()
+        if not shot_id or not shot_version_id or not clip_version_id or not video_url:
+            raise DigitalHumanPostprocessError(
+                f"selected shot {position} requires shotId, shotVersionId, clipVersionId and videoUrl"
+            )
+        if shot_id in seen_shots:
+            raise DigitalHumanPostprocessError(f"duplicate selected shot: {shot_id}")
+        seen_shots.add(shot_id)
+        shot_audio = shot.get("audio") if isinstance(shot.get("audio"), dict) else {}
+        selected.append(
+            {
+                "shotId": shot_id,
+                "shotVersionId": shot_version_id,
+                "order": _positive_int(raw.get("order") or shot.get("order") or position, fallback=position, maximum=10000),
+                "clipVersionId": clip_version_id,
+                "videoUrl": video_url,
+                "audioVersionId": str(raw.get("audioVersionId") or audio.get("audioVersionId") or ""),
+                "audioUrl": str(raw.get("audioUrl") or audio.get("audioUrl") or ""),
+                "keyframeVersionId": str(raw.get("keyframeVersionId") or keyframe.get("keyframeVersionId") or ""),
+                "keyframeImageUrl": str(raw.get("keyframeImageUrl") or keyframe.get("imageUrl") or ""),
+                "subtitleZh": str(
+                    raw.get("subtitleZh")
+                    or shot_audio.get("subtitleZh")
+                    or shot.get("subtitleZh")
+                    or shot_audio.get("dialogue")
+                    or shot.get("dialogue")
+                    or ""
+                ),
+                "subtitleEn": str(raw.get("subtitleEn") or shot_audio.get("subtitleEn") or shot.get("subtitleEn") or ""),
+            }
+        )
+    if not selected:
+        raise DigitalHumanPostprocessError("comic.compose has no selected shot versions")
+    return sorted(selected, key=lambda item: (item["order"], item["shotId"]))
+
+
+def _safe_segment_name(value: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "-", value).strip("-")
+    return safe[:80] or "shot"
+
+
 def _normalize_assets(value: Any, asset_type: str) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
@@ -898,8 +2473,14 @@ def _resolve_image_generator(model_config: dict[str, Any]):
             model_config=model_config,
         )
 
-        def _gen(prompt: str) -> str:
-            urls = client.generate_images(prompt=prompt, model=model_name, image_size="1024x576", batch_size=1)
+        def _gen(prompt: str, reference_images: list[str] | None = None) -> str:
+            urls = client.generate_images(
+                prompt=prompt,
+                model=model_name,
+                image_size="1024x576",
+                batch_size=1,
+                image=reference_images or None,
+            )
             return urls[0] if urls else ""
 
         return _gen
@@ -909,7 +2490,11 @@ def _resolve_image_generator(model_config: dict[str, Any]):
         base_url=model_config.get("baseUrl"),
     )
 
-    def _gen(prompt: str) -> str:
+    def _gen(prompt: str, reference_images: list[str] | None = None) -> str:
+        if reference_images:
+            raise SiliconFlowVideoError(
+                "selected image provider cannot accept comic reference images; bind a reference-image capable model"
+            )
         return sf_client.generate_image(prompt=prompt, model=model_name, image_size="1024x576")
 
     return _gen
@@ -935,13 +2520,17 @@ def _resolve_video_generator(model_config: dict[str, Any]):
             prompt: str,
             image: str,
             reference_images: list[str] | None = None,
+            duration: int | float | str | None = None,
+            aspect_ratio: str | None = None,
             resume: dict[str, Any] | None = None,
             submitted_callback=None,
         ):
             images = [image, *(reference_images or [])]
             return client.generate_video(
                 prompt=prompt, image=image, images=images, model=model_name, image_size="1024x576",
-                duration=str(SCENE_SECONDS), resolution="480p", aspect_ratio="16:9",
+                duration=str(duration or SCENE_SECONDS),
+                resolution="480p",
+                aspect_ratio=aspect_ratio or "16:9",
                 resume=resume, submitted_callback=submitted_callback,
             )
 
@@ -954,12 +2543,20 @@ def _resolve_video_generator(model_config: dict[str, Any]):
         prompt: str,
         image: str,
         reference_images: list[str] | None = None,
+        duration: int | float | str | None = None,
+        aspect_ratio: str | None = None,
         resume: dict[str, Any] | None = None,
         submitted_callback=None,
     ):
         return seedance.generate_video(
-            prompt=prompt, image=image, model=model_name, duration=str(SCENE_SECONDS),
-            resolution="480p", aspect_ratio="16:9", image_size="1024x576",
+            prompt=prompt,
+            image=image,
+            images=[image, *(reference_images or [])],
+            model=model_name,
+            duration=str(duration or SCENE_SECONDS),
+            resolution="480p",
+            aspect_ratio=aspect_ratio or "16:9",
+            image_size="1024x576",
             resume=resume, submitted_callback=submitted_callback,
         )
 

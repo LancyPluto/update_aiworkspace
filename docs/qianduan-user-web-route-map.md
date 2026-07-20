@@ -41,7 +41,7 @@
 | `/community/inspirations` | 登录 | 灵感收藏夹。 |
 | `/u/:userId` | 公开 | 用户公开主页。 |
 | `/billing` | 登录 | 会员、算力与充值。 |
-| `/referral` | 登录 | 推荐有礼。 |
+| `/referral` | 登录 | 兼容入口：跳转到 `/home` 并打开“邀请有礼”弹窗。 |
 | `/profile` | 登录 | 个人资料。 |
 | `/legal/privacy` | 公开 | 隐私政策，版本化用户服务文件。 |
 | `/legal/terms` | 公开 | 服务条款，版本化用户服务文件。 |

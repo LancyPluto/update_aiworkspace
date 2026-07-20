@@ -35,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -286,16 +287,21 @@ public class WorkflowExecutionService {
         WorkflowDsl dsl = loadDsl(run);
         Map<String, WorkflowRunStep> steps = stepMap(runId);
         ObjectNode context = readContext(run);
+        Set<String> operationHandlerKeys = operationHandlerKeys(readInput(run));
+        boolean operationScoped = !operationHandlerKeys.isEmpty();
 
         for (String nodeId : dsl.executionOrder()) {
             WorkflowRunStep step = steps.get(nodeId);
             if (step == null || !STEP_PENDING.equals(step.getStatus())) {
                 continue;
             }
-            if (!dependenciesSucceeded(dsl, steps, nodeId)) {
+            WorkflowNodeDef node = dsl.requireNode(nodeId);
+            if (operationScoped && !operationHandlerKeys.contains(handlerKey(node))) {
+                throw new IllegalStateException("Operation-scoped run contains a mismatched step: " + nodeId);
+            }
+            if (!dependenciesSucceeded(dsl, steps, nodeId, operationScoped)) {
                 continue;
             }
-            WorkflowNodeDef node = dsl.requireNode(nodeId);
             if (node.type().isInline()) {
                 executeInlineStep(run, dsl, step, node, context);
                 run = requireRun(runId);
@@ -503,6 +509,12 @@ public class WorkflowExecutionService {
     private ObjectNode buildNodeInputs(WorkflowDsl dsl, WorkflowNodeDef node, ObjectNode context, JsonNode formInput) {
         ObjectNode inputs = objectMapper.createObjectNode();
         inputs.set("form", formInput);
+        ObjectNode operationInput = formInput != null && formInput.isObject()
+                ? ((ObjectNode) formInput).deepCopy()
+                : objectMapper.createObjectNode();
+        if (formInput != null && !formInput.isNull() && !formInput.isObject()) {
+            operationInput.set("value", formInput);
+        }
         for (WorkflowEdgeDef edge : dsl.edges()) {
             if (!node.id().equals(edge.target())) {
                 continue;
@@ -510,26 +522,60 @@ public class WorkflowExecutionService {
             JsonNode upstream = context.get(edge.source());
             if (upstream != null && !upstream.isMissingNode()) {
                 inputs.set(edge.source(), upstream);
+                operationInput.set(edge.source(), upstream);
             }
         }
+        // Stable handlers receive the project item plus outputs from selected upstream operations.
+        inputs.set("operationInput", operationInput);
         if (node.parameters() != null && !node.parameters().isMissingNode()) {
             inputs.set("parameters", node.parameters());
         }
         return inputs;
     }
 
-    private boolean dependenciesSucceeded(WorkflowDsl dsl, Map<String, WorkflowRunStep> steps, String nodeId) {
+    private boolean dependenciesSucceeded(WorkflowDsl dsl,
+                                          Map<String, WorkflowRunStep> steps,
+                                          String nodeId,
+                                          boolean operationScoped) {
         List<WorkflowEdgeDef> incoming = dsl.edges().stream().filter(edge -> nodeId.equals(edge.target())).toList();
         if (incoming.isEmpty()) {
             return true;
         }
         for (WorkflowEdgeDef edge : incoming) {
             WorkflowRunStep upstream = steps.get(edge.source());
+            if (upstream == null && operationScoped) {
+                continue;
+            }
             if (upstream == null || !STEP_SUCCESS.equals(upstream.getStatus())) {
                 return false;
             }
         }
         return true;
+    }
+
+    private Set<String> operationHandlerKeys(JsonNode input) {
+        if (input == null || input.isNull()) {
+            return Set.of();
+        }
+        LinkedHashSet<String> keys = new LinkedHashSet<>();
+        JsonNode array = input.get("operationHandlerKeys");
+        if (array != null && array.isArray()) {
+            array.forEach(value -> {
+                if (value.isTextual() && !value.asText().isBlank()) {
+                    keys.add(value.asText().trim());
+                }
+            });
+        }
+        String single = text(input, "operationHandlerKey");
+        if (single != null) {
+            keys.add(single);
+        }
+        return Set.copyOf(keys);
+    }
+
+    private String handlerKey(WorkflowNodeDef node) {
+        String key = text(node.parameters(), "handlerKey");
+        return key == null ? text(node.parameters(), "operation") : key;
     }
 
     private Map<String, WorkflowRunStep> stepMap(Long runId) {
@@ -586,7 +632,10 @@ public class WorkflowExecutionService {
 
     private JsonNode readInput(WorkflowRun run) {
         try {
-            return objectMapper.readTree(run.getInputJson());
+            JsonNode parsed = objectMapper.readTree(run.getInputJson());
+            return parsed != null && parsed.isTextual()
+                    ? objectMapper.readTree(parsed.asText())
+                    : parsed;
         } catch (Exception exception) {
             return objectMapper.createObjectNode();
         }

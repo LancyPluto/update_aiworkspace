@@ -7,7 +7,6 @@ import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderItemMapper;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderMapper;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.credit.service.GiftCardService;
-import com.aiminilab.aitoolmarket.credit.service.ReferralService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,20 +21,17 @@ public class CreditRechargeCreditingService {
     private final CreditRechargeOrderItemMapper orderItemMapper;
     private final CreditService creditService;
     private final GiftCardService giftCardService;
-    private final ReferralService referralService;
     private final MembershipService membershipService;
 
     public CreditRechargeCreditingService(CreditRechargeOrderMapper orderMapper,
                                           CreditRechargeOrderItemMapper orderItemMapper,
                                           CreditService creditService,
                                           GiftCardService giftCardService,
-                                          ReferralService referralService,
                                           MembershipService membershipService) {
         this.orderMapper = orderMapper;
         this.orderItemMapper = orderItemMapper;
         this.creditService = creditService;
         this.giftCardService = giftCardService;
-        this.referralService = referralService;
         this.membershipService = membershipService;
     }
 
@@ -69,7 +65,6 @@ public class CreditRechargeCreditingService {
                 creditService.rechargeAdd(order.getUserId(), order.getId(), order.getCredits(),
                         (reason == null || reason.isBlank() ? "Recharge order " + order.getOrderNo() : reason));
             }
-            referralService.rewardRechargeIfNeeded(order);
         }
 
         // Optimistic transition (idempotent): if another thread already credited, transitOrCurrent logic handles it.

@@ -24,7 +24,9 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -79,6 +81,22 @@ public class WorkflowRuntimeAdmissionService {
 
     @Transactional
     public WorkflowRuntimeAdmission admitNewRun(Long userId, Long toolId) {
+        return admitNewRun(userId, toolId, null);
+    }
+
+    @Transactional
+    public WorkflowRuntimeAdmission admitNewRun(Long userId, Long toolId, String operationHandlerKey) {
+        return admitNewRun(
+                userId,
+                toolId,
+                operationHandlerKey == null ? Set.of() : Set.of(operationHandlerKey)
+        );
+    }
+
+    @Transactional
+    public WorkflowRuntimeAdmission admitNewRun(Long userId,
+                                                Long toolId,
+                                                Collection<String> operationHandlerKeys) {
         if (userId == null || toolId == null) {
             throw blocked("admission_identity_invalid");
         }
@@ -106,12 +124,14 @@ public class WorkflowRuntimeAdmissionService {
         if (dsl == null || dsl.nodes() == null) {
             throw blocked("published_version_invalid");
         }
-        if (dsl.nodes().stream().anyMatch(node -> node.type() == WorkflowNodeDefType.USER_CONFIRM)
+        Set<String> operationNodeIds = operationNodeIds(dsl, operationHandlerKeys);
+        if (operationNodeIds.isEmpty()
+                && dsl.nodes().stream().anyMatch(node -> node.type() == WorkflowNodeDefType.USER_CONFIRM)
                 && !gate.isConfirmationEnabled()) {
             throw blocked("confirmation_disabled");
         }
 
-        long estimatedRunCredits = estimatedRunCredits(version, dsl);
+        long estimatedRunCredits = estimatedRunCredits(version, dsl, operationNodeIds);
         boolean paidRun = estimatedRunCredits > 0;
         long committedToday = paidRun ? committedToday(userId) : 0L;
         if (paidRun && unknownProviderCostsToday() > 0) {
@@ -154,7 +174,9 @@ public class WorkflowRuntimeAdmissionService {
         throw blocked("legacy_workflow_entry_disabled");
     }
 
-    private long estimatedRunCredits(ToolWorkflowVersion version, WorkflowDsl dsl) {
+    private long estimatedRunCredits(ToolWorkflowVersion version,
+                                     WorkflowDsl dsl,
+                                     Set<String> operationNodeIds) {
         try {
             JsonNode root = objectMapper.readTree(version.getBillingPolicyJson());
             JsonNode nodePolicies = root == null ? null : root.get("nodePolicies");
@@ -171,7 +193,8 @@ public class WorkflowRuntimeAdmissionService {
             }
 
             long total = 0L;
-            for (String nodeId : workerNodeIds) {
+            Set<String> chargedNodeIds = operationNodeIds.isEmpty() ? workerNodeIds : operationNodeIds;
+            for (String nodeId : chargedNodeIds) {
                 JsonNode maxCreditCost = nodePolicies.path(nodeId).get("maxCreditCost");
                 if (maxCreditCost == null
                         || !maxCreditCost.isIntegralNumber()
@@ -187,6 +210,46 @@ public class WorkflowRuntimeAdmissionService {
         } catch (Exception exception) {
             throw blocked("billing_policy_invalid");
         }
+    }
+
+    private Set<String> operationNodeIds(WorkflowDsl dsl, Collection<String> operationHandlerKeys) {
+        if (operationHandlerKeys == null || operationHandlerKeys.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> requested = new LinkedHashSet<>();
+        for (String value : operationHandlerKeys) {
+            if (value != null && !value.isBlank()) {
+                requested.add(value.trim());
+            }
+        }
+        if (requested.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> nodeIds = new LinkedHashSet<>();
+        for (String operationHandlerKey : requested) {
+            var matches = dsl.nodes().stream()
+                    .filter(node -> operationHandlerKey.equals(handlerKey(node.parameters())))
+                    .toList();
+            if (matches.size() != 1 || !matches.get(0).type().isWorkerStep()) {
+                throw new BusinessException(
+                        ErrorCode.PARAM_ERROR,
+                        "operationHandlerKey 必须唯一匹配一个 worker 节点: " + operationHandlerKey
+                );
+            }
+            nodeIds.add(matches.get(0).id());
+        }
+        return Set.copyOf(nodeIds);
+    }
+
+    private String handlerKey(JsonNode parameters) {
+        if (parameters == null || parameters.isMissingNode()) {
+            return null;
+        }
+        JsonNode value = parameters.get("handlerKey");
+        if (value == null || value.isNull() || value.asText().isBlank()) {
+            value = parameters.get("operation");
+        }
+        return value == null || value.isNull() ? null : value.asText().trim();
     }
 
     private Set<String> fieldNames(JsonNode object) {

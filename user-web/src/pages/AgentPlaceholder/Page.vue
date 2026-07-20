@@ -20,6 +20,12 @@ const filteredTools = computed(() => {
   )
 })
 
+function toolRoute(tool: WorkflowToolSummary) {
+  return tool.toolCode === "ai_comic_drama_agent"
+    ? userRoutes.comicProjects
+    : userRoutes.workflowTool(tool.toolCode)
+}
+
 function normalizeTools(result: WorkflowToolPage): WorkflowToolSummary[] {
   if (Array.isArray(result)) return result
   const compatible = result as WorkflowToolPage & { records?: WorkflowToolSummary[]; content?: WorkflowToolSummary[] }
@@ -97,7 +103,7 @@ onBeforeUnmount(() => loadController?.abort())
       <RouterLink
         v-for="tool in filteredTools"
         :key="tool.toolCode"
-        :to="userRoutes.workflowTool(tool.toolCode)"
+        :to="toolRoute(tool)"
         class="group flex min-h-44 flex-col rounded-lg border border-border bg-card p-5 transition hover:border-primary/50 hover:bg-secondary/30"
       >
         <div class="flex items-start justify-between gap-3">

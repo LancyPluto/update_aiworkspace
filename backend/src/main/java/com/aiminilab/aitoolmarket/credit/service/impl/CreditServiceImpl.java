@@ -469,14 +469,18 @@ public class CreditServiceImpl implements CreditService {
 
     @Override
     @Transactional
-    public CreditAccountResponse referralBonusAdd(Long userId, Long rechargeOrderId, int amount, String reason) {
+    public CreditAccountResponse referralRegistrationBonusAdd(Long userId, Long referralId, String beneficiaryRole,
+                                                              int amount, String reason) {
         if (amount <= 0) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "referral bonus amount must be positive");
         }
-        if (rechargeOrderId == null) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order id is required");
+        if (referralId == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "referral id is required");
         }
-        String idempotencyKey = "REFERRAL_REWARD_ORDER:" + rechargeOrderId;
+        if (!"INVITEE".equals(beneficiaryRole) && !"INVITER".equals(beneficiaryRole)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "referral beneficiary role is invalid");
+        }
+        String idempotencyKey = "REFERRAL_REGISTRATION:" + referralId + ":" + beneficiaryRole;
         expireMembershipIfNeeded(userId);
         CreditAccount before = lockedAccount(userId);
         try {
@@ -491,13 +495,13 @@ public class CreditServiceImpl implements CreditService {
                     before.getFrozen(),
                     "REFERRAL",
                     null,
-                    normalizeReason(reason, "Referral recharge reward"),
+                    normalizeReason(reason, "Referral registration reward"),
                     idempotencyKey
             );
         } catch (DuplicateKeyException ignored) {
             return account(userId);
         }
-        if (!creditMapper.referralBonusAdd(before.getId(), amount)) {
+        if (!creditMapper.referralRegistrationBonusAdd(before.getId(), amount)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "credit account is unavailable");
         }
         creditChangeNotifier.notifyAfterCommit(userId);

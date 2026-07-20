@@ -342,6 +342,21 @@ CREATE TABLE referral_rewards (
 CREATE UNIQUE INDEX uk_referral_rewards_order ON referral_rewards(recharge_order_id);
 CREATE INDEX idx_referral_rewards_inviter ON referral_rewards(inviter_user_id, created_at);
 
+CREATE TABLE referral_registration_rewards (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  referral_id BIGINT NOT NULL,
+  beneficiary_user_id BIGINT NOT NULL,
+  beneficiary_role VARCHAR(16) NOT NULL,
+  reward_credits INT NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'CREDITED',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX uk_referral_registration_reward_role
+  ON referral_registration_rewards(referral_id, beneficiary_role);
+CREATE INDEX idx_referral_registration_reward_user
+  ON referral_registration_rewards(beneficiary_user_id, created_at);
+
 CREATE TABLE tool_prompts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   tool_id BIGINT NOT NULL,
@@ -1210,6 +1225,170 @@ CREATE TABLE workflow_confirmations (
   consumed_at TIMESTAMP,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT uk_workflow_confirmation_token UNIQUE (token_hash)
+);
+
+CREATE TABLE comic_projects (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  description VARCHAR(1000),
+  aspect_ratio VARCHAR(16) NOT NULL DEFAULT '16:9',
+  visual_style VARCHAR(1000),
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  revision BIGINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TIMESTAMP
+);
+
+CREATE TABLE comic_episodes (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  project_id BIGINT NOT NULL,
+  episode_no INT NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  script_source_type VARCHAR(32) NOT NULL DEFAULT 'PASTE',
+  script_file_name VARCHAR(255),
+  script_text CLOB NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+  revision BIGINT NOT NULL DEFAULT 0,
+  storyboard_locked_at TIMESTAMP,
+  assets_confirmed_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_episode_project_no UNIQUE (project_id, episode_no)
+);
+
+CREATE TABLE comic_characters (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  project_id BIGINT NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  description VARCHAR(2000),
+  voice_config_json CLOB,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_character_project_name UNIQUE (project_id, name)
+);
+
+CREATE TABLE comic_character_versions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  character_id BIGINT NOT NULL,
+  version_no INT NOT NULL,
+  visual_prompt CLOB NOT NULL,
+  front_image_url VARCHAR(2048),
+  side_image_url VARCHAR(2048),
+  back_image_url VARCHAR(2048),
+  status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_character_version UNIQUE (character_id, version_no)
+);
+
+CREATE TABLE comic_scenes (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  project_id BIGINT NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  description VARCHAR(2000),
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_scene_project_name UNIQUE (project_id, name)
+);
+
+CREATE TABLE comic_scene_versions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  scene_id BIGINT NOT NULL,
+  version_no INT NOT NULL,
+  visual_prompt CLOB NOT NULL,
+  anchor_image_url VARCHAR(2048),
+  status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_scene_version UNIQUE (scene_id, version_no)
+);
+
+CREATE TABLE comic_shots (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  episode_id BIGINT NOT NULL,
+  shot_key CHAR(36) NOT NULL,
+  sequence_no INT NOT NULL,
+  duration_ms INT NOT NULL DEFAULT 5000,
+  shot_scale VARCHAR(64),
+  camera_angle VARCHAR(128),
+  camera_movement VARCHAR(128),
+  emotion VARCHAR(128),
+  visual_description CLOB NOT NULL,
+  dialogue CLOB,
+  narration CLOB,
+  sound_effect VARCHAR(1000),
+  bgm_cue VARCHAR(1000),
+  first_frame_prompt CLOB,
+  video_prompt CLOB,
+  negative_prompt CLOB,
+  character_version_ids_json CLOB NOT NULL,
+  scene_version_id BIGINT,
+  depends_on_shot_id BIGINT,
+  selected_attempt_id BIGINT,
+  status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+  revision BIGINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_shot_key UNIQUE (shot_key),
+  CONSTRAINT uk_comic_shot_episode_sequence UNIQUE (episode_id, sequence_no)
+);
+
+CREATE TABLE comic_generation_batches (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  episode_id BIGINT NOT NULL,
+  batch_type VARCHAR(32) NOT NULL DEFAULT 'SHOT_VIDEO',
+  tool_code VARCHAR(128) NOT NULL,
+  client_request_id VARCHAR(128) NOT NULL,
+  max_parallelism INT NOT NULL DEFAULT 4,
+  estimated_credits INT,
+  status VARCHAR(32) NOT NULL DEFAULT 'CREATED',
+  request_json CLOB NOT NULL,
+  confirmed_at TIMESTAMP NOT NULL,
+  started_at TIMESTAMP,
+  finished_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_batch_user_request UNIQUE (user_id, client_request_id)
+);
+
+CREATE TABLE comic_shot_attempts (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  batch_id BIGINT NOT NULL,
+  shot_id BIGINT NOT NULL,
+  attempt_no INT NOT NULL,
+  idempotency_key VARCHAR(128) NOT NULL,
+  workflow_run_id BIGINT,
+  root_task_id BIGINT,
+  status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+  result_json CLOB,
+  error_code VARCHAR(64),
+  error_message VARCHAR(2000),
+  started_at TIMESTAMP,
+  finished_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_attempt_shot_no UNIQUE (shot_id, attempt_no),
+  CONSTRAINT uk_comic_attempt_idempotency UNIQUE (idempotency_key),
+  CONSTRAINT uk_comic_attempt_workflow_run UNIQUE (workflow_run_id),
+  CONSTRAINT uk_comic_attempt_root_task UNIQUE (root_task_id)
+);
+
+CREATE TABLE comic_project_workflow_runs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  episode_id BIGINT,
+  shot_id BIGINT,
+  workflow_run_id BIGINT NOT NULL,
+  root_task_id BIGINT NOT NULL,
+  launch_source VARCHAR(32) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_workflow_run UNIQUE (workflow_run_id),
+  CONSTRAINT uk_comic_root_task UNIQUE (root_task_id)
 );
 
 CREATE TABLE IF NOT EXISTS user_generation_subjects (

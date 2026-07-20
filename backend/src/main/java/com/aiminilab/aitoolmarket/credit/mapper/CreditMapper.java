@@ -288,10 +288,10 @@ public interface CreditMapper extends BaseMapper<CreditAccount> {
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{accountId} AND status = 'ACTIVE'
             """)
-    int referralBonusAddRows(@Param("accountId") Long accountId, @Param("amount") int amount);
+    int referralRegistrationBonusAddRows(@Param("accountId") Long accountId, @Param("amount") int amount);
 
-    default boolean referralBonusAdd(Long accountId, int amount) {
-        return referralBonusAddRows(accountId, amount) == 1;
+    default boolean referralRegistrationBonusAdd(Long accountId, int amount) {
+        return referralRegistrationBonusAddRows(accountId, amount) == 1;
     }
 
     @Update("""

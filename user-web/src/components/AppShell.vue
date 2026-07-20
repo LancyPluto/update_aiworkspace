@@ -30,6 +30,7 @@ import {
   Check,
   Gift,
   Zap,
+  Clapperboard,
 } from "lucide-vue-next"
 import { ref, onMounted, onUnmounted, computed, watch } from "vue"
 import { useGlobalSearch, type GlobalSearchResultItem, type GlobalSearchScope } from "@/composables/useGlobalSearch"
@@ -41,6 +42,7 @@ import type { CreditAccount } from "@/api/types"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import UserAvatar from "@/components/UserAvatar.vue"
+import ReferralDialog from "@/components/ReferralDialog.vue"
 import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import { safeDisplayName } from "@/utils/displayName"
 import { createCreditRealtime } from "@/utils/creditRealtime"
@@ -107,6 +109,8 @@ const SIDEBAR_OPEN_KEY = "ai_tool_market_sidebar_open"
 const credit = ref<CreditAccount | null>(null)
 const sidebarOpen = ref(true)
 const customerServiceOpen = ref(false)
+const referralDialogOpen = ref(false)
+let referralDialogOpenedFromQuery = false
 const DEFAULT_CUSTOMER_SERVICE_QR = "https://cdn.wlcloudai.com/static/kf.jpg"
 
 const customerService = ref<CustomerServiceSettings>({
@@ -154,6 +158,7 @@ const navSections: NavSection[] = [
         icon: Wrench,
         active: (path) => path === "/marketplace" || path.startsWith("/chat/"),
       },
+      { type: "link", href: "/agents/comic-projects", label: "漫剧项目", icon: Clapperboard },
       { type: "link", href: "/library", label: "资产", icon: Package },
       { type: "link", href: "/community", label: "社区", icon: Compass },
       { type: "link", href: "/community/inspirations", label: "灵感收藏", icon: Lightbulb },
@@ -168,6 +173,29 @@ const accountNav: NavLink[] = [
 
 function toggleSidebar() {
   sidebarOpen.value = !sidebarOpen.value
+}
+
+function isReferralDialogQuery(value: unknown) {
+  return Array.isArray(value) ? value.includes("referral") : value === "referral"
+}
+
+function openReferralDialog() {
+  if (!auth.isLoggedIn) {
+    void router.push({ name: "Login", query: { redirect: "/home?dialog=referral" } })
+    return
+  }
+  referralDialogOpenedFromQuery = false
+  referralDialogOpen.value = true
+}
+
+function closeReferralDialog() {
+  referralDialogOpen.value = false
+  referralDialogOpenedFromQuery = false
+  if (!isReferralDialogQuery(route.query.dialog)) return
+
+  const query = { ...route.query }
+  delete query.dialog
+  void router.replace({ query })
 }
 
 function selectBrandAccent(next: BrandAccent) {
@@ -375,6 +403,27 @@ watch(
   },
 )
 
+watch(
+  [() => route.query.dialog, () => auth.isLoggedIn],
+  ([dialog, loggedIn]) => {
+    if (!loggedIn) {
+      referralDialogOpen.value = false
+      referralDialogOpenedFromQuery = false
+      return
+    }
+    if (isReferralDialogQuery(dialog)) {
+      referralDialogOpenedFromQuery = true
+      referralDialogOpen.value = true
+      return
+    }
+    if (referralDialogOpenedFromQuery) {
+      referralDialogOpenedFromQuery = false
+      referralDialogOpen.value = false
+    }
+  },
+  { immediate: true },
+)
+
 onMounted(async () => {
   applyAppTheme("dark")
   brandAccent.value = getStoredBrandAccent()
@@ -493,16 +542,17 @@ watch(
           <span>{{ item.label }}</span>
         </RouterLink>
 
-        <RouterLink
-          to="/referral"
+        <button
+          type="button"
           class="group relative mb-3 flex h-11 w-full items-center gap-2.5 overflow-hidden rounded-lg border border-white/[0.055] bg-white/[0.025] px-3 text-left text-sm font-medium text-white/76 transition hover:border-[var(--brand-border)] hover:bg-white/[0.045] hover:text-white"
+          @click="openReferralDialog"
         >
           <Gift class="h-[18px] w-[18px] shrink-0 text-white/60 transition group-hover:text-white/90" aria-hidden="true" />
           <span class="min-w-0 flex-1">
             <span class="block truncate">推荐有礼</span>
           </span>
           <span class="rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[10px] font-medium text-[var(--brand-active-text)] ring-1 ring-white/[0.05]">最新</span>
-        </RouterLink>
+        </button>
 
         <RouterLink
           to="/billing"
@@ -672,6 +722,15 @@ watch(
           </div>
         </div>
         <div class="flex min-w-0 items-center justify-end gap-3 md:gap-4">
+          <button
+            type="button"
+            class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--brand-border)] bg-[var(--brand-softer)] text-[var(--brand-active-text)] transition hover:bg-[var(--brand-soft)] hover:text-white lg:hidden"
+            aria-label="打开邀请有礼"
+            title="邀请有礼"
+            @click="openReferralDialog"
+          >
+            <Gift class="h-[18px] w-[18px]" aria-hidden="true" />
+          </button>
           <RouterLink
             v-if="!isAgentRoute"
             :to="userRoutes.toolList"
@@ -763,6 +822,8 @@ watch(
         <slot />
       </main>
     </div>
+
+    <ReferralDialog :open="referralDialogOpen" @close="closeReferralDialog" />
 
     <div
       v-if="customerServiceOpen"
