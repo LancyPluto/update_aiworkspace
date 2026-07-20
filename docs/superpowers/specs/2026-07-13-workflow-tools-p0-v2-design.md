@@ -1,8 +1,8 @@
 # `/agents` 工作流工具 P0 V2 方案
 
 > 日期：2026-07-13
-> 修订日期：2026-07-14
-> 状态：设计已确认，等待实施计划评审
+> 修订日期：2026-07-20
+> 状态：设计已确认，实施中
 > 试点工具：AI 漫剧
 > 目标读者：产品、运营、研发、测试和运维
 
@@ -10,15 +10,16 @@
 
 本期不新建 Workflow 微服务，而是在现有 Spring Boot 后端、Python Worker、RabbitMQ、MySQL 和 root task 体系上完成工作流能力加固。
 
-P0 只交付一条可靠的 AI 漫剧纵向闭环，先解决五个基础问题：
+P0 只交付一条可靠的 AI 漫剧纵向闭环，先解决六个基础问题：
 
 1. 管理员修改流程不能影响已经开始的任务。
 2. 重复提交、重复回调不能产生重复任务或重复扣费。
 3. 调用付费模型前必须先冻结足够算力，避免平台先产生供应商成本却无法向用户结算。
 4. 取消、超时、重试和用户确认必须在 root task、workflow run、step 和账务之间保持一致。
 5. `/agents` 和 `/agent` 必须调用同一份工作流工具能力，不能形成两套工具定义和两套执行逻辑。
+6. 对运营人员只提供“工具上线/下线”一个对外开放总开关，工作流发布、执行模式和展示位由后端按规则联动，不能要求运营逐项开启。
 
-在这五项通过生产门禁前，不开放自由条件分支、循环、并行节点和全品类工作流迁移。
+在这六项通过生产门禁前，不开放自由条件分支、循环、并行节点和全品类工作流迁移。
 
 ## 2. 为什么要调整原方案
 
@@ -38,8 +39,8 @@ V2 方案保留原方案的正确方向，但先把资金和执行正确性独�
 
 ### 3.1 本期包含
 
-- 管理端 `/task-tools` 工作流工具列表。
-- 管理端 `/task-tools/:toolId/workflow` 草稿编辑、检查、发布和版本记录。
+- 管理端 `/task-tools` 工作流工具列表，以及唯一的工具上线/下线总开关。
+- 管理端 `/task-tools/:toolId/workflow` 草稿编辑、检查、发布更新和版本记录。
 - 发布时生成不可修改的正式版本。
 - 用户端 `/agents` 工作流工具中心。
 - 用户端 `/agents/tools/:toolCode` 工具详情、输入表单和费用说明。
@@ -72,8 +73,8 @@ V2 方案保留原方案的正确方向，但先把资金和执行正确性独�
 ```mermaid
 flowchart LR
   subgraph Admin["管理端"]
-    A1["/task-tools<br/>工作流工具列表"]
-    A2["/task-tools/:toolId/workflow<br/>编辑、检查、发布、版本记录"]
+    A1["/task-tools<br/>工作流工具列表<br/>唯一上线/下线总开关"]
+    A2["/task-tools/:toolId/workflow<br/>保存草稿、发布更新、版本记录"]
     A1 --> A2
   end
 
@@ -87,9 +88,15 @@ flowchart LR
     C1 --> C2 --> U3
   end
 
-  A2 -->|"发布同一份工具能力"| U1
-  A2 -->|"进入统一 Agent 工具注册表"| C1
+  A1 -->|"上线后开放同一份工具能力"| U1
+  A1 -->|"上线后进入统一 Agent 工具注册表"| C1
 ```
+
+“发布版本”和“工具上线”不是两个并列的开放开关：
+
+- 离线工具点击“上线”时，后端自动校验并发布当前已保存草稿，然后一次性开放 `/agents` 和 `/agent`。
+- 在线工具在画布点击“发布更新”时，只切换后续新任务使用的正式版本，不改变上线状态。
+- 点击“下线”后，两个入口都不再接受新任务；已经开始的任务继续使用其锁定版本运行到结束。
 
 ### 4.2 `/agents/runs/:taskId` 必备内容
 
@@ -165,6 +172,7 @@ flowchart LR
 - 工作流草稿只负责管理员编辑，不直接被运行端读取。
 - 工作流发布负责检查草稿并生成不可修改的正式版本。
 - 统一工具注册表同时向 `/agents` 和 `/agent` 提供同一份工具 schema、风险策略和执行模式。
+- 工具上线/下线服务负责在一个事务内联动工具状态、执行模式、计费模式、展示位、工作流执行位和正式版本指针；运营端不直接维护这些技术字段。
 - Agent 调用桥接负责创建 `agent_tool_call`、启动工作流、绑定 root task，并把关键状态同步回聊天运行卡片。
 - 运行入口负责接收页面直接启动或 Agent 启动，幂等地创建 root task、workflow run 和步骤。
 - 运行引擎只读取本次 run 绑定的正式版本，并通过数据库状态条件推进。
@@ -176,20 +184,22 @@ flowchart LR
 
 ### 6.1 浅显理解
 
-管理员编辑的是草稿。点击发布后，系统把草稿复制成一份不能修改的正式版本。用户启动任务时固定使用其中一个正式版本。
+管理员编辑的是草稿。“保存”只保存草稿，不会影响用户正在使用的正式版本。
 
-管理员后续继续编辑，只会产生新草稿，不会影响已经开始的任务。
+离线工具点击“上线”时，系统自动检查当前已保存草稿，并把它生成一份不能修改的正式版本。在线工具修改草稿后，点击“发布更新”才会让后续新任务使用新版本。用户启动任务时会固定使用当时的正式版本，因此后续编辑、发布更新或下线都不会改变已经开始的任务。
 
 ```mermaid
 flowchart LR
-  A["管理员编辑草稿"] --> B["检查流程是否正确"]
-  B --> C["生成不可修改的正式版本"]
-  C --> D["新任务绑定这个版本"]
-  D --> E["按该版本执行到结束"]
-
-  A -. "后续继续修改" .-> G["新草稿"]
-  G -. "不会影响" .-> D
+  A["编辑并保存草稿"] --> B{"工具当前在线吗？"}
+  B -- "否：点击上线" --> C["自动校验并生成正式版本"]
+  B -- "是：点击发布更新" --> C
+  C --> D["后续新任务绑定新版本"]
+  D --> E["按锁定版本执行到结束"]
+  A -. "只保存、不发布" .-> F["线上仍使用原正式版本"]
+  G["点击下线"] -. "只阻止新任务" .-> E
 ```
+
+对运营人员而言，工具列表里的上线/下线开关是唯一的对外开放总开关。画布中的保存和发布只管理“执行哪个版本”，不是额外的可见性或执行开关。
 
 ### 6.2 发布流程
 
@@ -205,16 +215,26 @@ sequenceDiagram
   API->>DB: 只在版本匹配时保存
   DB-->>Admin: 返回新的草稿版本
 
-  Admin->>API: 发布草稿
-  API->>Validator: 检查并整理为标准执行格式
-  Validator-->>API: 标准 DSL 和依赖清单
-  API->>API: 计算内容指纹 dsl_hash
-  API->>DB: 插入不可修改的正式版本
-  API->>DB: 切换当前发布版本指针
-  DB-->>Admin: 返回 versionId 和 dslHash
+  alt 离线工具点击上线
+    Admin->>API: 上线工具
+    API->>Validator: 校验当前已保存草稿
+    Validator-->>API: 标准 DSL、输入 schema 和依赖清单
+    API->>API: 计算完整发布内容指纹
+    API->>DB: 同一事务内插入正式版本并联动全部可用技术位
+    DB-->>Admin: 工具已上线，两个用户入口同时可用
+  else 在线工具点击发布更新
+    Admin->>API: 发布更新
+    API->>Validator: 校验当前已保存草稿
+    Validator-->>API: 标准 DSL、输入 schema 和依赖清单
+    API->>API: 计算完整发布内容指纹
+    API->>DB: 插入正式版本并切换当前版本指针
+    DB-->>Admin: 返回 versionId 和发布内容指纹
+  end
 
   Runner->>DB: 创建 run 并固定 versionId
-  Note over Runner,DB: 后续编辑、恢复和下线不影响该 run
+  Admin->>API: 下线工具
+  API->>DB: 同一事务内关闭两个入口的新任务准入
+  Note over Runner,DB: 保存草稿、发布更新和下线都不影响已创建 run
 ```
 
 ### 6.3 发布版本必须包含
@@ -225,7 +245,9 @@ sequenceDiagram
 - 模型和工具绑定清单，但不包含 API Key 等密钥。
 - 计费规则、价格上限和最大计费单位。
 - 风险级别和确认策略。
-- `dsl_hash`、发布时间和发布人。
+- 覆盖标准 DSL、输入 schema、依赖、计费和风险策略的发布内容指纹，以及发布时间和发布人；数据库字段名可继续沿用 `dsl_hash`，但计算范围不能只包含 DSL。
+
+只要输入字段 schema 或上述任一执行内容发生变化，就必须产生新的正式版本和内容指纹，不能因为画布 DSL 没变而复用旧版本。
 
 “恢复历史版本”只把历史内容复制成新草稿，不直接替换线上版本。管理员必须重新检查和发布。
 
@@ -501,12 +523,14 @@ flowchart TD
 
 - `execution_mode`: `DIRECT | WORKFLOW`。
 - `billing_mode`: P0 支持 `FIXED | WORKFLOW_STEP`。
-- `agent_surface_enabled`: 是否展示到 `/agents`。
+- `agent_surface_enabled`: 是否展示到 `/agents`；这是由工作流工具上线/下线事务自动维护的技术位，不提供独立运营开关。
 - `minimum_required_credits`: 发布时计算并缓存，用于工具列表展示第一个付费步骤所需的最低算力；运行时权威值来自正式版本的计费策略。
 
 保留现有 `tool_type` 语义，不改成 `MODEL | AGENT | WORKFLOW`。
 
-`/agent` 是否可调用继续使用现有 `agent_tool_descriptor_extension`，不在 `ai_tools` 再建一套重复字段。
+对于工作流工具，能否被用户使用统一由同一份“工作流可用”判定决定：工具在线、执行模式和计费模式正确、展示位与工作流执行位开启，并且存在有效正式版本。该判定同时供 `/agents` 和 `/agent` 使用。
+
+现有 `agent_tool_descriptor_extension` 继续保存自动调用、风险等级和确认策略，但 `agent_enabled` 不再作为已上线工作流工具进入 `/agent` 的第二道运营门槛。普通非工作流工具保持现有行为。
 
 #### `tool_workflows`
 
@@ -514,7 +538,7 @@ flowchart TD
 
 - `draft_revision`: 防止两个管理员互相覆盖草稿。
 - `published_version_id`: 当前正式版本。
-- `execution_enabled`: 工作流执行总开关。
+- `execution_enabled`: 单个工作流的新任务执行技术位，由工具上线/下线事务自动维护，不提供独立运营开关。
 
 草稿和正式版本并存。是否有未发布修改通过草稿 revision 和正式版本来源 revision 比较得出，不使用单一 `DRAFT/PUBLISHED` 状态表达全部事实。
 
@@ -657,11 +681,13 @@ flowchart TD
 
 页面使用 `/task-tools`，后端继续保留现有 canonical API：
 
+- `POST /api/admin/v1/tools/{toolId}/publish`：唯一上线动作；工作流工具会自动校验并发布当前已保存草稿，再原子开启全部可用技术位。
+- `POST /api/admin/v1/tools/{toolId}/offline`：唯一下线动作；原子关闭两个入口的新任务准入，不影响已创建 run。
 - `GET /api/admin/v1/tools/{toolId}/workflow`
 - `PUT /api/admin/v1/tools/{toolId}/workflow`
 - `POST /api/admin/v1/tools/{toolId}/workflow/validate`
-- `POST /api/admin/v1/tools/{toolId}/workflow/publish`
-- `POST /api/admin/v1/tools/{toolId}/workflow/unpublish`
+- `POST /api/admin/v1/tools/{toolId}/workflow/publish`：发布正式版本；在线工具的管理端按钮显示为“发布更新”，不改变工具上线状态。
+- `POST /api/admin/v1/tools/{toolId}/workflow/unpublish`：仅作旧调用兼容时，必须委托工具下线语义，不能成为独立入口或只关闭部分技术位。
 - `GET /api/admin/v1/tools/{toolId}/workflow/versions`
 - `POST /api/admin/v1/tools/{toolId}/workflow/versions/{versionId}/restore`
 
@@ -715,7 +741,7 @@ P0 保留 `GET /api/v1/agent/tools` 作为聊天页的轻量工具选择列表�
 - `riskLevel`
 - `confirmationPolicy`
 
-工作流工具能否出现在 `/agent`、能否由聊天智能体自动调用，继续使用现有 `agent_tool_descriptor_extension.agent_enabled`、`agent_auto_callable` 和确认策略作为唯一配置来源。
+工作流工具是否出现在 `/agent`，与它是否出现在 `/agents` 使用同一份工作流可用判定；上线后两个入口同时可用，下线后两个入口同时拒绝新任务。`agent_auto_callable` 和确认策略只决定聊天智能体能否直接调用，还是必须先向用户确认，不决定工具能否被发现。普通非工作流工具继续使用现有描述符规则。
 
 调用链如下：
 
@@ -796,14 +822,16 @@ sequenceDiagram
 ### 13.1 必备开关
 
 - 全局工作流执行开关。
-- 按工具开关。
+- 按工具上线/下线总开关。
 - 真实扣费开关，支持 shadow billing。
 - 自动重试开关。
 - 用户确认节点开关。
 - 灰度用户比例。
 - 单 run 最大算力和单用户每日最大算力。
 
-开关由后端读取，关闭后立即阻止创建新 run；已开始的 run 按“继续完成”或“安全取消”策略处理，不能直接丢弃。
+开关由后端读取，关闭后立即阻止创建新 run。单个工具下线时，已开始的 run 必须继续完成；只有平台级紧急开关才可以按预先定义的安全取消策略处理在途任务，任何情况下都不能直接丢弃。
+
+其中按工具开关是运营人员使用的唯一对外开放开关。全局执行、真实扣费、自动重试、确认节点和灰度比例属于平台安全与应急控制，不在工具运营界面形成需要逐项放行的发布门槛。
 
 ### 13.2 必备指标
 
@@ -888,11 +916,16 @@ flowchart LR
 - 同一成功回调重复 100 次，只产生一次状态变化和一次扣费。
 - 用户确认、取消和成功回调同时发生时，只允许一个符合状态机的结果。
 
-### 17.2 版本
+### 17.2 版本与上下线
 
 - 100 个 v1 长任务运行期间发布 v2，全部继续使用原 `workflowVersionId` 和 `dslHash`。
 - 恢复历史版本后，当前 `published_version_id` 不变。
 - 两名管理员同时保存草稿，旧 revision 请求返回 409，不覆盖新内容。
+- 在线工具只保存草稿时，用户仍使用原正式版本；发布更新后，只有新任务使用新版本。
+- 输入字段 schema 变化即使画布 DSL 未变，也生成新的正式版本和内容指纹。
+- 离线工具上线时，草稿校验、正式版本生成、工具状态、执行模式、计费模式、展示位和执行位在一个事务内成功或一起回滚，不能出现“显示在线但不能运行”的中间状态。
+- 下线与创建新 run 并发时，通过锁定并重查保证结果只有两种：任务在下线前按有效版本完整创建，或在下线后被拒绝；不能创建半套 root task、run、step、outbox 或冻结记录。
+- 下线后 `/agents` 和 `/agent` 同时拒绝新任务，已经开始的 run 继续使用锁定版本完成。
 
 ### 17.3 计费
 
@@ -925,7 +958,7 @@ flowchart LR
 
 ### 17.6 Agent 调用
 
-- `/agents` 已发布且 `agent_enabled=true` 的工作流工具出现在 `/agent` 可用 descriptor 中。
+- 工作流工具上线且满足统一可用判定后，同时出现在 `/agents` 与 `/agent` 可用 descriptor 中；下线后同时消失并拒绝新任务，不再要求运营额外开启 `agent_enabled`。
 - `agent_auto_callable=false` 或需要确认时，聊天智能体必须先取得用户确认；不允许绕过现有风险策略。
 - 同一个 `agent_tool_call` 重试创建工作流 100 次，只产生一个 root task 和一个 workflow run。
 - `agent_tool_call.task_id` 正确绑定 root task，聊天运行卡片链接到 `/agents/runs/:taskId`。
@@ -950,6 +983,8 @@ flowchart LR
 ### 17.8 Task 12 门禁执行记录
 
 本阶段只完成代码接线和自动化测试第一阶段，以下状态不能解释为“已经可以生产部署”：
+
+本节记录平台级安全开关和历史迁移状态，不改变前述产品语义：运营人员仍只通过工具上线/下线控制单个工作流工具是否对外开放。
 
 - [x] `workflow.runtime.enabled`、`execution-enabled` 默认保持 `false`；新 `/agents` run 在任何 root/run/step/outbox/freeze 写入前执行准入判断。
 - [x] 同一个已存在的 `clientRequestId` 先返回原 run；kill switch 只阻止新建，不影响已有 run 查询和 in-flight 收敛。
@@ -993,7 +1028,9 @@ flowchart LR
 
 - `/agent` 保持 AI 对话入口，`/agents` 作为有状态工作流工具中心。
 - `/tools`、`/agents` 的工具能力进入统一 Agent 工具注册表；`/agents` 工具从 P0 开始即可被 `/agent` 调用。
-- 管理端可以使用 `/task-tools` 页面名称，管理 API 继续以 `/tools/{toolId}/workflow` 为唯一正式资源路径。
+- 工作流工具的上线/下线是唯一运营总开关；保存只更新草稿，发布更新只切换后续新任务使用的版本，下线不终止在途任务。
+- 工作流工具上线后 `/agents` 与 `/agent` 同时可用，`agent_auto_callable` 和确认策略只控制调用方式，不构成第二个上下线门槛。
+- 管理端可以使用 `/task-tools` 页面名称；工作流定义 API 继续以 `/tools/{toolId}/workflow` 为唯一正式资源路径，工具对外开放则统一使用 `/tools/{toolId}/publish` 和 `/offline`。
 - `tool_type` 保留现有能力分类，只新增 `execution_mode`。
 - 草稿与正式版本分离，run 必须锁定不可修改的正式版本。
 - P0 采用线性 DAG 和 AI 漫剧单工具试点。

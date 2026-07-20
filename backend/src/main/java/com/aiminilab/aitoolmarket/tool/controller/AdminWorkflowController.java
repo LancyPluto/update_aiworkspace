@@ -7,6 +7,7 @@ import com.aiminilab.aitoolmarket.tool.dto.UpsertWorkflowRequest;
 import com.aiminilab.aitoolmarket.tool.dto.WorkflowResponse;
 import com.aiminilab.aitoolmarket.tool.dto.WorkflowValidationResponse;
 import com.aiminilab.aitoolmarket.tool.dto.WorkflowVersionItemResponse;
+import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.WorkflowService;
 import com.aiminilab.aitoolmarket.workflow.dsl.WorkflowDslValidationResult;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowDslService;
@@ -21,11 +22,14 @@ public class AdminWorkflowController {
 
     private final WorkflowService workflowService;
     private final WorkflowDslService workflowDslService;
+    private final ToolService toolService;
 
     public AdminWorkflowController(WorkflowService workflowService,
-                                   WorkflowDslService workflowDslService) {
+                                   WorkflowDslService workflowDslService,
+                                   ToolService toolService) {
         this.workflowService = workflowService;
         this.workflowDslService = workflowDslService;
+        this.toolService = toolService;
     }
 
     @GetMapping
@@ -78,7 +82,8 @@ public class AdminWorkflowController {
             return ApiResponse.fail(ErrorCode.PARAM_ERROR, "工作流不存在");
         }
         Long operatorId = AuthContext.get().userId();
-        return ApiResponse.success(workflowService.updateStatus(workflow.id(), "DRAFT", operatorId));
+        toolService.offlineTool(toolId, operatorId);
+        return ApiResponse.success(workflowService.getWorkflow(toolId));
     }
 
     @GetMapping("/versions")

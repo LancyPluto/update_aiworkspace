@@ -32,6 +32,7 @@ import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertFieldSchemaRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolCategoryRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
+import com.aiminilab.aitoolmarket.tool.dto.WorkflowResponse;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.support.ConfigNoteMergeSupport;
 import com.aiminilab.aitoolmarket.tool.entity.ToolCategory;
@@ -56,6 +57,7 @@ import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationRegistry;
 import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationResolver;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.ToolTemplateService;
+import com.aiminilab.aitoolmarket.tool.service.WorkflowService;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowExecutionService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JavaType;
@@ -66,6 +68,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -82,6 +86,8 @@ import java.util.Set;
 public class ToolServiceImpl implements ToolService {
 
     private static final Logger log = LoggerFactory.getLogger(ToolServiceImpl.class);
+    private static final String WORKFLOW_EXECUTION_MODE = "WORKFLOW";
+    private static final String WORKFLOW_BILLING_MODE = "WORKFLOW_STEP";
     private static final long MAX_TOOL_COVER_BYTES = 20L * 1024L * 1024L;
     private static final DateTimeFormatter COVER_FILENAME_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final Set<String> TOOL_COVER_EXTENSIONS = Set.of(
@@ -104,6 +110,7 @@ public class ToolServiceImpl implements ToolService {
     private final ToolIntegrationRegistry toolIntegrationRegistry;
     private final BypassCacheService bypassCacheService;
     private final WorkflowExecutionService workflowExecutionService;
+    private final WorkflowService workflowService;
 
     public ToolServiceImpl(ToolMapper toolMapper, ToolCategoryMapper toolCategoryMapper,
                            ToolFieldSchemaMapper toolFieldSchemaMapper, ToolFieldItemMapper toolFieldItemMapper,
@@ -116,7 +123,8 @@ public class ToolServiceImpl implements ToolService {
                            ToolIntegrationResolver toolIntegrationResolver,
                            ToolIntegrationRegistry toolIntegrationRegistry,
                            BypassCacheService bypassCacheService,
-                           @Lazy WorkflowExecutionService workflowExecutionService) {
+                           @Lazy WorkflowExecutionService workflowExecutionService,
+                           WorkflowService workflowService) {
         this.toolMapper = toolMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.toolFieldSchemaMapper = toolFieldSchemaMapper;
@@ -133,6 +141,7 @@ public class ToolServiceImpl implements ToolService {
         this.toolIntegrationRegistry = toolIntegrationRegistry;
         this.bypassCacheService = bypassCacheService;
         this.workflowExecutionService = workflowExecutionService;
+        this.workflowService = workflowService;
     }
 
     @Override
@@ -405,22 +414,41 @@ public class ToolServiceImpl implements ToolService {
     }
 
     @Override
+    @Transactional
     public ToolSummaryResponse publishTool(Long toolId, Long operatorId) {
-        AiTool tool = toolMapper.findById(toolId)
+        AiTool tool = toolMapper.findByIdForUpdate(toolId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "Tool not found"));
         validatePublishable(tool);
-        toolMapper.updateToolStatus(toolId, ToolStatus.ONLINE, operatorId);
-        ToolSummaryResponse summary = findToolSummary(toolId);
-        bypassCacheService.invalidateToolCatalog(summary.toolCode());
+        WorkflowResponse workflow = workflowService.getWorkflow(toolId);
+        if (workflow == null) {
+            toolMapper.updateToolStatus(toolId, ToolStatus.ONLINE, operatorId);
+        } else {
+            workflowService.publish(workflow.id(), operatorId);
+            if (toolMapper.activateWorkflowTool(toolId, operatorId) != 1) {
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Workflow tool publish failed");
+            }
+        }
+        ToolSummaryResponse summary = findAdminToolSummary(toolId);
+        invalidateToolCatalogAfterCommit(summary.toolCode());
         return summary;
     }
 
     @Override
+    @Transactional
     public ToolSummaryResponse offlineTool(Long toolId, Long operatorId) {
-        ensureToolExists(toolId);
-        toolMapper.updateToolStatus(toolId, ToolStatus.OFFLINE, operatorId);
-        ToolSummaryResponse summary = findToolSummary(toolId);
-        bypassCacheService.invalidateToolCatalog(summary.toolCode());
+        toolMapper.findByIdForUpdate(toolId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "Tool not found"));
+        WorkflowResponse workflow = workflowService.getWorkflow(toolId);
+        if (workflow == null) {
+            toolMapper.updateToolStatus(toolId, ToolStatus.OFFLINE, operatorId);
+        } else {
+            workflowService.disableExecutionPreservingPublication(workflow.id(), operatorId);
+            if (toolMapper.deactivateWorkflowTool(toolId, operatorId) != 1) {
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Workflow tool offline failed");
+            }
+        }
+        ToolSummaryResponse summary = findAdminToolSummary(toolId);
+        invalidateToolCatalogAfterCommit(summary.toolCode());
         return summary;
     }
 
@@ -431,8 +459,9 @@ public class ToolServiceImpl implements ToolService {
     }
 
     @Override
+    @Transactional
     public List<ToolFieldResponse> updateFields(Long toolId, UpdateToolFieldsRequest request) {
-        ensureToolExists(toolId);
+        lockTool(toolId);
         validateSingleCoreField(request.fields());
         Long schemaId = toolFieldSchemaMapper.findActiveSchemaId(toolId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具字段配置不存在"));
@@ -451,7 +480,9 @@ public class ToolServiceImpl implements ToolService {
     }
 
     @Override
+    @Transactional
     public FieldSchemaAdminResponse upsertActiveFieldSchema(Long toolId, UpsertFieldSchemaRequest request, Long operatorId) {
+        lockTool(toolId);
         Long schemaId = toolFieldSchemaMapper.findActiveSchemaId(toolId).orElse(null);
         CreateFieldSchemaRequest createRequest = new CreateFieldSchemaRequest(
                 request.schemaVersion(),
@@ -485,8 +516,9 @@ public class ToolServiceImpl implements ToolService {
     }
 
     @Override
+    @Transactional
     public FieldSchemaResponse createFieldSchema(Long toolId, CreateFieldSchemaRequest request, Long operatorId) {
-        ensureToolExists(toolId);
+        lockTool(toolId);
         validateSingleCoreField(request.fields());
         ToolFieldSchema schema = new ToolFieldSchema();
         schema.setToolId(toolId);
@@ -575,7 +607,7 @@ public class ToolServiceImpl implements ToolService {
 
     private ToolSummaryResponse findToolSummary(Long toolId) {
         return toolMapper.findById(toolId)
-                .map(this::toEstimatedSummary)
+                .map(this::toAdminSummary)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
     }
 
@@ -585,14 +617,24 @@ public class ToolServiceImpl implements ToolService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
     }
 
-    private ToolSummaryResponse toEstimatedSummary(AiTool tool) {
-        return sanitizeCoverUrl(
-                ToolSummaryResponse.from(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool)));
-    }
-
     private ToolSummaryResponse toAdminSummary(AiTool tool) {
+        WorkflowResponse workflow = workflowService.getWorkflow(tool.getId());
+        boolean configured = workflow != null;
+        boolean usable = configured
+                && ToolStatus.ONLINE.name().equalsIgnoreCase(tool.getStatus())
+                && WORKFLOW_EXECUTION_MODE.equalsIgnoreCase(tool.getExecutionMode())
+                && WORKFLOW_BILLING_MODE.equalsIgnoreCase(tool.getBillingMode())
+                && Boolean.TRUE.equals(tool.getAgentSurfaceEnabled())
+                && workflow.executionEnabled()
+                && workflow.publishedVersionId() != null;
         return sanitizeCoverUrlForAdmin(
-                ToolSummaryResponse.from(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool)));
+                ToolSummaryResponse.from(tool, taskCreditEstimateService.estimateUserFacingTaskCredits(tool))
+                        .withWorkflowState(
+                                configured,
+                                configured ? workflow.executionEnabled() : null,
+                                configured ? workflow.publishedVersionId() : null,
+                                usable
+                        ));
     }
 
     private ToolSummaryResponse sanitizeCoverUrl(ToolSummaryResponse summary) {
@@ -731,6 +773,11 @@ public class ToolServiceImpl implements ToolService {
     private void ensureToolExists(Long toolId) {
         toolMapper.findById(toolId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+    }
+
+    private AiTool lockTool(Long toolId) {
+        return toolMapper.findByIdForUpdate(toolId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "Tool not found"));
     }
 
     private ToolCategory ensureCategoryExists(Long categoryId) {
@@ -982,6 +1029,19 @@ public class ToolServiceImpl implements ToolService {
 
     private void invalidateUserToolCaches(Long toolId) {
         toolMapper.findById(toolId)
-                .ifPresent(tool -> bypassCacheService.invalidateToolCatalog(tool.getToolCode()));
+                .ifPresent(tool -> invalidateToolCatalogAfterCommit(tool.getToolCode()));
+    }
+
+    private void invalidateToolCatalogAfterCommit(String toolCode) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            bypassCacheService.invalidateToolCatalog(toolCode);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                bypassCacheService.invalidateToolCatalog(toolCode);
+            }
+        });
     }
 }

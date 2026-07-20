@@ -93,6 +93,13 @@ public interface ToolMapper extends BaseMapper<AiTool> {
         return Optional.ofNullable(selectDetailById(toolId));
     }
 
+    @Select("SELECT * FROM ai_tools WHERE id = #{toolId} AND is_deleted = 0 FOR UPDATE")
+    AiTool selectByIdForUpdate(@Param("toolId") Long toolId);
+
+    default Optional<AiTool> findByIdForUpdate(Long toolId) {
+        return Optional.ofNullable(selectByIdForUpdate(toolId));
+    }
+
     @Select("""
             SELECT t.*, c.category_name, c.category_code,
                    COALESCE(m.display_name, m.model_name) AS model_config_name,
@@ -124,6 +131,9 @@ public interface ToolMapper extends BaseMapper<AiTool> {
     default Optional<AiTool> findAnyByCode(String toolCode) {
         return Optional.ofNullable(selectAnyByCode(toolCode));
     }
+
+    @Select("SELECT * FROM ai_tools WHERE tool_code = #{toolCode} AND is_deleted = 0 LIMIT 1 FOR UPDATE")
+    AiTool selectAnyByCodeForUpdate(@Param("toolCode") String toolCode);
 
     @Select("""
             SELECT COUNT(*)
@@ -198,6 +208,30 @@ public interface ToolMapper extends BaseMapper<AiTool> {
     default void updateToolStatus(Long toolId, ToolStatus status, Long operatorId) {
         updateToolStatusValue(toolId, status.name(), operatorId);
     }
+
+    @Update("""
+            UPDATE ai_tools
+            SET status = 'ONLINE',
+                execution_mode = 'WORKFLOW',
+                billing_mode = 'WORKFLOW_STEP',
+                agent_surface_enabled = 1,
+                updated_by = #{operatorId},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{toolId} AND is_deleted = 0
+            """)
+    int activateWorkflowTool(@Param("toolId") Long toolId,
+                             @Param("operatorId") Long operatorId);
+
+    @Update("""
+            UPDATE ai_tools
+            SET status = 'OFFLINE',
+                agent_surface_enabled = 0,
+                updated_by = #{operatorId},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{toolId} AND is_deleted = 0
+            """)
+    int deactivateWorkflowTool(@Param("toolId") Long toolId,
+                               @Param("operatorId") Long operatorId);
 
     @Update("""
             UPDATE ai_tools

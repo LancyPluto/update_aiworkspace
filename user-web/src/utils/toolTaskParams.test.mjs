@@ -25,7 +25,31 @@ async function importToolTaskParams() {
   return import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`)
 }
 
-const { buildAspectRatioTaskParams, buildTaskParams } = await importToolTaskParams()
+const { buildAspectRatioOptions, buildAspectRatioTaskParams, buildTaskParams } = await importToolTaskParams()
+
+test("uses tool-specific aspect-ratio options instead of merging generic fallbacks", () => {
+  assert.deepEqual(
+    buildAspectRatioOptions(
+      [
+        { label: "智能", value: "auto" },
+        { label: "2:3", value: "1024x1536" },
+      ],
+      ["1:1", "16:9", "9:16"],
+    ),
+    [
+      { label: "智能", value: "auto" },
+      { label: "2:3", value: "1024x1536" },
+    ],
+  )
+})
+
+test("uses generic aspect ratios only when the tool has no configured options", () => {
+  assert.deepEqual(buildAspectRatioOptions([], ["1:1", "16:9", "9:16"]), [
+    { label: "1:1", value: "1:1" },
+    { label: "16:9", value: "16:9" },
+    { label: "9:16", value: "9:16" },
+  ])
+})
 
 test("keeps the original dynamic aspect-ratio field key for gateway forms", () => {
   assert.deepEqual(buildAspectRatioTaskParams(" 1024x1536 ", "size"), {

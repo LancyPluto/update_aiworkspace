@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.*;
 
 import java.util.Optional;
+import java.util.List;
 
 public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
 
@@ -31,16 +32,42 @@ public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
     ToolWorkflow selectExecutableCanonicalByToolId(@Param("toolId") Long toolId);
 
     @Select("""
-            SELECT w.*
+            <script>
+            SELECT DISTINCT w.tool_id
             FROM tool_workflows w
             JOIN tool_workflow_versions v
               ON v.id = w.published_version_id
              AND v.workflow_id = w.id
-            WHERE w.tool_id = #{toolId}
+            WHERE w.execution_enabled = 1
+              AND w.published_version_id IS NOT NULL
+              AND w.tool_id IN
+              <foreach collection="toolIds" item="toolId" open="(" separator="," close=")">
+                #{toolId}
+              </foreach>
+            </script>
+            """)
+    List<Long> selectExecutableToolIds(@Param("toolIds") List<Long> toolIds);
+
+    @Select("""
+            SELECT w.*
+            FROM ai_tools t
+            JOIN tool_workflows w
+              ON w.tool_id = t.id
+            JOIN tool_workflow_versions v
+              ON v.id = w.published_version_id
+             AND v.workflow_id = w.id
+            WHERE t.id = #{toolId}
+              AND t.status = 'ONLINE'
+              AND COALESCE(t.is_deleted, 0) = 0
+              AND t.execution_mode = 'WORKFLOW'
+              AND t.billing_mode = 'WORKFLOW_STEP'
+              AND t.agent_surface_enabled = 1
+              AND w.execution_enabled = 1
               AND w.published_version_id IS NOT NULL
             ORDER BY CASE WHEN w.workflow_name = 'default' THEN 0 ELSE 1 END,
                      w.id DESC
             LIMIT 1
+            FOR UPDATE
             """)
     ToolWorkflow selectCanonicalPublishedByToolId(@Param("toolId") Long toolId);
 
@@ -127,6 +154,16 @@ public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
             """)
     int disableExecution(@Param("workflowId") Long workflowId,
                          @Param("operatorId") Long operatorId);
+
+    @Update("""
+            UPDATE tool_workflows
+            SET execution_enabled = 0,
+                updated_by = #{operatorId},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{workflowId}
+            """)
+    int disableExecutionPreservingPublication(@Param("workflowId") Long workflowId,
+                                              @Param("operatorId") Long operatorId);
 
     @Update("""
             UPDATE tool_workflows
