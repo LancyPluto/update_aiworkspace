@@ -28,12 +28,12 @@ export function validateWorkflow(toolId: number): Promise<WorkflowValidationResu
   return http.post<WorkflowValidationResult>(`/api/admin/v1/tools/${toolId}/workflow/validate`)
 }
 
-/** 校验并发布工作流（status=PUBLISHED）；运行端只执行 PUBLISHED 工作流 */
+/** 生成或复用不可变正式版本；工具离线时不会借此重新上线。 */
 export function publishWorkflow(toolId: number): Promise<WorkflowResponse> {
   return http.post<WorkflowResponse>(`/api/admin/v1/tools/${toolId}/workflow/publish`)
 }
 
-/** 将工作流退回 DRAFT（运行端回退到工具原有 handler） */
+/** 兼容入口：按工具下线语义关闭新运行，同时保留正式工作流版本。 */
 export function unpublishWorkflow(toolId: number): Promise<WorkflowResponse> {
   return http.post<WorkflowResponse>(`/api/admin/v1/tools/${toolId}/workflow/unpublish`)
 }

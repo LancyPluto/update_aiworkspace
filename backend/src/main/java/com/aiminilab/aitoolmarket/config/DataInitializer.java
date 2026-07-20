@@ -1721,7 +1721,7 @@ public class DataInitializer implements CommandLineRunner {
 
     private void normalizeGptImageToolFieldOptions() {
         String sizeOptionsJson = """
-                [{"label":"智能","value":"auto"},{"label":"9:16","value":"1024x1536"},{"label":"2:3","value":"1024x1536"},{"label":"3:4","value":"1024x1536"},{"label":"1:1","value":"1024x1024"},{"label":"4:3","value":"1536x1024"},{"label":"3:2","value":"1536x1024"},{"label":"16:9","value":"1536x1024"}]
+                [{"label":"智能","value":"auto"},{"label":"2:3","value":"1024x1536"},{"label":"1:1","value":"1024x1024"},{"label":"3:2","value":"1536x1024"}]
                 """.trim();
         jdbcTemplate.update("""
                 UPDATE tool_field_schema_items
@@ -1738,6 +1738,12 @@ public class DataInitializer implements CommandLineRunner {
                     OR REPLACE(options_json, ' ', '') LIKE '%"value":"16：9"%'
                     OR REPLACE(options_json, ' ', '') LIKE '%"value":"9:16"%'
                     OR REPLACE(options_json, ' ', '') LIKE '%"value":"9：16"%'
+                    OR REPLACE(options_json, ' ', '') LIKE '%"label":"9:16","value":"1024x1536"%'
+                    OR REPLACE(options_json, ' ', '') LIKE '%"label":"9：16","value":"1024x1536"%'
+                    OR REPLACE(options_json, ' ', '') LIKE '%"label":"3:4","value":"1024x1536"%'
+                    OR REPLACE(options_json, ' ', '') LIKE '%"label":"4:3","value":"1536x1024"%'
+                    OR REPLACE(options_json, ' ', '') LIKE '%"label":"16:9","value":"1536x1024"%'
+                    OR REPLACE(options_json, ' ', '') LIKE '%"label":"16：9","value":"1536x1024"%'
                   )
                   AND schema_id IN (
                     SELECT s.id

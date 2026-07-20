@@ -20,6 +20,6 @@ public interface WorkflowService {
 
     WorkflowResponse publish(Long workflowId, Long operatorId);
 
-    /** 仅切换工作流状态（DRAFT/PUBLISHED），不改动 DAG 内容、不产生新版本。 */
-    WorkflowResponse updateStatus(Long workflowId, String status, Long operatorId);
+    void disableExecutionsForToolPreservingPublication(Long toolId, Long operatorId);
+
 }

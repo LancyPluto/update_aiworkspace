@@ -1,6 +1,8 @@
 package com.aiminilab.aitoolmarket.tool;
 
 import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
+import com.aiminilab.aitoolmarket.storage.AssetStorageService;
+import com.aiminilab.aitoolmarket.storage.StoredAsset;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -10,7 +12,15 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -32,6 +42,12 @@ class UserUploadApiTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private AssetStorageService assetStorageService;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Test
     void uploadAssetsSupportPaging() throws Exception {
@@ -68,6 +84,24 @@ class UserUploadApiTest {
                 .andExpect(jsonPath("$.data.list.length()").value(1))
                 .andExpect(jsonPath("$.data.pageNo").value(2))
                 .andExpect(jsonPath("$.data.hasNext").value(false));
+    }
+
+    @Test
+    void databaseRollbackRemovesNewUniqueUpload() {
+        AtomicReference<Path> storedPath = new AtomicReference<>();
+
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            StoredAsset stored = assetStorageService.storeMultipartPrivateUnique(
+                    "uploads/rollback-" + UUID.randomUUID() + ".txt",
+                    new MockMultipartFile("file", "rollback.txt", "text/plain", "temporary".getBytes())
+            );
+            storedPath.set(Path.of(stored.storagePath()));
+            assertThat(storedPath.get()).exists();
+            status.setRollbackOnly();
+        });
+
+        assertThat(storedPath.get()).isNotNull();
+        assertThat(Files.exists(storedPath.get())).isFalse();
     }
 
     private String loginUser() throws Exception {

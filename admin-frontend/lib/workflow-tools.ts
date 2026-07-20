@@ -17,12 +17,23 @@ export interface WorkflowToolLike {
   toolName?: string | null
   name?: string | null
   toolType?: string | null
+  executionMode?: string | null
   executionHandler?: string | null
   category?: string | null
   categoryName?: string | null
   inputModality?: string | null
   outputModality?: string | null
   configNote?: string | null
+}
+
+export interface ToolAvailabilityLike extends WorkflowToolLike {
+  status?: string | null
+  agentSurfaceEnabled?: boolean | null
+  workflowExecutionEnabled?: boolean | null
+  workflowConfigured?: boolean | null
+  publishedWorkflowVersionId?: number | null
+  workflowUsable?: boolean | null
+  workflowAvailable?: boolean | null
 }
 
 function normalize(value?: string | null) {
@@ -33,7 +44,13 @@ function includesAny(value: string, keywords: string[]) {
   return keywords.some((keyword) => value.includes(keyword))
 }
 
+function hasWorkflowExecutionMode(tool: WorkflowToolLike) {
+  return normalize(tool.executionMode).toUpperCase() === "WORKFLOW"
+}
+
 export function isWorkflowTool(tool: WorkflowToolLike) {
+  if (hasWorkflowExecutionMode(tool)) return true
+
   const code = normalize(tool.toolCode)
   if (modelOnlyToolCodes.has(code)) return false
   if (workflowToolCodes.has(code)) return true
@@ -70,4 +87,27 @@ export function isWorkflowTool(tool: WorkflowToolLike) {
     "comic",
     "drama",
   ])
+}
+
+/** 管理端开关表示用户真实可用性；工作流工具不能只依据 status=ONLINE。 */
+export function isToolAvailableToUsers(tool: ToolAvailabilityLike) {
+  const statusOnline = normalize(tool.status).toUpperCase() === "ONLINE"
+  if (!isWorkflowTool(tool)) return statusOnline
+  if (tool.workflowConfigured === false) return !hasWorkflowExecutionMode(tool) && statusOnline
+
+  if (typeof tool.workflowUsable === "boolean") return tool.workflowUsable
+  if (typeof tool.workflowAvailable === "boolean") return tool.workflowAvailable
+
+  const hasRuntimeAvailability =
+    typeof tool.agentSurfaceEnabled === "boolean" ||
+    typeof tool.workflowExecutionEnabled === "boolean" ||
+    tool.executionMode != null ||
+    tool.publishedWorkflowVersionId !== undefined
+
+  if (!hasRuntimeAvailability) return statusOnline
+  if (!statusOnline) return false
+  if (tool.agentSurfaceEnabled === false || tool.workflowExecutionEnabled === false) return false
+  if (tool.executionMode != null && normalize(tool.executionMode).toUpperCase() !== "WORKFLOW") return false
+  if (tool.publishedWorkflowVersionId === null) return false
+  return true
 }

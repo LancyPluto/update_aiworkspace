@@ -7,7 +7,7 @@ import { resolveCommunityDerivativeUrl } from "@/utils/communityPostMedia"
 import { normalizeMediaFieldValue, normalizeMediaUrl, isValidImagePreviewUrl } from "@/utils/toolCoverMedia"
 import { useAuthStore } from "@/store/authStore"
 import { buildTaskResultBlocks, resolveAudioTracks } from "@/utils/taskResultBlocks"
-import { buildAspectRatioTaskParams } from "@/utils/toolTaskParams"
+import { buildAspectRatioOptions, buildAspectRatioTaskParams } from "@/utils/toolTaskParams"
 import { useGeneratedMaterialList, useUploadHistoryList } from "@/composables/useMaterialPickerLists"
 import { useInfiniteScroll } from "@/composables/useInfiniteScroll"
 import {
@@ -495,28 +495,9 @@ const customModeValue = computed(() => {
 
 const aspectRatioOptions = computed<AspectRatioOption[]>(() => {
   const config = imageCapability.value?.config
-  const options: AspectRatioOption[] = []
-  const seen = new Set<string>()
-
-  function add(label: string, rawValue: unknown) {
-    const value = normalizeAspectRatio(rawValue)
-    if (!value || seen.has(value)) return
-    seen.add(value)
-    options.push({ label: label.trim() || (value === "auto" ? "智能" : value), value })
-  }
-
-  if (ratioField.value) {
-    for (const option of fieldOptions(ratioField.value)) {
-      add(optionLabel(option), optionValue(option))
-    }
-  }
-  if (Array.isArray(config?.aspectRatios)) {
-    for (const ratio of config.aspectRatios) {
-      add(String(ratio), ratio)
-    }
-  }
-
-  return options.length > 0 ? options : [{ label: "智能", value: "auto" }]
+  const toolOptions = ratioField.value ? fieldOptions(ratioField.value) : []
+  const genericRatios = Array.isArray(config?.aspectRatios) ? config.aspectRatios : []
+  return buildAspectRatioOptions(toolOptions, genericRatios, normalizeAspectRatio)
 })
 const aspectRatios = computed(() => aspectRatioOptions.value.map((option) => option.value))
 

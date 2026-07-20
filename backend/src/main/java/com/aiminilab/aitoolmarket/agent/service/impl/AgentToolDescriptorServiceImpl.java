@@ -17,8 +17,12 @@ import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
+import com.aiminilab.aitoolmarket.tool.entity.ToolWorkflow;
+import com.aiminilab.aitoolmarket.tool.entity.ToolWorkflowVersion;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolWorkflowMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolWorkflowVersionMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -34,6 +38,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
@@ -48,6 +53,8 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
 
     private final ToolMapper toolMapper;
     private final ToolFieldItemMapper toolFieldItemMapper;
+    private final ToolWorkflowMapper workflowMapper;
+    private final ToolWorkflowVersionMapper workflowVersionMapper;
     private final AgentToolDescriptorExtensionMapper extensionMapper;
     private final AgentToolPreferenceMapper preferenceMapper;
     private final AgentModelConfigMapper modelConfigMapper;
@@ -56,6 +63,8 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
 
     public AgentToolDescriptorServiceImpl(ToolMapper toolMapper,
                                           ToolFieldItemMapper toolFieldItemMapper,
+                                          ToolWorkflowMapper workflowMapper,
+                                          ToolWorkflowVersionMapper workflowVersionMapper,
                                           AgentToolDescriptorExtensionMapper extensionMapper,
                                           AgentToolPreferenceMapper preferenceMapper,
                                           AgentModelConfigMapper modelConfigMapper,
@@ -63,6 +72,8 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                                           ObjectMapper objectMapper) {
         this.toolMapper = toolMapper;
         this.toolFieldItemMapper = toolFieldItemMapper;
+        this.workflowMapper = workflowMapper;
+        this.workflowVersionMapper = workflowVersionMapper;
         this.extensionMapper = extensionMapper;
         this.preferenceMapper = preferenceMapper;
         this.modelConfigMapper = modelConfigMapper;
@@ -75,10 +86,12 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
         List<AiTool> tools = toolMapper.findTools(true, null, null, null, AGENT_AVAILABLE_TOOL_LIMIT, 0);
         Map<String, AgentToolDescriptorExtension> extensions = findExtensionsByToolCode(tools);
         Set<String> disabledToolCodes = disabledToolCodes(userId);
+        Set<Long> executableWorkflowToolIds = executableWorkflowToolIds(tools);
         return tools.stream()
                 .filter(tool -> {
                     AgentToolDescriptorExtension ext = extensions.get(tool.getToolCode());
-                    return (ext == null || isAgentReadable(ext)) && !disabledToolCodes.contains(tool.getToolCode());
+                    return isToolAgentReadable(tool, ext, executableWorkflowToolIds)
+                            && !disabledToolCodes.contains(tool.getToolCode());
                 })
                 .map(tool -> toDescriptor(tool, extensions.get(tool.getToolCode())))
                 .toList();
@@ -89,10 +102,11 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
         List<AiTool> tools = toolMapper.findTools(true, null, null, null, AGENT_AVAILABLE_TOOL_LIMIT, 0);
         Map<String, AgentToolDescriptorExtension> extensions = findExtensionsByToolCode(tools);
         Map<String, AgentToolPreference> preferences = preferencesByToolCode(userId);
+        Set<Long> executableWorkflowToolIds = executableWorkflowToolIds(tools);
         return tools.stream()
                 .filter(tool -> {
                     AgentToolDescriptorExtension ext = extensions.get(tool.getToolCode());
-                    return ext == null || isAgentReadable(ext);
+                    return isToolAgentReadable(tool, ext, executableWorkflowToolIds);
                 })
                 .map(tool -> {
                     AgentToolPreference preference = preferences.get(tool.getToolCode());
@@ -116,7 +130,7 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
         AiTool tool = toolMapper.findOnlineByCode(toolCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.AGENT_TOOL_NOT_AVAILABLE, "工具不可用"));
         AgentToolDescriptorExtension ext = extensionMapper.findByToolCode(tool.getToolCode()).orElse(null);
-        if (ext != null && !isAgentReadable(ext)) {
+        if (!isToolAgentReadable(tool, ext, null)) {
             throw new BusinessException(ErrorCode.AGENT_TOOL_NOT_AVAILABLE, "Tool is disabled for Agent");
         }
         AgentToolPreference preference = preferenceMapper.findByUserIdAndToolCode(userId, tool.getToolCode());
@@ -219,12 +233,17 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
     }
 
     private AgentToolDescriptorResponse toDescriptor(AiTool tool, AgentToolDescriptorExtension ext) {
-        List<ToolFieldResponse> fields = toolFieldItemMapper.findActiveFields(tool.getId()).stream()
-                .map(field -> ToolFieldResponse.from(field, objectMapper))
-                .toList();
-        List<AgentToolFieldDescriptorResponse> fieldDescriptors = isGptImageTool(tool.getToolCode())
-                ? imageV2LiteFieldDescriptors()
-                : fields.stream()
+        JsonNode publishedInputSchema = publishedWorkflowInputSchema(tool);
+        List<ToolFieldResponse> fields = publishedInputSchema == null
+                ? toolFieldItemMapper.findActiveFields(tool.getId()).stream()
+                        .map(field -> ToolFieldResponse.from(field, objectMapper))
+                        .toList()
+                : List.of();
+        List<AgentToolFieldDescriptorResponse> fieldDescriptors = publishedInputSchema != null
+                ? fieldDescriptorsFromSchema(publishedInputSchema)
+                : isGptImageTool(tool.getToolCode())
+                    ? imageV2LiteFieldDescriptors()
+                    : fields.stream()
                         .map(field -> new AgentToolFieldDescriptorResponse(
                                 field.fieldKey(),
                                 field.fieldName(),
@@ -249,7 +268,7 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                 tool.getToolName(),
                 tool.getDescription(),
                 taskCreditEstimateService.estimateUserFacingTaskCredits(tool),
-                toInputSchema(tool.getToolCode(), fields),
+                publishedInputSchema == null ? toInputSchema(tool.getToolCode(), fields) : publishedInputSchema,
                 autoCallable,
                 fieldDescriptors,
                 loadHints(tool.getToolCode(), ext),
@@ -260,6 +279,86 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
                 configuredOrDefault(ext == null ? null : ext.getRiskLevel(), "low"),
                 configuredOrDefault(ext == null ? null : ext.getConfirmationPolicy(), "auto")
         );
+    }
+
+    private JsonNode publishedWorkflowInputSchema(AiTool tool) {
+        if (!"WORKFLOW".equals(normalizeExecutionMode(tool.getExecutionMode()))) {
+            return null;
+        }
+        ToolWorkflow workflow = workflowMapper.selectExecutableCanonicalByToolId(tool.getId());
+        if (workflow == null || workflow.getPublishedVersionId() == null) {
+            return objectMapper.createObjectNode();
+        }
+        ToolWorkflowVersion version = workflowVersionMapper.selectById(workflow.getPublishedVersionId());
+        if (version == null || !workflow.getId().equals(version.getWorkflowId())) {
+            return objectMapper.createObjectNode();
+        }
+        try {
+            JsonNode schema = objectMapper.readTree(version.getInputSchemaSnapshotJson());
+            return schema != null && schema.isObject() ? schema : objectMapper.createObjectNode();
+        } catch (Exception exception) {
+            LOGGER.warn("Published workflow input schema is invalid: toolCode={}, versionId={}",
+                    tool.getToolCode(), version.getId());
+            return objectMapper.createObjectNode();
+        }
+    }
+
+    private List<AgentToolFieldDescriptorResponse> fieldDescriptorsFromSchema(JsonNode schema) {
+        JsonNode properties = schema.path("properties");
+        if (!properties.isObject()) {
+            return List.of();
+        }
+        Set<String> required = new java.util.HashSet<>();
+        JsonNode requiredNode = schema.path("required");
+        if (requiredNode.isArray()) {
+            requiredNode.forEach(item -> required.add(item.asText()));
+        }
+        List<AgentToolFieldDescriptorResponse> fields = new ArrayList<>();
+        int index = 0;
+        var iterator = properties.fields();
+        while (iterator.hasNext()) {
+            var entry = iterator.next();
+            String fieldKey = entry.getKey();
+            JsonNode property = entry.getValue();
+            boolean executionRequired = required.contains(fieldKey);
+            boolean userRequired = property.has("x-user-required")
+                    ? property.path("x-user-required").asBoolean()
+                    : executionRequired;
+            JsonNode options = property.path("enum");
+            fields.add(new AgentToolFieldDescriptorResponse(
+                    fieldKey,
+                    property.path("title").asText(fieldKey),
+                    fieldTypeFromSchema(property),
+                    property.hasNonNull("description") ? property.get("description").asText() : null,
+                    options.isArray() ? options : null,
+                    executionRequired,
+                    executionRequired,
+                    userRequired,
+                    property.has("default") && !property.get("default").isNull()
+                            ? property.get("default").asText()
+                            : null,
+                    property.path("x-agent-fill-strategy").asText(userRequired ? "ask_user" : "default"),
+                    property.path("x-risk-level").asText("LOW"),
+                    property.path("x-sort-order").asInt(index)
+            ));
+            index++;
+        }
+        return List.copyOf(fields);
+    }
+
+    private String fieldTypeFromSchema(JsonNode property) {
+        if (property.hasNonNull("x-field-type")) {
+            return property.get("x-field-type").asText();
+        }
+        if (property.path("enum").isArray()) {
+            return "select";
+        }
+        return switch (property.path("type").asText("string")) {
+            case "boolean" -> "checkbox";
+            case "integer", "number" -> "number";
+            case "array" -> "array";
+            default -> "textarea".equals(property.path("format").asText()) ? "textarea" : "text";
+        };
     }
 
     private String normalizeExecutionMode(String executionMode) {
@@ -344,6 +443,29 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
     private boolean isAgentReadable(AgentToolDescriptorExtension ext) {
         return !Boolean.FALSE.equals(ext.getAgentEnabled())
                 && !HEALTH_FAILED.equalsIgnoreCase(ext.getHealthStatus());
+    }
+
+    private boolean isToolAgentReadable(AiTool tool,
+                                        AgentToolDescriptorExtension ext,
+                                        Set<Long> executableWorkflowToolIds) {
+        if (!"WORKFLOW".equals(normalizeExecutionMode(tool.getExecutionMode()))) {
+            return ext == null || isAgentReadable(ext);
+        }
+        return Boolean.TRUE.equals(tool.getAgentSurfaceEnabled())
+                && "WORKFLOW_STEP".equals(normalizeBillingMode(tool.getBillingMode(), "WORKFLOW"))
+                && (executableWorkflowToolIds == null
+                    ? workflowMapper.selectExecutableCanonicalByToolId(tool.getId()) != null
+                    : executableWorkflowToolIds.contains(tool.getId()));
+    }
+
+    private Set<Long> executableWorkflowToolIds(List<AiTool> tools) {
+        List<Long> toolIds = tools.stream()
+                .filter(tool -> "WORKFLOW".equals(normalizeExecutionMode(tool.getExecutionMode())))
+                .map(AiTool::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        return toolIds.isEmpty() ? Set.of() : Set.copyOf(workflowMapper.selectExecutableToolIds(toolIds));
     }
 
     private String normalizeHealthStatus(String healthStatus) {

@@ -17,6 +17,7 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -106,7 +107,7 @@ class AdminWorkflowApiTest {
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.publishedVersionId").isNumber())
-                .andExpect(jsonPath("$.data.executionEnabled").value(true))
+                .andExpect(jsonPath("$.data.executionEnabled").value(false))
                 .andExpect(jsonPath("$.data.hasUnpublishedChanges").value(false))
                 .andReturn();
         long versionId = responseData(published).path("publishedVersionId").asLong();
@@ -122,6 +123,227 @@ class AdminWorkflowApiTest {
         assertThat(objectMapper.readTree(immutableVersion.getEdgesJson()))
                 .isEqualTo(objectMapper.readTree(VALID_EDGES));
         assertThat(versionMapper.countByWorkflowId(immutableVersion.getWorkflowId())).isEqualTo(1);
+    }
+
+    @Test
+    void toolLifecyclePublishesWorkflowAndFreezesCurrentInputSchema() throws Exception {
+        String adminToken = login();
+        Long toolId = createTool(adminToken, "wf_tool_lifecycle");
+        saveWorkflow(adminToken, toolId, VALID_NODES, VALID_EDGES, 0L)
+                .andExpect(status().isOk());
+
+        MvcResult firstPublish = mockMvc.perform(post("/api/admin/v1/tools/{toolId}/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("ONLINE"))
+                .andExpect(jsonPath("$.data.executionMode").value("WORKFLOW"))
+                .andExpect(jsonPath("$.data.billingMode").value("WORKFLOW_STEP"))
+                .andExpect(jsonPath("$.data.agentSurfaceEnabled").value(true))
+                .andExpect(jsonPath("$.data.workflowConfigured").value(true))
+                .andExpect(jsonPath("$.data.workflowExecutionEnabled").value(true))
+                .andExpect(jsonPath("$.data.workflowUsable").value(true))
+                .andReturn();
+        long firstVersionId = responseData(firstPublish).path("publishedWorkflowVersionId").asLong();
+        ToolWorkflowVersion firstVersion = versionMapper.selectById(firstVersionId);
+        JsonNode firstSchema = objectMapper.readTree(firstVersion.getInputSchemaSnapshotJson());
+        assertThat(firstSchema.path("type").asText()).isEqualTo("object");
+        assertThat(firstSchema.path("properties").has("productName")).isTrue();
+        assertThat(firstSchema.path("required").toString()).contains("productName");
+
+        mockMvc.perform(get("/api/v1/agents/tools")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("keyword", "wf_tool_lifecycle"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.items[0].toolCode").value("wf_tool_lifecycle"));
+        mockMvc.perform(get("/api/v1/agent/tools")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].toolCode").value(hasItem("wf_tool_lifecycle")));
+
+        mockMvc.perform(put("/api/admin/v1/tools/{toolId}/fields", toolId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "fields": [{
+                                    "fieldKey": "story",
+                                    "fieldName": "Story",
+                                    "fieldType": "textarea",
+                                    "placeholder": "Describe the story",
+                                    "required": true,
+                                    "executionRequired": true,
+                                    "userRequired": true,
+                                    "agentFillStrategy": "ask_user",
+                                    "riskLevel": "LOW",
+                                    "sortOrder": 1
+                                  }]
+                                }
+                                """))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/admin/v1/tools/{toolId}/workflow", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.hasUnpublishedChanges").value(true));
+        assertThat(objectMapper.readTree(versionMapper.selectById(firstVersionId).getInputSchemaSnapshotJson()))
+                .isEqualTo(firstSchema);
+
+        MvcResult secondPublish = mockMvc.perform(post("/api/admin/v1/tools/{toolId}/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        long secondVersionId = responseData(secondPublish).path("publishedWorkflowVersionId").asLong();
+        assertThat(secondVersionId).isNotEqualTo(firstVersionId);
+        JsonNode secondSchema = objectMapper.readTree(versionMapper.selectById(secondVersionId).getInputSchemaSnapshotJson());
+        assertThat(secondSchema.path("properties").has("story")).isTrue();
+        assertThat(secondSchema.path("properties").has("productName")).isFalse();
+        assertThat(versionMapper.selectById(secondVersionId).getDslHash())
+                .isNotEqualTo(firstVersion.getDslHash());
+
+        jdbcTemplate.update("""
+                INSERT INTO tool_workflows(
+                  tool_id, workflow_name, nodes_json, edges_json, groups_json, config_json,
+                  version, status, draft_revision, execution_enabled, created_at, updated_at
+                ) VALUES (?, 'alternate', ?, ?, NULL, '{}', 1, 'PUBLISHED', 1, 1,
+                          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, toolId, VALID_NODES, VALID_EDGES);
+
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/offline", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("OFFLINE"))
+                .andExpect(jsonPath("$.data.agentSurfaceEnabled").value(false))
+                .andExpect(jsonPath("$.data.workflowExecutionEnabled").value(false))
+                .andExpect(jsonPath("$.data.publishedWorkflowVersionId").value(secondVersionId))
+                .andExpect(jsonPath("$.data.workflowUsable").value(false));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM tool_workflows WHERE tool_id = ? AND workflow_name = 'default'",
+                String.class, toolId))
+                .isEqualTo("PUBLISHED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM tool_workflows WHERE tool_id = ? AND execution_enabled = 1",
+                Integer.class, toolId)).isZero();
+
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.publishedVersionId").value(secondVersionId))
+                .andExpect(jsonPath("$.data.executionEnabled").value(false));
+
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.publishedWorkflowVersionId").value(secondVersionId))
+                .andExpect(jsonPath("$.data.workflowUsable").value(true));
+        assertThat(versionMapper.countByWorkflowId(firstVersion.getWorkflowId())).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM tool_workflows WHERE tool_id = ? AND execution_enabled = 1",
+                Integer.class, toolId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT workflow_name FROM tool_workflows WHERE tool_id = ? AND execution_enabled = 1",
+                String.class, toolId)).isEqualTo("default");
+    }
+
+    @Test
+    void workflowLifecycleIgnoresUnrelatedToolModelGateDuringPublishAndOnlineEditing() throws Exception {
+        String adminToken = login();
+        Long textOnlyModelId = createTextOnlyModelConfig(adminToken);
+        String response = mockMvc.perform(post("/api/admin/v1/tools")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "wf_ignores_direct_model_gate",
+                                  "toolName": "Workflow Model Gate",
+                                  "categoryId": 1,
+                                  "description": "workflow owns its node dependencies",
+                                  "toolType": "IMAGE_TO_IMAGE",
+                                  "inputModality": "IMAGE",
+                                  "outputModality": "IMAGE",
+                                  "estimatedCreditCost": 3,
+                                  "modelConfigId": %d,
+                                  "executionHandler": "IMAGE_GENERATION"
+                                }
+                                """.formatted(textOnlyModelId)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long toolId = Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+        saveWorkflow(adminToken, toolId, VALID_NODES, VALID_EDGES, 0L)
+                .andExpect(status().isOk());
+
+        MvcResult published = mockMvc.perform(post("/api/admin/v1/tools/{toolId}/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("ONLINE"))
+                .andExpect(jsonPath("$.data.workflowExecutionEnabled").value(true))
+                .andReturn();
+        long publishedVersionId = responseData(published).path("publishedWorkflowVersionId").asLong();
+
+        mockMvc.perform(put("/api/admin/v1/tools/{toolId}", toolId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "wf_ignores_direct_model_gate",
+                                  "toolName": "Workflow Model Gate Updated",
+                                  "categoryId": 1,
+                                  "description": "online workflow edit",
+                                  "toolType": "IMAGE_TO_IMAGE",
+                                  "inputModality": "IMAGE",
+                                  "outputModality": "IMAGE",
+                                  "estimatedCreditCost": 3,
+                                  "modelConfigId": %d,
+                                  "executionHandler": "IMAGE_GENERATION"
+                                }
+                                """.formatted(textOnlyModelId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("ONLINE"));
+
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/apply-template", toolId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "templateCode": "image_generation_default",
+                                  "applyMetadata": true,
+                                  "overwritePrompt": true
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/admin/v1/tools/{toolId}/workflow", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PUBLISHED"))
+                .andExpect(jsonPath("$.data.publishedVersionId").value(publishedVersionId))
+                .andExpect(jsonPath("$.data.executionEnabled").value(true))
+                .andExpect(jsonPath("$.data.hasUnpublishedChanges").value(true));
+    }
+
+    @Test
+    void toolPublishRejectsInvalidWorkflowWithoutPartialActivation() throws Exception {
+        String adminToken = login();
+        Long toolId = createTool(adminToken, "wf_invalid_tool_publish");
+        saveWorkflow(adminToken, toolId, INVALID_NODES, "[]", 0L)
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM ai_tools WHERE id = ?", String.class, toolId)).isEqualTo("DRAFT");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT execution_mode FROM ai_tools WHERE id = ?", String.class, toolId)).isEqualTo("DIRECT");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT billing_mode FROM ai_tools WHERE id = ?", String.class, toolId)).isEqualTo("FIXED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT agent_surface_enabled FROM ai_tools WHERE id = ?", Integer.class, toolId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT execution_enabled FROM tool_workflows WHERE tool_id = ?", Integer.class, toolId)).isZero();
     }
 
     @Test
@@ -181,6 +403,15 @@ class AdminWorkflowApiTest {
                     .andReturn();
             long firstVersionId = responseData(firstPublished).path("publishedVersionId").asLong();
             JsonNode firstPolicy = billingPolicy(firstVersionId).path("nodePolicies").path("worker");
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT minimum_required_credits FROM ai_tools WHERE id = ?", Integer.class, toolId))
+                    .isEqualTo(100);
+            mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
+                            .header("Authorization", "Bearer " + adminToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.publishedVersionId").value(firstVersionId));
+            assertThat(versionMapper.countByWorkflowId(
+                    versionMapper.selectById(firstVersionId).getWorkflowId())).isEqualTo(1);
 
             jdbcTemplate.update("""
                     UPDATE agent_model_configs SET unit_price = 0.90 WHERE id = ?
@@ -193,16 +424,25 @@ class AdminWorkflowApiTest {
                     UPDATE pricing_rules SET factor = 4.0
                     WHERE scope_type = 'TOOL' AND scope_ref = ?
                     """, toolId);
-            saveWorkflow(adminToken, toolId, nodes, edges, revision)
-                    .andExpect(status().isOk());
+            jdbcTemplate.update(
+                    "UPDATE ai_tools SET minimum_required_credits = 1 WHERE id = ?", toolId);
+            mockMvc.perform(get("/api/admin/v1/tools/{toolId}/workflow", toolId)
+                            .header("Authorization", "Bearer " + adminToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.hasUnpublishedChanges").value(true));
             MvcResult secondPublished = mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
                             .header("Authorization", "Bearer " + adminToken))
                     .andExpect(status().isOk())
                     .andReturn();
             long secondVersionId = responseData(secondPublished).path("publishedVersionId").asLong();
             JsonNode secondPolicy = billingPolicy(secondVersionId).path("nodePolicies").path("worker");
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT minimum_required_credits FROM ai_tools WHERE id = ?", Integer.class, toolId))
+                    .isEqualTo(100);
 
             assertThat(firstVersionId).isNotEqualTo(secondVersionId);
+            assertThat(versionMapper.selectById(firstVersionId).getDslHash())
+                    .isNotEqualTo(versionMapper.selectById(secondVersionId).getDslHash());
             assertThat(firstPolicy.path("modelPricingSnapshot").path("unitPrice").decimalValue())
                     .isEqualByComparingTo("0.10");
             assertThat(firstPolicy.path("pricingPolicy").path("markupRatio").decimalValue())
@@ -313,11 +553,18 @@ class AdminWorkflowApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("PUBLISHED"));
 
-        // 4. 下线后回到 DRAFT
+        Long publishedVersionId = jdbcTemplate.queryForObject(
+                "SELECT published_version_id FROM tool_workflows WHERE tool_id = ?", Long.class, toolId);
+
+        // 4. 兼容入口复用工具下线，但保留正式版本
         mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/unpublish", toolId)
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("DRAFT"));
+                .andExpect(jsonPath("$.data.status").value("PUBLISHED"))
+                .andExpect(jsonPath("$.data.executionEnabled").value(false))
+                .andExpect(jsonPath("$.data.publishedVersionId").value(publishedVersionId));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM ai_tools WHERE id = ?", String.class, toolId)).isEqualTo("OFFLINE");
 
         // 5. 历史版本可列出
         mockMvc.perform(get("/api/admin/v1/tools/{toolId}/workflow/versions", toolId)
@@ -420,6 +667,34 @@ class AdminWorkflowApiTest {
                 .getResponse()
                 .getContentAsString();
         return Long.parseLong(response.replaceAll("(?s).*\"id\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+
+    private Long createTextOnlyModelConfig(String adminToken) throws Exception {
+        String response = mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "Workflow Text Only Model",
+                                  "configCode": "workflow_text_only_publish_guard",
+                                  "provider": "minimax",
+                                  "modelName": "MiniMax-M2.7",
+                                  "baseUrl": "https://api.minimaxi.com/v1",
+                                  "apiKey": "fake-key",
+                                  "timeoutSeconds": 60,
+                                  "billingUnit": "TOKEN_PER_M",
+                                  "unitPrice": 0,
+                                  "capabilities": ["TEXT_GENERATION"],
+                                  "enabled": true,
+                                  "agentEnabled": true,
+                                  "isDefault": false
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
     }
 
     private String login() throws Exception {

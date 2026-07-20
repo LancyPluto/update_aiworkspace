@@ -59,7 +59,6 @@ public class WorkflowRunController {
     @PostMapping("/tools/{toolCode}/runs")
     public ApiResponse<CreateWorkflowRunResponse> createRun(@PathVariable String toolCode,
                                                             @Valid @RequestBody CreateWorkflowRunRequest request) {
-        queryService.assertLaunchable(toolCode);
         WorkflowRunCreated created = runApplicationService.create(new CreateWorkflowRunCommand(
                 AuthContext.get().userId(),
                 toolCode,

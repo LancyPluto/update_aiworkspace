@@ -5,6 +5,7 @@ import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.model.CopyObjectRequest;
 import com.aliyun.oss.model.GeneratePresignedUrlRequest;
 import com.aliyun.oss.model.ObjectMetadata;
+import com.aliyun.oss.model.PutObjectRequest;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
@@ -12,8 +13,11 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.Ordered;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -23,8 +27,10 @@ import java.io.InputStream;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -43,6 +49,7 @@ public class AssetStorageService {
 
     private static final Logger log = LoggerFactory.getLogger(AssetStorageService.class);
     private static final String GENERATED_PREFIX = "/generated/";
+    private static final String OSS_FORBID_OVERWRITE_HEADER = "x-oss-forbid-overwrite";
     private static final Set<String> IMAGE_EXTENSIONS = Set.of("png", "jpg", "jpeg", "gif", "webp", "avif", "bmp");
     private static final Pattern CF_IMAGE_TRANSFORM = Pattern.compile("^(https?://[^/]+)/cdn-cgi/image/[^/]+(/.*)");
     private static final Pattern OSS_PROCESS_SUFFIX = Pattern.compile("^(.*?)\\?x-oss-process=.*$");
@@ -122,6 +129,22 @@ public class AssetStorageService {
         return storeMultipartForVisibility(relativeKey, file, AssetVisibility.PRIVATE);
     }
 
+    /**
+     * Stores an asset under a caller-provided unique key and removes it if the surrounding
+     * database transaction rolls back. The key must not be shared with another database row.
+     */
+    public StoredAsset storeMultipartPublicUnique(String relativeKey, MultipartFile file) {
+        return storeMultipartUniqueForVisibility(relativeKey, file, AssetVisibility.PUBLIC);
+    }
+
+    /**
+     * Stores an asset under a caller-provided unique key and removes it if the surrounding
+     * database transaction rolls back. The key must not be shared with another database row.
+     */
+    public StoredAsset storeMultipartPrivateUnique(String relativeKey, MultipartFile file) {
+        return storeMultipartUniqueForVisibility(relativeKey, file, AssetVisibility.PRIVATE);
+    }
+
     private StoredAsset storeMultipartForVisibility(String relativeKey, MultipartFile file, AssetVisibility visibility) {
         try {
             return storeBytesForVisibility(
@@ -130,6 +153,21 @@ public class AssetStorageService {
                     file.getContentType() == null ? "application/octet-stream" : file.getContentType(),
                     visibility
             );
+        } catch (IOException exception) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "file save failed");
+        }
+    }
+
+    private StoredAsset storeMultipartUniqueForVisibility(String relativeKey, MultipartFile file,
+                                                           AssetVisibility visibility) {
+        try {
+            byte[] data = file.getBytes();
+            String normalizedKey = normalizeRelativeKey(relativeKey);
+            return isOssMode()
+                    ? storeUniqueToOss(normalizedKey, data,
+                            file.getContentType() == null ? "application/octet-stream" : file.getContentType(),
+                            visibility)
+                    : storeUniqueToLocal(normalizedKey, data, visibility);
         } catch (IOException exception) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "file save failed");
         }
@@ -351,6 +389,24 @@ public class AssetStorageService {
         }
     }
 
+    private StoredAsset storeUniqueToLocal(String relativeKey, byte[] data, AssetVisibility visibility) {
+        Path target = localAbsolutePath(relativeKey);
+        try {
+            Files.createDirectories(target.getParent());
+            Files.write(target, data, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+        } catch (FileAlreadyExistsException exception) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "file key already exists");
+        } catch (IOException exception) {
+            deleteLocalFileBestEffort(target, "failed unique file write");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "file save failed");
+        }
+        registerRollbackCleanup(
+                "local asset " + target,
+                () -> deleteLocalFileBestEffort(target, "database transaction rollback")
+        );
+        return new StoredAsset(relativeKey, urlForKey(relativeKey, visibility), target.toString());
+    }
+
     private StoredAsset storeToOss(String relativeKey, byte[] data, String contentType, AssetVisibility visibility) {
         long started = System.nanoTime();
         AppProperties.AssetStorage storage = appProperties.getAssetStorage();
@@ -371,6 +427,39 @@ public class AssetStorageService {
         }
         metrics.record("put", visibility.name().toLowerCase(Locale.ROOT), "success", data.length, System.nanoTime() - started);
         return new StoredAsset(relativeKey, urlForKey(relativeKey, visibility), "oss://" + bucket + "/" + objectKey);
+    }
+
+    private StoredAsset storeUniqueToOss(String relativeKey, byte[] data, String contentType,
+                                         AssetVisibility visibility) {
+        long started = System.nanoTime();
+        AppProperties.AssetStorage storage = appProperties.getAssetStorage();
+        String bucket = bucketFor(visibility, storage);
+        String objectKey = storage.getOssKeyPrefix() + relativeKey;
+        ObjectMetadata metadata = new ObjectMetadata();
+        metadata.setContentLength(data.length);
+        if (contentType != null && !contentType.isBlank()) {
+            metadata.setContentType(contentType);
+        }
+        metadata.setCacheControl(cacheControlFor(relativeKey, visibility, storage));
+        PutObjectRequest request = new PutObjectRequest(
+                bucket, objectKey, new ByteArrayInputStream(data), metadata);
+        request.addHeader(OSS_FORBID_OVERWRITE_HEADER, "true");
+        try {
+            ossClient.putObject(request);
+        } catch (RuntimeException exception) {
+            metrics.record("put", visibility.name().toLowerCase(Locale.ROOT), "failed", data.length,
+                    System.nanoTime() - started);
+            log.warn("OSS unique-key upload failed: bucket={}, key={}", bucket, objectKey, exception);
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "cloud file save failed");
+        }
+        metrics.record("put", visibility.name().toLowerCase(Locale.ROOT), "success", data.length,
+                System.nanoTime() - started);
+        registerRollbackCleanup(
+                "OSS asset oss://" + bucket + "/" + objectKey,
+                () -> deleteOssObjectBestEffort(bucket, objectKey, "database transaction rollback")
+        );
+        return new StoredAsset(relativeKey, urlForKey(relativeKey, visibility),
+                "oss://" + bucket + "/" + objectKey);
     }
 
     private String cacheControlFor(String relativeKey, AssetVisibility visibility, AppProperties.AssetStorage storage) {
@@ -403,48 +492,153 @@ public class AssetStorageService {
         long started = System.nanoTime();
         String targetBucket = bucketFor(targetVisibility, storage);
         String targetKey = storage.getOssKeyPrefix() + source.relativeKey();
-        if (source.bucket().equals(targetBucket) && source.objectKey().equals(targetKey)) {
-            if (ossClient.doesObjectExist(targetBucket, targetKey)) {
-                metrics.record("move", targetVisibility.name().toLowerCase(Locale.ROOT), "already_present", 0, System.nanoTime() - started);
-                return urlForKey(source.relativeKey(), targetVisibility);
-            }
-            for (String fallback : knownBuckets(storage)) {
-                if (fallback.equals(targetBucket)) continue;
-                if (ossClient.doesObjectExist(fallback, targetKey)) {
-                    ossClient.copyObject(copyRequest(fallback, targetKey, targetBucket, targetKey, targetVisibility, storage));
-                    ossClient.deleteObject(fallback, targetKey);
-                    metrics.record("move", targetVisibility.name().toLowerCase(Locale.ROOT), "success", 0, System.nanoTime() - started);
-                    log.info("OSS asset recovered: oss://{}/{} -> oss://{}/{}", fallback, targetKey, targetBucket, targetKey);
+        try {
+            if (source.bucket().equals(targetBucket) && source.objectKey().equals(targetKey)) {
+                if (ossClient.doesObjectExist(targetBucket, targetKey)) {
+                    metrics.record("move", targetVisibility.name().toLowerCase(Locale.ROOT), "already_present", 0,
+                            System.nanoTime() - started);
                     return urlForKey(source.relativeKey(), targetVisibility);
                 }
+                for (String fallback : knownBuckets(storage)) {
+                    if (fallback.equals(targetBucket)) {
+                        continue;
+                    }
+                    if (ossClient.doesObjectExist(fallback, targetKey)) {
+                        copyOssObject(
+                                copyRequest(fallback, targetKey, targetBucket, targetKey, targetVisibility, storage),
+                                targetBucket,
+                                targetKey
+                        );
+                        registerOssMoveCompletion(
+                                fallback, targetKey, targetBucket, targetKey, true);
+                        metrics.record("move", targetVisibility.name().toLowerCase(Locale.ROOT), "success", 0,
+                                System.nanoTime() - started);
+                        log.info("OSS asset copied for recovery: oss://{}/{} -> oss://{}/{}",
+                                fallback, targetKey, targetBucket, targetKey);
+                        return urlForKey(source.relativeKey(), targetVisibility);
+                    }
+                }
+                log.warn("OSS asset missing from all buckets: key={}", targetKey);
+                metrics.record("move", targetVisibility.name().toLowerCase(Locale.ROOT), "missing", 0,
+                        System.nanoTime() - started);
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "cloud file is missing");
             }
-            log.warn("OSS asset missing from all buckets: key={}", targetKey);
-            metrics.record("move", targetVisibility.name().toLowerCase(Locale.ROOT), "missing", 0, System.nanoTime() - started);
-            return urlForKey(source.relativeKey(), targetVisibility);
-        }
-        try {
-            ossClient.copyObject(copyRequest(source.bucket(), source.objectKey(), targetBucket, targetKey, targetVisibility, storage));
-            ossClient.deleteObject(source.bucket(), source.objectKey());
+
+            boolean targetCreated = !ossClient.doesObjectExist(targetBucket, targetKey);
+            if (targetCreated) {
+                copyOssObject(
+                        copyRequest(source.bucket(), source.objectKey(), targetBucket, targetKey,
+                                targetVisibility, storage),
+                        targetBucket,
+                        targetKey
+                );
+            }
+            registerOssMoveCompletion(
+                    source.bucket(), source.objectKey(), targetBucket, targetKey, targetCreated);
         } catch (com.aliyun.oss.OSSException ossEx) {
-            // OSS文件不存在（NoSuchKey）时，只更新数据库状态，不阻塞撤回/删除操作
-            if ("NoSuchKey".equals(ossEx.getErrorCode())) {
-                log.warn("OSS asset not found during move, proceeding with status update only: source=oss://{}/{} target=oss://{}/{}",
-                        source.bucket(), source.objectKey(), targetBucket, targetKey);
-                metrics.record("move", targetVisibility.name().toLowerCase(Locale.ROOT), "missing", 0, System.nanoTime() - started);
-                return urlForKey(source.relativeKey(), targetVisibility);
-            }
             metrics.record("move", targetVisibility.name().toLowerCase(Locale.ROOT), "failed", 0, System.nanoTime() - started);
-            log.warn("OSS asset move failed: source=oss://{}/{} target=oss://{}/{}",
+            log.warn("OSS asset copy failed: source=oss://{}/{} target=oss://{}/{}",
                     source.bucket(), source.objectKey(), targetBucket, targetKey, ossEx);
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "cloud file move failed");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "cloud file copy failed");
+        } catch (BusinessException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             metrics.record("move", targetVisibility.name().toLowerCase(Locale.ROOT), "failed", 0, System.nanoTime() - started);
-            log.warn("OSS asset move failed: source=oss://{}/{} target=oss://{}/{}",
+            log.warn("OSS asset copy failed: source=oss://{}/{} target=oss://{}/{}",
                     source.bucket(), source.objectKey(), targetBucket, targetKey, exception);
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "cloud file move failed");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "cloud file copy failed");
         }
         metrics.record("move", targetVisibility.name().toLowerCase(Locale.ROOT), "success", 0, System.nanoTime() - started);
         return urlForKey(source.relativeKey(), targetVisibility);
+    }
+
+    private void registerRollbackCleanup(String assetDescription, Runnable cleanup) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            cleanup.run();
+            throw new IllegalStateException("Transaction synchronization is required for rollback-safe asset storage");
+        }
+        try {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
+                        cleanup.run();
+                    } else if (status == TransactionSynchronization.STATUS_UNKNOWN) {
+                        log.warn("Asset transaction outcome is unknown; retaining {}", assetDescription);
+                    }
+                }
+            });
+        } catch (RuntimeException exception) {
+            cleanup.run();
+            throw exception;
+        }
+    }
+
+    private void copyOssObject(CopyObjectRequest request, String targetBucket, String targetKey) {
+        try {
+            ossClient.copyObject(request);
+        } catch (RuntimeException exception) {
+            deleteOssObjectBestEffort(targetBucket, targetKey, "failed OSS copy");
+            throw exception;
+        }
+    }
+
+    private void registerOssMoveCompletion(String sourceBucket, String sourceKey,
+                                           String targetBucket, String targetKey,
+                                           boolean targetCreated) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            if (targetCreated) {
+                deleteOssObjectBestEffort(targetBucket, targetKey, "missing database transaction");
+            }
+            throw new IllegalStateException("Transaction synchronization is required for OSS asset migration");
+        }
+        try {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public int getOrder() {
+                    return Ordered.HIGHEST_PRECEDENCE;
+                }
+
+                @Override
+                public void afterCommit() {
+                    deleteOssObjectBestEffort(sourceBucket, sourceKey, "database commit");
+                }
+
+                @Override
+                public void afterCompletion(int status) {
+                    if (status == TransactionSynchronization.STATUS_ROLLED_BACK && targetCreated) {
+                        deleteOssObjectBestEffort(targetBucket, targetKey, "database transaction rollback");
+                    } else if (status == TransactionSynchronization.STATUS_UNKNOWN) {
+                        log.warn("OSS asset transaction outcome is unknown; retaining source=oss://{}/{} and target=oss://{}/{}",
+                                sourceBucket, sourceKey, targetBucket, targetKey);
+                    }
+                }
+            });
+        } catch (RuntimeException exception) {
+            if (targetCreated) {
+                deleteOssObjectBestEffort(targetBucket, targetKey, "move synchronization registration failure");
+            }
+            throw exception;
+        }
+    }
+
+    private void deleteOssObjectBestEffort(String bucket, String objectKey, String phase) {
+        try {
+            ossClient.deleteObject(bucket, objectKey);
+        } catch (RuntimeException exception) {
+            log.warn("Could not delete OSS asset after {}: oss://{}/{}", phase, bucket, objectKey, exception);
+        }
+    }
+
+    private void deleteLocalFileBestEffort(Path target, String phase) {
+        if (target == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(target);
+        } catch (IOException | RuntimeException exception) {
+            log.warn("Could not delete local asset after {}: path={}", phase, target, exception);
+        }
     }
 
     private CopyObjectRequest copyRequest(String sourceBucket, String sourceKey, String targetBucket, String targetKey,

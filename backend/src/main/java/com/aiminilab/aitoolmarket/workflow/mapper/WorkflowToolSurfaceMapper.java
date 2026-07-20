@@ -34,6 +34,7 @@ public interface WorkflowToolSurfaceMapper {
             WHERE t.status = 'ONLINE'
               AND COALESCE(t.is_deleted, 0) = 0
               AND t.execution_mode = 'WORKFLOW'
+              AND t.billing_mode = 'WORKFLOW_STEP'
               AND t.agent_surface_enabled = 1
               AND w.id = (
                   SELECT cw.id
@@ -85,6 +86,7 @@ public interface WorkflowToolSurfaceMapper {
             WHERE t.status = 'ONLINE'
               AND COALESCE(t.is_deleted, 0) = 0
               AND t.execution_mode = 'WORKFLOW'
+              AND t.billing_mode = 'WORKFLOW_STEP'
               AND t.agent_surface_enabled = 1
               AND w.id = (
                   SELECT cw.id
@@ -143,6 +145,7 @@ public interface WorkflowToolSurfaceMapper {
               AND t.status = 'ONLINE'
               AND COALESCE(t.is_deleted, 0) = 0
               AND t.execution_mode = 'WORKFLOW'
+              AND t.billing_mode = 'WORKFLOW_STEP'
               AND t.agent_surface_enabled = 1
               AND w.id = (
                   SELECT cw.id

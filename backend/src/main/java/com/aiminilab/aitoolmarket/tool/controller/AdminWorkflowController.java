@@ -7,6 +7,7 @@ import com.aiminilab.aitoolmarket.tool.dto.UpsertWorkflowRequest;
 import com.aiminilab.aitoolmarket.tool.dto.WorkflowResponse;
 import com.aiminilab.aitoolmarket.tool.dto.WorkflowValidationResponse;
 import com.aiminilab.aitoolmarket.tool.dto.WorkflowVersionItemResponse;
+import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.WorkflowService;
 import com.aiminilab.aitoolmarket.workflow.dsl.WorkflowDslValidationResult;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowDslService;
@@ -21,11 +22,14 @@ public class AdminWorkflowController {
 
     private final WorkflowService workflowService;
     private final WorkflowDslService workflowDslService;
+    private final ToolService toolService;
 
     public AdminWorkflowController(WorkflowService workflowService,
-                                   WorkflowDslService workflowDslService) {
+                                   WorkflowDslService workflowDslService,
+                                   ToolService toolService) {
         this.workflowService = workflowService;
         this.workflowDslService = workflowDslService;
+        this.toolService = toolService;
     }
 
     @GetMapping
@@ -54,7 +58,7 @@ public class AdminWorkflowController {
         return ApiResponse.success(new WorkflowValidationResponse(result.valid(), result.errors()));
     }
 
-    /** 校验通过后将工作流置为 PUBLISHED；运行端（WorkflowExecutionService）只执行 PUBLISHED 工作流。 */
+    /** 生成或复用不可变正式版本；工具离线时不会借此重新上线。 */
     @PostMapping("/publish")
     public ApiResponse<WorkflowResponse> publish(@PathVariable Long toolId) {
         WorkflowResponse workflow = workflowService.getWorkflow(toolId);
@@ -70,7 +74,7 @@ public class AdminWorkflowController {
         return ApiResponse.success(workflowService.publish(workflow.id(), operatorId));
     }
 
-    /** 将工作流退回 DRAFT，运行端会回退到工具原有的执行 handler。 */
+    /** 兼容入口：按工具下线语义关闭新运行，同时保留正式工作流版本。 */
     @PostMapping("/unpublish")
     public ApiResponse<WorkflowResponse> unpublish(@PathVariable Long toolId) {
         WorkflowResponse workflow = workflowService.getWorkflow(toolId);
@@ -78,7 +82,8 @@ public class AdminWorkflowController {
             return ApiResponse.fail(ErrorCode.PARAM_ERROR, "工作流不存在");
         }
         Long operatorId = AuthContext.get().userId();
-        return ApiResponse.success(workflowService.updateStatus(workflow.id(), "DRAFT", operatorId));
+        toolService.offlineTool(toolId, operatorId);
+        return ApiResponse.success(workflowService.getWorkflow(toolId));
     }
 
     @GetMapping("/versions")

@@ -1,15 +1,18 @@
 package com.aiminilab.aitoolmarket.tool.service.impl;
 
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
+import com.aiminilab.aitoolmarket.common.cache.BypassCacheService;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.common.util.Utf8TextRepair;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertWorkflowRequest;
+import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.dto.WorkflowResponse;
 import com.aiminilab.aitoolmarket.tool.dto.WorkflowVersionItemResponse;
 import com.aiminilab.aitoolmarket.tool.entity.ToolWorkflow;
 import com.aiminilab.aitoolmarket.tool.entity.ToolWorkflowVersion;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.credit.service.PricingService;
@@ -28,6 +31,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -35,6 +40,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
@@ -42,31 +48,39 @@ import java.util.TreeMap;
 @Service
 public class WorkflowServiceImpl implements WorkflowService {
 
-    private static final String DRAFT = "DRAFT";
-    private static final String PUBLISHED = "PUBLISHED";
+    private static final String DSL_VERSION = "1";
+    private static final String NODE_REGISTRY_VERSION = "p0";
+    private static final String RISK_POLICY_JSON =
+            "{\"confirmationPolicy\":\"WORKFLOW_DEFINED\",\"level\":\"MEDIUM\"}";
 
     private final ToolWorkflowMapper workflowMapper;
     private final ToolWorkflowVersionMapper versionMapper;
     private final ObjectMapper objectMapper;
     private final WorkflowDslService workflowDslService;
     private final ToolMapper toolMapper;
+    private final ToolFieldItemMapper toolFieldItemMapper;
     private final AgentModelConfigMapper modelConfigMapper;
     private final PricingService pricingService;
+    private final BypassCacheService bypassCacheService;
 
     public WorkflowServiceImpl(ToolWorkflowMapper workflowMapper,
                                ToolWorkflowVersionMapper versionMapper,
                                ObjectMapper objectMapper,
                                WorkflowDslService workflowDslService,
                                ToolMapper toolMapper,
+                               ToolFieldItemMapper toolFieldItemMapper,
                                AgentModelConfigMapper modelConfigMapper,
-                               PricingService pricingService) {
+                               PricingService pricingService,
+                               BypassCacheService bypassCacheService) {
         this.workflowMapper = workflowMapper;
         this.versionMapper = versionMapper;
         this.objectMapper = objectMapper;
         this.workflowDslService = workflowDslService;
         this.toolMapper = toolMapper;
+        this.toolFieldItemMapper = toolFieldItemMapper;
         this.modelConfigMapper = modelConfigMapper;
         this.pricingService = pricingService;
+        this.bypassCacheService = bypassCacheService;
     }
 
     @Override
@@ -160,6 +174,11 @@ public class WorkflowServiceImpl implements WorkflowService {
     @Transactional
     public WorkflowResponse publish(Long workflowId, Long operatorId) {
         ToolWorkflow draft = requireWorkflow(workflowId);
+        AiTool lockedTool = toolMapper.selectByIdForUpdate(draft.getToolId());
+        if (lockedTool == null) {
+            throw new BusinessException(ErrorCode.TOOL_NOT_FOUND, "Tool not found");
+        }
+        boolean executionEnabled = isWorkflowToolOnline(lockedTool);
         long draftRevision = revision(draft);
         WorkflowDslValidationResult validation = workflowDslService.validate(draft);
         if (!validation.valid()) {
@@ -169,59 +188,62 @@ public class WorkflowServiceImpl implements WorkflowService {
             );
         }
 
+        PublicationArtifacts artifacts = publicationArtifacts(draft);
+        if (toolMapper.updateWorkflowMinimumRequiredCredits(
+                draft.getToolId(), artifacts.minimumRequiredCredits(), operatorId) != 1) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Workflow minimum credits update failed");
+        }
+        if (executionEnabled) {
+            workflowMapper.disableAllExecutionsPreservingPublication(draft.getToolId(), operatorId);
+        }
+
         ToolWorkflowVersion currentPublished = draft.getPublishedVersionId() == null
                 ? null
                 : versionMapper.selectById(draft.getPublishedVersionId());
         if (currentPublished != null
-                && Objects.equals(currentPublished.getSourceDraftRevision(), draftRevision)) {
-            bindPublishedVersion(draft, currentPublished, operatorId);
+                && Objects.equals(currentPublished.getSourceDraftRevision(), draftRevision)
+                && Objects.equals(currentPublished.getDslHash(), artifacts.fingerprint())) {
+            bindPublishedVersion(draft, currentPublished, executionEnabled, operatorId);
+            invalidateToolCatalogAfterCommit(lockedTool.getToolCode());
             return toResponse(requireWorkflow(workflowId));
         }
 
-        String canonicalDsl = canonicalDsl(draft);
-        String dslHash = sha256(canonicalDsl);
-        ToolWorkflowVersion identical = versionMapper.selectByWorkflowIdAndDslHash(workflowId, dslHash);
-        if (identical != null && Objects.equals(identical.getSourceDraftRevision(), draftRevision)) {
-            bindPublishedVersion(draft, identical, operatorId);
+        ToolWorkflowVersion identical = versionMapper.selectByWorkflowIdAndDslHash(
+                workflowId, artifacts.fingerprint());
+        if (identical != null
+                && Objects.equals(identical.getSourceDraftRevision(), draftRevision)) {
+            bindPublishedVersion(draft, identical, executionEnabled, operatorId);
+            invalidateToolCatalogAfterCommit(lockedTool.getToolCode());
             return toResponse(requireWorkflow(workflowId));
         }
 
         ToolWorkflowVersion published = publishedSnapshot(
                 draft,
                 versionMapper.selectMaxVersion(workflowId) + 1,
-                canonicalDsl,
-                dslHash,
+                artifacts,
                 operatorId
         );
         versionMapper.insert(published);
-        bindPublishedVersion(draft, published, operatorId);
+        bindPublishedVersion(draft, published, executionEnabled, operatorId);
+        invalidateToolCatalogAfterCommit(lockedTool.getToolCode());
         return toResponse(requireWorkflow(workflowId));
     }
 
     @Override
     @Transactional
-    public WorkflowResponse updateStatus(Long workflowId, String status, Long operatorId) {
-        String normalized = normalizeStatus(status);
-        if (normalized == null) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "工作流状态不能为空");
-        }
-        if (PUBLISHED.equals(normalized)) {
-            return publish(workflowId, operatorId);
-        }
-        ToolWorkflow current = requireWorkflow(workflowId);
-        if (workflowMapper.disableExecution(current.getId(), operatorId) != 1) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "工作流下线失败");
-        }
-        return toResponse(requireWorkflow(workflowId));
+    public void disableExecutionsForToolPreservingPublication(Long toolId, Long operatorId) {
+        workflowMapper.disableAllExecutionsPreservingPublication(toolId, operatorId);
     }
 
     private void bindPublishedVersion(ToolWorkflow draft,
                                       ToolWorkflowVersion published,
+                                      boolean executionEnabled,
                                       Long operatorId) {
         int changed = workflowMapper.bindPublishedVersion(
                 draft.getId(),
                 published.getId(),
                 published.getVersion(),
+                executionEnabled,
                 revision(draft),
                 operatorId
         );
@@ -232,8 +254,7 @@ public class WorkflowServiceImpl implements WorkflowService {
 
     private ToolWorkflowVersion publishedSnapshot(ToolWorkflow draft,
                                                    int version,
-                                                   String canonicalDsl,
-                                                   String dslHash,
+                                                   PublicationArtifacts artifacts,
                                                    Long operatorId) {
         LocalDateTime now = LocalDateTime.now();
         ToolWorkflowVersion snapshot = new ToolWorkflowVersion();
@@ -243,14 +264,14 @@ public class WorkflowServiceImpl implements WorkflowService {
         snapshot.setEdgesJson(repairJson(draft.getEdgesJson()));
         snapshot.setGroupsJson(repairJson(draft.getGroupsJson()));
         snapshot.setConfigJson(repairJson(draft.getConfigJson()));
-        snapshot.setCanonicalDslJson(canonicalDsl);
-        snapshot.setDslVersion("1");
-        snapshot.setNodeRegistryVersion("p0");
-        snapshot.setDslHash(dslHash);
-        snapshot.setInputSchemaSnapshotJson("{}");
-        snapshot.setDependencyManifestJson(canonicalJson(draft.getConfigJson(), "{}"));
-        snapshot.setBillingPolicyJson(billingPolicyJson(draft));
-        snapshot.setRiskPolicyJson("{\"confirmationPolicy\":\"WORKFLOW_DEFINED\",\"level\":\"MEDIUM\"}");
+        snapshot.setCanonicalDslJson(artifacts.canonicalDslJson());
+        snapshot.setDslVersion(DSL_VERSION);
+        snapshot.setNodeRegistryVersion(NODE_REGISTRY_VERSION);
+        snapshot.setDslHash(artifacts.fingerprint());
+        snapshot.setInputSchemaSnapshotJson(artifacts.inputSchemaSnapshotJson());
+        snapshot.setDependencyManifestJson(artifacts.dependencyManifestJson());
+        snapshot.setBillingPolicyJson(artifacts.billingPolicyJson());
+        snapshot.setRiskPolicyJson(artifacts.riskPolicyJson());
         snapshot.setSourceDraftRevision(revision(draft));
         snapshot.setSnapshotLabel("Published v" + version);
         snapshot.setPublishedAt(now);
@@ -265,12 +286,9 @@ public class WorkflowServiceImpl implements WorkflowService {
         int estimated = tool == null || tool.getEstimatedCreditCost() == null
                 ? 0
                 : Math.max(0, tool.getEstimatedCreditCost());
-        int minimum = tool == null || tool.getMinimumRequiredCredits() == null
-                ? 0
-                : Math.max(0, tool.getMinimumRequiredCredits());
         ObjectNode policy = objectMapper.createObjectNode();
         policy.put("mode", "WORKFLOW_STEP");
-        policy.put("fallbackMaxCreditCost", Math.max(estimated, minimum));
+        policy.put("fallbackMaxCreditCost", estimated);
         policy.put("fallbackChargeCredits", estimated);
         ObjectNode nodePolicies = objectMapper.createObjectNode();
         WorkflowDsl dsl = workflowDslService.parse(
@@ -295,7 +313,7 @@ public class WorkflowServiceImpl implements WorkflowService {
             int explicitCap = node.parameters() != null && node.parameters().hasNonNull("maxCreditCost")
                     ? Math.max(0, node.parameters().get("maxCreditCost").asInt())
                     : 0;
-            int maxCreditCost = explicitCap > 0 ? explicitCap : Math.max(estimated, minimum);
+            int maxCreditCost = explicitCap > 0 ? explicitCap : estimated;
             if (maxCreditCost <= 0) {
                 throw new BusinessException(
                         ErrorCode.PARAM_ERROR,
@@ -339,6 +357,230 @@ public class WorkflowServiceImpl implements WorkflowService {
         }
         policy.set("nodePolicies", nodePolicies);
         return writeJson(policy);
+    }
+
+    private String inputSchemaSnapshotJson(Long toolId) {
+        List<ToolFieldResponse> fields = toolFieldItemMapper.findActiveFields(toolId).stream()
+                .map(field -> ToolFieldResponse.from(field, objectMapper))
+                .toList();
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = objectMapper.createObjectNode();
+        ArrayNode required = objectMapper.createArrayNode();
+        schema.put("type", "object");
+        for (ToolFieldResponse field : fields) {
+            if (field.fieldKey() == null || field.fieldKey().isBlank()) {
+                continue;
+            }
+            ObjectNode property = objectMapper.createObjectNode();
+            applyFieldType(property, field.fieldType());
+            property.put("x-field-type", field.fieldType());
+            if (field.fieldName() != null && !field.fieldName().isBlank()) {
+                property.put("title", field.fieldName());
+            }
+            if (field.placeholder() != null && !field.placeholder().isBlank()) {
+                property.put("description", field.placeholder());
+            }
+            if (field.sortOrder() != null) {
+                property.put("x-sort-order", field.sortOrder());
+            }
+            JsonNode options = enumOptions(field.options());
+            boolean booleanEnum = isBooleanModeField(field) && allBooleanEnumOptions(options);
+            if (booleanEnum) {
+                property.put("type", "boolean");
+            }
+            if (supportsEnum(field.fieldType()) && options != null) {
+                ArrayNode enumValues = objectMapper.createArrayNode();
+                options.forEach(option -> {
+                    String value = option.isTextual()
+                            ? option.asText()
+                            : option.hasNonNull("value") ? option.get("value").asText() : null;
+                    if (value != null) {
+                        if (booleanEnum) {
+                            enumValues.add(booleanValue(value));
+                        } else {
+                            enumValues.add(value);
+                        }
+                    }
+                });
+                if (!enumValues.isEmpty()) {
+                    property.set("enum", enumValues);
+                }
+            }
+            applyDefaultValue(property, field.defaultValue());
+            boolean userRequired = Boolean.TRUE.equals(
+                    field.userRequired() == null ? field.required() : field.userRequired());
+            property.put("x-user-required", userRequired);
+            property.put("x-agent-fill-strategy",
+                    field.agentFillStrategy() == null || field.agentFillStrategy().isBlank()
+                            ? (userRequired ? "ask_user" : "default")
+                            : field.agentFillStrategy());
+            property.put("x-risk-level",
+                    field.riskLevel() == null || field.riskLevel().isBlank() ? "LOW" : field.riskLevel());
+            properties.set(field.fieldKey(), property);
+            if (Boolean.TRUE.equals(
+                    field.executionRequired() == null ? field.required() : field.executionRequired())) {
+                required.add(field.fieldKey());
+            }
+        }
+        schema.set("properties", properties);
+        schema.set("required", required);
+        return writeJson(schema);
+    }
+
+    private void applyFieldType(ObjectNode property, String fieldType) {
+        if ("multi_image".equalsIgnoreCase(fieldType) || "multi_video".equalsIgnoreCase(fieldType)) {
+            property.put("type", "array");
+            property.putObject("items").put("type", "string");
+            return;
+        }
+        if ("omni_video_list".equalsIgnoreCase(fieldType)) {
+            property.put("type", "array");
+            ObjectNode item = property.putObject("items");
+            item.put("type", "object");
+            ObjectNode itemProperties = item.putObject("properties");
+            itemProperties.putObject("video_url").put("type", "string");
+            itemProperties.putObject("refer_type").put("type", "string");
+            itemProperties.putObject("keep_original_sound").put("type", "string");
+            return;
+        }
+        if ("subject_element_list".equalsIgnoreCase(fieldType)) {
+            property.put("type", "array");
+            property.putObject("items").put("type", "object");
+            return;
+        }
+        property.put("type", jsonType(fieldType));
+        if ("textarea".equalsIgnoreCase(fieldType)) {
+            property.put("format", "textarea");
+        }
+    }
+
+    private boolean isWorkflowToolOnline(AiTool tool) {
+        return "ONLINE".equalsIgnoreCase(tool.getStatus())
+                && "WORKFLOW".equalsIgnoreCase(tool.getExecutionMode())
+                && "WORKFLOW_STEP".equalsIgnoreCase(tool.getBillingMode())
+                && Boolean.TRUE.equals(tool.getAgentSurfaceEnabled());
+    }
+
+    private PublicationArtifacts publicationArtifacts(ToolWorkflow draft) {
+        String canonicalDslJson = canonicalDsl(draft);
+        String inputSchemaSnapshotJson = inputSchemaSnapshotJson(draft.getToolId());
+        String dependencyManifestJson = canonicalJson(draft.getConfigJson(), "{}");
+        String billingPolicyJson = billingPolicyJson(draft);
+        String riskPolicyJson = canonicalJson(RISK_POLICY_JSON, "{}");
+        int minimumRequiredCredits = minimumRequiredCredits(draft, billingPolicyJson);
+        ObjectNode publication = objectMapper.createObjectNode();
+        publication.set("canonicalDsl", readJson(canonicalDslJson, objectMapper.createObjectNode()));
+        publication.put("dslVersion", DSL_VERSION);
+        publication.put("nodeRegistryVersion", NODE_REGISTRY_VERSION);
+        publication.set("inputSchema", readJson(inputSchemaSnapshotJson, objectMapper.createObjectNode()));
+        publication.set("dependencies", readJson(dependencyManifestJson, objectMapper.createObjectNode()));
+        publication.set("billingPolicy", readJson(billingPolicyJson, objectMapper.createObjectNode()));
+        publication.set("riskPolicy", readJson(riskPolicyJson, objectMapper.createObjectNode()));
+        String fingerprint = sha256(writeJson(canonicalNode(publication)));
+        return new PublicationArtifacts(
+                canonicalDslJson,
+                inputSchemaSnapshotJson,
+                dependencyManifestJson,
+                billingPolicyJson,
+                riskPolicyJson,
+                minimumRequiredCredits,
+                fingerprint
+        );
+    }
+
+    private int minimumRequiredCredits(ToolWorkflow draft, String billingPolicyJson) {
+        WorkflowDsl dsl = workflowDslService.parse(
+                draft.getNodesJson(), draft.getEdgesJson(), draft.getConfigJson());
+        JsonNode nodePolicies = readJson(
+                billingPolicyJson, objectMapper.createObjectNode()).path("nodePolicies");
+        for (String nodeId : dsl.executionOrder()) {
+            WorkflowNodeDef node = dsl.requireNode(nodeId);
+            if (!node.type().isWorkerStep()) {
+                continue;
+            }
+            int maxCreditCost = nodePolicies.path(nodeId).path("maxCreditCost").asInt(0);
+            if (maxCreditCost > 0) {
+                return maxCreditCost;
+            }
+        }
+        return 0;
+    }
+
+    private void applyDefaultValue(ObjectNode property, String defaultValue) {
+        if (defaultValue == null || defaultValue.isBlank()) {
+            return;
+        }
+        String type = property.path("type").asText("string");
+        try {
+            switch (type) {
+                case "boolean" -> property.put("default", booleanValue(defaultValue));
+                case "integer" -> property.put("default", Long.parseLong(defaultValue.trim()));
+                case "number" -> property.put("default", new BigDecimal(defaultValue.trim()));
+                case "string" -> property.put("default", defaultValue);
+                default -> {
+                    // Complex field defaults are intentionally omitted unless represented structurally.
+                }
+            }
+        } catch (NumberFormatException ignored) {
+            // An invalid default must not make the frozen JSON Schema internally inconsistent.
+        }
+    }
+
+    private String jsonType(String fieldType) {
+        if ("number".equalsIgnoreCase(fieldType) || "slider".equalsIgnoreCase(fieldType)) {
+            return "number";
+        }
+        if ("integer".equalsIgnoreCase(fieldType)) {
+            return "integer";
+        }
+        if ("boolean".equalsIgnoreCase(fieldType) || "checkbox".equalsIgnoreCase(fieldType)) {
+            return "boolean";
+        }
+        return "string";
+    }
+
+    private boolean supportsEnum(String fieldType) {
+        return "select".equalsIgnoreCase(fieldType)
+                || "radio".equalsIgnoreCase(fieldType)
+                || "aspect_ratio".equalsIgnoreCase(fieldType);
+    }
+
+    private JsonNode enumOptions(JsonNode options) {
+        if (options == null) {
+            return null;
+        }
+        if (options.isArray()) {
+            return options;
+        }
+        JsonNode nested = options.get("options");
+        return nested != null && nested.isArray() ? nested : null;
+    }
+
+    private boolean isBooleanModeField(ToolFieldResponse field) {
+        String key = field.fieldKey() == null ? "" : field.fieldKey().trim().toLowerCase();
+        return "custommode".equals(key) || "custom_mode".equals(key);
+    }
+
+    private boolean allBooleanEnumOptions(JsonNode options) {
+        if (options == null || !options.isArray() || options.isEmpty()) {
+            return false;
+        }
+        for (JsonNode option : options) {
+            String value = option.isTextual()
+                    ? option.asText()
+                    : option.hasNonNull("value") ? option.get("value").asText() : "";
+            if (!"true".equalsIgnoreCase(value) && !"false".equalsIgnoreCase(value)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean booleanValue(String value) {
+        return "true".equalsIgnoreCase(value)
+                || "1".equals(value)
+                || "yes".equalsIgnoreCase(value)
+                || "on".equalsIgnoreCase(value);
     }
 
     private String canonicalDsl(ToolWorkflow draft) {
@@ -428,6 +670,16 @@ public class WorkflowServiceImpl implements WorkflowService {
         long draftRevision = revision(workflow);
         boolean hasUnpublishedChanges = published == null
                 || !Objects.equals(published.getSourceDraftRevision(), draftRevision);
+        if (!hasUnpublishedChanges) {
+            try {
+                hasUnpublishedChanges = !Objects.equals(
+                        published.getDslHash(),
+                        publicationArtifacts(workflow).fingerprint()
+                );
+            } catch (BusinessException exception) {
+                hasUnpublishedChanges = true;
+            }
+        }
         return new WorkflowResponse(
                 workflow.getId(),
                 workflow.getToolId(),
@@ -453,16 +705,28 @@ public class WorkflowServiceImpl implements WorkflowService {
         return workflow.getDraftRevision() == null ? 0L : workflow.getDraftRevision();
     }
 
-    private static String normalizeStatus(String status) {
-        if (status == null) {
-            return null;
+    private void invalidateToolCatalogAfterCommit(String toolCode) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            bypassCacheService.invalidateToolCatalog(toolCode);
+            return;
         }
-        String normalized = status.trim().toUpperCase();
-        if (!DRAFT.equals(normalized) && !PUBLISHED.equals(normalized)) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "不支持的工作流状态: " + status);
-        }
-        return normalized;
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                bypassCacheService.invalidateToolCatalog(toolCode);
+            }
+        });
     }
+
+    private record PublicationArtifacts(
+            String canonicalDslJson,
+            String inputSchemaSnapshotJson,
+            String dependencyManifestJson,
+            String billingPolicyJson,
+            String riskPolicyJson,
+            int minimumRequiredCredits,
+            String fingerprint
+    ) {}
 
     private static String repairJson(String json) {
         return Utf8TextRepair.repairIfNeeded(json);

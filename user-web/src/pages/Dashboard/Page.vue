@@ -2570,51 +2570,29 @@ onUnmounted(() => {
                   >
                     <div class="relative overflow-hidden bg-[#101014]">
                       <template v-if="isTaskRunning(item.task.status) || canRetryTask(item.task.status) || (!item.task.result?.contentText && item.task.status !== 'SUCCESS')">
-                        <div class="relative bg-[#101014] p-4">
-                          <div class="mb-3 flex items-center justify-between gap-2">
-                            <span
-                              class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium"
-                              :class="
-                                canRetryTask(item.task.status)
-                                  ? 'bg-red-500/15 text-red-100 ring-1 ring-red-400/25'
-                                  : 'bg-primary/15 text-primary ring-1 ring-primary/25'
-                              "
-                            >
-                              <Loader2 v-if="isTaskRunning(item.task.status)" class="h-3.5 w-3.5 animate-spin" />
-                              <X v-else-if="canRetryTask(item.task.status)" class="h-3.5 w-3.5" />
-                              <Clock v-else class="h-3.5 w-3.5" />
-                              {{ taskStatusLabel(item.task.status) }}
-                            </span>
-                            <div class="flex items-center gap-2">
-                              <button
-                                v-if="canCancelTask(item.task.status)"
-                                type="button"
-                                class="inline-flex items-center gap-1 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white/75 transition hover:bg-white/18 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                                :disabled="
-                                  cancellingTaskIds.has(item.task.taskId) ||
-                                  deletingTaskIds.has(item.task.taskId) ||
-                                  retryingTaskIds.has(item.task.taskId)
-                                "
-                                @click.stop="cancelQueuedTask(item.task)"
-                              >
-                                <Loader2
-                                  v-if="cancellingTaskIds.has(item.task.taskId)"
-                                  class="h-3 w-3 animate-spin"
-                                />
-                                <X v-else class="h-3 w-3" />
-                                {{ cancellingTaskIds.has(item.task.taskId) ? "取消中" : "取消" }}
-                              </button>
-                            </div>
-                          </div>
+                        <div class="dashboard-history-status-frame dashboard-history-media-frame aspect-[4/3] w-full">
                           <GenerationLoadingPreview
-                            :task="item.task"
-                            :aspect-ratio="inferTaskAspectRatio(item.task)"
+                            class="dashboard-history-status-preview"
+                            :aspect-ratio="4 / 3"
                             :max-preview-height="360"
                             :caption="taskProgressView(item.task).caption || taskProgressSubtitle(item.task, canRetryTask(item.task.status) ? '任务生成失败，可以复用本次参数重试。' : '任务正在生成，完成后结果会自动出现在这里。')"
                             :percent-label="taskProgressView(item.task).percentLabel"
                             :percent="taskProgressView(item.task).percent"
                             :failed="canRetryTask(item.task.status)"
                           />
+                          <span
+                            class="absolute right-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium backdrop-blur"
+                            :class="
+                              canRetryTask(item.task.status)
+                                ? 'bg-red-500/20 text-red-100 ring-1 ring-red-400/30'
+                                : 'bg-black/55 text-white/75 ring-1 ring-white/10'
+                            "
+                          >
+                            <Loader2 v-if="isTaskRunning(item.task.status)" class="h-3.5 w-3.5 animate-spin" />
+                            <X v-else-if="canRetryTask(item.task.status)" class="h-3.5 w-3.5" />
+                            <Clock v-else class="h-3.5 w-3.5" />
+                            {{ taskStatusLabel(item.task.status) }}
+                          </span>
                         </div>
                       </template>
                       <template v-else-if="primaryBlock(item.blocks)?.type === 'image'">
@@ -3809,6 +3787,19 @@ onUnmounted(() => {
   height: 100%;
 }
 
+.dashboard-history-status-frame {
+  display: flex;
+  align-items: stretch;
+}
+
+.dashboard-history-status-frame :deep(.dashboard-history-status-preview) {
+  width: 100% !important;
+  height: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+}
+
 .dashboard-history-media-frame--stack :deep(.image-grid-preview.grid) {
   height: 100%;
   grid-auto-rows: minmax(0, 1fr);
@@ -3820,7 +3811,8 @@ onUnmounted(() => {
 }
 
 .dashboard-history-grid > .history-card-pending {
-  min-height: 0;
+  min-width: 0;
+  min-height: 300px;
 }
 
 @keyframes dashboard-progress-pulse {

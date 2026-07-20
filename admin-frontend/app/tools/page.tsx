@@ -110,7 +110,7 @@ import {
   pricingRuleJsonToPayload,
   pricingRulesForModelExport,
 } from "@/lib/pricing-rules-json"
-import { isWorkflowTool } from "@/lib/workflow-tools"
+import { isToolAvailableToUsers, isWorkflowTool } from "@/lib/workflow-tools"
 import type { AgentModelConfig, AgentSkillBundle, ConfigBundleImportResult, ModelProviderDescriptor, ToolCategory, ToolField, ToolFieldPayload, ToolSummary } from "@/lib/api/types"
 
 const adminBasePath = (process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || "").replace(/\/$/, "")
@@ -514,7 +514,7 @@ function mapTool(tool: ToolSummary): ToolRow {
     afterVideoUrl: style.afterVideoUrl,
     icon: pickIcon(tool.categoryName),
     credits: tool.estimatedCreditCost ?? 0,
-    status: (tool.status || "").toUpperCase() === "ONLINE",
+    status: isToolAvailableToUsers(tool),
     rawStatus: tool.status,
     modelConfigId: tool.modelConfigId ?? null,
     modelConfigName: tool.modelConfigName || null,
@@ -887,15 +887,24 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
   async function toggleToolStatus(id: string) {
     const target = toolList.find((tool) => tool.id === id)
     if (!target) return
+    const action = target.status ? "下线" : "上线"
     setTogglingId(target.rawId)
     try {
       const updated = target.status
         ? await offlineTool(target.rawId)
         : await publishTool(target.rawId)
-      setToolList((prev) => prev.map((tool) => (tool.id === id ? mapTool(updated) : tool)))
+      const mapped = mapTool(updated)
+      setToolList((prev) => prev.map((tool) => (tool.id === id ? mapped : tool)))
+      toast.success(`工具已${action}`, {
+        description: target.status
+          ? `「${target.name}」已停止接受新任务，运行中的任务不受影响。`
+          : `「${target.name}」已通过校验并可供用户使用。`,
+      })
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "更新工具状态失败"
-      if (typeof window !== "undefined") window.alert(message)
+      const detail = err instanceof ApiError && err.traceId ? `${message}（traceId: ${err.traceId}）` : message
+      setSaveFeedback({ type: "error", title: `工具${action}失败`, detail })
+      toast.error(`工具${action}失败`, { description: detail })
     } finally {
       setTogglingId(null)
     }
@@ -1103,21 +1112,19 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
         modelConfigId: form.modelConfigId ? Number(form.modelConfigId) : null,
         templateCode: !editingTool && form.templateCode ? form.templateCode : undefined,
       }
-      let published: ToolSummary
+      let saved: ToolSummary
       if (editingTool) {
-        await updateTool(editingTool.rawId, payload)
-        published = await publishTool(editingTool.rawId)
-        setToolList((prev) => prev.map((tool) => (tool.rawId === editingTool.rawId ? mapTool(published) : tool)))
+        saved = await updateTool(editingTool.rawId, payload)
+        setToolList((prev) => prev.map((tool) => (tool.rawId === editingTool.rawId ? mapTool(saved) : tool)))
       } else {
-        const created = await createTool(payload)
-        published = await publishTool(created.id)
-        setToolList((prev) => [mapTool(published), ...prev])
+        saved = await createTool(payload)
+        setToolList((prev) => [mapTool(saved), ...prev])
       }
       if (form.modelConfigId) {
         await syncModelPricingRules(Number(form.modelConfigId), form.pricingRulesJson)
       }
-      const successTitle = editingTool ? "工具已保存并上线" : "工具已创建并上线"
-      const successDetail = `「${published.toolName}」已对用户端可见，请刷新用户端大模型页查看。`
+      const successTitle = editingTool ? "工具已保存" : "工具已创建"
+      const successDetail = `「${saved.toolName}」的资料已保存；是否对用户开放，以列表中的上线开关为准。`
       setNotice(successDetail)
       setSaveFeedback({ type: "success", title: successTitle, detail: successDetail })
       toast.success(successTitle, { id: toastId, description: successDetail })

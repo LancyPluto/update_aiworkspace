@@ -26,3 +26,10 @@ test("workflow canvas sends and refreshes the current draft revision", () => {
   assert.equal(canvasSource.includes("setDraftRevision(saved.draftRevision)"), true)
   assert.equal(canvasSource.includes("setDraftRevision(workflow.draftRevision)"), true)
 })
+
+test("workflow canvas keeps version publishing separate from tool availability", () => {
+  assert.equal(canvasSource.includes('onClick={doPublish}'), true)
+  assert.equal(canvasSource.includes('isPublished ? "发布更新" : "发布首版"'), true)
+  assert.equal(canvasSource.includes("doUnpublish"), false)
+  assert.equal(canvasSource.includes("setHasUnpublishedChanges(saved.hasUnpublishedChanges)"), true)
+})

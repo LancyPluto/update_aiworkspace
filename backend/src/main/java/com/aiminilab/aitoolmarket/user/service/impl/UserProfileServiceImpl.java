@@ -72,6 +72,7 @@ public class UserProfileServiceImpl implements UserProfileService {
     }
 
     @Override
+    @Transactional
     public UserAvatarUploadResponse uploadAvatar(Long userId, MultipartFile file) {
         requireUser(userId);
         if (file == null || file.isEmpty()) {
@@ -93,9 +94,11 @@ public class UserProfileServiceImpl implements UserProfileService {
 
         String timestamp = LocalDateTime.now().format(AVATAR_FILENAME_TIME);
         String filename = timestamp + "-" + UUID.randomUUID().toString().replace("-", "") + "." + extension;
-        StoredAsset stored = assetStorageService.storeMultipartPublic("avatars/" + userId + "/" + filename, file);
+        StoredAsset stored = assetStorageService.storeMultipartPublicUnique("avatars/" + userId + "/" + filename, file);
         String avatarUrl = stored.publicUrl();
-        userMapper.updateAvatarUrl(userId, avatarUrl);
+        if (userMapper.updateAvatarUrl(userId, avatarUrl) != 1) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "用户不存在");
+        }
         UserProfileResponse user = UserProfileResponse.from(requireUser(userId), membershipService.current(userId));
         return new UserAvatarUploadResponse(avatarUrl, user);
     }

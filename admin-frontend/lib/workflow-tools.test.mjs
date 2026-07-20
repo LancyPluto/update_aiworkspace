@@ -16,7 +16,7 @@ async function importTsModule(path) {
   return import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`)
 }
 
-const { isWorkflowTool } = await importTsModule("./workflow-tools.ts")
+const { isToolAvailableToUsers, isWorkflowTool } = await importTsModule("./workflow-tools.ts")
 
 test("model-only audio tools stay in large-model management", () => {
   assert.equal(isWorkflowTool({ toolCode: "suno_music", toolType: "MUSIC_GENERATION", outputModality: "AUDIO" }), false)
@@ -28,4 +28,30 @@ test("true workflow agents remain classified as workflow tools", () => {
   assert.equal(isWorkflowTool({ toolCode: "ai_comic_drama_agent" }), true)
   assert.equal(isWorkflowTool({ toolCode: "digital_human_agent" }), true)
   assert.equal(isWorkflowTool({ toolCode: "banana_ppt_generator" }), true)
+})
+
+test("explicit workflow execution mode classifies new workflow tools before legacy heuristics", () => {
+  assert.equal(isWorkflowTool({ toolCode: "scene_builder_v2", toolType: "CUSTOM", executionMode: "WORKFLOW" }), true)
+  assert.equal(isWorkflowTool({ toolCode: "suno_music", executionMode: " workflow " }), true)
+  assert.equal(isWorkflowTool({ toolCode: "scene_builder_v2", toolType: "CUSTOM", executionMode: "DIRECT" }), false)
+})
+
+test("workflow availability prefers the backend runtime verdict over tool status", () => {
+  assert.equal(isToolAvailableToUsers({ toolCode: "ai_comic_drama_agent", status: "ONLINE", workflowConfigured: true, workflowUsable: false }), false)
+  assert.equal(isToolAvailableToUsers({ toolCode: "ai_comic_drama_agent", status: "ONLINE", workflowConfigured: true, workflowUsable: true }), true)
+  assert.equal(isToolAvailableToUsers({ toolCode: "ai_comic_drama_agent", status: "ONLINE", workflowConfigured: false, workflowUsable: false }), true)
+  assert.equal(isToolAvailableToUsers({ toolCode: "scene_builder_v2", status: "ONLINE", executionMode: "WORKFLOW", workflowConfigured: false }), false)
+})
+
+test("workflow availability supports transition fields and legacy responses", () => {
+  assert.equal(isToolAvailableToUsers({
+    toolCode: "ai_comic_drama_agent",
+    status: "ONLINE",
+    executionMode: "DIRECT",
+    agentSurfaceEnabled: true,
+    workflowExecutionEnabled: true,
+    publishedWorkflowVersionId: 12,
+  }), false)
+  assert.equal(isToolAvailableToUsers({ toolCode: "ai_comic_drama_agent", status: "ONLINE" }), true)
+  assert.equal(isToolAvailableToUsers({ toolCode: "suno_music", status: "ONLINE", workflowUsable: false }), true)
 })

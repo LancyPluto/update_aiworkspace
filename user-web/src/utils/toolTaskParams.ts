@@ -1,6 +1,32 @@
 import type { ToolField } from "@/api/types"
 import { parseFieldMeta } from "@/utils/fieldUiMeta"
 
+export type AspectRatioOptionInput = string | { label: string; value: string }
+export type AspectRatioOption = { label: string; value: string }
+
+export function buildAspectRatioOptions(
+  toolOptions: AspectRatioOptionInput[] = [],
+  genericRatios: unknown[] = [],
+  normalizeValue: (value: unknown) => string = (value) => String(value ?? "").trim().replace(/\s+/g, ""),
+): AspectRatioOption[] {
+  const source: AspectRatioOptionInput[] = toolOptions.length > 0
+    ? toolOptions
+    : genericRatios.map((ratio) => ({ label: String(ratio), value: String(ratio) }))
+  const options: AspectRatioOption[] = []
+  const seen = new Set<string>()
+
+  for (const option of source) {
+    const label = typeof option === "string" ? option : option.label
+    const rawValue = typeof option === "string" ? option : option.value
+    const value = normalizeValue(rawValue)
+    if (!value || seen.has(value)) continue
+    seen.add(value)
+    options.push({ label: label.trim() || (value === "auto" ? "智能" : value), value })
+  }
+
+  return options.length > 0 ? options : [{ label: "智能", value: "auto" }]
+}
+
 export function buildAspectRatioTaskParams(
   value: unknown,
   fieldKey?: string | null,

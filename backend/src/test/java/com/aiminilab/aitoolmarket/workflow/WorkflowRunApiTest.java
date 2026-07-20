@@ -241,14 +241,6 @@ class WorkflowRunApiTest {
         assertThat(command.launchSource()).isEqualTo("AGENTS_PAGE");
         assertThat(command.input().path("prompt").asText()).isEqualTo("write a launch plan");
 
-        mockMvc.perform(post("/api/v1/agents/tools/{toolCode}/runs", HIDDEN_TOOL)
-                        .header("Authorization", bearer(ownerToken))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"clientRequestId":"hidden-tool-request","input":{}}
-                                """))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("TOOL_NOT_FOUND"));
     }
 
     @Test

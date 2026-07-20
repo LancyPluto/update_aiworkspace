@@ -37,7 +37,6 @@ import {
   publishWorkflow,
   restoreWorkflowVersion,
   saveWorkflow,
-  unpublishWorkflow,
   validateWorkflow,
 } from "@/lib/api/workflows"
 import {
@@ -1378,6 +1377,7 @@ export function WorkflowCanvas({
   const [loading, setLoading] = useState(true)
   const [workflowVersion, setWorkflowVersion] = useState(0)
   const [workflowStatus, setWorkflowStatus] = useState<string>("DRAFT")
+  const [hasUnpublishedChanges, setHasUnpublishedChanges] = useState(false)
   const [draftRevision, setDraftRevision] = useState(0)
   const [publishing, setPublishing] = useState(false)
   const [versionsOpen, setVersionsOpen] = useState(false)
@@ -1442,6 +1442,7 @@ export function WorkflowCanvas({
         setGroups(loadedGroups)
         setWorkflowVersion(workflow.version)
         setWorkflowStatus(workflow.status || "DRAFT")
+        setHasUnpublishedChanges(workflow.hasUnpublishedChanges)
         setDraftRevision(workflow.draftRevision)
         clear()
       })
@@ -1554,7 +1555,7 @@ export function WorkflowCanvas({
     setSaving(true)
     setSaveStatus("idle")
     try {
-      // 不传 status：保存内容时保持现有 DRAFT/PUBLISHED 状态不变，发布与否由“发布/下线”按钮单独控制
+      // 保存只更新草稿；已有正式版本继续服务，直到管理员显式发布更新。
       const saved = await saveWorkflow(toolId, {
         workflowName: toolName || "default",
         nodesJson: JSON.stringify(nodes),
@@ -1564,6 +1565,7 @@ export function WorkflowCanvas({
       })
       setWorkflowVersion(saved.version)
       setWorkflowStatus(saved.status || "DRAFT")
+      setHasUnpublishedChanges(saved.hasUnpublishedChanges)
       setDraftRevision(saved.draftRevision)
       setSaveStatus("saved")
       setTimeout(() => setSaveStatus("idle"), 2000)
@@ -1592,28 +1594,17 @@ export function WorkflowCanvas({
       const published = await publishWorkflow(toolId)
       setWorkflowStatus(published.status || "PUBLISHED")
       setWorkflowVersion(published.version)
+      setHasUnpublishedChanges(published.hasUnpublishedChanges)
       setDraftRevision(published.draftRevision)
-      toast.success("工作流已发布，用户任务将按当前 DAG 执行")
+      toast.success("工作流版本已发布", {
+        description: "后续新任务将使用此版本；工具是否开放仍由工具列表中的上线开关控制。",
+      })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "发布失败")
     } finally {
       setPublishing(false)
     }
   }, [doSave, toolId])
-
-  const doUnpublish = useCallback(async () => {
-    setPublishing(true)
-    try {
-      const result = await unpublishWorkflow(toolId)
-      setWorkflowStatus(result.status || "DRAFT")
-      setDraftRevision(result.draftRevision)
-      toast.success("工作流已下线（DRAFT），任务将回退到工具默认执行方式")
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "下线失败")
-    } finally {
-      setPublishing(false)
-    }
-  }, [toolId])
 
   const loadVersions = useCallback(async () => {
     setVersionsLoading(true)
@@ -1645,6 +1636,7 @@ export function WorkflowCanvas({
         setGroups(restoredGroups)
         setWorkflowVersion(restored.version)
         setWorkflowStatus(restored.status || "DRAFT")
+        setHasUnpublishedChanges(restored.hasUnpublishedChanges)
         setDraftRevision(restored.draftRevision)
         clear()
         toast.success(`已恢复到 v${version}（生成新版本 v${restored.version}）`)
@@ -1971,7 +1963,7 @@ export function WorkflowCanvas({
     <div className="flex flex-wrap items-center gap-2">
       <Badge variant={isPublished ? "default" : "secondary"} className="gap-1 text-xs">
         {isPublished ? <CheckCircle2 className="h-3 w-3" /> : null}
-        {isPublished ? "已发布" : "草稿"}
+        {isPublished ? (hasUnpublishedChanges ? "有未发布更改" : "正式版本已发布") : "仅草稿"}
       </Badge>
       <Badge
         variant={saveStatus === "saved" ? "default" : saveStatus === "error" ? "destructive" : "outline"}
@@ -1987,12 +1979,12 @@ export function WorkflowCanvas({
         type="button"
         size="sm"
         className="gap-1.5 text-xs"
-        onClick={isPublished ? doUnpublish : doPublish}
+        onClick={doPublish}
         disabled={publishing || saving}
-        variant={isPublished ? "outline" : "default"}
+        variant="default"
       >
         <Rocket className="h-3.5 w-3.5" />
-        {publishing ? "处理中..." : isPublished ? "下线" : "发布"}
+        {publishing ? "发布中..." : isPublished ? "发布更新" : "发布首版"}
       </Button>
       <Button type="button" size="sm" variant="outline" className="gap-1.5 text-xs" onClick={toggleVersions}>
         <History className="h-3.5 w-3.5" />
@@ -2056,7 +2048,7 @@ export function WorkflowCanvas({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <p className="max-w-3xl text-xs leading-5 text-muted-foreground">
-          当前画布用于描述工具执行流程。连线表示数据流向；每个入口/出口保持独立 ID，可自由重连。保存仅更新内容，需点击“发布”后用户任务才会按当前 DAG 执行。
+          当前画布用于描述工具执行流程。保存只更新草稿，不影响正在使用的正式版本；发布更新后，新任务使用新版本，运行中的任务继续使用原版本。工具是否对用户开放由工具列表中的上线开关控制。
         </p>
         {toolbar}
       </div>

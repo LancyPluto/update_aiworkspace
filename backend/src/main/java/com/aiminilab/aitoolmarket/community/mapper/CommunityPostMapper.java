@@ -37,6 +37,19 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
     @Select("""
             SELECT *
             FROM community_posts
+            WHERE task_id = #{taskId}
+            LIMIT 1
+            FOR UPDATE
+            """)
+    CommunityPost selectByTaskIdForUpdate(@Param("taskId") Long taskId);
+
+    default Optional<CommunityPost> findByTaskIdForUpdate(Long taskId) {
+        return Optional.ofNullable(selectByTaskIdForUpdate(taskId));
+    }
+
+    @Select("""
+            SELECT *
+            FROM community_posts
             WHERE id = #{postId}
             LIMIT 1
             """)
@@ -44,6 +57,19 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
 
     default Optional<CommunityPost> findPostById(Long postId) {
         return Optional.ofNullable(selectPostById(postId));
+    }
+
+    @Select("""
+            SELECT *
+            FROM community_posts
+            WHERE id = #{postId}
+            LIMIT 1
+            FOR UPDATE
+            """)
+    CommunityPost selectPostByIdForUpdate(@Param("postId") Long postId);
+
+    default Optional<CommunityPost> findPostByIdForUpdate(Long postId) {
+        return Optional.ofNullable(selectPostByIdForUpdate(postId));
     }
 
     @Select("""

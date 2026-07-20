@@ -1028,11 +1028,11 @@ public class AgentRunServiceImpl implements AgentRunService {
         if (!"RUNNING".equals(run.getStatus())) {
             throw new BusinessException(ErrorCode.AGENT_RUN_NOT_CANCELLABLE, "当前 Agent 运行不可创建工具调用");
         }
-        agentToolDescriptorService.getToolForAgent(run.getUserId(), request.toolCode());
         AgentToolCall existing = agentToolCallMapper.selectLatestByRunIdAndToolCode(runId, request.toolCode());
         if (existing != null) {
             return AgentToolCallResponse.from(existing);
         }
+        agentToolDescriptorService.getToolForAgent(run.getUserId(), request.toolCode());
         LocalDateTime now = LocalDateTime.now();
         AgentToolCall call = new AgentToolCall();
         call.setRunId(runId);

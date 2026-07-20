@@ -28,6 +28,13 @@ public record ToolSummaryResponse(
         String modelConfigName,
         String modelName,
         String executionHandler,
+        String executionMode,
+        String billingMode,
+        Boolean agentSurfaceEnabled,
+        Boolean workflowConfigured,
+        Boolean workflowExecutionEnabled,
+        Long publishedWorkflowVersionId,
+        Boolean workflowUsable,
         ToolFrontendStyleConfig frontendStyle
 ) {
     public static ToolSummaryResponse from(AiTool tool) {
@@ -60,6 +67,13 @@ public record ToolSummaryResponse(
                 tool.getModelConfigName(),
                 tool.getModelName(),
                 tool.getExecutionHandler(),
+                tool.getExecutionMode(),
+                tool.getBillingMode(),
+                tool.getAgentSurfaceEnabled(),
+                null,
+                null,
+                null,
+                null,
                 null
         );
     }
@@ -95,7 +109,52 @@ public record ToolSummaryResponse(
                 tool.getModelConfigName(),
                 tool.getModelName(),
                 tool.getExecutionHandler(),
+                tool.getExecutionMode(),
+                tool.getBillingMode(),
+                tool.getAgentSurfaceEnabled(),
+                null,
+                null,
+                null,
+                null,
                 ToolFrontendStyleConfig.fromConfigNote(tool.getConfigNote(), objectMapper)
+        );
+    }
+
+    public ToolSummaryResponse withWorkflowState(
+            boolean workflowConfigured,
+            Boolean workflowExecutionEnabled,
+            Long publishedWorkflowVersionId,
+            boolean workflowUsable
+    ) {
+        return new ToolSummaryResponse(
+                id,
+                toolCode,
+                toolName,
+                categoryId,
+                categoryCode,
+                categoryName,
+                description,
+                coverUrl,
+                toolType,
+                inputModality,
+                outputModality,
+                toolKind,
+                configNote,
+                status,
+                estimatedCreditCost,
+                variableCreditPricing,
+                modelConfigId,
+                modelConfigName,
+                modelName,
+                executionHandler,
+                executionMode,
+                billingMode,
+                agentSurfaceEnabled,
+                workflowConfigured,
+                workflowExecutionEnabled,
+                publishedWorkflowVersionId,
+                workflowUsable,
+                frontendStyle
         );
     }
 
@@ -124,6 +183,13 @@ public record ToolSummaryResponse(
                 modelConfigName,
                 modelName,
                 executionHandler,
+                executionMode,
+                billingMode,
+                agentSurfaceEnabled,
+                workflowConfigured,
+                workflowExecutionEnabled,
+                publishedWorkflowVersionId,
+                workflowUsable,
                 frontendStyle
         );
     }

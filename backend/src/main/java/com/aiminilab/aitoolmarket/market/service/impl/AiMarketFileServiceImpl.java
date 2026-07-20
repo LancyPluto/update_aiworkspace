@@ -73,7 +73,10 @@ public class AiMarketFileServiceImpl implements AiMarketFileService {
 
         String fileId = MarketIdGenerator.fileId();
         String filename = UUID.randomUUID() + "-" + safeFilename(file.getOriginalFilename());
-        StoredAsset stored = assetStorageService.storeMultipart("market-files/" + userId + "/" + filename, file);
+        StoredAsset stored = assetStorageService.storeMultipartPrivateUnique(
+                "market-files/" + userId + "/" + filename,
+                file
+        );
         LocalDateTime now = LocalDateTime.now();
         AiMarketFile record = new AiMarketFile();
         record.setFileId(fileId);

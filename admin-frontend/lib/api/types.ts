@@ -59,6 +59,16 @@ export interface ToolSummary {
   /** 任务路由用，未设置时由 toolType 推导 */
   executionHandler?: string | null
   status: 'DRAFT' | 'ONLINE' | 'OFFLINE' | string
+  /** 工作流工具运行方式与对外可用性，由发布接口原子更新。 */
+  executionMode?: 'DIRECT' | 'WORKFLOW' | string | null
+  billingMode?: string | null
+  agentSurfaceEnabled?: boolean | null
+  workflowExecutionEnabled?: boolean | null
+  workflowConfigured?: boolean | null
+  publishedWorkflowVersionId?: number | null
+  workflowUsable?: boolean | null
+  /** 兼容后端过渡期的同义字段。 */
+  workflowAvailable?: boolean | null
   estimatedCreditCost: number
   modelConfigId?: number | null
   modelConfigName?: string | null
