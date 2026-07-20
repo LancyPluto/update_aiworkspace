@@ -569,6 +569,11 @@ class DeployContractTests(unittest.TestCase):
             self.assertIn("build-info read attempt", deploy)
             self.assertIn("retrying in 2s", deploy)
             self.assertIn("remained unavailable after retries", deploy)
+            self.assertIn("--noproxy '*'", deploy)
+            self.assertIn("--resolve wlcloudai.com:443:127.0.0.1", deploy)
+            self.assertIn("https://wlcloudai.com/build-info.json?release=", deploy)
+            self.assertIn("CANDIDATE_BUILD_INFO_SHA", deploy)
+            self.assertNotIn("http://127.0.0.1/build-info.json", deploy)
 
     def test_external_smoke_check_fails_on_non_success_responses(self) -> None:
         workflow = self.read(".github/workflows/dev-delivery.yml")
