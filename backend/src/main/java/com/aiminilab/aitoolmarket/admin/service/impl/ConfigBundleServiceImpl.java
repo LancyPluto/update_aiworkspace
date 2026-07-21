@@ -7,6 +7,7 @@ import com.aiminilab.aitoolmarket.admin.service.SystemSettingService;
 import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigResponse;
+import com.aiminilab.aitoolmarket.agent.dto.ModelAccountRoutingRequest;
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountRequest;
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountResponse;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
@@ -16,6 +17,8 @@ import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentToolDescriptorExtensionMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
+import com.aiminilab.aitoolmarket.agent.service.ModelAccountRoutingService;
+import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountService;
 import com.aiminilab.aitoolmarket.common.cache.BypassCacheService;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
@@ -47,6 +50,7 @@ import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.WorkflowService;
 import com.aiminilab.aitoolmarket.tool.support.ConfigNoteMergeSupport;
 import com.aiminilab.aitoolmarket.tool.support.ToolFrontendStyleConfig;
+import com.aiminilab.aitoolmarket.task.routing.ModelRoutingPolicy;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -77,7 +81,8 @@ import java.util.stream.Collectors;
 public class ConfigBundleServiceImpl implements ConfigBundleService {
 
     private static final String FORMAT = "ai-tool-market-config-bundle";
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
+    private static final int ROUTING_POOLS_VERSION = 2;
     private static final Set<String> SECRET_KEY_PARTS = Set.of("secret", "token", "password", "apikey", "api_key", "key");
     private static final Set<String> EXTRA_AUTH_METADATA_KEYS = Set.of(
             "pricingVerifiedAt",
@@ -159,6 +164,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     private final ModelProviderRegistry modelProviderRegistry;
     private final ModelVendorAccountMapper vendorAccountMapper;
     private final ModelVendorAccountService modelVendorAccountService;
+    private final ModelAccountRoutingService modelAccountRoutingService;
+    private final ModelCapabilityService modelCapabilityService;
     private final BypassCacheService bypassCacheService;
     private final TransactionTemplate transactionTemplate;
     private final PricingRuleMapper pricingRuleMapper;
@@ -176,6 +183,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                                    ModelProviderRegistry modelProviderRegistry,
                                    ModelVendorAccountMapper vendorAccountMapper,
                                    ModelVendorAccountService modelVendorAccountService,
+                                   ModelAccountRoutingService modelAccountRoutingService,
+                                   ModelCapabilityService modelCapabilityService,
                                    BypassCacheService bypassCacheService,
                                    TransactionTemplate transactionTemplate,
                                    PricingRuleMapper pricingRuleMapper) {
@@ -192,6 +201,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         this.modelProviderRegistry = modelProviderRegistry;
         this.vendorAccountMapper = vendorAccountMapper;
         this.modelVendorAccountService = modelVendorAccountService;
+        this.modelAccountRoutingService = modelAccountRoutingService;
+        this.modelCapabilityService = modelCapabilityService;
         this.bypassCacheService = bypassCacheService;
         this.transactionTemplate = transactionTemplate;
         this.pricingRuleMapper = pricingRuleMapper;
@@ -239,17 +250,23 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                         .filter(code -> !isBlank(code))
                         .forEach(exportedModelCodes::add));
 
+        List<ModelVendorAccount> allVendorAccounts = vendorAccountMapper.findAllActive();
+        RoutingExportClosure routingClosure = selective
+                ? resolveRoutingExportClosure(allModelConfigs, allVendorAccounts, exportedModelCodes)
+                : null;
         List<AgentModelConfigResponse> modelConfigs = selective
                 ? allModelConfigs.stream()
-                .filter(config -> exportedModelCodes.contains(stableModelConfigCode(config)))
+                .filter(config -> config.id() != null && routingClosure.modelConfigIds().contains(config.id()))
                 .toList()
                 : allModelConfigs;
-        Set<Long> exportedVendorAccountIds = modelConfigs.stream()
+        Set<Long> exportedVendorAccountIds = selective
+                ? routingClosure.vendorAccountIds()
+                : modelConfigs.stream()
                 .map(AgentModelConfigResponse::vendorAccountId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
 
-        List<ModelVendorAccount> vendorAccounts = vendorAccountMapper.findAllActive().stream()
+        List<ModelVendorAccount> vendorAccounts = allVendorAccounts.stream()
                 .filter(account -> !selective || exportedVendorAccountIds.contains(account.getId()))
                 .toList();
         Map<Long, String> accountRefById = vendorAccounts.stream()
@@ -289,11 +306,17 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         }
 
         List<String> warnings = new ArrayList<>();
+        boolean legacyRoutingFormat = bundle.version() == null || bundle.version() < ROUTING_POOLS_VERSION;
         int settings = importSettings(bundle.settings());
-        Map<String, Long> accountIdsByRef = importVendorAccounts(
-                safeList(bundle.vendorAccounts()), warnings, bundle.secretsRedacted());
+        ImportVendorAccountResult vendorAccountResult = importVendorAccounts(
+                safeList(bundle.vendorAccounts()), warnings, bundle.secretsRedacted(), legacyRoutingFormat);
         ImportModelResult modelResult = importModelConfigs(
-                safeList(bundle.modelConfigs()), accountIdsByRef, warnings, bundle.secretsRedacted());
+                safeList(bundle.modelConfigs()),
+                vendorAccountResult.accountIdsByRef,
+                vendorAccountResult.poolIdsByVendorAndName,
+                warnings,
+                bundle.secretsRedacted(),
+                legacyRoutingFormat);
         int categories = importCategories(safeList(bundle.categories()));
 
         Map<String, Long> modelIdsByCode = agentModelConfigService.adminList().stream()
@@ -305,7 +328,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
 
         ImportCounter counter = new ImportCounter(
                 settings,
-                (int) accountIdsByRef.values().stream().distinct().count(),
+                (int) vendorAccountResult.accountIdsByRef.values().stream().distinct().count(),
                 modelResult.changed,
                 categories);
         for (ConfigBundleDto.Tool tool : safeList(bundle.tools())) {
@@ -328,7 +351,12 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         }
 
         if (!isSelectedToolExport(bundle)) {
-            pruneStaleCatalogAfterImport(bundle, accountIdsByRef, modelResult.modelIdsByImportedCode, warnings);
+            pruneStaleCatalogAfterImport(
+                    bundle,
+                    vendorAccountResult.accountIdsByRef,
+                    modelResult.modelIdsByImportedCode,
+                    warnings
+            );
         }
 
         bypassCacheService.invalidateImportedCatalogData();
@@ -515,6 +543,9 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 account.getBalanceAmount(),
                 account.getBalanceCurrency(),
                 account.getBalanceLowThreshold(),
+                account.getRoutingPoolName(),
+                account.getLoadBalanceEnabled(),
+                account.getLoadBalanceWeight(),
                 account.getEnabled()
         );
     }
@@ -550,6 +581,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 config.displayName(),
                 stableModelConfigCode(config),
                 vendorAccountRef,
+                config.routingPoolName(),
                 null,
                 null,
                 null,
@@ -719,10 +751,12 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         return clean.size();
     }
 
-    private Map<String, Long> importVendorAccounts(List<ConfigBundleDto.VendorAccount> accounts,
-                                                   List<String> warnings,
-                                                   Boolean bundleSecretsRedacted) {
+    private ImportVendorAccountResult importVendorAccounts(List<ConfigBundleDto.VendorAccount> accounts,
+                                                           List<String> warnings,
+                                                           Boolean bundleSecretsRedacted,
+                                                           boolean legacyRoutingFormat) {
         Map<String, Long> accountIdsByRef = new LinkedHashMap<>();
+        Map<String, Long> poolIdsByVendorAndName = new LinkedHashMap<>();
         for (ConfigBundleDto.VendorAccount item : accounts) {
             if (isBlank(item.vendorCode()) || isBlank(item.accountName())) {
                 warnings.add("Skipped vendor account with missing vendorCode/accountName");
@@ -769,21 +803,46 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                     ModelVendorAccountResponse saved = existing == null
                             ? modelVendorAccountService.adminCreate(request)
                             : modelVendorAccountService.adminUpdate(existing.getId(), request);
-                    accountIdsByRef.put(ref, saved.id());
                     removeDuplicateVendorAccounts(
                             vendorCode, item.baseUrl(), request.apiKey(), request.extraAuthJson(), saved.id(), warnings);
+                    String routingPoolName = legacyRoutingFormat ? saved.routingPoolName() : item.routingPoolName();
+                    boolean routingEnabled = legacyRoutingFormat
+                            ? Boolean.TRUE.equals(saved.loadBalanceEnabled())
+                            : Boolean.TRUE.equals(item.loadBalanceEnabled());
+                    int routingWeight = legacyRoutingFormat
+                            ? (saved.loadBalanceWeight() == null ? 100 : saved.loadBalanceWeight())
+                            : item.loadBalanceWeight() == null
+                            ? (saved.loadBalanceWeight() == null ? 100 : saved.loadBalanceWeight())
+                            : item.loadBalanceWeight();
+                    ModelVendorAccountResponse routed = modelAccountRoutingService.update(
+                            saved.id(),
+                            new ModelAccountRoutingRequest(
+                                    routingEnabled,
+                                    routingWeight,
+                                    routingPoolName
+                            )
+                    );
+                    accountIdsByRef.put(ref, routed.id());
+                    if (routed.routingPoolId() != null && !isBlank(routed.routingPoolName())) {
+                        poolIdsByVendorAndName.put(
+                                routingPoolRef(routed.vendorCode(), routed.routingPoolName()),
+                                routed.routingPoolId()
+                        );
+                    }
                 });
             } catch (Exception exception) {
                 warnings.add("Vendor account " + ref + " import failed: " + rootMessage(exception));
             }
         }
-        return accountIdsByRef;
+        return new ImportVendorAccountResult(accountIdsByRef, poolIdsByVendorAndName);
     }
 
     private ImportModelResult importModelConfigs(List<ConfigBundleDto.ModelConfig> configs,
                                                  Map<String, Long> accountIdsByRef,
+                                                 Map<String, Long> poolIdsByVendorAndName,
                                                  List<String> warnings,
-                                                 Boolean bundleSecretsRedacted) {
+                                                 Boolean bundleSecretsRedacted,
+                                                 boolean legacyRoutingFormat) {
         int count = 0;
         Map<String, Long> modelIdsByImportedCode = new LinkedHashMap<>();
         for (ConfigBundleDto.ModelConfig config : configs) {
@@ -820,6 +879,13 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                         }
                     }
                     AgentModelConfig existing = agentModelConfigMapper.findActiveByConfigCode(config.configCode());
+                    Long routingPoolId = legacyRoutingFormat && existing != null
+                            ? existing.getRoutingPoolId()
+                            : resolveImportedRoutingPoolId(
+                                    config,
+                                    vendorAccountId,
+                                    poolIdsByVendorAndName
+                            );
                     if (existing == null) {
                         Optional<AgentModelConfigResponse> equivalent = findEquivalentModelConfig(config);
                         if (equivalent.isPresent()) {
@@ -830,7 +896,13 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                         }
                     }
                     boolean forceDisabled = shouldDisableImportedModel(config, vendorAccountId, secretsRedacted, warnings);
-                    AgentModelConfigRequest request = modelConfigRequest(config, vendorAccountId, secretsRedacted, forceDisabled);
+                    AgentModelConfigRequest request = modelConfigRequest(
+                            config,
+                            vendorAccountId,
+                            routingPoolId,
+                            secretsRedacted,
+                            forceDisabled
+                    );
                     if (existing == null) {
                         AgentModelConfigResponse created = agentModelConfigService.adminCreate(request);
                         modelIdsByImportedCode.put(config.configCode(), created.id());
@@ -860,10 +932,12 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
 
     private AgentModelConfigRequest modelConfigRequest(ConfigBundleDto.ModelConfig config,
                                                        Long vendorAccountId,
+                                                       Long routingPoolId,
                                                        boolean secretsRedacted,
                                                        boolean forceDisabled) {
         return new AgentModelConfigRequest(
                 vendorAccountId,
+                routingPoolId,
                 config.displayName(),
                 config.configCode(),
                 config.provider(),
@@ -894,6 +968,92 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 null,
                 null
         );
+    }
+
+    private RoutingExportClosure resolveRoutingExportClosure(
+            List<AgentModelConfigResponse> allModelConfigs,
+            List<ModelVendorAccount> allVendorAccounts,
+            Set<String> selectedModelCodes) {
+        List<AgentModelConfigResponse> selectedModels = allModelConfigs.stream()
+                .filter(config -> selectedModelCodes.contains(stableModelConfigCode(config)))
+                .toList();
+        Set<Long> modelConfigIds = selectedModels.stream()
+                .map(AgentModelConfigResponse::id)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<Long> vendorAccountIds = selectedModels.stream()
+                .map(AgentModelConfigResponse::vendorAccountId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (selectedModels.stream().noneMatch(config -> config.routingPoolId() != null)) {
+            return new RoutingExportClosure(modelConfigIds, vendorAccountIds);
+        }
+
+        Map<Long, AgentModelConfig> modelById = agentModelConfigMapper.findAllActive().stream()
+                .filter(model -> model.getId() != null)
+                .collect(Collectors.toMap(AgentModelConfig::getId, Function.identity(), (left, right) -> left));
+        for (AgentModelConfigResponse selectedModel : selectedModels) {
+            if (selectedModel.routingPoolId() == null || selectedModel.id() == null) {
+                continue;
+            }
+            AgentModelConfig reference = modelById.get(selectedModel.id());
+            if (reference == null) {
+                continue;
+            }
+            Set<Long> poolMemberAccountIds = allVendorAccounts.stream()
+                    .filter(account -> Objects.equals(account.getRoutingPoolId(), selectedModel.routingPoolId()))
+                    .map(ModelVendorAccount::getId)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+            vendorAccountIds.addAll(poolMemberAccountIds);
+
+            Set<Long> eligibleAccountIds = allVendorAccounts.stream()
+                    .filter(account -> poolMemberAccountIds.contains(account.getId()))
+                    .filter(account -> Boolean.TRUE.equals(account.getEnabled()))
+                    .filter(account -> Boolean.TRUE.equals(account.getLoadBalanceEnabled()))
+                    .map(ModelVendorAccount::getId)
+                    .collect(Collectors.toSet());
+            List<AgentModelConfig> compatibleCandidates = modelById.values().stream()
+                    .filter(candidate -> candidate.getVendorAccountId() != null)
+                    .filter(candidate -> eligibleAccountIds.contains(candidate.getVendorAccountId()))
+                    .filter(candidate -> Boolean.TRUE.equals(candidate.getEnabled()))
+                    .filter(candidate -> ModelRoutingPolicy.compatible(
+                            reference, candidate, modelCapabilityService, OBJECT_MAPPER))
+                    .toList();
+            ModelRoutingPolicy.deduplicateByAccount(compatibleCandidates).stream()
+                    .map(AgentModelConfig::getId)
+                    .filter(Objects::nonNull)
+                    .forEach(modelConfigIds::add);
+        }
+        return new RoutingExportClosure(modelConfigIds, vendorAccountIds);
+    }
+
+    private Long resolveImportedRoutingPoolId(ConfigBundleDto.ModelConfig config,
+                                              Long vendorAccountId,
+                                              Map<String, Long> poolIdsByVendorAndName) {
+        if (isBlank(config.routingPoolName())) {
+            return null;
+        }
+        if (vendorAccountId == null) {
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "vendorAccountRef is required when routingPoolName is selected"
+            );
+        }
+        ModelVendorAccount account = vendorAccountMapper.findActiveById(vendorAccountId);
+        if (account == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account not found for routing pool import");
+        }
+        Long routingPoolId = poolIdsByVendorAndName.get(
+                routingPoolRef(account.getVendorCode(), config.routingPoolName())
+        );
+        if (routingPoolId == null) {
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "routing pool not found for vendor account: " + config.routingPoolName().trim()
+            );
+        }
+        return routingPoolId;
     }
 
     private boolean shouldDisableImportedModel(ConfigBundleDto.ModelConfig config,
@@ -1538,9 +1698,20 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         if (fromAccountId == null || toAccountId == null || fromAccountId.equals(toAccountId)) {
             return;
         }
+        ModelVendorAccount targetAccount = vendorAccountMapper.findActiveById(toAccountId);
+        if (targetAccount == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "target vendor account not found during import merge");
+        }
         LocalDateTime now = LocalDateTime.now();
         for (AgentModelConfig config : agentModelConfigMapper.findAllActive()) {
             if (fromAccountId.equals(config.getVendorAccountId())) {
+                if (config.getRoutingPoolId() != null
+                        && !Objects.equals(config.getRoutingPoolId(), targetAccount.getRoutingPoolId())) {
+                    throw new BusinessException(
+                            ErrorCode.PARAM_ERROR,
+                            "cannot merge vendor accounts while a model is anchored to a different routing pool"
+                    );
+                }
                 agentModelConfigMapper.updateVendorAccountId(config.getId(), toAccountId, now);
             }
         }
@@ -1554,6 +1725,12 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
 
     private static String accountRef(String vendorCode, String accountName) {
         return vendorCode.trim().toLowerCase(Locale.ROOT) + "::" + accountName.trim();
+    }
+
+    private static String routingPoolRef(String vendorCode, String poolName) {
+        return vendorCode.trim().toLowerCase(Locale.ROOT)
+                + "::"
+                + poolName.trim().toLowerCase(Locale.ROOT);
     }
 
     private static String normalizeVendorBaseUrl(String baseUrl) {
@@ -1599,5 +1776,17 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     }
 
     private record ImportModelResult(int changed, Map<String, Long> modelIdsByImportedCode) {
+    }
+
+    private record ImportVendorAccountResult(
+            Map<String, Long> accountIdsByRef,
+            Map<String, Long> poolIdsByVendorAndName
+    ) {
+    }
+
+    private record RoutingExportClosure(
+            Set<Long> modelConfigIds,
+            Set<Long> vendorAccountIds
+    ) {
     }
 }

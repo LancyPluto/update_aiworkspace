@@ -34,6 +34,8 @@ public record ModelVendorAccountResponse(
         LocalDateTime healthCheckedAt,
         Boolean loadBalanceEnabled,
         Integer loadBalanceWeight,
+        Long routingPoolId,
+        String routingPoolName,
         Integer inFlightCount,
         String circuitState,
         LocalDateTime circuitOpenUntil,
@@ -73,6 +75,8 @@ public record ModelVendorAccountResponse(
                 account.getHealthCheckedAt(),
                 Boolean.TRUE.equals(account.getLoadBalanceEnabled()),
                 normalizeWeight(account.getLoadBalanceWeight()),
+                account.getRoutingPoolId(),
+                account.getRoutingPoolName(),
                 account.getRoutingInFlightCount() == null ? 0 : account.getRoutingInFlightCount(),
                 account.getRoutingCircuitStatus() == null ? "CLOSED" : account.getRoutingCircuitStatus(),
                 account.getRoutingCooldownUntil(),
@@ -91,11 +95,14 @@ public record ModelVendorAccountResponse(
     }
 
     private static String routingExclusionReason(ModelVendorAccount account) {
+        if (!Boolean.TRUE.equals(account.getLoadBalanceEnabled())) {
+            return null;
+        }
         if (!Boolean.TRUE.equals(account.getEnabled())) {
             return "ACCOUNT_DISABLED";
         }
-        if (!Boolean.TRUE.equals(account.getLoadBalanceEnabled())) {
-            return "LOAD_BALANCING_DISABLED";
+        if (account.getRoutingPoolId() == null) {
+            return "ROUTING_POOL_REQUIRED";
         }
         if ("OPEN".equalsIgnoreCase(account.getRoutingCircuitStatus())) {
             return "CIRCUIT_OPEN";

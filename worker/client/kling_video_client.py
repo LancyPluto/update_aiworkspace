@@ -11,6 +11,12 @@ from urllib.parse import urlparse
 
 import requests
 
+from client.provider_error import (
+    ProviderCallError,
+    rejected_response_metadata,
+    request_was_not_sent,
+    transport_failure_metadata,
+)
 from config import settings
 
 
@@ -19,7 +25,7 @@ SUCCESS_STATUSES = {"succeeded", "succeed", "success", "completed", "done", "fin
 FAILED_STATUSES = {"failed", "fail", "failure", "error", "cancelled", "canceled", "timeout", "timed_out"}
 
 
-class KlingVideoError(RuntimeError):
+class KlingVideoError(ProviderCallError):
     pass
 
 
@@ -877,10 +883,16 @@ class KlingVideoClient:
                 )
                 break
             except requests.Timeout as exc:
-                raise KlingVideoTimeoutError("kling request timed out") from exc
+                raise KlingVideoTimeoutError(
+                    "kling request timed out",
+                    **transport_failure_metadata(exc),
+                ) from exc
             except requests.ConnectionError as exc:
-                if attempt >= self._MAX_TRANSPORT_ATTEMPTS:
-                    raise KlingVideoError(f"kling request failed: {exc}") from exc
+                if not request_was_not_sent(exc) or attempt >= self._MAX_TRANSPORT_ATTEMPTS:
+                    raise KlingVideoError(
+                        f"kling request failed: {exc}",
+                        **transport_failure_metadata(exc),
+                    ) from exc
                 delay = self._RETRY_BASE_DELAY_SECONDS * attempt
                 LOGGER.warning(
                     "kling transient connection failure, retrying attempt=%s/%s delay=%.1fs: %s",
@@ -891,13 +903,17 @@ class KlingVideoClient:
                 )
                 time.sleep(delay)
             except requests.RequestException as exc:
-                raise KlingVideoError(f"kling request failed: {exc}") from exc
+                raise KlingVideoError(
+                    f"kling request failed: {exc}",
+                    **transport_failure_metadata(exc),
+                ) from exc
 
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
             raise KlingVideoError(
-                f"kling request failed: status={response.status_code}, body={response.text}"
+                f"kling request failed: status={response.status_code}, body={response.text}",
+                **rejected_response_metadata(response),
             ) from exc
 
         try:

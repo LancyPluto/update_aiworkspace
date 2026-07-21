@@ -8,6 +8,7 @@ import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.agent.service.ModelExecutionSnapshotService;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
+import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.task.dto.RouteFailoverRequest;
 import com.aiminilab.aitoolmarket.task.dto.WorkerFailedRequest;
@@ -27,6 +28,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -72,8 +74,12 @@ class ModelRoutingServiceTest {
         AgentModelConfig reference = model(1L, 10L);
         AgentModelConfig alternate = model(2L, 20L);
         alternate.setLastTestSuccess(false);
+        AgentModelConfig outsidePool = model(3L, 30L);
+        outsidePool.setRoutingPoolId(200L);
         ModelVendorAccount source = account(10L, 100);
         ModelVendorAccount target = account(20L, 100);
+        ModelVendorAccount outside = account(30L, 100);
+        outside.setRoutingPoolId(200L);
         AccountModelRouteState sourceState = state(101L, 1L, 10L);
         AccountModelRouteState targetState = state(102L, 2L, 20L);
 
@@ -82,9 +88,9 @@ class ModelRoutingServiceTest {
         when(attemptMapper.countByTaskId(1L)).thenReturn(1);
         when(modelConfigMapper.findActiveById(1L)).thenReturn(reference);
         when(accountMapper.findActiveById(10L)).thenReturn(source);
-        when(accountMapper.findActiveByVendorCode("openai")).thenReturn(List.of(source, target));
+        when(accountMapper.findActiveByVendorCode("openai")).thenReturn(List.of(source, target, outside));
         when(modelConfigMapper.findRoutingCandidates("openai", "openai_images_gateway", "gpt-image-2"))
-                .thenReturn(List.of(reference, alternate));
+                .thenReturn(List.of(reference, alternate, outsidePool));
         when(capabilityService.resolveCapabilities(any())).thenReturn(List.of("IMAGE_GENERATION"));
         when(stateMapper.findByModelConfigIdsForUpdate(List.of(1L, 2L)))
                 .thenReturn(List.of(sourceState, targetState));
@@ -107,7 +113,111 @@ class ModelRoutingServiceTest {
         assertThat(decision.routeAttemptId()).isEqualTo(8L);
         verify(stateMapper).releaseFailure(101L, "CLOSED", null, 1);
         verify(stateMapper).reserve(102L, 0);
+        verify(stateMapper, never()).insertIfAbsent(30L, 3L);
         verify(taskMapper).switchRouteGuarded(1L, "claim-1", 7L, 2L, 20L, 8L, "{}");
+    }
+
+    @Test
+    void accountModeNeverStartsAutomaticRouting() {
+        AiTask task = new AiTask();
+        task.setId(1L);
+        AgentModelConfig reference = model(1L, 10L);
+        reference.setRoutingPoolId(null);
+
+        service.assignInitialRoute(task, reference);
+
+        verify(accountMapper, never()).findActiveById(anyLong());
+        verify(taskMapper, never()).assignInitialRoute(
+                anyLong(), anyLong(), anyLong(), anyLong(), any());
+    }
+
+    @Test
+    void initialRouteIsIsolatedToTheExplicitPool() {
+        AiTask task = new AiTask();
+        task.setId(1L);
+        AgentModelConfig reference = model(1L, 10L);
+        AgentModelConfig samePool = model(2L, 20L);
+        AgentModelConfig outsidePool = model(3L, 30L);
+        outsidePool.setRoutingPoolId(200L);
+        ModelVendorAccount source = account(10L, 100);
+        ModelVendorAccount target = account(20L, 100);
+        ModelVendorAccount outside = account(30L, 100);
+        outside.setRoutingPoolId(200L);
+        AccountModelRouteState sourceState = state(101L, 1L, 10L);
+        sourceState.setInFlightCount(5);
+        AccountModelRouteState targetState = state(102L, 2L, 20L);
+
+        when(accountMapper.findActiveById(10L)).thenReturn(source);
+        when(accountMapper.findActiveByVendorCode("openai")).thenReturn(List.of(source, target, outside));
+        when(modelConfigMapper.findRoutingCandidates(
+                "openai", "openai_images_gateway", "gpt-image-2"))
+                .thenReturn(List.of(reference, samePool, outsidePool));
+        when(capabilityService.resolveCapabilities(any())).thenReturn(List.of("IMAGE_GENERATION"));
+        when(stateMapper.findByModelConfigIdsForUpdate(List.of(1L, 2L)))
+                .thenReturn(List.of(sourceState, targetState));
+        when(stateMapper.reserve(102L, 0)).thenReturn(1);
+        prepareInitialAssignment(2L, 20L, 8L);
+
+        service.assignInitialRoute(task, reference);
+
+        assertThat(task.getSelectedModelConfigId()).isEqualTo(2L);
+        assertThat(task.getSelectedVendorAccountId()).isEqualTo(20L);
+        verify(stateMapper, never()).insertIfAbsent(30L, 3L);
+    }
+
+    @Test
+    void emptyExplicitPoolDoesNotFallBackToAnOutsideAccount() {
+        AiTask task = new AiTask();
+        task.setId(1L);
+        AgentModelConfig reference = model(1L, 10L);
+        AgentModelConfig outsidePool = model(2L, 20L);
+        outsidePool.setRoutingPoolId(200L);
+        ModelVendorAccount source = account(10L, 100);
+        source.setEnabled(false);
+        ModelVendorAccount outside = account(20L, 100);
+        outside.setRoutingPoolId(200L);
+
+        when(accountMapper.findActiveById(10L)).thenReturn(source);
+        when(accountMapper.findActiveByVendorCode("openai")).thenReturn(List.of(source, outside));
+        when(modelConfigMapper.findRoutingCandidates(
+                "openai", "openai_images_gateway", "gpt-image-2"))
+                .thenReturn(List.of(outsidePool));
+
+        assertThatThrownBy(() -> service.assignInitialRoute(task, reference))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("no eligible model account");
+        verify(taskMapper, never()).assignInitialRoute(
+                anyLong(), anyLong(), anyLong(), anyLong(), any());
+    }
+
+    @Test
+    void repeatedCompatibleConfigsDoNotGiveAnAccountExtraWeight() {
+        AiTask task = new AiTask();
+        task.setId(1L);
+        AgentModelConfig reference = model(1L, 10L);
+        AgentModelConfig first = model(2L, 20L);
+        AgentModelConfig duplicate = model(3L, 20L);
+        ModelVendorAccount source = account(10L, 100);
+        ModelVendorAccount target = account(20L, 100);
+        AccountModelRouteState sourceState = state(101L, 1L, 10L);
+        sourceState.setInFlightCount(5);
+        AccountModelRouteState targetState = state(102L, 2L, 20L);
+
+        when(accountMapper.findActiveById(10L)).thenReturn(source);
+        when(accountMapper.findActiveByVendorCode("openai")).thenReturn(List.of(source, target));
+        when(modelConfigMapper.findRoutingCandidates(
+                "openai", "openai_images_gateway", "gpt-image-2"))
+                .thenReturn(List.of(reference, duplicate, first));
+        when(capabilityService.resolveCapabilities(any())).thenReturn(List.of("IMAGE_GENERATION"));
+        when(stateMapper.findByModelConfigIdsForUpdate(List.of(1L, 2L)))
+                .thenReturn(List.of(sourceState, targetState));
+        when(stateMapper.reserve(102L, 0)).thenReturn(1);
+        prepareInitialAssignment(2L, 20L, 8L);
+
+        service.assignInitialRoute(task, reference);
+
+        assertThat(task.getSelectedModelConfigId()).isEqualTo(2L);
+        verify(stateMapper, never()).insertIfAbsent(20L, 3L);
     }
 
     @Test
@@ -146,14 +256,16 @@ class ModelRoutingServiceTest {
     }
 
     @Test
-    void genericModelFailureResetsTheNotSentFailureStreak() {
+    void nonRouteFailureReleasesInFlightWithoutChangingTheCircuit() {
         AiTask task = processingTask();
         task.setStatus(TaskStatus.FAILED.name());
         TaskModelRouteAttempt attempt = activeAttempt(7L, 1L, 10L);
         AccountModelRouteState state = state(101L, 1L, 10L);
-        state.setConsecutiveFailures(1);
+        state.setCircuitStatus("OPEN");
+        state.setConsecutiveFailures(2);
+        state.setCooldownUntil(LocalDateTime.now().plusMinutes(5));
         WorkerFailedRequest failure = new WorkerFailedRequest(
-                "MODEL_CALL_FAILED", "invalid request parameter", "SUBMIT", false,
+                "MEDIA_PERSIST_FAILED", "object storage unavailable", "MEDIA_PERSIST", false,
                 null, null, null, null, null, null, null, "claim-1"
         );
         when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
@@ -163,7 +275,8 @@ class ModelRoutingServiceTest {
 
         service.completeTask(1L, TaskStatus.FAILED.name(), failure);
 
-        verify(stateMapper).releaseFailure(101L, "CLOSED", null, 0);
+        verify(stateMapper).releaseNeutral(101L);
+        verify(stateMapper, never()).releaseFailure(anyLong(), any(), any(), anyInt());
     }
 
     @Test
@@ -233,6 +346,7 @@ class ModelRoutingServiceTest {
         model.setBillingUnit("IMAGE");
         model.setUnitPrice(BigDecimal.ONE);
         model.setEnabled(true);
+        model.setRoutingPoolId(100L);
         return model;
     }
 
@@ -243,7 +357,21 @@ class ModelRoutingServiceTest {
         account.setEnabled(true);
         account.setLoadBalanceEnabled(true);
         account.setLoadBalanceWeight(weight);
+        account.setRoutingPoolId(100L);
         return account;
+    }
+
+    private void prepareInitialAssignment(Long modelConfigId, Long accountId, Long attemptId) {
+        when(attemptMapper.countByTaskId(1L)).thenReturn(0);
+        when(attemptMapper.insertAttempt(any())).thenAnswer(invocation -> {
+            TaskModelRouteAttempt attempt = invocation.getArgument(0);
+            attempt.setId(attemptId);
+            return 1;
+        });
+        when(snapshotService.serialize(nullable(ModelExecutionSnapshot.class))).thenReturn("{}");
+        when(taskMapper.assignInitialRoute(
+                1L, modelConfigId, accountId, attemptId, "{}"))
+                .thenReturn(1);
     }
 
     private static AccountModelRouteState state(Long id, Long modelId, Long accountId) {

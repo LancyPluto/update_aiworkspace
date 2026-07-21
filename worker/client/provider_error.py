@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ssl
 from typing import Any
 
 
@@ -20,7 +21,6 @@ _NOT_SENT_EXCEPTION_TYPES = {
     "NameResolutionError",
     "NewConnectionError",
     "ProxyError",
-    "SSLError",
     "gaierror",
 }
 
@@ -98,6 +98,8 @@ def request_was_not_sent(error: BaseException) -> bool:
         if id(current) in seen:
             continue
         seen.add(id(current))
+        if isinstance(current, (ssl.SSLCertVerificationError, ssl.CertificateError)):
+            return True
         if current.__class__.__name__ in _NOT_SENT_EXCEPTION_TYPES:
             return True
         for nested in (current.__cause__, current.__context__, getattr(current, "reason", None)):
@@ -105,6 +107,22 @@ def request_was_not_sent(error: BaseException) -> bool:
                 pending.append(nested)
         pending.extend(argument for argument in current.args if isinstance(argument, BaseException))
     return False
+
+
+def transport_failure_metadata(error: BaseException) -> dict[str, Any]:
+    """Describe delivery using typed transport facts, never exception text."""
+
+    if request_was_not_sent(error):
+        return {
+            "delivery_state": DELIVERY_NOT_SENT,
+            "retry_scope": RETRY_ACCOUNT,
+            "failure_stage": "BEFORE_PROVIDER",
+        }
+    return {
+        "delivery_state": DELIVERY_UNKNOWN,
+        "retry_scope": RETRY_NONE,
+        "failure_stage": "PROVIDER_SUBMITTED",
+    }
 
 
 def rejected_http_metadata(
@@ -141,6 +159,20 @@ def response_provider_error_code(response: Any) -> str | None:
     except (AttributeError, TypeError, ValueError):
         return None
     return _find_provider_error_code(payload)
+
+
+def rejected_response_metadata(response: Any) -> dict[str, Any]:
+    headers = getattr(response, "headers", None)
+    retry_after = headers.get("Retry-After") if hasattr(headers, "get") else None
+    try:
+        retry_after_seconds = max(0, int(float(str(retry_after).strip())))
+    except (TypeError, ValueError):
+        retry_after_seconds = None
+    return rejected_http_metadata(
+        int(getattr(response, "status_code")),
+        retry_after_seconds,
+        response_provider_error_code(response),
+    )
 
 
 def _find_provider_error_code(value: Any) -> str | None:

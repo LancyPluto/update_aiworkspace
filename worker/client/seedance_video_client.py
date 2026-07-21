@@ -7,6 +7,11 @@ from urllib.parse import urlparse
 import requests
 from urllib3.util import Timeout as Urllib3Timeout
 
+from client.provider_error import (
+    ProviderCallError,
+    rejected_response_metadata,
+    transport_failure_metadata,
+)
 from config import settings
 from utils.input_image import InputImageError, resolve_reference_image_data_url
 from volcengine_model import normalize_volcengine_openai_base_url
@@ -16,7 +21,7 @@ LOGGER = logging.getLogger(__name__)
 POLL_REQUEST_ATTEMPTS = 3
 
 
-class SeedanceVideoError(RuntimeError):
+class SeedanceVideoError(ProviderCallError):
     pass
 
 
@@ -344,15 +349,22 @@ class SeedanceVideoClient:
                 timeout=request_timeout if request_timeout is not None else self.timeout,
             )
         except requests.Timeout as exc:
-            raise SeedanceVideoTimeoutError("seedance video request timed out") from exc
+            raise SeedanceVideoTimeoutError(
+                "seedance video request timed out",
+                **transport_failure_metadata(exc),
+            ) from exc
         except requests.RequestException as exc:
-            raise SeedanceVideoError(f"seedance video request failed: {exc}") from exc
+            raise SeedanceVideoError(
+                f"seedance video request failed: {exc}",
+                **transport_failure_metadata(exc),
+            ) from exc
 
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
             raise SeedanceVideoError(
-                f"seedance video request failed: status={response.status_code}, body={response.text}"
+                f"seedance video request failed: status={response.status_code}, body={response.text}",
+                **rejected_response_metadata(response),
             ) from exc
         try:
             data = response.json()

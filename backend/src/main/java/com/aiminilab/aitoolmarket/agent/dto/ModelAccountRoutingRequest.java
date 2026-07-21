@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotNull;
 
 public record ModelAccountRoutingRequest(
         @NotNull Boolean loadBalanceEnabled,
-        @NotNull @Min(1) @Max(100) Integer loadBalanceWeight
+        @NotNull @Min(1) @Max(100) Integer loadBalanceWeight,
+        String routingPoolName
 ) {
 }

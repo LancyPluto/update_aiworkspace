@@ -23,6 +23,7 @@ public class MarketModelConfigBridge {
         AgentModelConfig resolved = credentialResolver.resolveForExecution(config);
         return new AgentModelConfigRequest(
                 resolved.getVendorAccountId(),
+                config.getRoutingPoolId(),
                 resolved.getDisplayName(),
                 config.getConfigCode(),
                 resolved.getProvider(),

@@ -14,6 +14,7 @@ public interface ModelVendorAccountMapper extends BaseMapper<ModelVendorAccount>
 
     @Select("""
             SELECT account.*,
+                   pool.pool_name AS routing_pool_name,
                    COALESCE(route.in_flight_count, 0) AS routing_in_flight_count,
                    COALESCE(route.circuit_status, 'CLOSED') AS routing_circuit_status,
                    route.cooldown_until AS routing_cooldown_until
@@ -30,6 +31,7 @@ public interface ModelVendorAccountMapper extends BaseMapper<ModelVendorAccount>
                 FROM account_model_route_state
                 GROUP BY vendor_account_id
             ) route ON route.vendor_account_id = account.id
+            LEFT JOIN model_account_routing_pools pool ON pool.id = account.routing_pool_id
             WHERE COALESCE(account.is_deleted, 0) = 0
             ORDER BY account.vendor_code ASC, account.id ASC
             """)
@@ -37,6 +39,7 @@ public interface ModelVendorAccountMapper extends BaseMapper<ModelVendorAccount>
 
     @Select("""
             SELECT account.*,
+                   pool.pool_name AS routing_pool_name,
                    COALESCE(route.in_flight_count, 0) AS routing_in_flight_count,
                    COALESCE(route.circuit_status, 'CLOSED') AS routing_circuit_status,
                    route.cooldown_until AS routing_cooldown_until
@@ -54,6 +57,7 @@ public interface ModelVendorAccountMapper extends BaseMapper<ModelVendorAccount>
                 WHERE vendor_account_id = #{id}
                 GROUP BY vendor_account_id
             ) route ON route.vendor_account_id = account.id
+            LEFT JOIN model_account_routing_pools pool ON pool.id = account.routing_pool_id
             WHERE account.id = #{id}
               AND COALESCE(account.is_deleted, 0) = 0
             """)
@@ -63,13 +67,15 @@ public interface ModelVendorAccountMapper extends BaseMapper<ModelVendorAccount>
             UPDATE model_vendor_accounts
             SET load_balance_enabled = #{enabled},
                 load_balance_weight = #{weight},
+                routing_pool_id = #{routingPoolId},
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{id}
               AND COALESCE(is_deleted, 0) = 0
             """)
     int updateRouting(@Param("id") Long id,
                       @Param("enabled") boolean enabled,
-                      @Param("weight") int weight);
+                      @Param("weight") int weight,
+                      @Param("routingPoolId") Long routingPoolId);
 
     @Select("""
             SELECT *
@@ -82,6 +88,7 @@ public interface ModelVendorAccountMapper extends BaseMapper<ModelVendorAccount>
 
     @Select("""
             SELECT account.*,
+                   pool.pool_name AS routing_pool_name,
                    COALESCE(route.in_flight_count, 0) AS routing_in_flight_count,
                    COALESCE(route.circuit_status, 'CLOSED') AS routing_circuit_status,
                    route.cooldown_until AS routing_cooldown_until
@@ -98,6 +105,7 @@ public interface ModelVendorAccountMapper extends BaseMapper<ModelVendorAccount>
                 FROM account_model_route_state
                 GROUP BY vendor_account_id
             ) route ON route.vendor_account_id = account.id
+            LEFT JOIN model_account_routing_pools pool ON pool.id = account.routing_pool_id
             WHERE account.vendor_code = #{vendorCode}
               AND COALESCE(account.is_deleted, 0) = 0
             ORDER BY account.id ASC

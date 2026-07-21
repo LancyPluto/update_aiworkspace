@@ -38,6 +38,9 @@ public record ConfigBundleDto(
             BigDecimal balanceAmount,
             String balanceCurrency,
             BigDecimal balanceLowThreshold,
+            String routingPoolName,
+            Boolean loadBalanceEnabled,
+            Integer loadBalanceWeight,
             Boolean enabled
     ) {
     }
@@ -46,6 +49,7 @@ public record ConfigBundleDto(
             String displayName,
             String configCode,
             String vendorAccountRef,
+            String routingPoolName,
             String channelCode,
             String channelLabel,
             String channelIconAsset,

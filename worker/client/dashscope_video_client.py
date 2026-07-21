@@ -4,10 +4,16 @@ from typing import Any
 
 import requests
 
+from client.provider_error import (
+    ProviderCallError,
+    rejected_response_metadata,
+    transport_failure_metadata,
+)
+
 DEFAULT_DASHSCOPE_VIDEO_TIMEOUT_SECONDS = 3600
 
 
-class DashScopeVideoError(RuntimeError):
+class DashScopeVideoError(ProviderCallError):
     pass
 
 
@@ -96,15 +102,22 @@ class DashScopeVideoClient:
                 timeout=self.timeout,
             )
         except requests.Timeout as exc:
-            raise DashScopeVideoTimeoutError("dashscope video request timed out") from exc
+            raise DashScopeVideoTimeoutError(
+                "dashscope video request timed out",
+                **transport_failure_metadata(exc),
+            ) from exc
         except requests.RequestException as exc:
-            raise DashScopeVideoError(f"dashscope video request failed: {exc}") from exc
+            raise DashScopeVideoError(
+                f"dashscope video request failed: {exc}",
+                **transport_failure_metadata(exc),
+            ) from exc
 
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
             raise DashScopeVideoError(
-                f"dashscope video request failed: status={response.status_code}, body={response.text}"
+                f"dashscope video request failed: status={response.status_code}, body={response.text}",
+                **rejected_response_metadata(response),
             ) from exc
         try:
             data = response.json()

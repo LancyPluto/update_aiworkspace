@@ -48,6 +48,7 @@ test("updateModelVendorAccountRouting patches only routing settings", async () =
     vendorCode: "agnes",
     loadBalanceEnabled: true,
     loadBalanceWeight: 60,
+    routingPoolName: "视频主池",
   }
   const api = await importAccountApi({
     patch: async (path, body) => {
@@ -59,11 +60,12 @@ test("updateModelVendorAccountRouting patches only routing settings", async () =
   const result = await api.updateModelVendorAccountRouting(25, {
     loadBalanceEnabled: true,
     loadBalanceWeight: 60,
+    routingPoolName: "视频主池",
   })
 
   assert.deepEqual(captured, {
     path: "/api/admin/v1/model-vendor-accounts/25/routing",
-    body: { loadBalanceEnabled: true, loadBalanceWeight: 60 },
+    body: { loadBalanceEnabled: true, loadBalanceWeight: 60, routingPoolName: "视频主池" },
   })
   assert.equal(result, updatedAccount)
 })

@@ -9,6 +9,7 @@ import java.util.List;
 
 public record AgentModelConfigRequest(
         Long vendorAccountId,
+        Long routingPoolId,
         String displayName,
         String configCode,
         @NotBlank String provider,

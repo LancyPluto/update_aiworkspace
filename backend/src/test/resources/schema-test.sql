@@ -796,6 +796,16 @@ CREATE TABLE model_vendors (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE model_account_routing_pools (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  vendor_code VARCHAR(64) NOT NULL,
+  pool_name VARCHAR(128) NOT NULL,
+  pool_key VARCHAR(128) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_model_account_routing_pool_vendor_key UNIQUE (vendor_code, pool_key)
+);
+
 CREATE TABLE model_vendor_accounts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   vendor_code VARCHAR(64) NOT NULL,
@@ -819,6 +829,7 @@ CREATE TABLE model_vendor_accounts (
   health_checked_at DATETIME,
   load_balance_enabled TINYINT NOT NULL DEFAULT 0,
   load_balance_weight INT NOT NULL DEFAULT 100,
+  routing_pool_id BIGINT,
   enabled TINYINT NOT NULL DEFAULT 1,
   is_deleted TINYINT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -828,6 +839,7 @@ CREATE TABLE model_vendor_accounts (
 CREATE TABLE agent_model_configs (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   vendor_account_id BIGINT,
+  routing_pool_id BIGINT,
   display_name VARCHAR(128),
   config_code VARCHAR(64),
   provider VARCHAR(64) NOT NULL,

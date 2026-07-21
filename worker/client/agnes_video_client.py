@@ -492,7 +492,11 @@ class AgnesVideoClient:
         except ReadTimeout as exc:
             raise AgnesVideoTimeoutError("Agnes video request timed out") from exc
         except SSLError as exc:
-            raise AgnesVideoRequestNotSentError("Agnes video TLS handshake failed before request was sent") from exc
+            if request_was_not_sent(exc):
+                raise AgnesVideoRequestNotSentError(
+                    "Agnes video TLS setup failed before request was sent"
+                ) from exc
+            raise AgnesVideoError("Agnes video TLS failure occurred after delivery became unknown") from exc
         except RequestsConnectionError as exc:
             if request_was_not_sent(exc):
                 raise AgnesVideoRequestNotSentError(

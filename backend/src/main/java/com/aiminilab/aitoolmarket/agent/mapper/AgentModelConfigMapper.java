@@ -59,6 +59,26 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
             """)
     int countActiveByConfigCode(@Param("configCode") String configCode, @Param("excludeId") Long excludeId);
 
+    @Select("""
+            SELECT COUNT(1)
+            FROM agent_model_configs
+            WHERE vendor_account_id = #{vendorAccountId}
+              AND routing_pool_id IS NOT NULL
+              AND COALESCE(is_deleted, 0) = 0
+            """)
+    int countPoolBoundByVendorAccountId(@Param("vendorAccountId") Long vendorAccountId);
+
+    @Select("""
+            SELECT COUNT(1)
+            FROM agent_model_configs
+            WHERE vendor_account_id = #{vendorAccountId}
+              AND routing_pool_id IS NOT NULL
+              AND routing_pool_id <> #{routingPoolId}
+              AND COALESCE(is_deleted, 0) = 0
+            """)
+    int countPoolBoundOutsideRoutingPool(@Param("vendorAccountId") Long vendorAccountId,
+                                         @Param("routingPoolId") Long routingPoolId);
+
     @Update("""
             UPDATE agent_model_configs
             SET config_code = CONCAT(SUBSTRING(config_code, 1, 40), '__deleted_', id),
@@ -183,14 +203,14 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
                                @Param("updatedAt") LocalDateTime updatedAt);
 
     @Insert("""
-            INSERT INTO agent_model_configs(vendor_account_id, display_name, config_code, provider, model_name, base_url, api_key,
+            INSERT INTO agent_model_configs(vendor_account_id, routing_pool_id, display_name, config_code, provider, model_name, base_url, api_key,
                                             extra_auth_json, execution_task, execution_options_json,
                                             minimax_group_id, console_url, balance_url, docs_url,
                                             timeout_seconds, input_token_price_per_1k, output_token_price_per_1k,
                                             input_token_price_per_1m, output_token_price_per_1m,
                                             billing_unit, unit_price, capabilities, enabled, agent_enabled,
                                             is_default, created_at, updated_at)
-            VALUES(#{config.vendorAccountId}, #{config.displayName}, #{config.configCode}, #{config.provider}, #{config.modelName},
+            VALUES(#{config.vendorAccountId}, #{config.routingPoolId}, #{config.displayName}, #{config.configCode}, #{config.provider}, #{config.modelName},
                    #{config.baseUrl}, #{config.apiKey}, #{config.extraAuthJson}, #{config.executionTask},
                    #{config.executionOptionsJson}, #{config.minimaxGroupId},
                    #{config.consoleUrl}, #{config.balanceUrl}, #{config.docsUrl}, #{config.timeoutSeconds},
@@ -206,6 +226,7 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
     @Update("""
             UPDATE agent_model_configs
             SET vendor_account_id = #{config.vendorAccountId},
+                routing_pool_id = #{config.routingPoolId},
                 display_name = #{config.displayName},
                 config_code = #{config.configCode},
                 provider = #{config.provider},

@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.agent.entity;
 
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.math.BigDecimal;
@@ -11,6 +12,7 @@ public class AgentModelConfig {
     @TableId
     private Long id;
     private Long vendorAccountId;
+    private Long routingPoolId;
     private String displayName;
     private String configCode;
     private String provider;
@@ -40,11 +42,15 @@ public class AgentModelConfig {
     private LocalDateTime lastTestAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    @TableField(exist = false)
+    private String routingPoolName;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public Long getVendorAccountId() { return vendorAccountId; }
     public void setVendorAccountId(Long vendorAccountId) { this.vendorAccountId = vendorAccountId; }
+    public Long getRoutingPoolId() { return routingPoolId; }
+    public void setRoutingPoolId(Long routingPoolId) { this.routingPoolId = routingPoolId; }
     public String getDisplayName() { return displayName; }
     public void setDisplayName(String displayName) { this.displayName = displayName; }
     public String getConfigCode() { return configCode; }
@@ -103,4 +109,6 @@ public class AgentModelConfig {
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    public String getRoutingPoolName() { return routingPoolName; }
+    public void setRoutingPoolName(String routingPoolName) { this.routingPoolName = routingPoolName; }
 }

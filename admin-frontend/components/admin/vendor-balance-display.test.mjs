@@ -15,3 +15,13 @@ test("vendor rows do not render persistent balance query failures", () => {
   assert.doesNotMatch(source, />查询失败</)
   assert.doesNotMatch(source, /余额查询失败：/)
 })
+
+test("account balance badges keep actionable states but omit a positive normal badge", () => {
+  const badgeBlock = source.match(/function balanceStatusBadge[\s\S]*?function formatBalance/)?.[0] || ""
+
+  assert.match(badgeBlock, />欠费</)
+  assert.match(badgeBlock, />余额异常</)
+  assert.match(badgeBlock, />待手填</)
+  assert.match(badgeBlock, />仅外链</)
+  assert.doesNotMatch(badgeBlock, />正常</)
+})
