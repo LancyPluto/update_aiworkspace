@@ -146,14 +146,16 @@ class ModelRoutingServiceTest {
     }
 
     @Test
-    void genericModelFailureResetsTheNotSentFailureStreak() {
+    void nonRouteFailureReleasesInFlightWithoutChangingTheCircuit() {
         AiTask task = processingTask();
         task.setStatus(TaskStatus.FAILED.name());
         TaskModelRouteAttempt attempt = activeAttempt(7L, 1L, 10L);
         AccountModelRouteState state = state(101L, 1L, 10L);
-        state.setConsecutiveFailures(1);
+        state.setCircuitStatus("OPEN");
+        state.setConsecutiveFailures(2);
+        state.setCooldownUntil(LocalDateTime.now().plusMinutes(5));
         WorkerFailedRequest failure = new WorkerFailedRequest(
-                "MODEL_CALL_FAILED", "invalid request parameter", "SUBMIT", false,
+                "MEDIA_PERSIST_FAILED", "object storage unavailable", "MEDIA_PERSIST", false,
                 null, null, null, null, null, null, null, "claim-1"
         );
         when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
@@ -163,7 +165,8 @@ class ModelRoutingServiceTest {
 
         service.completeTask(1L, TaskStatus.FAILED.name(), failure);
 
-        verify(stateMapper).releaseFailure(101L, "CLOSED", null, 0);
+        verify(stateMapper).releaseNeutral(101L);
+        verify(stateMapper, never()).releaseFailure(anyLong(), any(), any(), anyInt());
     }
 
     @Test

@@ -2,10 +2,13 @@ from unittest.mock import MagicMock, patch
 
 import requests
 
-from client.kling_video_client import KlingVideoClient
+import pytest
+
+from client.kling_video_client import KlingVideoClient, KlingVideoError
+from client.provider_error import structured_failure_payload
 
 
-def test_kling_request_retries_transient_ssl_eof() -> None:
+def test_kling_request_does_not_retry_ambiguous_ssl_eof() -> None:
     client = KlingVideoClient(api_key="test.jwt.token")
     assert client.session.trust_env is False
     response = MagicMock()
@@ -16,8 +19,9 @@ def test_kling_request_retries_transient_ssl_eof() -> None:
     )
 
     with patch("client.kling_video_client.time.sleep") as sleep:
-        result = client._request("POST", "/v1/videos/multi-image2video", {"image_list": ["large"]})
+        with pytest.raises(KlingVideoError) as raised:
+            client._request("POST", "/v1/videos/multi-image2video", {"image_list": ["large"]})
 
-    assert result["data"]["task_id"] == "kling-task-1"
-    assert client.session.request.call_count == 2
-    sleep.assert_called_once()
+    assert structured_failure_payload(raised.value)["deliveryState"] == "UNKNOWN"
+    assert client.session.request.call_count == 1
+    sleep.assert_not_called()

@@ -97,6 +97,34 @@ sum by (method, uri) (
 
 k6 的 `name` 和 `endpoint` 标签使用固定路由名称，便于在 k6 结果中按接口聚合；Prometheus 侧使用 Spring Boot 的 `method`、`uri`、`status` 标签聚合真实服务指标。
 
+## 匿名只读容量测试
+
+`k6-capacity-readonly.js` 用固定到达率测试四个低风险匿名接口，不读取或传递 `K6_ACCESS_TOKEN`，也不包含写请求：
+
+- `GET /api/v1/ping`
+- `GET /api/v1/tool-categories`
+- `GET /api/v1/model-options`
+- `GET /api/v1/tools?pageNo=1&pageSize=20`
+
+容量计划为 `10s` 升至 100 QPS 并保持 `3m`，之后分别用 `15s` 升至 `300 / 500 / 1000 / 1500 / 2000 QPS`，每档保持 `3m`。计划总时长为 `19m25s`，结束时最多另有 `30s` 优雅退出时间。脚本采用 `600` 个预分配 VU、最多 `2500` 个 VU，且迭代之间没有 `sleep()`。
+
+全局 HTTP 失败率或业务失败率达到 `1%`、全局 P95 达到 `500ms` 时，k6 会主动中止；请求仅将 HTTP 200 视为预期响应，因此 3xx、429 和其他非 2xx 都会计入 HTTP 失败。每个接口使用固定的 `endpoint` 标签，四个接口按迭代序号均分流量。
+
+每个 3 分钟平台还使用固定的 `capacity_stage` 标签。完整 JSON summary 逐档记录目标 QPS、实际 QPS、达成率、估算 dropped 及比例、P50/P95/P99/max、HTTP/业务失败率和最大 VU，并在每档下列出四个接口各自的实际 QPS。只有实际 QPS 达成率不低于 `99%` 且估算 dropped 不超过 `0.1%` 的档位才是有效容量数据；无效档位优先说明发压端可能已经不足，不能直接当作服务端上限。`dropped_iterations` 的 k6 全局精确值也会单独保留。
+
+容量测试必须使用带生产保护的 runner：
+
+```powershell
+python tests/load/run_production_load_test.py --dry-run --capacity
+python tests/load/run_production_load_test.py --capacity
+```
+
+容量 profile 每 15 秒检查生产 Prometheus：5xx 或非 2xx 超过 `1%` 立即停止，P95 超过 `0.5s` 连续 4 次、任一主机实例 CPU 超过 `70%` 或任一 Tomcat connector busy/max 超过 `60%` 时停止。SSH、Prometheus 或必需监控指标中断时仍按 fail-closed 停止。
+
+容量 summary 保存为 `tests/load/results/capacity-summary-<timestamp>.json`。runner 同时保存 `capacity-prometheus-<timestamp>.json`，包含每 15 秒快照和各平台 Prometheus 最大 P95、CPU、Tomcat、5xx、非 2xx；Prometheus 使用 1 分钟滚动窗口，平台边界为 runner 侧近似时间。测试后仍可使用 `--report --window 30m` 生成按服务端 URI 聚合的补充报告。
+
+所有目标值都是四接口混合场景的总 QPS。`2000 QPS` 表示四个接口合计约 2000 QPS、均分后每接口约 500 QPS，不代表任一单接口已验证 2000 QPS。
+
 ## 推荐：带生产保护的执行器
 
 正式执行优先使用 `run_production_load_test.py`。它先通过 SSH 在生产机本地查询 `127.0.0.1:9091`，确认 `backend-actuator`、`node-exporter`、`cadvisor`、`alloy`、`loki` 全部为 UP，并检查 HTTP histogram、主机 CPU、Tomcat busy/max threads 指标确实存在。压测由本机 Docker 中的固定版本 `grafana/k6:0.54.0` 执行，JSON summary 仍保留在 `tests/load/results/`。

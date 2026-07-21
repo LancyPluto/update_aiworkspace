@@ -348,7 +348,9 @@ class ModelClient:
         except ReadTimeout as exc:
             raise ModelTimeoutError("model response timed out after request may have been sent") from exc
         except SSLError as exc:
-            raise ModelRequestNotSentError("model TLS handshake failed before request was sent") from exc
+            if request_was_not_sent(exc):
+                raise ModelRequestNotSentError("model TLS setup failed before request was sent") from exc
+            raise ModelClientError("model TLS failure occurred after delivery became unknown") from exc
         except RequestsConnectionError as exc:
             if request_was_not_sent(exc):
                 raise ModelRequestNotSentError(f"model connection failed before request was sent: {exc}") from exc

@@ -1,3 +1,9 @@
+"""Worker-side HTTP contract tests.
+
+The Backend server in this module is a contract double. The matching real Spring
+controller/service/database decisions are covered by ModelRouteFailoverApiIntegrationTest.
+"""
+
 import json
 import socket
 import threading

@@ -933,34 +933,16 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         }
         ModelVendorAccount account = vendorAccountMapper.findActiveById(request.vendorAccountId());
         if (account != null) {
-            validateAccountReadyForEnabledModel(account, request.provider());
+            validateAccountReadyForEnabledModel(account);
         }
     }
 
-    private void validateAccountReadyForEnabledModel(ModelVendorAccount account, String providerCode) {
+    private void validateAccountReadyForEnabledModel(ModelVendorAccount account) {
         if (Boolean.FALSE.equals(account.getEnabled())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account must be enabled before enabling this model");
         }
-        if (usesAcceptOnlyTestStrategy(providerCode)) {
-            if (!hasAccountExecutableCredential(account)) {
-                throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account credential must be configured before enabling this model");
-            }
-            return;
-        }
-        String health = account.getHealthStatus() == null ? "" : account.getHealthStatus().trim();
-        if (!"OK".equalsIgnoreCase(health)) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "账户探活未通过，请先测试账户连通性，或先将模型保存为停用状态");
-        }
-    }
-
-    private boolean usesAcceptOnlyTestStrategy(String providerCode) {
-        if (providerCode == null || providerCode.isBlank()) {
-            return false;
-        }
-        try {
-            return TEST_STRATEGY_ACCEPT_ONLY.equalsIgnoreCase(providerMetadataService.get(providerCode.trim()).testStrategy());
-        } catch (BusinessException exception) {
-            return false;
+        if (!hasAccountExecutableCredential(account)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account credential must be configured before enabling this model");
         }
     }
 

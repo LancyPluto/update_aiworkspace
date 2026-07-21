@@ -295,7 +295,7 @@ public class ModelRoutingService {
         }
         if (TaskStatus.SUCCESS.name().equalsIgnoreCase(outcome)) {
             stateMapper.releaseSuccess(state.getId());
-        } else if (failureDetails != null) {
+        } else if (circuitAffectingFailure(failureDetails)) {
             releaseFailure(state, circuitDecision(state, failureDetails));
         } else {
             stateMapper.releaseNeutral(state.getId());
@@ -396,6 +396,28 @@ public class ModelRoutingService {
                     decision.consecutiveFailures()
             );
         }
+    }
+
+    private boolean circuitAffectingFailure(RouteFailoverRequest request) {
+        if (request == null) {
+            return false;
+        }
+        String deliveryState = nullToEmpty(request.deliveryState());
+        String retryScope = nullToEmpty(request.retryScope());
+        if ("ACCOUNT".equalsIgnoreCase(retryScope)
+                && ("NOT_SENT".equalsIgnoreCase(deliveryState)
+                    || "REJECTED".equalsIgnoreCase(deliveryState))) {
+            return true;
+        }
+        String code = (nullToEmpty(request.errorCode()) + " "
+                + nullToEmpty(request.providerErrorCode())).toLowerCase(Locale.ROOT);
+        return code.contains("429") || code.contains("rate_limit") || code.contains("too_many")
+                || code.contains("401") || code.contains("403") || code.contains("402")
+                || code.contains("auth") || code.contains("unauthorized") || code.contains("forbidden")
+                || code.contains("quota") || code.contains("balance") || code.contains("credit")
+                || code.contains("model_unavailable") || code.contains("model_not_found")
+                || code.contains("no_available_channel") || code.contains("channel_unavailable")
+                || code.contains("provider_unavailable");
     }
 
     private CircuitDecision circuitDecision(AccountModelRouteState state, RouteFailoverRequest request) {

@@ -744,8 +744,12 @@ class OpenAIImagesClient:
                 f"diagnostics={diagnostics}"
             ) from exc
         except SSLError as exc:
-            raise OpenAIImagesRequestNotSentError(
-                "openai images TLS handshake failed before request was sent"
+            if request_was_not_sent(exc):
+                raise OpenAIImagesRequestNotSentError(
+                    "openai images TLS setup failed before request was sent"
+                ) from exc
+            raise OpenAIImagesError(
+                "openai images TLS failure occurred after delivery became unknown"
             ) from exc
         except ProxyError as exc:
             if request_was_not_sent(exc):
@@ -846,8 +850,12 @@ class OpenAIImagesClient:
                 f"diagnostics={diagnostics}"
             ) from exc
         except SSLError as exc:
-            raise OpenAIImagesRequestNotSentError(
-                "openai images TLS handshake failed before request was sent"
+            if request_was_not_sent(exc):
+                raise OpenAIImagesRequestNotSentError(
+                    "openai images TLS setup failed before request was sent"
+                ) from exc
+            raise OpenAIImagesError(
+                "openai images TLS failure occurred after delivery became unknown"
             ) from exc
         except ProxyError as exc:
             if request_was_not_sent(exc):

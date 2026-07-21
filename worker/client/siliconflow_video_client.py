@@ -4,10 +4,15 @@ from typing import Any
 
 import requests
 
+from client.provider_error import (
+    ProviderCallError,
+    rejected_response_metadata,
+    transport_failure_metadata,
+)
 from config import settings
 
 
-class SiliconFlowVideoError(RuntimeError):
+class SiliconFlowVideoError(ProviderCallError):
     pass
 
 
@@ -119,15 +124,22 @@ class SiliconFlowVideoClient:
                 timeout=self.timeout,
             )
         except requests.Timeout as exc:
-            raise SiliconFlowVideoTimeoutError("siliconflow speech request timed out") from exc
+            raise SiliconFlowVideoTimeoutError(
+                "siliconflow speech request timed out",
+                **transport_failure_metadata(exc),
+            ) from exc
         except requests.RequestException as exc:
-            raise SiliconFlowVideoError(f"siliconflow speech request failed: {exc}") from exc
+            raise SiliconFlowVideoError(
+                f"siliconflow speech request failed: {exc}",
+                **transport_failure_metadata(exc),
+            ) from exc
 
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
             raise SiliconFlowVideoError(
-                f"siliconflow speech request failed: status={response.status_code}, body={response.text}"
+                f"siliconflow speech request failed: status={response.status_code}, body={response.text}",
+                **rejected_response_metadata(response),
             ) from exc
 
         encoded = base64.b64encode(response.content).decode("ascii")
@@ -200,15 +212,22 @@ class SiliconFlowVideoClient:
                 timeout=self.timeout,
             )
         except requests.Timeout as exc:
-            raise SiliconFlowVideoTimeoutError("siliconflow request timed out") from exc
+            raise SiliconFlowVideoTimeoutError(
+                "siliconflow request timed out",
+                **transport_failure_metadata(exc),
+            ) from exc
         except requests.RequestException as exc:
-            raise SiliconFlowVideoError(f"siliconflow request failed: {exc}") from exc
+            raise SiliconFlowVideoError(
+                f"siliconflow request failed: {exc}",
+                **transport_failure_metadata(exc),
+            ) from exc
 
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
             raise SiliconFlowVideoError(
-                f"siliconflow request failed: status={response.status_code}, body={response.text}"
+                f"siliconflow request failed: status={response.status_code}, body={response.text}",
+                **rejected_response_metadata(response),
             ) from exc
 
         try:

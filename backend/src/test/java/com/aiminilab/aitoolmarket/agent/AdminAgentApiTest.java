@@ -823,8 +823,6 @@ class AdminAgentApiTest {
                 .getContentAsString();
         Long accountId = Long.parseLong(accountResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
 
-        jdbcTemplate.update("UPDATE model_vendor_accounts SET health_status='OK' WHERE id=?", accountId);
-
         String configResponse = mockMvc.perform(post("/api/admin/v1/agent/model-config")
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
