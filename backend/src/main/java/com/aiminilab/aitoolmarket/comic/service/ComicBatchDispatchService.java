@@ -7,13 +7,8 @@ import com.aiminilab.aitoolmarket.comic.entity.ComicShotAttempt;
 import com.aiminilab.aitoolmarket.comic.mapper.ComicGenerationBatchMapper;
 import com.aiminilab.aitoolmarket.comic.mapper.ComicShotAttemptMapper;
 import com.aiminilab.aitoolmarket.comic.mapper.ComicShotMapper;
-import com.aiminilab.aitoolmarket.common.exception.BusinessException;
-import com.aiminilab.aitoolmarket.workflow.dto.CreateWorkflowRunCommand;
-import com.aiminilab.aitoolmarket.workflow.dto.WorkflowRunCreated;
 import com.aiminilab.aitoolmarket.workflow.entity.WorkflowRun;
 import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowRunMapper;
-import com.aiminilab.aitoolmarket.workflow.service.WorkflowRunApplicationService;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -35,24 +30,21 @@ public class ComicBatchDispatchService {
     private final ComicShotAttemptMapper attemptMapper;
     private final ComicShotMapper shotMapper;
     private final WorkflowRunMapper workflowRunMapper;
-    private final WorkflowRunApplicationService workflowRunApplicationService;
     private final ComicGenerationBatchService batchService;
-    private final ComicProjectService projectService;
+    private final ComicBatchAttemptLaunchService attemptLaunchService;
 
     public ComicBatchDispatchService(ComicGenerationBatchMapper batchMapper,
                                      ComicShotAttemptMapper attemptMapper,
                                      ComicShotMapper shotMapper,
                                      WorkflowRunMapper workflowRunMapper,
-                                     WorkflowRunApplicationService workflowRunApplicationService,
                                      ComicGenerationBatchService batchService,
-                                     ComicProjectService projectService) {
+                                     ComicBatchAttemptLaunchService attemptLaunchService) {
         this.batchMapper = batchMapper;
         this.attemptMapper = attemptMapper;
         this.shotMapper = shotMapper;
         this.workflowRunMapper = workflowRunMapper;
-        this.workflowRunApplicationService = workflowRunApplicationService;
         this.batchService = batchService;
-        this.projectService = projectService;
+        this.attemptLaunchService = attemptLaunchService;
     }
 
     public ComicDtos.BatchDetail dispatch(Long userId, Long projectId, Long episodeId, Long batchId) {
@@ -89,45 +81,20 @@ public class ComicBatchDispatchService {
         reconcile(batch);
         batch = batchMapper.selectById(batch.getId());
         if (batch == null || !Set.of("CREATED", "RUNNING").contains(batch.getStatus())) return;
-        List<ComicShotAttempt> attempts = attemptMapper.selectByBatch(batch.getId());
-        long active = attempts.stream().filter(attempt -> isActiveAttempt(attempt.getStatus())).count();
-        int available = Math.max(0, batch.getMaxParallelism() - (int) active);
-        if (available == 0) return;
-
-        int dispatched = 0;
-        for (ComicShotAttempt attempt : attempts) {
-            if (dispatched >= available) break;
-            if (!"PENDING".equals(attempt.getStatus()) || !dependencyReady(attempt.getShotId())) continue;
-            if (attemptMapper.claimForDispatch(attempt.getId()) != 1) continue;
+        int launchBudget = Math.max(1, attemptMapper.selectByBatch(batch.getId()).size());
+        for (int index = 0; index < launchBudget; index++) {
             try {
-                ObjectNode input = projectService.buildShotOperationInput(
-                        batch.getUserId(), batch.getProjectId(), batch.getEpisodeId(), attempt.getShotId()
-                );
-                input.put("comicGenerationBatchId", batch.getId());
-                input.put("comicShotAttemptId", attempt.getId());
-                WorkflowRunCreated created = workflowRunApplicationService.create(new CreateWorkflowRunCommand(
-                        batch.getUserId(), batch.getToolCode(), input, attempt.getIdempotencyKey(),
-                        "COMIC_PROJECT", null
-                ));
-                String status = normalizeRunStatus(created.status());
-                if (attemptMapper.bindWorkflow(
-                        attempt.getId(), created.runId(), created.rootTaskId(), status) != 1) {
-                    throw new IllegalStateException("Comic attempt lost dispatch ownership");
+                ComicBatchAttemptLaunchService.LaunchResult result = attemptLaunchService.launchNext(batch.getId());
+                if (result == ComicBatchAttemptLaunchService.LaunchResult.LAUNCHED
+                        || result == ComicBatchAttemptLaunchService.LaunchResult.RETRY) {
+                    continue;
                 }
-                dispatched++;
-            } catch (BusinessException exception) {
-                attemptMapper.syncState(
-                        attempt.getId(), "FAILED", null, exception.getErrorCode().name(),
-                        limit(exception.getMessage(), 1900), LocalDateTime.now()
-                );
-            } catch (Exception exception) {
-                attemptMapper.syncState(
-                        attempt.getId(), "FAILED", null, "DISPATCH_FAILED",
-                        limit(exception.getMessage(), 1900), LocalDateTime.now()
-                );
+                break;
+            } catch (ComicBatchAttemptLaunchService.AttemptLaunchException failure) {
+                attemptLaunchService.failAfterRollback(failure);
             }
         }
-        batchMapper.updateState(batch.getId(), "RUNNING", LocalDateTime.now(), null);
+        batchMapper.markRunning(batch.getId(), LocalDateTime.now());
         reconcile(batchMapper.selectById(batch.getId()));
     }
 
@@ -166,37 +133,25 @@ public class ComicBatchDispatchService {
     }
 
     private void failBrokenDependencies(List<ComicShotAttempt> attempts) {
-        boolean hasActive = attempts.stream().anyMatch(a -> isActiveAttempt(a.getStatus()));
-        if (hasActive) return;
         for (ComicShotAttempt attempt : attempts) {
             if (!"PENDING".equals(attempt.getStatus())) continue;
             ComicShot shot = shotMapper.selectById(attempt.getShotId());
-            if (shot == null || shot.getDependsOnShotId() == null) continue;
+            if (shot == null) {
+                attemptMapper.syncState(
+                        attempt.getId(), "FAILED", null, "SHOT_NOT_FOUND",
+                        "分镜已不存在", LocalDateTime.now()
+                );
+                continue;
+            }
+            if (shot.getDependsOnShotId() == null) continue;
             ComicShot dependency = shotMapper.selectById(shot.getDependsOnShotId());
             if (dependency != null && dependency.getSelectedAttemptId() != null) continue;
-            boolean dependencyFailed = attempts.stream()
-                    .filter(item -> item.getShotId().equals(shot.getDependsOnShotId()))
-                    .anyMatch(item -> isFailed(item.getStatus()));
-            if (dependencyFailed) {
-                attemptMapper.syncState(
-                        attempt.getId(), "FAILED", null, "DEPENDENCY_FAILED",
-                        "前置连续镜头生成失败", LocalDateTime.now()
-                );
-            }
+            if (attemptMapper.countActiveByShot(shot.getDependsOnShotId()) > 0) continue;
+            attemptMapper.syncState(
+                    attempt.getId(), "FAILED", null, "DEPENDENCY_FAILED",
+                    "前置连续镜头没有可用版本", LocalDateTime.now()
+            );
         }
-    }
-
-    private boolean dependencyReady(Long shotId) {
-        ComicShot shot = shotMapper.selectById(shotId);
-        if (shot == null) return false;
-        if (shot.getDependsOnShotId() == null) return true;
-        ComicShot dependency = shotMapper.selectById(shot.getDependsOnShotId());
-        return dependency != null && dependency.getSelectedAttemptId() != null;
-    }
-
-    private boolean isActiveAttempt(String status) {
-        return Set.of("DISPATCHING", "RUNNING", "AWAITING_USER", "AWAITING_FUNDS", "CANCELLING")
-                .contains(status);
     }
 
     private boolean isTerminal(String status) {
@@ -219,8 +174,4 @@ public class ComicBatchDispatchService {
         return value == null ? LocalDateTime.now() : value;
     }
 
-    private String limit(String value, int max) {
-        if (value == null) return null;
-        return value.length() <= max ? value : value.substring(0, max);
-    }
 }

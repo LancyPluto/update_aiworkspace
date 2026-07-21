@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.comic.mapper;
 import com.aiminilab.aitoolmarket.comic.entity.ComicShot;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
@@ -56,4 +57,7 @@ public interface ComicShotMapper extends BaseMapper<ComicShot> {
             WHERE id = #{shotId} AND selected_attempt_id IS NULL
             """)
     int selectFirstSuccessfulAttempt(@Param("shotId") Long shotId, @Param("attemptId") Long attemptId);
+
+    @Delete("DELETE FROM comic_shots WHERE episode_id = #{episodeId}")
+    int deleteByEpisode(@Param("episodeId") Long episodeId);
 }

@@ -1311,6 +1311,51 @@ class AgentApiTest {
     }
 
     @Test
+    void onlinePublishedWorkflowStaysInPickerWhenLegacyLaunchFlagsAreOff() throws Exception {
+        mockExternalAuthDependencies();
+        String toolCode = "agent_published_visibility_workflow";
+        ensureWorkflowTool(toolCode);
+        jdbcTemplate.update(
+                "UPDATE ai_tools SET billing_mode = 'FIXED', agent_surface_enabled = 0 WHERE tool_code = ?",
+                toolCode
+        );
+        jdbcTemplate.update(
+                "UPDATE tool_workflows SET execution_enabled = 0 WHERE tool_id = (SELECT id FROM ai_tools WHERE tool_code = ?)",
+                toolCode
+        );
+        sqlSessionTemplate.clearCache();
+        register("agent_published_visibility_user");
+        String token = login("agent_published_visibility_user");
+
+        JsonNode onlineItems = objectMapper.readTree(mockMvc.perform(get("/api/v1/agent/tools")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString()).path("data");
+        JsonNode onlineTool = null;
+        for (JsonNode item : onlineItems) {
+            if (toolCode.equals(item.path("toolCode").asText())) {
+                onlineTool = item;
+                break;
+            }
+        }
+        assertThat(onlineTool).isNotNull();
+        assertThat(onlineTool.size()).isEqualTo(8);
+
+        jdbcTemplate.update("UPDATE ai_tools SET status = 'OFFLINE' WHERE tool_code = ?", toolCode);
+        sqlSessionTemplate.clearCache();
+
+        String offlineResponse = mockMvc.perform(get("/api/v1/agent/tools")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        assertThat(objectMapper.readTree(offlineResponse).path("data").toString()).doesNotContain(toolCode);
+    }
+
+    @Test
     void userCannotConfirmToolForFinishedRun() throws Exception {
         mockExternalAuthDependencies();
         register("agent_finished_user");

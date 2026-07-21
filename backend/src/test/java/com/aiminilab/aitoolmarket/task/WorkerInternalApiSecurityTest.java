@@ -8,6 +8,7 @@ import com.aiminilab.aitoolmarket.task.controller.InternalTaskController;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
 import com.aiminilab.aitoolmarket.task.service.TaskService;
+import com.aiminilab.aitoolmarket.task.support.ProviderCheckpointLimits;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +24,7 @@ import java.time.Instant;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -97,6 +99,19 @@ class WorkerInternalApiSecurityTest {
                         .content("{}"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+    }
+
+    @Test
+    void oversizedProviderCheckpointIsRejectedBeforeSignatureBodyBuffering() throws Exception {
+        String body = "x".repeat(ProviderCheckpointLimits.MAX_REQUEST_BODY_BYTES + 1);
+
+        mockMvc.perform(post("/api/internal/v1/tasks/1/provider-checkpoint")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isPayloadTooLarge())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"));
+
+        verifyNoInteractions(verifier, internalTaskService);
     }
 
     private String signature(String method, String path, String timestamp, String nonce, String body) {

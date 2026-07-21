@@ -3,7 +3,11 @@ import base64
 import pytest
 import requests
 
-from client.agnes_video_client import AgnesVideoClient, AgnesVideoTimeoutError
+from client.agnes_video_client import (
+    AgnesVideoClient,
+    AgnesVideoRequestNotSentError,
+    AgnesVideoTimeoutError,
+)
 
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
@@ -34,6 +38,30 @@ class RecordingSession:
         if isinstance(response, Exception):
             raise response
         return response
+
+
+def test_agnes_connection_refused_is_marked_not_sent():
+    client = AgnesVideoClient(base_url="https://apihub.agnes-ai.com", api_key="test-key")
+    client.session = RecordingSession([
+        requests.ConnectionError(ConnectionRefusedError("connection refused")),
+    ])
+
+    with pytest.raises(AgnesVideoRequestNotSentError) as raised:
+        client._request("POST", "/v1/videos", json_payload={"model": "agnes-video-v2.0"})
+
+    assert raised.value.delivery_state == "NOT_SENT"
+    assert raised.value.retry_scope == "ACCOUNT"
+
+
+def test_agnes_read_timeout_keeps_delivery_unknown():
+    client = AgnesVideoClient(base_url="https://apihub.agnes-ai.com", api_key="test-key")
+    client.session = RecordingSession([requests.ReadTimeout("response lost")])
+
+    with pytest.raises(AgnesVideoTimeoutError) as raised:
+        client._request("POST", "/v1/videos", json_payload={"model": "agnes-video-v2.0"})
+
+    assert raised.value.delivery_state == "UNKNOWN"
+    assert raised.value.retry_scope == "NONE"
 
 
 def test_agnes_video_client_creates_task_and_retrieves_result_by_video_id():

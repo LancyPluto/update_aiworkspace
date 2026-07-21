@@ -14,7 +14,7 @@ class WorkflowRuntimeGateTest {
     void defaultConfigurationBlocksEveryNewRun() {
         WorkflowRuntimeGate gate = new WorkflowRuntimeGate(new WorkflowRuntimeProperties());
 
-        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0))
+        assertThat(gate.evaluateNewRun(11L, false, 0, 0))
                 .isEqualTo(WorkflowRuntimeGate.Decision.denied("runtime_disabled"));
     }
 
@@ -23,12 +23,12 @@ class WorkflowRuntimeGateTest {
         WorkflowRuntimeProperties properties = enabledProperties();
         WorkflowRuntimeGate gate = new WorkflowRuntimeGate(properties);
 
-        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0).reason())
+        assertThat(gate.evaluateNewRun(11L, false, 0, 0).reason())
                 .isEqualTo("reconciliation_not_healthy");
 
         gate.markReconciliationHealthyAfterFullScan(gate.reconciliationFailureGeneration());
 
-        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0).allowed()).isTrue();
+        assertThat(gate.evaluateNewRun(11L, false, 0, 0).allowed()).isTrue();
     }
 
     @Test
@@ -38,18 +38,20 @@ class WorkflowRuntimeGateTest {
         properties.setCanaryPercentage(10);
         WorkflowRuntimeGate gate = healthyGate(properties);
 
-        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0).allowed()).isTrue();
-        assertThat(gate.evaluateNewRun(105L, true, false, 0, 0).allowed()).isTrue();
-        assertThat(gate.evaluateNewRun(115L, true, false, 0, 0).reason())
+        assertThat(gate.evaluateNewRun(11L, false, 0, 0).allowed()).isTrue();
+        assertThat(gate.evaluateNewRun(105L, false, 0, 0).allowed()).isTrue();
+        assertThat(gate.evaluateNewRun(115L, false, 0, 0).reason())
                 .isEqualTo("user_not_in_canary");
     }
 
     @Test
-    void toolLevelExecutionSwitchIsEnforced() {
-        WorkflowRuntimeGate gate = healthyGate(enabledProperties());
+    void globalExecutionSwitchIsEnforced() {
+        WorkflowRuntimeProperties properties = enabledProperties();
+        properties.setExecutionEnabled(false);
+        WorkflowRuntimeGate gate = healthyGate(properties);
 
-        assertThat(gate.evaluateNewRun(11L, false, false, 0, 0).reason())
-                .isEqualTo("tool_execution_disabled");
+        assertThat(gate.evaluateNewRun(11L, false, 0, 0).reason())
+                .isEqualTo("execution_disabled");
     }
 
     @Test
@@ -60,7 +62,7 @@ class WorkflowRuntimeGateTest {
         properties.setMaxUserDailyCostCredits(1000);
         WorkflowRuntimeGate gate = healthyGate(properties);
 
-        assertThat(gate.evaluateNewRun(11L, true, true, 10, 0).reason())
+        assertThat(gate.evaluateNewRun(11L, true, 10, 0).reason())
                 .isEqualTo("paid_run_requires_real_billing");
     }
 
@@ -73,7 +75,7 @@ class WorkflowRuntimeGateTest {
         properties.setMaxUserDailyCostCredits(1000);
         WorkflowRuntimeGate gate = healthyGate(properties);
 
-        assertThat(gate.evaluateNewRun(11L, true, true, 10, 0).reason())
+        assertThat(gate.evaluateNewRun(11L, true, 10, 0).reason())
                 .isEqualTo("billing_mode_conflict");
     }
 
@@ -84,7 +86,7 @@ class WorkflowRuntimeGateTest {
         properties.setCanaryPercentage(101);
         WorkflowRuntimeGate gate = healthyGate(properties);
 
-        assertThat(gate.evaluateNewRun(42L, true, false, 0, 0).reason())
+        assertThat(gate.evaluateNewRun(42L, false, 0, 0).reason())
                 .isEqualTo("user_not_in_canary");
     }
 
@@ -96,21 +98,21 @@ class WorkflowRuntimeGateTest {
         properties.setMaxUserDailyCostCredits(150);
         WorkflowRuntimeGate gate = healthyGate(properties);
 
-        assertThat(gate.evaluateNewRun(11L, true, true, 101, 0).reason())
+        assertThat(gate.evaluateNewRun(11L, true, 101, 0).reason())
                 .isEqualTo("run_cost_limit_exceeded");
-        assertThat(gate.evaluateNewRun(11L, true, true, 60, 100).reason())
+        assertThat(gate.evaluateNewRun(11L, true, 60, 100).reason())
                 .isEqualTo("user_daily_cost_limit_exceeded");
-        assertThat(gate.evaluateNewRun(11L, true, true, 50, 100).allowed()).isTrue();
+        assertThat(gate.evaluateNewRun(11L, true, 50, 100).allowed()).isTrue();
     }
 
     @Test
     void reconciliationMismatchImmediatelyBlocksNewRuns() {
         WorkflowRuntimeGate gate = healthyGate(enabledProperties());
-        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0).allowed()).isTrue();
+        assertThat(gate.evaluateNewRun(11L, false, 0, 0).allowed()).isTrue();
 
         gate.markReconciliationUnhealthy();
 
-        assertThat(gate.evaluateNewRun(11L, true, false, 0, 0).reason())
+        assertThat(gate.evaluateNewRun(11L, false, 0, 0).reason())
                 .isEqualTo("reconciliation_not_healthy");
     }
 

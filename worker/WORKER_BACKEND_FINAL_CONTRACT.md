@@ -344,6 +344,10 @@ The backend accepts the write only while the task is `PROCESSING`, the lease
 and claim token are current, and `expectedVersion` matches. The response returns
 the stored checkpoint and incremented `version`. Workers must persist a received
 provider task ID before polling and must resume with that ID after redelivery.
+The normalized checkpoint JSON has a 1 MiB UTF-8 hard limit, and this endpoint
+rejects request bodies larger than 2 MiB before signature buffering. Completed
+comic script checkpoints keep the screenplay only at `result.script.screenplay`;
+they must not duplicate it at `result.screenplay`.
 
 ### Provider accounting callbacks
 

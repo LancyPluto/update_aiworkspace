@@ -40,6 +40,16 @@ class WorkflowSchemaContractTest {
     void taskTableExposesProviderCheckpointCompareAndSetColumns() {
         assertColumn("ai_tasks", "provider_checkpoint_json");
         assertColumn("ai_tasks", "provider_checkpoint_version");
+        Long checkpointCapacity = jdbcTemplate.queryForObject(
+                """
+                SELECT character_maximum_length
+                FROM information_schema.columns
+                WHERE LOWER(table_name) = 'ai_tasks'
+                  AND LOWER(column_name) = 'provider_checkpoint_json'
+                """,
+                Long.class
+        );
+        assertThat(checkpointCapacity).isGreaterThanOrEqualTo(1_048_576L);
     }
 
     private void assertColumn(String table, String column) {

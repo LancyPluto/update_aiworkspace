@@ -20,7 +20,12 @@ import {
 } from "@/api/comicProjectApi"
 import { ApiBusinessError } from "@/api/client"
 import { useAuthStore } from "@/store/authStore"
-import { comicAttemptMedia } from "@/utils/comicProject"
+import {
+  comicAttemptMedia,
+  mergeComicShotAttempts,
+  retainComicClientRequestAttempt,
+  type ComicClientRequestAttempt,
+} from "@/utils/comicProject"
 import { randomUUID } from "@/utils/randomUUID"
 
 const props = defineProps<{
@@ -43,17 +48,45 @@ const submitting = ref(false)
 const refreshing = ref(false)
 const actionShotId = ref<number | null>(null)
 const error = ref<string | null>(null)
+const batchLaunchAttempt = ref<ComicClientRequestAttempt | null>(null)
+const shotRetryAttempts = new Map<number, ComicClientRequestAttempt>()
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 let latestBatchController: AbortController | null = null
 
 const shots = computed(() => (props.episode.shots ?? []).filter((shot): shot is ComicShot & { id: number } => shot.id != null))
-const batchActive = computed(() => ["DRAFT", "QUEUED", "RUNNING"].includes(String(batch.value?.status ?? "").toUpperCase()))
+const batchActive = computed(() => [
+  "CREATED",
+  "DRAFT",
+  "QUEUED",
+  "DISPATCHING",
+  "RUNNING",
+  "AWAITING_USER",
+  "AWAITING_FUNDS",
+  "CANCELLING",
+].includes(String(batch.value?.status ?? "").toUpperCase()))
 const batchProgress = computed(() => {
   const total = batch.value?.totalCount ?? shots.value.length
   const complete = (batch.value?.succeededCount ?? 0) + (batch.value?.failedCount ?? 0)
   return total > 0 ? Math.round((complete / total) * 100) : 0
 })
 const batchSucceeded = computed(() => String(batch.value?.status ?? "").toUpperCase() === "SUCCESS")
+
+const batchInputSignature = computed(() => JSON.stringify({
+  operation: "comic.generation.batch",
+  projectId: String(props.projectId),
+  episodeId: String(props.episode.id),
+  episodeRevision: props.episode.revision ?? 0,
+  shotIds: [...new Set(selectedShotIds.value)].sort((left, right) => left - right),
+  maxParallelism: maxParallelism.value,
+  toolCode: "ai_comic_drama_agent",
+}))
+
+const retryInputRevision = computed(() => JSON.stringify({
+  projectId: String(props.projectId),
+  episodeId: String(props.episode.id),
+  episodeRevision: props.episode.revision ?? 0,
+  selectedAttemptIds: shots.value.map((shot) => [shot.id, shot.selectedAttemptId ?? null]),
+}))
 
 watch(
   () => props.episode.id,
@@ -69,19 +102,48 @@ watch(
   { immediate: true },
 )
 
-function attemptsForShot(shotId: number): ComicShotAttempt[] {
-  return (batch.value?.attempts ?? [])
-    .filter((attempt) => attempt.shotId === shotId)
-    .sort((left, right) => right.attemptNo - left.attemptNo)
+watch(batchInputSignature, () => {
+  batchLaunchAttempt.value = null
+})
+
+watch(retryInputRevision, () => {
+  for (const [shotId, attempt] of shotRetryAttempts) {
+    const shot = shots.value.find((item) => item.id === shotId)
+    if (!shot || attempt.signature !== shotRetrySignature(shot)) shotRetryAttempts.delete(shotId)
+  }
+})
+
+watch(batch, (loadedBatch) => {
+  const loadedClientRequestId = loadedBatch?.clientRequestId
+  if (!loadedClientRequestId) return
+  if (batchLaunchAttempt.value?.clientRequestId === loadedClientRequestId) batchLaunchAttempt.value = null
+  for (const [shotId, attempt] of shotRetryAttempts) {
+    if (attempt.clientRequestId === loadedClientRequestId) shotRetryAttempts.delete(shotId)
+  }
+})
+
+function shotRetrySignature(shot: ComicShot & { id: number }): string {
+  return JSON.stringify({
+    operation: "comic.shot.retry",
+    projectId: String(props.projectId),
+    episodeId: String(props.episode.id),
+    shotId: shot.id,
+    selectedAttemptId: shot.selectedAttemptId ?? null,
+    toolCode: "ai_comic_drama_agent",
+  })
+}
+
+function attemptsForShot(shot: ComicShot): ComicShotAttempt[] {
+  return mergeComicShotAttempts(shot, batch.value?.attempts ?? [])
 }
 
 function activeAttempt(shot: ComicShot): ComicShotAttempt | null {
-  const attempts = attemptsForShot(shot.id as number)
+  const attempts = attemptsForShot(shot)
   return attempts.find((attempt) => attempt.id === shot.selectedAttemptId) ?? attempts[0] ?? null
 }
 
-function successfulAttempts(shotId: number): ComicShotAttempt[] {
-  return attemptsForShot(shotId).filter((attempt) => String(attempt.status).toUpperCase() === "SUCCESS")
+function successfulAttempts(shot: ComicShot): ComicShotAttempt[] {
+  return attemptsForShot(shot).filter((attempt) => String(attempt.status).toUpperCase() === "SUCCESS")
 }
 
 function attemptStatusLabel(attempt?: ComicShotAttempt | null): string {
@@ -179,13 +241,19 @@ async function startBatch() {
   submitting.value = true
   error.value = null
   try {
+    batchLaunchAttempt.value = retainComicClientRequestAttempt(
+      batchLaunchAttempt.value,
+      batchInputSignature.value,
+      randomUUID,
+    )
     batch.value = await comicProjectApi.createGenerationBatch(props.projectId, props.episode.id, {
-      clientRequestId: randomUUID(),
+      clientRequestId: batchLaunchAttempt.value.clientRequestId,
       toolCode: "ai_comic_drama_agent",
       maxParallelism: maxParallelism.value,
       confirmed: true,
-      shotIds: selectedShotIds.value,
+      shotIds: [...new Set(selectedShotIds.value)].sort((left, right) => left - right),
     }, { token: auth.token })
+    batchLaunchAttempt.value = null
     schedulePoll()
   } catch (startError) {
     error.value = startError instanceof Error ? startError.message : "镜头批次启动失败"
@@ -199,10 +267,19 @@ async function retryShot(shotId: number) {
   actionShotId.value = shotId
   error.value = null
   try {
+    const shot = shots.value.find((item) => item.id === shotId)
+    if (!shot) throw new Error("镜头不存在或尚未保存")
+    const attempt = retainComicClientRequestAttempt(
+      shotRetryAttempts.get(shotId) ?? null,
+      shotRetrySignature(shot),
+      randomUUID,
+    )
+    shotRetryAttempts.set(shotId, attempt)
     batch.value = await comicProjectApi.retryShot(props.projectId, props.episode.id, shotId, {
-      clientRequestId: randomUUID(),
+      clientRequestId: attempt.clientRequestId,
       toolCode: "ai_comic_drama_agent",
     }, { token: auth.token })
+    shotRetryAttempts.delete(shotId)
     schedulePoll(800)
   } catch (retryError) {
     error.value = retryError instanceof Error ? retryError.message : "镜头重试失败"
@@ -213,6 +290,7 @@ async function retryShot(shotId: number) {
 
 async function selectAttempt(shot: ComicShot & { id: number }, attemptId: number) {
   if (actionShotId.value != null || shot.selectedAttemptId === attemptId) return
+  shotRetryAttempts.delete(shot.id)
   actionShotId.value = shot.id
   error.value = null
   try {
@@ -299,8 +377,8 @@ onBeforeUnmount(() => {
         </div>
         <div>
           <label class="block text-xs text-muted-foreground">采用版本
-            <select :value="shot.selectedAttemptId ?? ''" class="mt-2 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground" :disabled="actionShotId === shot.id || !successfulAttempts(shot.id).length" @change="selectAttempt(shot, Number(($event.target as HTMLSelectElement).value))">
-              <option value="">自动选择首个成功版本</option><option v-for="attempt in successfulAttempts(shot.id)" :key="attempt.id" :value="attempt.id">V{{ attempt.attemptNo }} · 已完成</option>
+            <select :value="shot.selectedAttemptId ?? ''" class="mt-2 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground" :disabled="actionShotId === shot.id || !successfulAttempts(shot).length" @change="selectAttempt(shot, Number(($event.target as HTMLSelectElement).value))">
+              <option value="">自动选择首个成功版本</option><option v-for="attempt in successfulAttempts(shot)" :key="attempt.id" :value="attempt.id">V{{ attempt.attemptNo }} · 已完成</option>
             </select>
           </label>
           <button type="button" class="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-border text-sm hover:bg-secondary disabled:opacity-50" :disabled="actionShotId != null || batchActive" @click="retryShot(shot.id)">

@@ -103,7 +103,8 @@ class WorkflowP0EndToEndTest {
                 INSERT INTO ai_tasks(
                   task_no, user_id, tool_id, status, progress, params_json,
                   idempotency_key, estimated_credit_cost, queued_at, started_at
-                ) VALUES ('P0-CLOSED-EXISTING', ?, ?, 'PROCESSING', 25, '{}', ?, 0,
+                ) VALUES ('P0-CLOSED-EXISTING', ?, ?, 'PROCESSING', 25,
+                          '{"prompt":"new run"}', ?, 0,
                           CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """, USER_ID, published.toolId(), requestId);
         Long rootTaskId = jdbcTemplate.queryForObject(
@@ -119,7 +120,7 @@ class WorkflowP0EndToEndTest {
                   cancellation_generation, input_json, context_json, billing_status,
                   started_at, created_at, updated_at
                 ) VALUES (?, ?, ?, 1, ?, ?, 'AGENTS_PAGE', ?, 'RUNNING', 0,
-                          0, '{}', '{}', 'CLEAR', CURRENT_TIMESTAMP,
+                          0, '{"prompt":"new run"}', '{}', 'CLEAR', CURRENT_TIMESTAMP,
                           CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """, USER_ID, published.toolId(), published.workflowId(), published.versionId(),
                 rootTaskId, requestId);

@@ -53,6 +53,18 @@ public final class ComicDtos {
             @Min(1) Integer episodeNo) {
     }
 
+    public record GenerateEpisodeRequest(
+            @NotBlank @Size(max = 255) String title,
+            @NotBlank @Size(max = 500000) String prompt,
+            @Min(1) Integer episodeNo,
+            @NotBlank @Size(max = 96) String clientRequestId) {
+    }
+
+    public record GenerateStoryboardRequest(
+            @NotNull @Min(0) Long expectedRevision,
+            @NotBlank @Size(max = 96) String clientRequestId) {
+    }
+
     public record UpdateEpisodeRequest(
             @NotBlank @Size(max = 255) String title,
             @NotBlank @Size(max = 500000) String scriptText,
@@ -103,7 +115,7 @@ public final class ComicDtos {
             String visualDescription, String dialogue, String narration, String soundEffect,
             String bgmCue, String firstFramePrompt, String videoPrompt, String negativePrompt,
             List<Long> characterVersionIds, Long sceneVersionId, Long dependsOnShotId,
-            Long selectedAttemptId, String status, long revision) {
+            Long selectedAttemptId, ShotAttemptDetail selectedAttempt, String status, long revision) {
     }
 
     public record RevisionRequest(@NotNull @Min(0) Long expectedRevision) {
@@ -164,6 +176,14 @@ public final class ComicDtos {
             String status, LocalDateTime createdAt) {
     }
 
+    public record GenerateAssetVersionRequest(
+            @NotBlank @Size(max = 96) String clientRequestId) {
+    }
+
+    public record AssetGenerationDetail(
+            Long versionId, String status, Long workflowRunId, Long rootTaskId) {
+    }
+
     public record CreateBatchRequest(
             @NotBlank @Size(max = 128) String clientRequestId,
             @Size(max = 128) String toolCode,
@@ -190,6 +210,19 @@ public final class ComicDtos {
             Long id, Long shotId, Integer attemptNo, String status, Long workflowRunId,
             Long rootTaskId, JsonNode result, String errorCode, String errorMessage,
             LocalDateTime startedAt, LocalDateTime finishedAt) {
+    }
+
+    public record CreateAssemblyBatchRequest(
+            @NotBlank @Size(max = 128) String clientRequestId,
+            @NotNull Boolean confirmed) {
+    }
+
+    public record AssemblyBatchDetail(
+            Long id, Long projectId, Long episodeId, String toolCode, String clientRequestId,
+            int shotCount, List<Long> selectedAttemptIds, String status, Long workflowRunId,
+            Long rootTaskId, String finalVideoUrl, String subtitleUrl, JsonNode result,
+            String errorCode, String errorMessage, LocalDateTime confirmedAt,
+            LocalDateTime startedAt, LocalDateTime finishedAt, LocalDateTime createdAt) {
     }
 
     public record WorkspaceBinding(

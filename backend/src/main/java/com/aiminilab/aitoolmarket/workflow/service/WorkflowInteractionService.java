@@ -41,6 +41,7 @@ public class WorkflowInteractionService {
     private final WorkflowConfirmationMapper confirmationMapper;
     private final WorkflowConfirmationTokenService tokenService;
     private final WorkflowStepScheduler stepScheduler;
+    private final WorkflowStepCallbackService stepCallbackService;
     private final WorkflowCancellationService cancellationService;
     private final WorkflowExecutionService executionService;
     private final TaskMapper taskMapper;
@@ -51,6 +52,7 @@ public class WorkflowInteractionService {
                                       WorkflowConfirmationMapper confirmationMapper,
                                       WorkflowConfirmationTokenService tokenService,
                                       WorkflowStepScheduler stepScheduler,
+                                      WorkflowStepCallbackService stepCallbackService,
                                       WorkflowCancellationService cancellationService,
                                       WorkflowExecutionService executionService,
                                       TaskMapper taskMapper,
@@ -60,6 +62,7 @@ public class WorkflowInteractionService {
         this.confirmationMapper = confirmationMapper;
         this.tokenService = tokenService;
         this.stepScheduler = stepScheduler;
+        this.stepCallbackService = stepCallbackService;
         this.cancellationService = cancellationService;
         this.executionService = executionService;
         this.taskMapper = taskMapper;
@@ -127,10 +130,18 @@ public class WorkflowInteractionService {
             throw conflict("当前工作流不在等待充值状态");
         }
         WorkflowRunStep step = stepMapper.selectById(run.getCurrentStepId());
-        if (step == null || !run.getId().equals(step.getRunId()) || !"READY".equals(step.getStatus())) {
+        if (step == null || !run.getId().equals(step.getRunId())) {
             throw conflict("等待充值的步骤已经变化，请刷新后重试");
         }
-        stepScheduler.dispatch(step.getId());
+        if ("READY".equals(step.getStatus())) {
+            stepScheduler.dispatch(step.getId());
+            return;
+        }
+        if ("AWAITING_FUNDS".equals(step.getStatus())) {
+            stepCallbackService.resumeSettlement(run, step);
+            return;
+        }
+        throw conflict("Workflow step awaiting funds is no longer recoverable");
     }
 
     public void cancel(Long rootTaskId, Long userId, String reason) {

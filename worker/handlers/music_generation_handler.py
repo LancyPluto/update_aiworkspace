@@ -81,6 +81,8 @@ class MusicGenerationHandler:
                     "resourceType": "AUDIO",
                     "contentText": content,
                     "billableUnits": 1,
+                    "providerRequestId": result.task_id,
+                    "providerCalled": True,
                 },
                 trace_id=trace_id,
             )

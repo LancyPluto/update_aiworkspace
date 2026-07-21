@@ -11,6 +11,7 @@ import com.aiminilab.aitoolmarket.credit.mapper.GiftCardMapper;
 import com.aiminilab.aitoolmarket.credit.mapper.GiftCardPackageMapper;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.credit.service.GiftCardService;
+import com.aiminilab.aitoolmarket.credit.support.MembershipTier;
 import com.aiminilab.aitoolmarket.user.entity.User;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
 import org.springframework.stereotype.Service;
@@ -30,15 +31,18 @@ public class GiftCardServiceImpl implements GiftCardService {
     private final GiftCardMapper giftCardMapper;
     private final CreditService creditService;
     private final UserMapper userMapper;
+    private final MembershipService membershipService;
 
     public GiftCardServiceImpl(GiftCardPackageMapper packageMapper,
                                GiftCardMapper giftCardMapper,
                                CreditService creditService,
-                               UserMapper userMapper) {
+                               UserMapper userMapper,
+                               MembershipService membershipService) {
         this.packageMapper = packageMapper;
         this.giftCardMapper = giftCardMapper;
         this.creditService = creditService;
         this.userMapper = userMapper;
+        this.membershipService = membershipService;
     }
 
     @Override
@@ -75,6 +79,7 @@ public class GiftCardServiceImpl implements GiftCardService {
         if (!"UNUSED".equals(card.getStatus())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "礼品卡已使用");
         }
+        validateMemberCreditRedemption(userId, card);
 
         creditService.giftRedeemAdd(userId, card.getId(), card.getCredits(), "礼品卡兑换 " + card.getCardCode());
 
@@ -101,6 +106,7 @@ public class GiftCardServiceImpl implements GiftCardService {
         if (!"UNUSED".equals(card.getStatus())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "礼品卡已使用");
         }
+        validateMemberCreditRedemption(userId, card);
 
         creditService.giftRedeemAdd(userId, card.getId(), card.getCredits(), "礼品卡兑换 " + cardCode);
 
@@ -157,6 +163,7 @@ public class GiftCardServiceImpl implements GiftCardService {
         }
 
         createGiftCard(userId, orderId, giftCardPackageId, credits,
+                normalizeCardType(pkg.getCardType()), normalizeRequiredMemberTier(pkg.getRequiredMemberTier()),
                 "ORDER:" + orderId + ":LEGACY:0");
     }
 
@@ -177,12 +184,20 @@ public class GiftCardServiceImpl implements GiftCardService {
             }
             for (int i = 0; i < quantity; i++) {
                 createGiftCard(userId, orderId, item.getGiftCardPackageId(), item.getCredits(),
+                        normalizeCardType(item.getCardTypeSnapshot()),
+                        normalizeRequiredMemberTier(item.getRequiredMemberTierSnapshot()),
                         "ORDER:" + orderId + ":ITEM:" + item.getId() + ":" + i);
             }
         }
     }
 
-    private void createGiftCard(Long userId, Long orderId, Long giftCardPackageId, int credits, String issuanceKey) {
+    private void createGiftCard(Long userId,
+                                Long orderId,
+                                Long giftCardPackageId,
+                                int credits,
+                                String cardType,
+                                String requiredMemberTier,
+                                String issuanceKey) {
         LocalDateTime now = LocalDateTime.now();
         GiftCard card = new GiftCard();
         card.setCardCode(generateCardCode());
@@ -190,6 +205,8 @@ public class GiftCardServiceImpl implements GiftCardService {
         card.setOwnerUserId(userId);
         card.setOriginalUserId(userId);
         card.setCredits(credits);
+        card.setCardType(cardType);
+        card.setRequiredMemberTier(requiredMemberTier);
         card.setStatus("UNUSED");
         card.setRechargeOrderId(orderId);
         card.setIssuanceKey(issuanceKey);
@@ -199,6 +216,28 @@ public class GiftCardServiceImpl implements GiftCardService {
         card.setCreatedAt(now);
         card.setUpdatedAt(now);
         giftCardMapper.insertIssuanceIfAbsent(card);
+    }
+
+    private void validateMemberCreditRedemption(Long userId, GiftCard card) {
+        if (!"MEMBER_CREDIT".equalsIgnoreCase(card.getCardType())) {
+            return;
+        }
+        if (userId.equals(card.getOriginalUserId())) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "不能兑换自己购买的会员礼品卡");
+        }
+        membershipService.requireActiveTierAtLeast(userId, card.getRequiredMemberTier(), "兑换");
+    }
+
+    private String normalizeCardType(String cardType) {
+        return cardType == null || cardType.isBlank()
+                ? "CREDIT"
+                : cardType.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeRequiredMemberTier(String requiredMemberTier) {
+        return MembershipTier.fromCode(requiredMemberTier)
+                .map(MembershipTier::code)
+                .orElse(null);
     }
 
     private Map<Long, GiftCardPackage> loadPackageMap(List<GiftCard> cards) {

@@ -10,6 +10,7 @@ import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.UserStatus;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
+import com.aiminilab.aitoolmarket.task.support.ProviderCheckpointLimits;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.Filter;
@@ -71,7 +72,29 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
             return;
         }
 
-        byte[] body = StreamUtils.copyToByteArray(request.getInputStream());
+        byte[] body;
+        if (isProviderCheckpointRequest(request)) {
+            long contentLength = request.getContentLengthLong();
+            if (contentLength > ProviderCheckpointLimits.MAX_REQUEST_BODY_BYTES) {
+                try {
+                    writeError(response, HttpStatus.PAYLOAD_TOO_LARGE, ErrorCode.PARAM_ERROR, "供应商任务检查点请求过大");
+                } catch (Exception exception) {
+                    throw new ServletException(exception);
+                }
+                return;
+            }
+            body = request.getInputStream().readNBytes(ProviderCheckpointLimits.MAX_REQUEST_BODY_BYTES + 1);
+            if (body.length > ProviderCheckpointLimits.MAX_REQUEST_BODY_BYTES) {
+                try {
+                    writeError(response, HttpStatus.PAYLOAD_TOO_LARGE, ErrorCode.PARAM_ERROR, "供应商任务检查点请求过大");
+                } catch (Exception exception) {
+                    throw new ServletException(exception);
+                }
+                return;
+            }
+        } else {
+            body = StreamUtils.copyToByteArray(request.getInputStream());
+        }
         CachedBodyRequest wrappedRequest = new CachedBodyRequest(request, body);
         if (!verifyInternalSignature(wrappedRequest, body)) {
             try {
@@ -85,6 +108,11 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
 
         wrappedRequest.setAttribute(INTERNAL_SIGNATURE_VERIFIED_ATTRIBUTE, Boolean.TRUE);
         filterChain.doFilter(wrappedRequest, response);
+    }
+
+    private boolean isProviderCheckpointRequest(HttpServletRequest request) {
+        return "POST".equalsIgnoreCase(request.getMethod())
+                && request.getRequestURI().matches("/api/internal/v1/tasks/[^/]+/provider-checkpoint");
     }
 
     @Override

@@ -5,6 +5,7 @@ import com.aiminilab.aitoolmarket.auth.security.JwtTokenProvider;
 import com.aiminilab.aitoolmarket.auth.security.TokenDenylistService;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.aiminilab.aitoolmarket.workflow.dto.CreateWorkflowRunCommand;
 import com.aiminilab.aitoolmarket.workflow.dto.WorkflowRunCreated;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowRunApplicationService;
@@ -53,6 +54,7 @@ class WorkflowRunApiTest {
     private static final String HIDDEN_TOOL = "wf_api_hidden";
     private static final String DISABLED_TOOL = "wf_api_disabled";
     private static final String DIRECT_TOOL = "wf_api_direct";
+    private static final String COMIC_TOOL = "ai_comic_drama_agent";
 
     @Autowired
     private MockMvc mockMvc;
@@ -65,6 +67,9 @@ class WorkflowRunApiTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private ToolMapper toolMapper;
 
     @MockBean
     private TokenDenylistService tokenDenylistService;
@@ -108,14 +113,16 @@ class WorkflowRunApiTest {
     }
 
     @Test
-    void listsOnlyPublishedAgentSurfaceWorkflowTools() throws Exception {
+    void listsOnlineWorkflowToolsWithoutLegacySurfaceExecutionOrBillingGates() throws Exception {
         mockMvc.perform(get("/api/v1/agents/tools")
                         .header("Authorization", bearer(ownerToken)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.total").value(1))
-                .andExpect(jsonPath("$.data.items[0].toolCode").value(ELIGIBLE_TOOL))
-                .andExpect(jsonPath("$.data.items[0].minimumRequiredCredits").value(3))
-                .andExpect(jsonPath("$.data.items[0].variableCreditPricing").value(true));
+                .andExpect(jsonPath("$.data.total").value(3))
+                .andExpect(jsonPath("$.data.items[0].toolCode").value(DISABLED_TOOL))
+                .andExpect(jsonPath("$.data.items[1].toolCode").value(HIDDEN_TOOL))
+                .andExpect(jsonPath("$.data.items[2].toolCode").value(ELIGIBLE_TOOL))
+                .andExpect(jsonPath("$.data.items[2].minimumRequiredCredits").value(3))
+                .andExpect(jsonPath("$.data.items[2].variableCreditPricing").value(true));
 
         mockMvc.perform(get("/api/v1/agents/tools/{toolCode}", ELIGIBLE_TOOL)
                         .header("Authorization", bearer(ownerToken)))
@@ -126,16 +133,56 @@ class WorkflowRunApiTest {
 
         mockMvc.perform(get("/api/v1/agents/tools/{toolCode}", HIDDEN_TOOL)
                         .header("Authorization", bearer(ownerToken)))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("TOOL_NOT_FOUND"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.toolCode").value(HIDDEN_TOOL));
 
         mockMvc.perform(get("/api/v1/agents/tools/{toolCode}", DISABLED_TOOL)
                         .header("Authorization", bearer(ownerToken)))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.toolCode").value(DISABLED_TOOL));
 
         mockMvc.perform(get("/api/v1/agents/tools/{toolCode}", DIRECT_TOOL)
                         .header("Authorization", bearer(ownerToken)))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void aiComicVisibilityFollowsToolOnlineStatus() throws Exception {
+        Long categoryId = jdbcTemplate.queryForObject(
+                "SELECT category_id FROM ai_tools WHERE id = ?",
+                Long.class,
+                eligibleToolId
+        );
+        Long comicToolId = insertTool(categoryId, COMIC_TOOL, "ONLINE", "WORKFLOW", false);
+        insertPublishedWorkflow(comicToolId, false);
+        jdbcTemplate.update("UPDATE ai_tools SET billing_mode = 'FIXED' WHERE id = ?", comicToolId);
+
+        mockMvc.perform(get("/api/v1/agents/tools")
+                        .header("Authorization", bearer(ownerToken))
+                        .param("keyword", COMIC_TOOL))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.items[0].toolCode").value(COMIC_TOOL))
+                .andExpect(jsonPath("$.data.items[0].variableCreditPricing").value(false));
+
+        mockMvc.perform(get("/api/v1/agents/tools/{toolCode}", COMIC_TOOL)
+                        .header("Authorization", bearer(ownerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.toolCode").value(COMIC_TOOL));
+
+        toolMapper.updateToolStatusValue(comicToolId, "OFFLINE", ownerId);
+
+        mockMvc.perform(get("/api/v1/agents/tools")
+                        .header("Authorization", bearer(ownerToken))
+                        .param("keyword", COMIC_TOOL))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(0))
+                .andExpect(jsonPath("$.data.items").isEmpty());
+
+        mockMvc.perform(get("/api/v1/agents/tools/{toolCode}", COMIC_TOOL)
+                        .header("Authorization", bearer(ownerToken)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("TOOL_NOT_FOUND"));
     }
 
     @Test
@@ -153,10 +200,10 @@ class WorkflowRunApiTest {
                         .param("page", "2")
                         .param("pageSize", "2"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.total").value(4))
+                .andExpect(jsonPath("$.data.total").value(6))
                 .andExpect(jsonPath("$.data.items[0].toolCode").value("wf_media_alpha"))
-                .andExpect(jsonPath("$.data.items[1].toolCode").value(ELIGIBLE_TOOL))
-                .andExpect(jsonPath("$.data.hasNext").value(false));
+                .andExpect(jsonPath("$.data.items[1].toolCode").value(DISABLED_TOOL))
+                .andExpect(jsonPath("$.data.hasNext").value(true));
 
         mockMvc.perform(get("/api/v1/agents/tools")
                         .header("Authorization", bearer(ownerToken))

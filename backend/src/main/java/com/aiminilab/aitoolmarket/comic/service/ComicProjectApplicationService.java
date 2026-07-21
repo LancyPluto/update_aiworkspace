@@ -176,7 +176,7 @@ public class ComicProjectApplicationService {
 
     private String workspacePath(Long projectId, Long episodeId) {
         String path = "/agents/comic-projects/" + projectId;
-        return episodeId == null ? path : path + "?episodeId=" + episodeId;
+        return episodeId == null ? path : path + "?episode=" + episodeId;
     }
 
     private Long longOrNull(JsonNode node, String field) {

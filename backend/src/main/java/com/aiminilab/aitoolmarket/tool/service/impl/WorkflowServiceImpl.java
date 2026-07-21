@@ -17,6 +17,8 @@ import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.credit.service.PricingService;
 import com.aiminilab.aitoolmarket.credit.dto.ModelPricingSnapshot;
+import com.aiminilab.aitoolmarket.credit.dto.PricingPolicySnapshot;
+import com.aiminilab.aitoolmarket.credit.dto.PricingQuote;
 import com.aiminilab.aitoolmarket.workflow.dsl.WorkflowDsl;
 import com.aiminilab.aitoolmarket.workflow.dsl.WorkflowNodeDef;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolWorkflowMapper;
@@ -35,6 +37,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -43,6 +46,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 
 @Service
@@ -52,6 +56,10 @@ public class WorkflowServiceImpl implements WorkflowService {
     private static final String NODE_REGISTRY_VERSION = "p0";
     private static final String RISK_POLICY_JSON =
             "{\"confirmationPolicy\":\"WORKFLOW_DEFINED\",\"level\":\"MEDIUM\"}";
+    private static final Set<String> LOCAL_ZERO_COST_HANDLER_ALLOWLIST = Set.of("comic.compose");
+    private static final Set<String> LEGACY_NODE_COST_FIELDS = Set.of(
+            "maxCreditCost", "maxProviderCostCny", "providerCostMode"
+    );
 
     private final ToolWorkflowMapper workflowMapper;
     private final ToolWorkflowVersionMapper versionMapper;
@@ -298,9 +306,7 @@ public class WorkflowServiceImpl implements WorkflowService {
             if (!node.type().isWorkerStep()) {
                 continue;
             }
-            Long modelConfigId = node.parameters() != null && node.parameters().hasNonNull("modelConfigId")
-                    ? node.parameters().get("modelConfigId").asLong()
-                    : null;
+            Long modelConfigId = modelConfigId(node);
             AgentModelConfig modelConfig = modelConfigId == null
                     ? null
                     : modelConfigMapper.findActiveById(modelConfigId);
@@ -310,53 +316,111 @@ public class WorkflowServiceImpl implements WorkflowService {
                         "Workflow node references an inactive model configuration: " + node.id()
                 );
             }
-            int explicitCap = node.parameters() != null && node.parameters().hasNonNull("maxCreditCost")
-                    ? Math.max(0, node.parameters().get("maxCreditCost").asInt())
-                    : 0;
-            int maxCreditCost = explicitCap > 0 ? explicitCap : estimated;
-            if (maxCreditCost <= 0) {
+            String handlerKey = parameterText(node, "handlerKey");
+            boolean localZeroCost = handlerKey != null
+                    && LOCAL_ZERO_COST_HANDLER_ALLOWLIST.contains(handlerKey);
+            if (localZeroCost && modelConfig != null) {
                 throw new BusinessException(
                         ErrorCode.PARAM_ERROR,
-                        "Paid workflow worker step has no reservation cap: " + node.id()
+                        "Local zero-cost workflow node cannot reference a model configuration: " + node.id()
                 );
             }
-            JsonNode providerCapNode = node.parameters() == null
+            if (!localZeroCost && requiresModelPricing(node) && modelConfig == null) {
+                throw new BusinessException(
+                        ErrorCode.PARAM_ERROR,
+                        "Workflow model node has no active model configuration: " + node.id()
+                );
+            }
+
+            ObjectNode staticParams = pricingParams(node);
+            PricingPolicySnapshot pricingPolicy = pricingService.snapshot(tool, modelConfig);
+            PricingQuote estimateQuote = localZeroCost
                     ? null
-                    : node.parameters().get("maxProviderCostCny");
-            if (providerCapNode == null || !providerCapNode.isNumber()) {
+                    : pricingService.computeQuote(
+                            pricingPolicy,
+                            modelConfig,
+                            staticParams,
+                            null,
+                            modelConfig == null ? estimated : 0
+                    );
+            if (!localZeroCost && modelConfig != null
+                    && (!estimateQuote.modelDerived()
+                    || estimateQuote.chargeCredits() <= 0
+                    || estimateQuote.vendorCost().signum() <= 0)) {
                 throw new BusinessException(
                         ErrorCode.PARAM_ERROR,
-                        "Paid workflow worker step has no provider cost cap: " + node.id()
+                        "Workflow model node has no valid automatic pricing estimate: " + node.id()
                 );
             }
-            BigDecimal maxProviderCostCny = providerCapNode.decimalValue();
-            if (maxProviderCostCny.signum() <= 0
-                    || maxProviderCostCny.stripTrailingZeros().scale() > 6) {
+            if (!localZeroCost && modelConfig == null && estimateQuote.chargeCredits() <= 0) {
                 throw new BusinessException(
                         ErrorCode.PARAM_ERROR,
-                        "Paid workflow worker step has an invalid provider cost cap: " + node.id()
+                        "Workflow worker node has no model pricing or tool fallback price: " + node.id()
                 );
             }
-            maxProviderCostCny = maxProviderCostCny.setScale(6);
-            if (maxProviderCostCny.precision() - maxProviderCostCny.scale() > 12) {
-                throw new BusinessException(
-                        ErrorCode.PARAM_ERROR,
-                        "Paid workflow worker step provider cost cap is too large: " + node.id()
-                );
-            }
+
+            int maxCreditCost = localZeroCost ? 0 : estimateQuote.chargeCredits();
+            BigDecimal estimatedProviderCostCny = localZeroCost || modelConfig == null
+                    ? BigDecimal.ZERO.setScale(6)
+                    : estimateQuote.vendorCost().setScale(6, RoundingMode.CEILING);
             ObjectNode nodePolicy = objectMapper.createObjectNode();
             nodePolicy.put("maxCreditCost", maxCreditCost);
-            nodePolicy.put("maxProviderCostCny", maxProviderCostCny);
-            nodePolicy.put("fallbackChargeCredits", estimated);
-            nodePolicy.set("staticParams", node.parameters() == null
-                    ? objectMapper.createObjectNode()
-                    : node.parameters());
+            nodePolicy.put("estimatedProviderCostCny", estimatedProviderCostCny);
+            // Retained inside immutable snapshots so already-deployed readers remain compatible.
+            nodePolicy.put("maxProviderCostCny", estimatedProviderCostCny);
+            nodePolicy.put("fallbackChargeCredits", modelConfig == null && !localZeroCost ? estimated : 0);
+            nodePolicy.put("pricingSource", localZeroCost
+                    ? "LOCAL_ZERO_COST"
+                    : modelConfig == null ? "TOOL_FALLBACK" : "MODEL_PRICING");
+            nodePolicy.set("staticParams", staticParams);
             nodePolicy.set("modelPricingSnapshot", objectMapper.valueToTree(ModelPricingSnapshot.from(modelConfig)));
-            nodePolicy.set("pricingPolicy", objectMapper.valueToTree(pricingService.snapshot(tool, modelConfig)));
+            nodePolicy.set("pricingPolicy", objectMapper.valueToTree(pricingPolicy));
             nodePolicies.set(node.id(), nodePolicy);
         }
         policy.set("nodePolicies", nodePolicies);
         return writeJson(policy);
+    }
+
+    private Long modelConfigId(WorkflowNodeDef node) {
+        JsonNode value = node.parameters() == null ? null : node.parameters().get("modelConfigId");
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() <= 0) {
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "Workflow node has an invalid model configuration id: " + node.id()
+            );
+        }
+        return value.longValue();
+    }
+
+    private boolean requiresModelPricing(WorkflowNodeDef node) {
+        return switch (node.type().normalized()) {
+            case LLM_TEXT, IMAGE_MODEL, TTS_MODEL, VIDEO_MODEL -> true;
+            default -> false;
+        };
+    }
+
+    private ObjectNode pricingParams(WorkflowNodeDef node) {
+        ObjectNode params = objectMapper.createObjectNode();
+        if (node.parameters() == null || !node.parameters().isObject()) {
+            return params;
+        }
+        node.parameters().fields().forEachRemaining(entry -> {
+            if (!LEGACY_NODE_COST_FIELDS.contains(entry.getKey())) {
+                params.set(entry.getKey(), entry.getValue());
+            }
+        });
+        return params;
+    }
+
+    private String parameterText(WorkflowNodeDef node, String field) {
+        JsonNode value = node.parameters() == null ? null : node.parameters().get(field);
+        if (value == null || !value.isTextual() || value.textValue().isBlank()) {
+            return null;
+        }
+        return value.textValue().trim();
     }
 
     private String inputSchemaSnapshotJson(Long toolId) {

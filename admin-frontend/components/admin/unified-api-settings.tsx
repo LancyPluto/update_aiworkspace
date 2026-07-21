@@ -32,6 +32,7 @@ import {
   refreshModelVendorAccountBalance,
   testModelVendorAccount,
   updateModelVendorAccount,
+  updateModelVendorAccountRouting,
 } from "@/lib/api/model-vendor-account"
 import { fetchModelProviders } from "@/lib/api/model-providers"
 import { deleteModelVendor, upsertModelVendor } from "@/lib/api/model-vendors"
@@ -211,39 +212,130 @@ function accountCredentialLabel(account: Pick<ModelVendorAccount, "apiKeyMasked"
 }
 
 function isHealthyStatus(value?: string | null) {
-  return (value || "").trim().toUpperCase() === "OK"
+  return normalizeHealthStatus(value) === "OK"
 }
 
-function accountProbePassed(account?: ModelVendorAccount | null) {
-  return isHealthyStatus(account?.healthStatus)
+function normalizeHealthStatus(value?: string | null) {
+  return (value || "UNKNOWN").trim().toUpperCase()
 }
 
-function modelAccountHealth(model: UnifiedApiModelItem, vendor: UnifiedApiVendorGroup) {
-  if (!model.vendorAccountId) return "UNKNOWN"
-  const account = vendor.accounts.find((item) => item.id === model.vendorAccountId)
-  if (!account) return "UNKNOWN"
-  return account.healthStatus || "UNKNOWN"
+function isWarningStatus(value?: string | null) {
+  return normalizeHealthStatus(value) === "WARNING"
 }
 
-function canEnableAgentForModel(model: UnifiedApiModelItem, vendor: UnifiedApiVendorGroup) {
-  if (!model.enabled) return false
-  if (!model.vendorAccountId) return true
-  return isHealthyStatus(modelAccountHealth(model, vendor))
+function isErrorStatus(value?: string | null) {
+  return normalizeHealthStatus(value) === "ERROR"
 }
 
-function modelRowTone(model: UnifiedApiModelItem, vendor: UnifiedApiVendorGroup) {
-  const health = modelAccountHealth(model, vendor)
+function isCredentialValidStatus(value?: string | null) {
+  const status = normalizeHealthStatus(value)
+  return status === "OK" || status === "WARNING"
+}
+
+function canEnableAgentForModel(model: UnifiedApiModelItem) {
+  return model.enabled
+}
+
+function modelRowTone(model: UnifiedApiModelItem) {
+  const health = model.healthStatus
   const disabledTone = model.enabled ? "" : " opacity-75"
   if (isHealthyStatus(health)) return `bg-emerald-50/70 hover:bg-emerald-50${disabledTone}`
-  if ((health || "").trim().toUpperCase() === "ERROR") return `bg-rose-50/75 hover:bg-rose-50${disabledTone}`
-  return ""
+  if (isWarningStatus(health)) return `bg-amber-50/75 hover:bg-amber-50${disabledTone}`
+  if (isErrorStatus(health)) return `bg-rose-50/75 hover:bg-rose-50${disabledTone}`
+  return disabledTone.trim()
+}
+
+function modelHealthBadge(model: UnifiedApiModelItem) {
+  if (normalizeHealthStatus(model.healthStatus) === "DISABLED") {
+    return <Badge variant="outline" className="text-[10px]">模型已停用</Badge>
+  }
+  if (isHealthyStatus(model.healthStatus)) {
+    return <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700">模型正常</Badge>
+  }
+  if (isWarningStatus(model.healthStatus)) {
+    return <Badge variant="outline" className="border-amber-200 bg-amber-50 text-[10px] text-amber-800">模型告警</Badge>
+  }
+  if (isErrorStatus(model.healthStatus)) {
+    return <Badge variant="destructive" className="text-[10px]">模型异常</Badge>
+  }
+  return <Badge variant="outline" className="text-[10px]">模型未探活</Badge>
 }
 
 function accountCardTone(account: ModelVendorAccount) {
   if (!account.enabled) return ""
   if (isHealthyStatus(account.healthStatus)) return "border-emerald-200 bg-emerald-50/60"
-  if ((account.healthStatus || "").trim().toUpperCase() === "ERROR") return "border-rose-200 bg-rose-50/70"
+  if (isWarningStatus(account.healthStatus)) return "border-amber-200 bg-amber-50/70"
+  if (isErrorStatus(account.healthStatus)) return "border-rose-200 bg-rose-50/70"
   return "bg-muted/20"
+}
+
+function accountHealthBadge(account: ModelVendorAccount) {
+  if (isHealthyStatus(account.healthStatus)) {
+    return (
+      <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
+        <CheckCircle2 className="mr-1 h-3 w-3" />
+        连通正常
+      </Badge>
+    )
+  }
+  if (isWarningStatus(account.healthStatus)) {
+    return (
+      <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">
+        <AlertCircle className="mr-1 h-3 w-3" />
+        凭据有效，有告警
+      </Badge>
+    )
+  }
+  if (isErrorStatus(account.healthStatus)) {
+    return <Badge variant="destructive">连通异常</Badge>
+  }
+  return <Badge variant="outline">尚未探活</Badge>
+}
+
+function formatHealthCheckedAt(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return `探活于 ${date.toLocaleString("zh-CN", { hour12: false })}`
+}
+
+function clampRoutingWeight(value?: number | null) {
+  if (value == null) return 100
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return 100
+  return Math.min(100, Math.max(1, Math.round(parsed)))
+}
+
+function circuitStatusBadge(account: ModelVendorAccount) {
+  const state = (account.circuitState || "").trim().toUpperCase()
+  if (!state) return null
+  if (state === "OPEN") return <Badge variant="destructive">已熔断</Badge>
+  if (state === "HALF_OPEN") {
+    return <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">半开探测</Badge>
+  }
+  return <Badge variant="outline">熔断器正常</Badge>
+}
+
+function formatCircuitOpenUntil(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return `冷却至 ${date.toLocaleString("zh-CN", { hour12: false })}`
+}
+
+function routingExclusionReasonLabel(value?: string | null) {
+  const reason = (value || "").trim()
+  const labels: Record<string, string> = {
+    ACCOUNT_DISABLED: "账户已停用",
+    ACCOUNT_UNBOUND: "模型未绑定账户",
+    LOAD_BALANCING_DISABLED: "未开启负载均衡",
+    MODEL_DISABLED: "模型已停用",
+    NO_MATCHING_ACCOUNT: "没有其他账户配置同名模型",
+    PRICE_MISMATCH: "同名模型价格配置不一致",
+    ROUTE_CONFIG_MISMATCH: "同名模型执行协议或能力配置不一致",
+    CIRCUIT_OPEN: "账户处于熔断冷却中",
+  }
+  return labels[reason.toUpperCase()] || reason
 }
 
 function defaultBalanceModeForVendor(vendorCode: string) {
@@ -590,6 +682,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
   const [togglingModelId, setTogglingModelId] = useState<number | null>(null)
   const [togglingAgentModelId, setTogglingAgentModelId] = useState<number | null>(null)
   const [togglingAccountId, setTogglingAccountId] = useState<number | null>(null)
+  const [routingAccountId, setRoutingAccountId] = useState<number | null>(null)
+  const [routingWeightDrafts, setRoutingWeightDrafts] = useState<Record<number, string>>({})
   const [testingModelId, setTestingModelId] = useState<number | null>(null)
   const [testingAccountId, setTestingAccountId] = useState<number | null>(null)
   const [vendorFilter, setVendorFilter] = useState<VendorFilter>("ALL")
@@ -850,7 +944,13 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
           result.latencyMs != null && result.latencyMs >= 0 ? `（${result.latencyMs} ms）` : ""
         const modelHint =
           result.provider && result.modelName ? ` · ${result.provider} / ${result.modelName}` : ""
-        if (result.success) {
+        const testedAccount = result.account ?? account
+        if (isWarningStatus(testedAccount.healthStatus)) {
+          toast.warning(`${vendorLabel}：凭据有效，但账户有告警${latencyText}`, {
+            id: toastId,
+            description: `${result.message || testedAccount.healthMessage || "上游返回额度或频率告警"}${modelHint}`,
+          })
+        } else if (result.success || isCredentialValidStatus(testedAccount.healthStatus)) {
           toast.success(`${vendorLabel}：连通正常${latencyText}`, {
             id: toastId,
             description: `${result.message || "连接成功"}${modelHint}`,
@@ -1026,6 +1126,45 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     [patchAccountEnabled, patchVendorAccount],
   )
 
+  const saveAccountRouting = useCallback(
+    async (
+      account: ModelVendorAccount,
+      next: { loadBalanceEnabled?: boolean; loadBalanceWeight?: number },
+    ) => {
+      const loadBalanceEnabled = next.loadBalanceEnabled ?? account.loadBalanceEnabled ?? false
+      const loadBalanceWeight = clampRoutingWeight(next.loadBalanceWeight ?? account.loadBalanceWeight)
+      setRoutingAccountId(account.id)
+      setError(null)
+      try {
+        const updated = await updateModelVendorAccountRouting(account.id, {
+          loadBalanceEnabled,
+          loadBalanceWeight,
+        })
+        patchVendorAccount(updated)
+        setRoutingWeightDrafts((current) => ({
+          ...current,
+          [account.id]: String(clampRoutingWeight(updated.loadBalanceWeight)),
+        }))
+        toast.success(`${displayAccountName(updated)}：路由设置已更新`, {
+          description: updated.loadBalanceEnabled
+            ? `已加入负载均衡，权重 ${clampRoutingWeight(updated.loadBalanceWeight)}`
+            : "已退出负载均衡，模型继续使用绑定账户",
+        })
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : "更新负载均衡设置失败"
+        setRoutingWeightDrafts((current) => ({
+          ...current,
+          [account.id]: String(clampRoutingWeight(account.loadBalanceWeight)),
+        }))
+        setError(message)
+        toast.error(`${displayAccountName(account)}：路由设置更新失败`, { description: message })
+      } finally {
+        setRoutingAccountId((current) => (current === account.id ? null : current))
+      }
+    },
+    [patchVendorAccount],
+  )
+
   useEffect(() => {
     load()
   }, [load, refreshKey])
@@ -1035,10 +1174,12 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     const keyword = modelKeyword.trim().toLowerCase()
     const issueScore = (vendor: UnifiedApiVendorGroup) => {
       const lowBalance = vendor.accounts.filter(isNegativeBalance).length
-      const unhealthy = vendor.accounts.filter((a) => a.healthStatus === "ERROR").length
+      const unhealthyAccounts = vendor.accounts.filter((account) => isErrorStatus(account.healthStatus)).length
+      const warningAccounts = vendor.accounts.filter((account) => isWarningStatus(account.healthStatus)).length
+      const unhealthyModels = vendor.models.filter((model) => isErrorStatus(model.healthStatus)).length
       const disabled = vendor.accounts.filter((a) => !a.enabled).length
       const unbound = vendor.models.filter((m) => !m.vendorAccountId).length
-      return lowBalance * 4 + unhealthy * 5 + disabled * 2 + unbound
+      return lowBalance * 4 + unhealthyAccounts * 5 + unhealthyModels * 5 + warningAccounts * 2 + disabled * 2 + unbound
     }
     return overview.vendors
       .map((vendor) => {
@@ -1065,7 +1206,10 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         if (vendorFilter === "LOW_BALANCE") {
           return vendor.accounts.some(isNegativeBalance)
         }
-        if (vendorFilter === "UNHEALTHY") return vendor.accounts.some((a) => a.healthStatus === "ERROR")
+        if (vendorFilter === "UNHEALTHY") {
+          return vendor.accounts.some((account) => isErrorStatus(account.healthStatus))
+            || vendor.models.some((model) => isErrorStatus(model.healthStatus))
+        }
         if (vendorFilter === "DISABLED") return vendor.accounts.some((a) => !a.enabled)
         if (vendorFilter === "ISSUES") return issueScore(vendor) > 0
         return true
@@ -1077,14 +1221,36 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       })
   }, [modelKeyword, overview, vendorFilter, vendorSort])
 
+  const healthSummary = useMemo(() => {
+    if (!overview) return { unhealthyAccountCount: 0, unhealthyModelCount: 0, warningAccountCount: 0 }
+    return overview.vendors.reduce(
+      (summary, vendor) => ({
+        unhealthyAccountCount:
+          summary.unhealthyAccountCount
+          + vendor.accounts.filter((account) => isErrorStatus(account.healthStatus)).length,
+        unhealthyModelCount:
+          summary.unhealthyModelCount
+          + vendor.models.filter((model) => isErrorStatus(model.healthStatus)).length,
+        warningAccountCount:
+          summary.warningAccountCount
+          + vendor.accounts.filter((account) => isWarningStatus(account.healthStatus)).length,
+      }),
+      { unhealthyAccountCount: 0, unhealthyModelCount: 0, warningAccountCount: 0 },
+    )
+  }, [overview])
+
   const gatewayHealth = useMemo(() => {
     if (!overview) return { enabledRate: 0, issueCount: 0 }
     const total = Math.max(1, overview.summary.modelCount)
     return {
       enabledRate: Math.round((overview.summary.enabledModelCount / total) * 100),
-      issueCount: overview.summary.lowBalanceCount + overview.summary.unhealthyAccountCount,
+      issueCount:
+        overview.summary.lowBalanceCount
+        + healthSummary.unhealthyAccountCount
+        + healthSummary.unhealthyModelCount
+        + healthSummary.warningAccountCount,
     }
-  }, [overview])
+  }, [healthSummary, overview])
 
   function openCreateAccount(vendorCode: string, label: string) {
     const meta = selectDefaultModelProvider(providers, vendorCode)
@@ -1168,7 +1334,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     const meta = selectDefaultModelProvider(providers, vendor.vendorCode, vendor.models[0]?.provider)
     const defaultProvider = meta?.code || vendor.models[0]?.provider || "openai_compatible"
     const capabilities = capabilitiesForModelProvider(undefined, meta)
-    const accountReady = accountProbePassed(account)
     setModelVendorCode(vendor.vendorCode)
     setModelForm({
       ...emptyModelForm(),
@@ -1181,8 +1346,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       executionTask: routeTasksForModel(defaultProvider, capabilities)[0]?.value || "",
       executionOptionsJson: "",
       billingUnit: (meta?.billingDefault as AgentModelConfigPayload["billingUnit"]) || "TOKEN_PER_M",
-      enabled: accountReady,
-      agentEnabled: accountReady,
+      enabled: true,
+      agentEnabled: true,
     })
     setModelDialogOpen(true)
   }
@@ -1372,12 +1537,86 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     )
   }
 
+  function renderAccountRoutingSettings(account: ModelVendorAccount) {
+    const currentWeight = clampRoutingWeight(account.loadBalanceWeight)
+    const weightDraft = routingWeightDrafts[account.id] ?? String(currentWeight)
+    const routingSaving = routingAccountId === account.id
+
+    const commitWeight = () => {
+      const nextWeight = weightDraft.trim() ? clampRoutingWeight(Number(weightDraft)) : currentWeight
+      setRoutingWeightDrafts((current) => ({ ...current, [account.id]: String(nextWeight) }))
+      if (nextWeight !== currentWeight) {
+        void saveAccountRouting(account, { loadBalanceWeight: nextWeight })
+      }
+    }
+
+    return (
+      <div className="mt-3 border-t pt-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="text-xs font-semibold">负载均衡</p>
+              {routingSaving ? <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" /> : null}
+            </div>
+            <p className="text-[11px] text-muted-foreground">同厂商、同模型且配置一致时参与调度</p>
+          </div>
+          <EmbeddedOnOffSwitch
+            checked={account.loadBalanceEnabled === true}
+            disabled={routingSaving}
+            label={`负载均衡 ${displayAccountName(account)}`}
+            onCheckedChange={(loadBalanceEnabled) => {
+              void saveAccountRouting(account, { loadBalanceEnabled })
+            }}
+          />
+        </div>
+        <div className="mt-2 flex flex-wrap items-end justify-between gap-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+            <Badge variant="outline">在途 {Math.max(0, account.inFlightCount ?? 0)}</Badge>
+            {circuitStatusBadge(account)}
+            {formatCircuitOpenUntil(account.circuitOpenUntil) ? (
+              <span className="text-[11px] text-amber-800">{formatCircuitOpenUntil(account.circuitOpenUntil)}</span>
+            ) : null}
+          </div>
+          <div className="w-20 space-y-1">
+            <Label htmlFor={`routing-weight-${account.id}`} className="text-[11px] text-muted-foreground">权重</Label>
+            <Input
+              id={`routing-weight-${account.id}`}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={100}
+              step={1}
+              value={weightDraft}
+              disabled={routingSaving}
+              className="h-8 tabular-nums"
+              aria-label={`${displayAccountName(account)} 负载均衡权重`}
+              onChange={(event) => {
+                setRoutingWeightDrafts((current) => ({ ...current, [account.id]: event.target.value }))
+              }}
+              onBlur={commitWeight}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") event.currentTarget.blur()
+              }}
+            />
+          </div>
+        </div>
+        {account.routingExclusionReason ? (
+          <p className="mt-2 text-[11px] text-amber-800">
+            未进入候选池：{routingExclusionReasonLabel(account.routingExclusionReason)}
+          </p>
+        ) : null}
+      </div>
+    )
+  }
+
   function renderVendorSection(vendor: UnifiedApiVendorGroup) {
     const primaryAccount = pickPrimaryAccount(vendor.accounts)
     const isOpen = openVendors[vendor.vendorCode] ?? false
     const accountIdForNewModel = primaryAccount?.id
     const lowBalanceCount = vendor.accounts.filter(isNegativeBalance).length
-    const unhealthyCount = vendor.accounts.filter((account) => account.healthStatus === "ERROR").length
+    const unhealthyAccountCount = vendor.accounts.filter((account) => isErrorStatus(account.healthStatus)).length
+    const warningAccountCount = vendor.accounts.filter((account) => isWarningStatus(account.healthStatus)).length
+    const unhealthyModelCount = vendor.models.filter((model) => isErrorStatus(model.healthStatus)).length
 
     return (
       <Collapsible
@@ -1394,7 +1633,13 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               <div className="flex flex-wrap items-center gap-2">
                 <p className="font-semibold">{vendor.label}</p>
                 {lowBalanceCount > 0 ? <Badge variant="destructive" className="text-xs">低余额 {lowBalanceCount}</Badge> : null}
-                {unhealthyCount > 0 ? <Badge variant="destructive" className="text-xs">异常 {unhealthyCount}</Badge> : null}
+                {unhealthyAccountCount > 0 ? <Badge variant="destructive" className="text-xs">账户异常 {unhealthyAccountCount}</Badge> : null}
+                {unhealthyModelCount > 0 ? <Badge variant="destructive" className="text-xs">模型异常 {unhealthyModelCount}</Badge> : null}
+                {warningAccountCount > 0 ? (
+                  <Badge variant="outline" className="border-amber-200 bg-amber-50 text-xs text-amber-800">
+                    账户告警 {warningAccountCount}
+                  </Badge>
+                ) : null}
               </div>
               <p className="text-xs text-muted-foreground">{vendor.accounts.length} 个账户 · {vendor.models.length} 个模型</p>
             </div>
@@ -1404,16 +1649,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               <div className="flex flex-col items-end gap-0.5 sm:flex-row sm:items-center sm:gap-2">
                 <span className="text-sm font-semibold tabular-nums">{formatBalance(primaryAccount)}</span>
                 {balanceStatusBadge(primaryAccount)}
-                {primaryAccount.healthStatus === "OK" ? (
-                  <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-xs text-emerald-700">
-                    <CheckCircle2 className="mr-1 h-3 w-3" />
-                    连通正常
-                  </Badge>
-                ) : primaryAccount.healthStatus === "ERROR" ? (
-                  <Badge variant="destructive" className="text-xs">
-                    连通异常
-                  </Badge>
-                ) : null}
+                {accountHealthBadge(primaryAccount)}
                 {formatBalanceUpdatedAt(primaryAccount.balanceUpdatedAt) ? (
                   <span className="text-xs text-muted-foreground">{formatBalanceUpdatedAt(primaryAccount.balanceUpdatedAt)}</span>
                 ) : null}
@@ -1480,13 +1716,29 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     {balanceStatusBadge(account)}
+                    {accountHealthBadge(account)}
                     <Badge variant={account.enabled ? "outline" : "destructive"}>{account.enabled ? "已启用" : "已停用"}</Badge>
                     <span className="text-xs text-muted-foreground">{account.modelCount} 个模型</span>
                   </div>
                   <p className="mt-2 text-xs font-medium tabular-nums">{formatBalance(account)}</p>
+                  {formatHealthCheckedAt(account.healthCheckedAt) ? (
+                    <p className="mt-1 text-[11px] text-muted-foreground">{formatHealthCheckedAt(account.healthCheckedAt)}</p>
+                  ) : null}
+                  {account.healthMessage ? (
+                    <p className={`mt-1 line-clamp-2 text-xs ${
+                      isErrorStatus(account.healthStatus)
+                        ? "text-rose-700"
+                        : isWarningStatus(account.healthStatus)
+                          ? "text-amber-800"
+                          : "text-muted-foreground"
+                    }`} title={account.healthMessage}>
+                      {account.healthMessage}
+                    </p>
+                  ) : null}
                   <p className={`mt-1 text-xs ${hasAccountCredential(account) ? "text-muted-foreground" : "text-amber-700"}`}>
                     {accountCredentialLabel(account)}
                   </p>
+                  {renderAccountRoutingSettings(account)}
                 </div>
               ))}
             </div>
@@ -1526,7 +1778,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 </TableHeader>
                 <TableBody>
                   {vendor.models.map((model) => (
-                    <TableRow key={model.id} className={modelRowTone(model, vendor)}>
+                    <TableRow key={model.id} className={modelRowTone(model)}>
                       <TableCell className="align-middle">
                         <div className="mx-auto flex max-w-[240px] min-w-0 items-center justify-center gap-2 text-left">
                           <VendorIcon iconAsset={vendor.iconAsset} label={vendor.label} />
@@ -1536,6 +1788,19 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                               {model.isDefault ? <Star className="ml-1 inline h-3 w-3 text-amber-500" /> : null}
                             </div>
                             <p className="truncate font-mono text-xs text-muted-foreground">{model.modelName}</p>
+                            <div className="mt-1">{modelHealthBadge(model)}</div>
+                            {model.routingExclusionReason && [
+                              "NO_MATCHING_ACCOUNT",
+                              "PRICE_MISMATCH",
+                              "ROUTE_CONFIG_MISMATCH",
+                            ].includes(model.routingExclusionReason.toUpperCase()) ? (
+                              <p
+                                className="mt-1 line-clamp-2 text-[11px] text-amber-800"
+                                title={routingExclusionReasonLabel(model.routingExclusionReason)}
+                              >
+                                未入负载池：{routingExclusionReasonLabel(model.routingExclusionReason)}
+                              </p>
+                            ) : null}
                           </div>
                         </div>
                         {!model.vendorAccountId ? (
@@ -1620,7 +1885,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                           checked={model.agentEnabled !== false}
                           disabled={
                             togglingAgentModelId === model.id
-                            || (model.agentEnabled === false && !canEnableAgentForModel(model, vendor))
+                            || (model.agentEnabled === false && !canEnableAgentForModel(model))
                           }
                           label={`用户端可选 ${model.displayName || model.modelName}`}
                           onCheckedChange={(agentEnabled) => toggleModelAgentEnabled(model, agentEnabled)}
@@ -1728,9 +1993,14 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         <Card className={gatewayHealth.issueCount > 0 ? "border-destructive/25 bg-destructive/5" : ""}>
           <CardHeader className="space-y-0 pb-2">
             <CardDescription className="flex items-center gap-2"><Activity className="h-4 w-4" />运行健康</CardDescription>
-            <CardTitle className="text-2xl">{overview?.summary.unhealthyAccountCount ?? "--"}</CardTitle>
+            <CardTitle className="text-2xl">
+              {overview ? healthSummary.unhealthyAccountCount + healthSummary.unhealthyModelCount : "--"}
+            </CardTitle>
           </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">异常账户会优先展示，便于快速处理</CardContent>
+          <CardContent className="text-xs text-muted-foreground">
+            账户异常 {healthSummary.unhealthyAccountCount} · 模型异常 {healthSummary.unhealthyModelCount}
+            {healthSummary.warningAccountCount > 0 ? ` · 账户告警 ${healthSummary.warningAccountCount}` : ""}
+          </CardContent>
         </Card>
       </div>
 
@@ -1748,7 +2018,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
             <CardTitle>模型 API 中心</CardTitle>
             <CardDescription>
               {overview
-                ? `${overview.summary.vendorCount} 个厂商 · ${overview.summary.modelCount} 个模型 · ${overview.summary.lowBalanceCount} 个低余额 · ${overview.summary.unhealthyAccountCount} 个账户异常`
+                ? `${overview.summary.vendorCount} 个厂商 · ${overview.summary.modelCount} 个模型 · ${overview.summary.lowBalanceCount} 个低余额 · ${healthSummary.unhealthyAccountCount} 个账户异常 · ${healthSummary.unhealthyModelCount} 个模型异常`
                 : "加载概览中…"}
             </CardDescription>
           </div>
@@ -2100,12 +2370,9 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 value={modelForm.vendorAccountId ? String(modelForm.vendorAccountId) : undefined}
                 onValueChange={(value) => {
                   const accountId = Number(value)
-                  const account = modelAccountOptions.find((item) => item.id === accountId)
-                  const accountReady = accountProbePassed(account)
                   setModelForm((form) => ({
                     ...form,
                     vendorAccountId: Number.isFinite(accountId) ? accountId : undefined,
-                    ...(form.id ? {} : { enabled: accountReady, agentEnabled: accountReady }),
                   }))
                 }}
               >
@@ -2130,9 +2397,13 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                         ? `${account.vendorLabel || account.vendorCode} · ${accountCredentialLabel(account)} · ${account.healthStatus || "UNKNOWN"}`
                         : `账号 #${modelForm.vendorAccountId} 详情未加载，请重新选择一个可用账户`}
                     </p>
-                    {!modelForm.id && account && !accountProbePassed(account) ? (
+                    {account && isErrorStatus(account.healthStatus) ? (
                       <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        该账户尚未探活通过，新模型将先以停用状态保存。请先点账户闪电测试，成功后再启用模型。
+                        该账户的账户级探活异常，但不会覆盖模型自身状态。保存后请使用模型行的闪电按钮单独测试该模型。
+                      </p>
+                    ) : account && isWarningStatus(account.healthStatus) ? (
+                      <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        该账户凭据有效，但当前存在额度或频率告警；模型启用状态仍由模型自身探活决定。
                       </p>
                     ) : null}
                   </div>

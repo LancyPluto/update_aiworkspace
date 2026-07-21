@@ -521,8 +521,10 @@ class WorkflowFailureInjectionTest {
         String billingPolicy = """
                 {"mode":"WORKFLOW_STEP","nodePolicies":{"worker":{
                   "maxCreditCost":%d,
-                  "maxProviderCostCny":0.10,
+                  "estimatedProviderCostCny":0,
+                  "maxProviderCostCny":0,
                   "fallbackChargeCredits":%d,
+                  "pricingSource":"TOOL_FALLBACK",
                   "staticParams":{},
                   "modelPricingSnapshot":null,
                   "pricingPolicy":{"markupRatio":1.0,"minCredits":0,

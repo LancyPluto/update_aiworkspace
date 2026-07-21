@@ -29,6 +29,8 @@ import com.aiminilab.aitoolmarket.workflow.metrics.WorkflowMetrics;
 import com.aiminilab.aitoolmarket.workflow.model.WorkflowChargeStatus;
 import com.aiminilab.aitoolmarket.workflow.model.WorkflowReservationResult;
 import org.springframework.dao.DuplicateKeyException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -36,10 +38,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
 import java.math.BigDecimal;
 
 @Service
 public class WorkflowBillingService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(WorkflowBillingService.class);
+    private static final Set<String> LOCAL_ZERO_COST_HANDLER_ALLOWLIST = Set.of("comic.compose");
 
     private final WorkflowStepChargeMapper chargeMapper;
     private final WorkflowRunMapper runMapper;
@@ -169,32 +177,74 @@ public class WorkflowBillingService {
     }
 
     @Transactional
-    public void capture(Long attemptId, Long childTaskId, WorkerSuccessRequest request) {
+    public SettlementResult capture(Long attemptId, Long childTaskId, WorkerSuccessRequest request) {
         WorkflowStepCharge charge = chargeMapper.selectByAttemptIdForUpdate(attemptId);
         if (charge == null) {
-            return;
+            return SettlementResult.SETTLED;
         }
+        request = canonicalSettlementRequest(charge, request);
         if (WorkflowChargeStatus.CAPTURED.name().equals(charge.getStatus())) {
             attachActualProviderAccounting(charge, childTaskId, request);
-            return;
+            return SettlementResult.SETTLED;
         }
-        if (!WorkflowChargeStatus.RESERVED.name().equals(charge.getStatus())) {
+        boolean reserved = WorkflowChargeStatus.RESERVED.name().equals(charge.getStatus());
+        boolean awaitingFunds = WorkflowChargeStatus.AWAITING_FUNDS.name().equals(charge.getStatus());
+        if (!reserved && !awaitingFunds) {
             throw new IllegalStateException("Workflow charge is not reserved for capture");
+        }
+        Settlement settlement = settleFromSnapshot(charge, request);
+        if (Boolean.FALSE.equals(request.providerCalled())) {
+            releaseSuccessfulNoProviderCall(charge);
+            return SettlementResult.SETTLED;
         }
         taskMapper.findById(childTaskId)
                 .orElseThrow(() -> new IllegalStateException("Workflow child task does not exist"));
-        Settlement settlement = settleFromSnapshot(charge, request);
         AgentModelConfig modelConfig = settlement.modelConfig();
         ProviderAccounting providerAccounting = providerAccounting(request);
-        int actualCredits = Math.min(settlement.chargeCredits(), charge.getReservedCredits());
+        int intendedCredits = settlement.chargeCredits();
+        int reservedCredits = charge.getReservedCredits();
+        int capturedCredits = Math.min(intendedCredits, reservedCredits);
+        int shortfall = Math.max(0, intendedCredits - capturedCredits);
+        if (shortfall > 0 && !creditService.tryFreeze(
+                charge.getUserId(),
+                CreditSourceType.WORKFLOW_STEP,
+                charge.getStepId(),
+                shortfall,
+                charge.getIdempotencyKey() + ":shortfall-reserve"
+        )) {
+            String payloadJson = settlementPayloadJson(request);
+            if (reserved) {
+                if (chargeMapper.markAwaitingFunds(charge.getId(), payloadJson) != 1) {
+                    throw new IllegalStateException("Workflow settlement could not enter awaiting-funds state");
+                }
+            } else {
+                validateSettlementPayload(charge, request);
+            }
+            LOGGER.warn(
+                    "workflow step settlement deferred for insufficient credits runId={} stepId={} intendedCredits={} reservedCredits={} shortfall={}",
+                    charge.getRunId(), charge.getStepId(), intendedCredits, reservedCredits, shortfall
+            );
+            return SettlementResult.AWAITING_FUNDS;
+        }
         creditService.captureReserved(
                 charge.getUserId(),
                 CreditSourceType.WORKFLOW_STEP,
                 charge.getStepId(),
-                charge.getReservedCredits(),
-                actualCredits,
+                reservedCredits,
+                capturedCredits,
                 charge.getIdempotencyKey() + ":capture"
         );
+        if (shortfall > 0) {
+            creditService.captureReserved(
+                    charge.getUserId(),
+                    CreditSourceType.WORKFLOW_STEP,
+                    charge.getStepId(),
+                    shortfall,
+                    shortfall,
+                    charge.getIdempotencyKey() + ":shortfall"
+            );
+        }
+        int chargedCredits = intendedCredits;
         Long usageId = usageService.recordUsageOnce(
                 charge.getIdempotencyKey() + ":usage",
                 "WORKFLOW_STEP",
@@ -204,7 +254,7 @@ public class WorkflowBillingService {
                 request.promptTokens(),
                 request.completionTokens(),
                 request.billableUnits(),
-                actualCredits,
+                chargedCredits,
                 providerAccounting.amount(),
                 providerAccounting.currency(),
                 settlement.markupRatio(),
@@ -216,12 +266,32 @@ public class WorkflowBillingService {
                 providerAccounting.charged()
         );
         if (chargeMapper.markCaptured(
-                charge.getId(), actualCredits, providerAccounting.amount(),
+                charge.getId(), chargedCredits, providerAccounting.amount(),
                 providerAccounting.currency(), usageId
         ) != 1) {
             throw new IllegalStateException("Workflow charge capture compare-and-set failed");
         }
         metrics.recordBillingState(WorkflowMetrics.BillingState.CAPTURED);
+        return SettlementResult.SETTLED;
+    }
+
+    @Transactional
+    public void validateDeferredSettlement(Long attemptId, WorkerSuccessRequest request) {
+        WorkflowStepCharge charge = chargeMapper.selectByAttemptIdForUpdate(attemptId);
+        if (charge == null || !WorkflowChargeStatus.AWAITING_FUNDS.name().equals(charge.getStatus())) {
+            throw new IllegalStateException("Workflow attempt has no deferred settlement");
+        }
+        validateSettlementPayload(charge, request);
+    }
+
+    @Transactional
+    public WorkerSuccessRequest deferredSettlementRequest(Long attemptId, String outputJson) {
+        WorkflowStepCharge charge = chargeMapper.selectByAttemptIdForUpdate(attemptId);
+        if (charge == null || !WorkflowChargeStatus.AWAITING_FUNDS.name().equals(charge.getStatus())) {
+            throw new IllegalStateException("Workflow attempt has no deferred settlement");
+        }
+        SettlementPayload payload = readSettlementPayload(charge);
+        return payload.toWorkerSuccessRequest(outputJson);
     }
 
     @Transactional
@@ -243,7 +313,7 @@ public class WorkflowBillingService {
                          Long childTaskId,
                          WorkerFailedRequest request,
                          boolean lateCallback) {
-        WorkflowStepCharge charge = chargeMapper.selectByAttemptId(attemptId);
+        WorkflowStepCharge charge = chargeMapper.selectByAttemptIdForUpdate(attemptId);
         if (charge == null || WorkflowChargeStatus.CAPTURED.name().equals(charge.getStatus())) {
             return;
         }
@@ -319,16 +389,44 @@ public class WorkflowBillingService {
     @Transactional
     public void releaseLateSuccess(Long attemptId, Long childTaskId, WorkerSuccessRequest request) {
         WorkflowStepCharge charge = chargeMapper.selectByAttemptIdForUpdate(attemptId);
+        releaseSuccessfulAttempt(charge, childTaskId, request);
+    }
+
+    @Transactional
+    public void releaseDeferredSuccess(Long attemptId, Long childTaskId) {
+        WorkflowStepCharge charge = chargeMapper.selectByAttemptIdForUpdate(attemptId);
+        if (charge == null || !WorkflowChargeStatus.AWAITING_FUNDS.name().equals(charge.getStatus())) {
+            return;
+        }
+        releaseSuccessfulAttempt(
+                charge,
+                childTaskId,
+                readSettlementPayload(charge).toWorkerSuccessRequest(null)
+        );
+    }
+
+    private void releaseSuccessfulAttempt(WorkflowStepCharge charge,
+                                          Long childTaskId,
+                                          WorkerSuccessRequest request) {
         if (charge == null) {
             return;
         }
+        request = canonicalSettlementRequest(charge, request);
         if (WorkflowChargeStatus.CAPTURED.name().equals(charge.getStatus())) {
             attachActualProviderAccounting(charge, childTaskId, request);
             return;
         }
-        boolean reserved = WorkflowChargeStatus.RESERVED.name().equals(charge.getStatus());
+        boolean reserved = WorkflowChargeStatus.RESERVED.name().equals(charge.getStatus())
+                || WorkflowChargeStatus.AWAITING_FUNDS.name().equals(charge.getStatus());
         boolean released = WorkflowChargeStatus.RELEASED.name().equals(charge.getStatus());
         if (!reserved && !released) {
+            return;
+        }
+        if (Boolean.FALSE.equals(request.providerCalled())) {
+            if (released) {
+                return;
+            }
+            releaseSuccessfulNoProviderCall(charge);
             return;
         }
         if (released && charge.getBillingUsageId() != null) {
@@ -343,8 +441,10 @@ public class WorkflowBillingService {
                     charge.getIdempotencyKey() + ":release"
             );
         }
-        taskMapper.findById(childTaskId)
-                .orElseThrow(() -> new IllegalStateException("Workflow child task does not exist"));
+        if (childTaskId != null) {
+            taskMapper.findById(childTaskId)
+                    .orElseThrow(() -> new IllegalStateException("Workflow child task does not exist"));
+        }
         Settlement settlement = settleFromSnapshot(charge, request);
         ProviderAccounting providerAccounting = providerAccounting(request);
         Long usageId = usageService.recordUsageOnce(
@@ -386,6 +486,7 @@ public class WorkflowBillingService {
     private void attachActualProviderAccounting(WorkflowStepCharge charge,
                                                 Long childTaskId,
                                                 WorkerSuccessRequest request) {
+        validateProviderCallDeclaration(request);
         if (request.providerCostAmount() == null) {
             return;
         }
@@ -422,8 +523,17 @@ public class WorkflowBillingService {
     }
 
     private void pauseForFunds(WorkflowRun run, WorkflowRunStep step) {
+        pauseForFunds(run, step, "Insufficient credits for workflow step");
+    }
+
+    @Transactional
+    public void pauseForSettlementFunds(WorkflowRun run, WorkflowRunStep step) {
+        pauseForFunds(run, step, "Provider succeeded; recharge to settle actual workflow usage");
+    }
+
+    private void pauseForFunds(WorkflowRun run, WorkflowRunStep step, String errorMessage) {
         if (runMapper.markAwaitingFunds(
-                run.getId(), revision(run), step.getId(), "Insufficient credits for workflow step"
+                run.getId(), revision(run), step.getId(), errorMessage
         ) != 1) {
             throw new IllegalStateException("Workflow run could not pause for insufficient funds");
         }
@@ -462,6 +572,11 @@ public class WorkflowBillingService {
         );
     }
 
+    @Transactional
+    public void resumeAfterSettlement(WorkflowRun run, WorkflowRunStep step) {
+        resumeAfterReservation(run, step);
+    }
+
     private void validateReservation(WorkflowStepCharge charge,
                                      WorkflowRun run,
                                      WorkflowRunStep step,
@@ -488,7 +603,7 @@ public class WorkflowBillingService {
     }
 
     private Settlement settleFromSnapshot(WorkflowStepCharge charge,
-                                          WorkerSuccessRequest request) {
+                                           WorkerSuccessRequest request) {
         WorkflowRun run = runMapper.selectById(charge.getRunId());
         if (run == null || run.getWorkflowVersionId() == null) {
             throw new IllegalStateException("Workflow run has no fixed billing version");
@@ -512,7 +627,33 @@ public class WorkflowBillingService {
         }
         PricingPolicySnapshot pricingPolicy = readPricingPolicy(nodePolicy.path("pricingPolicy"));
         AgentModelConfig modelConfig = readModelPricing(nodePolicy.get("modelPricingSnapshot"));
-        int fallback = Math.max(0, nodePolicy.path("fallbackChargeCredits").asInt(0));
+        String pricingSource = nodePolicy.path("pricingSource").asText("").trim().toUpperCase(Locale.ROOT);
+        int fallback = requiredNonNegativeInteger(nodePolicy, "fallbackChargeCredits", step.getNodeId());
+        if ("MODEL_PRICING".equals(pricingSource)) {
+            validateModelPricingSnapshot(modelConfig, step.getNodeId());
+            if (fallback != 0) {
+                throw new IllegalStateException("MODEL_PRICING workflow node cannot have fallback credits: " + step.getNodeId());
+            }
+            if (request.providerCalled() == null) {
+                throw new IllegalStateException(
+                        "MODEL_PRICING workflow settlement must declare providerCalled: " + step.getNodeId()
+                );
+            }
+            if (Boolean.FALSE.equals(request.providerCalled())) {
+                return new Settlement(BigDecimal.ZERO, 0, pricingPolicy.markupRatio(), modelConfig);
+            }
+            requireReportedUsage(modelConfig, request, step.getNodeId());
+        } else if ("TOOL_FALLBACK".equals(pricingSource)) {
+            if (modelConfig != null || fallback <= 0) {
+                throw new IllegalStateException(
+                        "TOOL_FALLBACK workflow node must have no model and a positive fallback: " + step.getNodeId()
+                );
+            }
+        } else if ("LOCAL_ZERO_COST".equals(pricingSource)) {
+            validateLocalZeroCostPolicy(nodePolicy, modelConfig, fallback, step.getNodeId());
+        } else {
+            throw new IllegalStateException("Workflow node has no valid pricingSource: " + step.getNodeId());
+        }
         PricingQuote quote = pricingService.computeQuote(
                 pricingPolicy,
                 modelConfig,
@@ -520,7 +661,226 @@ public class WorkflowBillingService {
                 new PricingUsage(request.promptTokens(), request.completionTokens(), request.billableUnits()),
                 fallback
         );
+        if ("MODEL_PRICING".equals(pricingSource)
+                && (!quote.modelDerived()
+                || quote.vendorCost() == null
+                || quote.vendorCost().signum() <= 0
+                || quote.chargeCredits() <= 0)) {
+            throw new IllegalStateException(
+                    "Workflow model settlement has no valid billable usage: " + step.getNodeId()
+            );
+        }
+        if ("TOOL_FALLBACK".equals(pricingSource)
+                && (quote.modelDerived() || quote.chargeCredits() <= 0)) {
+            throw new IllegalStateException("Workflow fallback settlement is not valid: " + step.getNodeId());
+        }
+        if ("LOCAL_ZERO_COST".equals(pricingSource)
+                && (quote.modelDerived() || quote.chargeCredits() != 0 || quote.vendorCost().signum() != 0)) {
+            throw new IllegalStateException("Workflow local settlement must remain zero-cost: " + step.getNodeId());
+        }
         return new Settlement(quote.vendorCost(), quote.chargeCredits(), quote.markupRatio(), modelConfig);
+    }
+
+    private int requiredNonNegativeInteger(JsonNode nodePolicy, String field, String nodeId) {
+        JsonNode value = nodePolicy.get(field);
+        if (value == null || !value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < 0) {
+            throw new IllegalStateException("Workflow pricing snapshot has invalid " + field + ": " + nodeId);
+        }
+        return value.intValue();
+    }
+
+    private void validateModelPricingSnapshot(AgentModelConfig modelConfig, String nodeId) {
+        if (modelConfig == null
+                || modelConfig.getId() == null
+                || modelConfig.getId() <= 0
+                || modelConfig.getProvider() == null
+                || modelConfig.getProvider().isBlank()
+                || modelConfig.getModelName() == null
+                || modelConfig.getModelName().isBlank()) {
+            throw new IllegalStateException("MODEL_PRICING workflow node has no valid model snapshot: " + nodeId);
+        }
+        String unit = modelConfig.getBillingUnit() == null
+                ? ""
+                : modelConfig.getBillingUnit().trim().toUpperCase(Locale.ROOT);
+        boolean priced = switch (unit) {
+            case "PER_CALL", "PER_SECOND" -> positive(modelConfig.getUnitPrice());
+            case "TOKEN_PER_M", "IMAGE_TOKEN" -> positive(modelConfig.getInputTokenPricePer1m())
+                    || positive(modelConfig.getOutputTokenPricePer1m())
+                    || positive(modelConfig.getInputTokenPricePer1k())
+                    || positive(modelConfig.getOutputTokenPricePer1k());
+            default -> false;
+        };
+        if (!priced) {
+            throw new IllegalStateException("MODEL_PRICING workflow node has no usable model price: " + nodeId);
+        }
+    }
+
+    private void validateLocalZeroCostPolicy(JsonNode nodePolicy,
+                                             AgentModelConfig modelConfig,
+                                             int fallback,
+                                             String nodeId) {
+        String handlerKey = nodePolicy.path("staticParams").path("handlerKey").asText("").trim();
+        BigDecimal estimatedCost = decimalField(nodePolicy, "estimatedProviderCostCny", nodeId);
+        BigDecimal legacyEstimatedCost = decimalField(nodePolicy, "maxProviderCostCny", nodeId);
+        int maxCreditCost = requiredNonNegativeInteger(nodePolicy, "maxCreditCost", nodeId);
+        if (modelConfig != null
+                || fallback != 0
+                || maxCreditCost != 0
+                || estimatedCost.signum() != 0
+                || legacyEstimatedCost.signum() != 0
+                || !LOCAL_ZERO_COST_HANDLER_ALLOWLIST.contains(handlerKey)) {
+            throw new IllegalStateException("LOCAL_ZERO_COST workflow node violates its pricing invariant: " + nodeId);
+        }
+    }
+
+    private BigDecimal decimalField(JsonNode nodePolicy, String field, String nodeId) {
+        JsonNode value = nodePolicy.get(field);
+        if (value == null || !value.isNumber()) {
+            throw new IllegalStateException("Workflow pricing snapshot has invalid " + field + ": " + nodeId);
+        }
+        return value.decimalValue();
+    }
+
+    private boolean positive(BigDecimal value) {
+        return value != null && value.signum() > 0;
+    }
+
+    private void requireReportedUsage(AgentModelConfig modelConfig,
+                                      WorkerSuccessRequest request,
+                                      String nodeId) {
+        if (modelConfig == null || !Boolean.TRUE.equals(request.providerCalled())) {
+            return;
+        }
+        String unit = modelConfig.getBillingUnit() == null
+                ? ""
+                : modelConfig.getBillingUnit().trim().toUpperCase(java.util.Locale.ROOT);
+        boolean valid = switch (unit) {
+            case "TOKEN_PER_M", "IMAGE_TOKEN" ->
+                    (request.promptTokens() != null || request.completionTokens() != null)
+                            && (Math.max(0, request.promptTokens() == null ? 0 : request.promptTokens())
+                            + Math.max(0, request.completionTokens() == null ? 0 : request.completionTokens()) > 0);
+            case "PER_CALL", "PER_SECOND" ->
+                    request.billableUnits() != null && request.billableUnits() > 0;
+            default -> false;
+        };
+        if (!valid) {
+            throw new IllegalStateException(
+                    "Workflow model settlement is missing actual usage for " + unit + ": " + nodeId
+            );
+        }
+    }
+
+    private void validateProviderCallDeclaration(WorkerSuccessRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("Workflow settlement request is required");
+        }
+        requireNonNegative("promptTokens", request.promptTokens());
+        requireNonNegative("completionTokens", request.completionTokens());
+        requireNonNegative("billableUnits", request.billableUnits());
+        if (request.providerCostAmount() != null && request.providerCostAmount().signum() < 0) {
+            throw new IllegalArgumentException("Provider cost amount cannot be negative");
+        }
+        String requestId = normalizeProviderRequestId(request.providerRequestId());
+        if (Boolean.FALSE.equals(request.providerCalled())
+                && (positive(request.promptTokens())
+                || positive(request.completionTokens())
+                || positive(request.billableUnits())
+                || positive(request.providerCostAmount())
+                || requestId != null)) {
+            throw new IllegalStateException(
+                    "providerCalled=false conflicts with reported provider usage or accounting"
+            );
+        }
+    }
+
+    private void requireNonNegative(String field, Integer value) {
+        if (value != null && value < 0) {
+            throw new IllegalArgumentException(field + " cannot be negative");
+        }
+    }
+
+    private boolean positive(Integer value) {
+        return value != null && value > 0;
+    }
+
+    private String settlementPayloadJson(WorkerSuccessRequest request) {
+        try {
+            return objectMapper.writeValueAsString(settlementPayload(request));
+        } catch (Exception exception) {
+            throw new IllegalStateException("Workflow settlement payload could not be serialized", exception);
+        }
+    }
+
+    private SettlementPayload settlementPayload(WorkerSuccessRequest request) {
+        String currency = request.providerCostCurrency() == null
+                ? null
+                : request.providerCostCurrency().trim().toUpperCase(Locale.ROOT);
+        return new SettlementPayload(
+                request.promptTokens(),
+                request.completionTokens(),
+                request.billableUnits(),
+                request.providerCostAmount(),
+                currency,
+                normalizeProviderRequestId(request.providerRequestId()),
+                request.providerCalled()
+        );
+    }
+
+    private SettlementPayload readSettlementPayload(WorkflowStepCharge charge) {
+        String json = charge.getSettlementPayloadJson();
+        if (json == null || json.isBlank()) {
+            throw new IllegalStateException("Deferred workflow settlement has no persisted payload");
+        }
+        try {
+            SettlementPayload payload = objectMapper.readValue(json, SettlementPayload.class);
+            if (payload == null) {
+                throw new IllegalStateException("Deferred workflow settlement payload is empty");
+            }
+            return payload;
+        } catch (Exception exception) {
+            if (exception instanceof IllegalStateException illegalStateException) {
+                throw illegalStateException;
+            }
+            throw new IllegalStateException("Deferred workflow settlement payload is invalid", exception);
+        }
+    }
+
+    private void validateSettlementPayload(WorkflowStepCharge charge, WorkerSuccessRequest request) {
+        SettlementPayload persisted = readSettlementPayload(charge);
+        SettlementPayload received = settlementPayload(request);
+        if (!persisted.sameAccounting(received)) {
+            throw new IllegalStateException("Deferred workflow settlement callback conflicts with persisted usage");
+        }
+    }
+
+    private WorkerSuccessRequest canonicalSettlementRequest(WorkflowStepCharge charge,
+                                                             WorkerSuccessRequest request) {
+        validateProviderCallDeclaration(request);
+        boolean awaitingFunds = WorkflowChargeStatus.AWAITING_FUNDS.name().equals(charge.getStatus());
+        boolean hasPersistedPayload = charge.getSettlementPayloadJson() != null
+                && !charge.getSettlementPayloadJson().isBlank();
+        if (!awaitingFunds && !hasPersistedPayload) {
+            return request;
+        }
+        SettlementPayload persisted = readSettlementPayload(charge);
+        if (!persisted.sameAccounting(settlementPayload(request))) {
+            throw new IllegalStateException("Deferred workflow settlement callback conflicts with persisted usage");
+        }
+        return persisted.toWorkerSuccessRequest(request.contentText());
+    }
+
+    private void releaseSuccessfulNoProviderCall(WorkflowStepCharge charge) {
+        creditService.releaseReserved(
+                charge.getUserId(),
+                CreditSourceType.WORKFLOW_STEP,
+                charge.getStepId(),
+                charge.getReservedCredits(),
+                charge.getIdempotencyKey() + ":release"
+        );
+        if (chargeMapper.markReleased(charge.getId(), null, null, null) != 1) {
+            throw new IllegalStateException("Workflow no-provider success could not release its reservation");
+        }
+        metrics.recordBillingState(WorkflowMetrics.BillingState.RELEASED);
     }
 
     private ProviderAccounting providerAccounting(WorkerSuccessRequest request) {
@@ -616,6 +976,50 @@ public class WorkflowBillingService {
 
     private record Settlement(BigDecimal vendorCost, int chargeCredits, BigDecimal markupRatio,
                               AgentModelConfig modelConfig) {
+    }
+
+    public enum SettlementResult {
+        SETTLED,
+        AWAITING_FUNDS
+    }
+
+    private record SettlementPayload(Integer promptTokens,
+                                     Integer completionTokens,
+                                     Integer billableUnits,
+                                     BigDecimal providerCostAmount,
+                                     String providerCostCurrency,
+                                     String providerRequestId,
+                                     Boolean providerCalled) {
+
+        private WorkerSuccessRequest toWorkerSuccessRequest(String outputJson) {
+            return new WorkerSuccessRequest(
+                    "JSON",
+                    outputJson == null || outputJson.isBlank() ? "{}" : outputJson,
+                    promptTokens,
+                    completionTokens,
+                    billableUnits,
+                    providerCostAmount,
+                    providerCostCurrency,
+                    providerRequestId,
+                    providerCalled,
+                    null
+            );
+        }
+
+        private boolean sameAccounting(SettlementPayload other) {
+            return other != null
+                    && Objects.equals(promptTokens, other.promptTokens)
+                    && Objects.equals(completionTokens, other.completionTokens)
+                    && Objects.equals(billableUnits, other.billableUnits)
+                    && sameDecimal(providerCostAmount, other.providerCostAmount)
+                    && Objects.equals(providerCostCurrency, other.providerCostCurrency)
+                    && Objects.equals(providerRequestId, other.providerRequestId)
+                    && Objects.equals(providerCalled, other.providerCalled);
+        }
+
+        private static boolean sameDecimal(BigDecimal left, BigDecimal right) {
+            return left == null ? right == null : right != null && left.compareTo(right) == 0;
+        }
     }
 
     private record ProviderAccounting(BigDecimal amount, String currency, String requestId, boolean charged) {

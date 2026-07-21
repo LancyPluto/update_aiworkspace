@@ -31,6 +31,19 @@ test("episode generation polling only remains active for asynchronous workflow s
   assert.equal(comic.currentComicStage({ status: "STORYBOARD_GENERATING", scriptText: "正文" }), "storyboard")
 })
 
+test("comic workflow retries retain an id until their signed input changes", () => {
+  let sequence = 0
+  const createId = () => `request-${++sequence}`
+
+  const first = comic.retainComicClientRequestAttempt(null, "script:v1", createId)
+  const retry = comic.retainComicClientRequestAttempt(first, "script:v1", createId)
+  const changed = comic.retainComicClientRequestAttempt(retry, "script:v2", createId)
+
+  assert.equal(first.clientRequestId, "request-1")
+  assert.equal(retry, first)
+  assert.equal(changed.clientRequestId, "request-2")
+})
+
 test("storyboard validation and reordering preserve production constraints", () => {
   const shots = Array.from({ length: 6 }, (_, index) => ({
     id: index + 1,
@@ -57,4 +70,15 @@ test("attempt media tolerates stored JSON strings and nested result payloads", (
     prompt: null,
   })
   assert.equal(comic.comicAttemptMedia({ outputJson: "not-json" }).videoUrl, null)
+})
+
+test("selected attempt survives when the latest retry batch only contains another version", () => {
+  const selected = { id: 11, shotId: 7, attemptNo: 1, status: "SUCCESS" }
+  const retry = { id: 12, shotId: 7, attemptNo: 2, status: "SUCCESS" }
+  const unrelated = { id: 13, shotId: 8, attemptNo: 1, status: "SUCCESS" }
+  const merged = comic.mergeComicShotAttempts(
+    { id: 7, sequenceNo: 1, durationMs: 5_000, visualDescription: "shot", selectedAttempt: selected },
+    [retry, unrelated, selected],
+  )
+  assert.deepEqual(merged.map((attempt) => attempt.id), [12, 11])
 })

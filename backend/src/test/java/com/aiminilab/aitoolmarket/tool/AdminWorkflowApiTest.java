@@ -364,7 +364,7 @@ class AdminWorkflowApiTest {
                 [
                   {"id":"start","data":{"nodeDefType":"start","title":"Start"}},
                   {"id":"worker","data":{"nodeDefType":"llm_text","title":"Worker",
-                    "parameters":{"modelConfigId":%d,"maxCreditCost":100,"maxProviderCostCny":1.00,"duration":5}}},
+                    "parameters":{"modelConfigId":%d,"maxCreditCost":9999,"maxProviderCostCny":9999,"duration":5}}},
                   {"id":"output","data":{"nodeDefType":"video_output","title":"Output"}}
                 ]
                 """.formatted(modelId);
@@ -405,7 +405,7 @@ class AdminWorkflowApiTest {
             JsonNode firstPolicy = billingPolicy(firstVersionId).path("nodePolicies").path("worker");
             assertThat(jdbcTemplate.queryForObject(
                     "SELECT minimum_required_credits FROM ai_tools WHERE id = ?", Integer.class, toolId))
-                    .isEqualTo(100);
+                    .isEqualTo(150);
             mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
                             .header("Authorization", "Bearer " + adminToken))
                     .andExpect(status().isOk())
@@ -438,7 +438,7 @@ class AdminWorkflowApiTest {
             JsonNode secondPolicy = billingPolicy(secondVersionId).path("nodePolicies").path("worker");
             assertThat(jdbcTemplate.queryForObject(
                     "SELECT minimum_required_credits FROM ai_tools WHERE id = ?", Integer.class, toolId))
-                    .isEqualTo(100);
+                    .isEqualTo(5400);
 
             assertThat(firstVersionId).isNotEqualTo(secondVersionId);
             assertThat(versionMapper.selectById(firstVersionId).getDslHash())
@@ -450,6 +450,8 @@ class AdminWorkflowApiTest {
             assertThat(firstPolicy.path("pricingPolicy").path("rules").path(0).path("factor").decimalValue())
                     .isEqualByComparingTo("2.0");
             assertThat(firstPolicy.path("staticParams").path("duration").asInt()).isEqualTo(5);
+            assertThat(firstPolicy.path("staticParams").has("maxCreditCost")).isFalse();
+            assertThat(firstPolicy.path("maxCreditCost").asInt()).isEqualTo(150);
             assertThat(firstPolicy.path("maxProviderCostCny").decimalValue())
                     .isEqualByComparingTo("1.000000");
             assertThat(secondPolicy.path("modelPricingSnapshot").path("unitPrice").decimalValue())
@@ -458,8 +460,9 @@ class AdminWorkflowApiTest {
                     .isEqualByComparingTo("3.0");
             assertThat(secondPolicy.path("pricingPolicy").path("rules").path(0).path("factor").decimalValue())
                     .isEqualByComparingTo("4.0");
+            assertThat(secondPolicy.path("maxCreditCost").asInt()).isEqualTo(5400);
             assertThat(secondPolicy.path("maxProviderCostCny").decimalValue())
-                    .isEqualByComparingTo("1.000000");
+                    .isEqualByComparingTo("18.000000");
             assertThat(billingPolicy(firstVersionId)
                     .path("nodePolicies").path("worker")
                     .path("modelPricingSnapshot").path("unitPrice").decimalValue())
@@ -482,18 +485,15 @@ class AdminWorkflowApiTest {
     }
 
     @Test
-    void publishRejectsPaidWorkerWithoutProviderCostCap() throws Exception {
+    void publishRejectsTokenPricedModelWithoutTokenEstimate() throws Exception {
         String adminToken = login();
-        Long toolId = createTool(adminToken, "wf_missing_provider_cost_cap");
-        long modelId = jdbcTemplate.queryForObject(
-                "SELECT id FROM agent_model_configs WHERE enabled = 1 AND is_deleted = 0 ORDER BY id LIMIT 1",
-                Long.class
-        );
+        Long toolId = createTool(adminToken, "wf_missing_token_estimate");
+        long modelId = createTokenPricedModel("wf_missing_token_estimate_model");
         String nodes = """
                 [
                   {"id":"start","data":{"nodeDefType":"start","title":"Start"}},
                   {"id":"worker","data":{"nodeDefType":"llm_text","title":"Worker",
-                    "parameters":{"modelConfigId":%d,"maxCreditCost":100}}},
+                    "parameters":{"modelConfigId":%d}}},
                   {"id":"output","data":{"nodeDefType":"video_output","title":"Output"}}
                 ]
                 """.formatted(modelId);
@@ -510,7 +510,159 @@ class AdminWorkflowApiTest {
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
-                .andExpect(jsonPath("$.message").value(containsString("provider cost cap")));
+                .andExpect(jsonPath("$.message").value(containsString("automatic pricing estimate")));
+    }
+
+    @Test
+    void publishIgnoresLegacyCostFieldsAndUsesToolFallbackForModelLessWorker() throws Exception {
+        String adminToken = login();
+        Long toolId = createTool(adminToken, "wf_legacy_cost_fields_ignored");
+        String edges = """
+                [
+                  {"id":"e1","source":"start","target":"worker"},
+                  {"id":"e2","source":"worker","target":"output"}
+                ]
+                """;
+        String nodes = """
+                [
+                  {"id":"start","data":{"nodeDefType":"start","title":"Start"}},
+                  {"id":"worker","data":{"nodeDefType":"subtitle","title":"Worker",
+                    "parameters":{"handlerKey":"report.export","maxCreditCost":"not-a-number",
+                      "maxProviderCostCny":9999,"providerCostMode":"NONE"}}},
+                  {"id":"output","data":{"nodeDefType":"video_output","title":"Output"}}
+                ]
+                """;
+        saveWorkflow(adminToken, toolId, nodes, edges, 0L).andExpect(status().isOk());
+
+        MvcResult published = mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode policy = billingPolicy(responseData(published).path("publishedVersionId").asLong())
+                .path("nodePolicies").path("worker");
+        assertThat(policy.path("pricingSource").asText()).isEqualTo("TOOL_FALLBACK");
+        assertThat(policy.path("maxCreditCost").asInt()).isEqualTo(1);
+        assertThat(policy.path("maxProviderCostCny").decimalValue()).isEqualByComparingTo("0.000000");
+        assertThat(policy.path("modelPricingSnapshot").isNull()).isTrue();
+        assertThat(policy.path("staticParams").path("handlerKey").asText()).isEqualTo("report.export");
+        assertThat(policy.path("staticParams").has("maxCreditCost")).isFalse();
+        assertThat(policy.path("staticParams").has("maxProviderCostCny")).isFalse();
+        assertThat(policy.path("staticParams").has("providerCostMode")).isFalse();
+    }
+
+    @Test
+    void publishSnapshotsComicComposeAsAutomaticLocalZeroCost() throws Exception {
+        String adminToken = login();
+        Long toolId = createTool(adminToken, "wf_local_provider_cost_none");
+        String nodes = """
+                [
+                  {"id":"start","data":{"nodeDefType":"start","title":"Start"}},
+                  {"id":"compose","data":{"nodeDefType":"subtitle","title":"Compose",
+                    "parameters":{"handlerKey":"comic.compose","maxCreditCost":5,
+                      "providerCostMode":"NONE","maxProviderCostCny":0}}},
+                  {"id":"output","data":{"nodeDefType":"video_output","title":"Output"}}
+                ]
+                """;
+        String edges = """
+                [
+                  {"id":"e1","source":"start","target":"compose"},
+                  {"id":"e2","source":"compose","target":"output"}
+                ]
+                """;
+        saveWorkflow(adminToken, toolId, nodes, edges, 0L).andExpect(status().isOk());
+
+        MvcResult published = mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode composePolicy = billingPolicy(responseData(published).path("publishedVersionId").asLong())
+                .path("nodePolicies").path("compose");
+        assertThat(composePolicy.path("pricingSource").asText()).isEqualTo("LOCAL_ZERO_COST");
+        assertThat(composePolicy.path("maxProviderCostCny").decimalValue()).isEqualByComparingTo("0.000000");
+        assertThat(composePolicy.path("maxCreditCost").asInt()).isZero();
+        assertThat(composePolicy.path("fallbackChargeCredits").asInt()).isZero();
+        assertThat(composePolicy.path("staticParams").path("handlerKey").asText()).isEqualTo("comic.compose");
+        assertThat(composePolicy.path("staticParams").has("maxCreditCost")).isFalse();
+        assertThat(composePolicy.path("staticParams").has("maxProviderCostCny")).isFalse();
+        assertThat(composePolicy.path("staticParams").has("providerCostMode")).isFalse();
+    }
+
+    @Test
+    void publishUsesConfiguredTokenEstimateAndIgnoresLegacyCaps() throws Exception {
+        String adminToken = login();
+        Long toolId = createTool(adminToken, "wf_token_estimate_publish");
+        long modelId = createTokenPricedModel("wf_token_estimate_publish_model");
+        jdbcTemplate.update("""
+                INSERT INTO pricing_margins(
+                  scope_type, scope_ref, markup_ratio, min_credits,
+                  token_estimate_input_tokens, token_estimate_output_tokens, enabled, remark
+                ) VALUES ('MODEL', ?, 1.5, 0, 1000, 500, 1, 'workflow token estimate')
+                """, modelId);
+        String nodes = """
+                [
+                  {"id":"start","data":{"nodeDefType":"start","title":"Start"}},
+                  {"id":"worker","data":{"nodeDefType":"llm_text","title":"Worker",
+                    "parameters":{"modelConfigId":%d,"maxCreditCost":9999,
+                      "providerCostMode":"NONE","maxProviderCostCny":9999}}},
+                  {"id":"output","data":{"nodeDefType":"video_output","title":"Output"}}
+                ]
+                """.formatted(modelId);
+        String edges = """
+                [
+                  {"id":"e1","source":"start","target":"worker"},
+                  {"id":"e2","source":"worker","target":"output"}
+                ]
+                """;
+        saveWorkflow(adminToken, toolId, nodes, edges, 0L).andExpect(status().isOk());
+
+        MvcResult published = mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode policy = billingPolicy(responseData(published).path("publishedVersionId").asLong())
+                .path("nodePolicies").path("worker");
+        assertThat(policy.path("pricingSource").asText()).isEqualTo("MODEL_PRICING");
+        assertThat(policy.path("maxCreditCost").asInt()).isEqualTo(2);
+        assertThat(policy.path("maxProviderCostCny").decimalValue()).isEqualByComparingTo("0.004000");
+        assertThat(policy.path("pricingPolicy").path("tokenEstimateInputTokens").asInt()).isEqualTo(1000);
+        assertThat(policy.path("pricingPolicy").path("tokenEstimateOutputTokens").asInt()).isEqualTo(500);
+        assertThat(policy.path("staticParams").has("maxCreditCost")).isFalse();
+        assertThat(policy.path("staticParams").has("maxProviderCostCny")).isFalse();
+        assertThat(policy.path("staticParams").has("providerCostMode")).isFalse();
+    }
+
+    @Test
+    void publishRejectsComicComposeWhenItReferencesModel() throws Exception {
+        String adminToken = login();
+        Long toolId = createTool(adminToken, "wf_local_provider_cost_none_with_model");
+        long modelId = jdbcTemplate.queryForObject(
+                "SELECT id FROM agent_model_configs WHERE enabled = 1 AND is_deleted = 0 ORDER BY id LIMIT 1",
+                Long.class
+        );
+        String nodes = """
+                [
+                  {"id":"start","data":{"nodeDefType":"start","title":"Start"}},
+                  {"id":"compose","data":{"nodeDefType":"subtitle","title":"Compose",
+                    "parameters":{"handlerKey":"comic.compose","modelConfigId":%d}}},
+                  {"id":"output","data":{"nodeDefType":"video_output","title":"Output"}}
+                ]
+                """.formatted(modelId);
+        String edges = """
+                [
+                  {"id":"e1","source":"start","target":"compose"},
+                  {"id":"e2","source":"compose","target":"output"}
+                ]
+                """;
+        saveWorkflow(adminToken, toolId, nodes, edges, 0L).andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
+                .andExpect(jsonPath("$.message").value(containsString("cannot reference a model configuration")));
     }
 
     @Test
@@ -667,6 +819,23 @@ class AdminWorkflowApiTest {
                 .getResponse()
                 .getContentAsString();
         return Long.parseLong(response.replaceAll("(?s).*\"id\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+
+    private Long createTokenPricedModel(String configCode) {
+        jdbcTemplate.update("""
+                INSERT INTO agent_model_configs(
+                  display_name, config_code, provider, model_name, base_url, timeout_seconds,
+                  input_token_price_per_1m, output_token_price_per_1m,
+                  billing_unit, unit_price, capabilities,
+                  enabled, agent_enabled, is_default, is_deleted
+                ) VALUES (?, ?, 'test', 'token-priced-model', 'https://example.invalid/v1', 60,
+                          2.0, 4.0, 'TOKEN_PER_M', 0, '["TEXT_GENERATION"]', 1, 1, 0, 0)
+                """, "Workflow token priced model", configCode);
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM agent_model_configs WHERE config_code = ?",
+                Long.class,
+                configCode
+        );
     }
 
     private Long createTextOnlyModelConfig(String adminToken) throws Exception {

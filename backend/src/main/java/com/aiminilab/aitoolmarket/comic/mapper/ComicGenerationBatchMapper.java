@@ -9,6 +9,9 @@ import org.apache.ibatis.annotations.Update;
 import java.util.List;
 
 public interface ComicGenerationBatchMapper extends BaseMapper<ComicGenerationBatch> {
+    @Select("SELECT * FROM comic_generation_batches WHERE id = #{batchId} LIMIT 1 FOR UPDATE")
+    ComicGenerationBatch selectByIdForUpdate(@Param("batchId") Long batchId);
+
     @Select("SELECT * FROM comic_generation_batches WHERE id = #{batchId} AND user_id = #{userId} LIMIT 1")
     ComicGenerationBatch selectOwned(@Param("batchId") Long batchId, @Param("userId") Long userId);
 
@@ -42,4 +45,12 @@ public interface ComicGenerationBatchMapper extends BaseMapper<ComicGenerationBa
     int updateState(@Param("batchId") Long batchId, @Param("status") String status,
                     @Param("startedAt") java.time.LocalDateTime startedAt,
                     @Param("finishedAt") java.time.LocalDateTime finishedAt);
+
+    @Update("""
+            UPDATE comic_generation_batches SET status = 'RUNNING',
+              started_at = COALESCE(started_at, #{startedAt}), updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{batchId} AND status IN ('CREATED','RUNNING')
+            """)
+    int markRunning(@Param("batchId") Long batchId,
+                    @Param("startedAt") java.time.LocalDateTime startedAt);
 }

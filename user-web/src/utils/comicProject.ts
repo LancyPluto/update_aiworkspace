@@ -3,6 +3,11 @@ import type { ComicEpisodeDetail, ComicShot, ComicShotAttempt } from "@/api/comi
 export type ComicWorkspaceStage = "script" | "storyboard" | "assets" | "shots" | "delivery"
 export type ComicEpisodeGenerationStatus = "SCRIPT_GENERATING" | "STORYBOARD_GENERATING"
 
+export interface ComicClientRequestAttempt {
+  signature: string
+  clientRequestId: string
+}
+
 const COMIC_EPISODE_GENERATION_STATUSES = new Set<ComicEpisodeGenerationStatus>([
   "SCRIPT_GENERATING",
   "STORYBOARD_GENERATING",
@@ -27,6 +32,15 @@ export function stageIndex(stage: ComicWorkspaceStage): number {
 export function comicEpisodeGenerationStatus(status?: string | null): ComicEpisodeGenerationStatus | null {
   const normalized = String(status ?? "").toUpperCase() as ComicEpisodeGenerationStatus
   return COMIC_EPISODE_GENERATION_STATUSES.has(normalized) ? normalized : null
+}
+
+export function retainComicClientRequestAttempt(
+  current: ComicClientRequestAttempt | null,
+  signature: string,
+  createClientRequestId: () => string,
+): ComicClientRequestAttempt {
+  if (current?.signature === signature) return current
+  return { signature, clientRequestId: createClientRequestId() }
 }
 
 export function currentComicStage(episode?: ComicEpisodeDetail | null): ComicWorkspaceStage {
@@ -124,6 +138,18 @@ export function comicAttemptMedia(attempt?: ComicShotAttempt | null): {
     imageUrl: findTextDeep(output, ["imageUrl", "coverUrl"]),
     prompt: findTextDeep(output, ["prompt", "videoPrompt"]),
   }
+}
+
+export function mergeComicShotAttempts(
+  shot: ComicShot,
+  batchAttempts: ComicShotAttempt[] = [],
+): ComicShotAttempt[] {
+  const byId = new Map<number, ComicShotAttempt>()
+  if (shot.selectedAttempt) byId.set(shot.selectedAttempt.id, shot.selectedAttempt)
+  for (const attempt of batchAttempts) {
+    if (attempt.shotId === shot.id) byId.set(attempt.id, attempt)
+  }
+  return [...byId.values()].sort((left, right) => right.attemptNo - left.attemptNo)
 }
 
 export function formatComicDuration(durationMs: number): string {

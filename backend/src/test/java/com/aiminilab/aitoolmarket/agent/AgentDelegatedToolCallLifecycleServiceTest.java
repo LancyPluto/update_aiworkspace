@@ -6,6 +6,8 @@ import com.aiminilab.aitoolmarket.agent.mapper.AgentRunEventMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentToolCallMapper;
 import com.aiminilab.aitoolmarket.agent.metrics.AgentMetrics;
 import com.aiminilab.aitoolmarket.agent.service.AgentDelegatedToolCallLifecycleService;
+import com.aiminilab.aitoolmarket.comic.dto.ComicDtos;
+import com.aiminilab.aitoolmarket.comic.service.ComicProjectApplicationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +32,7 @@ class AgentDelegatedToolCallLifecycleServiceTest {
     private AgentToolCallMapper toolCallMapper;
     private AgentRunEventMapper eventMapper;
     private AgentMetrics metrics;
+    private ComicProjectApplicationService comicProjectApplicationService;
     private AgentDelegatedToolCallLifecycleService service;
 
     @BeforeEach
@@ -37,7 +40,10 @@ class AgentDelegatedToolCallLifecycleServiceTest {
         toolCallMapper = mock(AgentToolCallMapper.class);
         eventMapper = mock(AgentRunEventMapper.class);
         metrics = mock(AgentMetrics.class);
-        service = new AgentDelegatedToolCallLifecycleService(toolCallMapper, eventMapper, metrics, new ObjectMapper());
+        comicProjectApplicationService = mock(ComicProjectApplicationService.class);
+        service = new AgentDelegatedToolCallLifecycleService(
+                toolCallMapper, eventMapper, metrics, new ObjectMapper(), comicProjectApplicationService
+        );
     }
 
     @Test
@@ -142,6 +148,26 @@ class AgentDelegatedToolCallLifecycleServiceTest {
         assertThat(event.getValue().getEventJson())
                 .contains("\"status\":\"AWAITING_FUNDS\"")
                 .contains("\"runUrl\":\"/agents/runs/501\"");
+    }
+
+    @Test
+    void comicWorkflowProgressLinksDirectlyToProjectWorkspace() {
+        AgentToolCall call = delegatedCall();
+        call.setToolCode("ai_comic_drama_agent");
+        when(toolCallMapper.findDelegatedByWorkflow(501L, 601L))
+                .thenReturn(java.util.Optional.of(call));
+        when(comicProjectApplicationService.workspaceByRootTaskIdInternal(501L))
+                .thenReturn(new ComicDtos.WorkspaceBinding(
+                        71L, 81L, null, 501L, 601L, "AGENT_CHAT",
+                        "/agents/comic-projects/71?episode=81"
+                ));
+
+        service.progressForWorkflow(501L, 601L, "RUNNING");
+
+        ArgumentCaptor<AgentRunEvent> event = ArgumentCaptor.forClass(AgentRunEvent.class);
+        verify(eventMapper).insertEvent(event.capture());
+        assertThat(event.getValue().getEventJson())
+                .contains("\"runUrl\":\"/agents/comic-projects/71?episode=81\"");
     }
 
     @Test

@@ -10,6 +10,7 @@ import { cancelCurrentUserAccount, sendCancelAccountSmsCode } from "@/api/userAp
 import type { CreditAccount, GiftCard } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
 import { defaultUserDisplayName, safeDisplayName } from "@/utils/displayName"
+import { memberTierLabel } from "@/utils/giftCardTierConfig"
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -70,6 +71,16 @@ function giftCardStatusLabel(status: string | undefined | null) {
     case "EXPIRED": return "已过期"
     default: return status || "--"
   }
+}
+
+function giftCardMemberRequirement(card: GiftCard) {
+  if (card.cardType !== "MEMBER_CREDIT") return null
+  const tierLabel = memberTierLabel(card.requiredMemberTier)
+  return tierLabel ? `需${tierLabel}及以上有效会员兑换` : "需满足卡片会员等级后兑换"
+}
+
+function canRedeemOwnedGiftCard(card: GiftCard) {
+  return card.cardType !== "MEMBER_CREDIT" || card.giftedFromUserId != null
 }
 
 function giftCardStatusClass(status: string | undefined | null) {
@@ -559,6 +570,9 @@ onMounted(async () => {
               <div class="gift-card-credits">
                 {{ card.credits.toLocaleString() }} <span>算力</span>
               </div>
+              <p v-if="giftCardMemberRequirement(card)" class="gift-card-member-requirement">
+                {{ giftCardMemberRequirement(card) }}
+              </p>
               <code class="gift-card-code">{{ maskCardCode(card.cardCode) }}</code>
             </div>
             <div class="gift-card-actions">
@@ -566,11 +580,11 @@ onMounted(async () => {
                 <button
                   type="button"
                   class="gift-card-btn redeem-btn"
-                  :disabled="redeemingCardId === card.id"
+                  :disabled="redeemingCardId === card.id || !canRedeemOwnedGiftCard(card)"
                   @click="redeemCard(card.id)"
                 >
                   <Loader2 v-if="redeemingCardId === card.id" class="h-4 w-4 animate-spin" />
-                  使用
+                  {{ canRedeemOwnedGiftCard(card) ? "使用" : "仅可赠送" }}
                 </button>
                 <button type="button" class="gift-card-btn" @click="openShareDialog(card)">赠送</button>
               </template>
@@ -1166,6 +1180,12 @@ onMounted(async () => {
   font-size: 14px;
   font-weight: 400;
   color: rgb(255 255 255 / 0.6);
+}
+
+.gift-card-member-requirement {
+  color: rgb(255 255 255 / 0.72);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .gift-card-code {

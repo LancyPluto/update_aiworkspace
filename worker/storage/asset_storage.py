@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -99,6 +100,16 @@ class AssetStorage:
             return self._put_oss(key, data, content_type)
         return self._put_local(key, data)
 
+    def put_file(self, relative_key: str, file_path: Path, content_type: str | None = None) -> str:
+        key = self._normalize_relative_key(relative_key)
+        source = Path(file_path).resolve()
+        if self.is_oss:
+            return self._put_oss_file(key, source, content_type)
+        target = self.ensure_local_parent(key)
+        if source != target:
+            shutil.copy2(source, target)
+        return self.public_url(key)
+
     def put_bytes_public(self, relative_key: str, data: bytes, content_type: str | None = None) -> str:
         hashed_key = self._content_hash_key(self._normalize_relative_key(relative_key), data)
         if self.is_oss:
@@ -157,6 +168,20 @@ class AssetStorage:
         headers["Cache-Control"] = self.private_cache_control
         try:
             self._bucket_client.put_object(object_key, data, headers=headers or None)
+        except Exception as exc:  # pragma: no cover - network
+            raise AssetStorageError(f"oss upload failed: {exc}") from exc
+        return self.public_url(relative_key)
+
+    def _put_oss_file(self, relative_key: str, file_path: Path, content_type: str | None) -> str:
+        self._ensure_oss_client()
+        object_key = f"{self.oss_key_prefix}{relative_key}"
+        headers = {"Cache-Control": self.private_cache_control}
+        if content_type:
+            headers["Content-Type"] = content_type
+        try:
+            self._bucket_client.put_object_from_file(
+                object_key, str(file_path), headers=headers
+            )
         except Exception as exc:  # pragma: no cover - network
             raise AssetStorageError(f"oss upload failed: {exc}") from exc
         return self.public_url(relative_key)

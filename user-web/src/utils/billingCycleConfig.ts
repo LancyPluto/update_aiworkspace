@@ -9,7 +9,7 @@ export interface BillingCycleOption {
   hint: string | null
   badgeVariant: BillingCycleBadgeVariant | null
   prefix: string
-  /** 相对原价的折扣率，用于展示划线价 */
+  /** 相对月付总价的周期折扣率，仅用于周期优惠文案。 */
   discountRate: number | null
 }
 
@@ -18,20 +18,20 @@ export const BILLING_CYCLES: BillingCycleOption[] = [
   {
     value: "yearly",
     label: "连续包年",
-    badge: "限时37折",
-    hint: null,
+    badge: "约9折",
+    hint: "立省10%",
     badgeVariant: "orange",
     prefix: "yearly_",
-    discountRate: 0.63,
+    discountRate: 0.9,
   },
   {
     value: "quarterly",
     label: "连续包季",
-    badge: "季卡9折",
-    hint: null,
+    badge: "约9.5折",
+    hint: "立省约5%",
     badgeVariant: "teal",
     prefix: "quarterly_",
-    discountRate: 0.9,
+    discountRate: 0.95,
   },
   {
     value: "monthly",
@@ -44,10 +44,10 @@ export const BILLING_CYCLES: BillingCycleOption[] = [
   },
 ]
 
-const MARKUP = 1.5
+const MARKUP = 1.2
 
 /**
- * 在平台加价 markup（默认 1.50）下，用户用完套餐算力时的最低毛利率。
+ * 在平台加价 markup（默认 1.20）下，用户用完套餐算力时的最低毛利率。
  * credits 面值按 ¥0.01/点计，实际成本 = credits / markup。
  */
 export function subscriptionMarginPercent(credits: number, priceYuan: number, markup = MARKUP) {

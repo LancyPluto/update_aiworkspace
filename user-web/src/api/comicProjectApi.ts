@@ -6,7 +6,21 @@ export const COMIC_PROJECT_API_BASE = "/api/v1/agents/comic-projects"
 export type ComicEntityId = string | number
 export type ComicEpisodeSourceType = "AI" | "PASTE" | "TXT" | "MD" | "MARKDOWN" | "DOCX"
 export type ComicAssetStatus = "DRAFT" | "GENERATING" | "READY" | "FAILED"
-export type ComicBatchStatus = "DRAFT" | "QUEUED" | "RUNNING" | "PARTIAL_FAILED" | "PARTIAL_SUCCESS" | "SUCCESS" | "FAILED" | "CANCELLED"
+export type ComicBatchStatus =
+  | "CREATED"
+  | "DRAFT"
+  | "QUEUED"
+  | "DISPATCHING"
+  | "RUNNING"
+  | "AWAITING_USER"
+  | "AWAITING_FUNDS"
+  | "CANCELLING"
+  | "PARTIAL_FAILED"
+  | "PARTIAL_SUCCESS"
+  | "SUCCESS"
+  | "FAILED"
+  | "CANCELLED"
+  | "TIMEOUT"
 export type ComicAttemptStatus = "PENDING" | "QUEUED" | "RUNNING" | "SUCCESS" | "FAILED" | "CANCELLED"
 
 export interface ComicProjectSummary {
@@ -34,6 +48,16 @@ export interface ComicProjectDetail extends ComicProjectSummary {
   episodes?: ComicEpisodeSummary[] | null
   characters?: ComicCharacter[] | null
   scenes?: ComicScene[] | null
+}
+
+export interface ComicWorkspaceBinding {
+  projectId: number
+  episodeId?: number | null
+  shotId?: number | null
+  rootTaskId: number
+  workflowRunId: number
+  launchSource?: string | null
+  workspacePath: string
 }
 
 export interface ComicEpisodeSummary {
@@ -88,6 +112,7 @@ export interface ComicShot {
   sceneVersionId?: number | null
   dependsOnShotId?: number | null
   selectedAttemptId?: number | null
+  selectedAttempt?: ComicShotAttempt | null
 }
 
 export interface ComicCharacterVersion {
@@ -167,14 +192,24 @@ export interface ComicGenerationBatch {
 
 export interface ComicAssemblyBatch {
   id: number
+  projectId?: number | null
   episodeId: number
   status: ComicBatchStatus | string
+  toolCode?: string | null
+  clientRequestId?: string | null
+  shotCount?: number | null
+  selectedAttemptIds?: number[] | null
   workflowRunId?: number | null
   rootTaskId?: number | null
   progress?: number | null
+  finalVideoUrl?: string | null
   videoUrl?: string | null
   subtitleUrl?: string | null
+  result?: Record<string, unknown> | null
+  errorCode?: string | null
   errorMessage?: string | null
+  confirmedAt?: string | null
+  startedAt?: string | null
   createdAt?: string | null
   finishedAt?: string | null
 }
@@ -202,6 +237,12 @@ export interface GenerateComicEpisodeRequest {
   title: string
   prompt: string
   episodeNo?: number
+  clientRequestId: string
+}
+
+export interface GenerateComicStoryboardRequest {
+  expectedRevision: number
+  clientRequestId: string
 }
 
 export interface UpdateComicEpisodeRequest {
@@ -234,12 +275,13 @@ export interface RetryComicShotRequest {
   toolCode?: string
 }
 
+export interface GenerateComicAssetVersionRequest {
+  clientRequestId: string
+}
+
 export interface CreateComicAssemblyBatchRequest {
   clientRequestId: string
-  voiceEnabled: boolean
-  bgmEnabled: boolean
-  subtitlesEnabled: boolean
-  aspectRatio?: string
+  toolCode?: string
   confirmed: true
 }
 
@@ -272,7 +314,30 @@ function normalizeEpisodeSummary<T extends ComicEpisodeSummary>(episode: T): T {
 }
 
 function normalizeEpisodeDetail(episode: ComicEpisodeDetail): ComicEpisodeDetail {
-  return normalizeEpisodeSummary(episode)
+  return {
+    ...normalizeEpisodeSummary(episode),
+    latestAssemblyBatch: episode.latestAssemblyBatch
+      ? normalizeAssemblyBatch(episode.latestAssemblyBatch)
+      : episode.latestAssemblyBatch,
+  }
+}
+
+function normalizeAssemblyBatch(batch: ComicAssemblyBatch): ComicAssemblyBatch {
+  const resultVideoUrl = typeof batch.result?.finalVideoUrl === "string"
+    ? batch.result.finalVideoUrl
+    : typeof batch.result?.videoUrl === "string"
+      ? batch.result.videoUrl
+      : null
+  const resultSubtitleUrl = typeof batch.result?.subtitleUrl === "string"
+    ? batch.result.subtitleUrl
+    : null
+  const finalVideoUrl = batch.finalVideoUrl ?? resultVideoUrl
+  return {
+    ...batch,
+    finalVideoUrl,
+    videoUrl: batch.videoUrl ?? finalVideoUrl,
+    subtitleUrl: batch.subtitleUrl ?? resultSubtitleUrl,
+  }
 }
 
 function normalizeProject(project: ComicProjectDetail): ComicProjectDetail {
@@ -292,6 +357,9 @@ export function createComicProjectApi(request: ComicRequest = apiRequest) {
     },
     get(projectId: ComicEntityId, options?: RequestOptions): Promise<ComicProjectDetail> {
       return request<ComicProjectDetail>("GET", projectPath(projectId), options).then(normalizeProject)
+    },
+    getWorkspaceByRun(rootTaskId: ComicEntityId, options?: RequestOptions): Promise<ComicWorkspaceBinding> {
+      return request<ComicWorkspaceBinding>("GET", `${COMIC_PROJECT_API_BASE}/by-run/${encoded(rootTaskId)}`, options)
     },
     update(projectId: ComicEntityId, body: UpdateComicProjectRequest, options?: RequestOptions): Promise<ComicProjectDetail> {
       return request<ComicProjectDetail>("PUT", projectPath(projectId), { ...options, body }).then(normalizeProject)
@@ -318,10 +386,10 @@ export function createComicProjectApi(request: ComicRequest = apiRequest) {
     updateEpisode(projectId: ComicEntityId, episodeId: ComicEntityId, body: UpdateComicEpisodeRequest, options?: RequestOptions): Promise<ComicEpisodeDetail> {
       return request<ComicEpisodeDetail>("PUT", episodePath(projectId, episodeId), { ...options, body }).then(normalizeEpisodeDetail)
     },
-    generateStoryboard(projectId: ComicEntityId, episodeId: ComicEntityId, expectedRevision: number, options?: RequestOptions): Promise<ComicEpisodeDetail> {
+    generateStoryboard(projectId: ComicEntityId, episodeId: ComicEntityId, body: GenerateComicStoryboardRequest, options?: RequestOptions): Promise<ComicEpisodeDetail> {
       return request<ComicEpisodeDetail>("POST", `${episodePath(projectId, episodeId)}/generate-storyboard`, {
         ...options,
-        body: { expectedRevision },
+        body,
       }).then(normalizeEpisodeDetail)
     },
     replaceShots(projectId: ComicEntityId, episodeId: ComicEntityId, body: ReplaceComicShotsRequest, options?: RequestOptions): Promise<ComicEpisodeDetail> {
@@ -342,11 +410,17 @@ export function createComicProjectApi(request: ComicRequest = apiRequest) {
     createCharacterVersion(projectId: ComicEntityId, characterId: ComicEntityId, body: { visualPrompt: string; frontImageUrl?: string; sideImageUrl?: string; backImageUrl?: string; status?: string }, options?: RequestOptions): Promise<ComicCharacterVersion> {
       return request<ComicCharacterVersion>("POST", `${projectPath(projectId)}/characters/${encoded(characterId)}/versions`, { ...options, body })
     },
+    generateCharacterVersion(projectId: ComicEntityId, characterId: ComicEntityId, versionId: ComicEntityId, body: GenerateComicAssetVersionRequest, options?: RequestOptions): Promise<unknown> {
+      return request<unknown>("POST", `${projectPath(projectId)}/characters/${encoded(characterId)}/versions/${encoded(versionId)}/generate`, { ...options, body })
+    },
     createScene(projectId: ComicEntityId, body: { name: string; description?: string }, options?: RequestOptions): Promise<ComicScene> {
       return request<ComicScene>("POST", `${projectPath(projectId)}/scenes`, { ...options, body })
     },
     createSceneVersion(projectId: ComicEntityId, sceneId: ComicEntityId, body: { visualPrompt: string; anchorImageUrl?: string; status?: string }, options?: RequestOptions): Promise<ComicSceneVersion> {
       return request<ComicSceneVersion>("POST", `${projectPath(projectId)}/scenes/${encoded(sceneId)}/versions`, { ...options, body })
+    },
+    generateSceneVersion(projectId: ComicEntityId, sceneId: ComicEntityId, versionId: ComicEntityId, body: GenerateComicAssetVersionRequest, options?: RequestOptions): Promise<unknown> {
+      return request<unknown>("POST", `${projectPath(projectId)}/scenes/${encoded(sceneId)}/versions/${encoded(versionId)}/generate`, { ...options, body })
     },
     confirmAssets(projectId: ComicEntityId, episodeId: ComicEntityId, expectedRevision: number, options?: RequestOptions): Promise<ComicEpisodeDetail> {
       return request<ComicEpisodeDetail>("POST", `${episodePath(projectId, episodeId)}/confirm-assets`, {
@@ -376,10 +450,18 @@ export function createComicProjectApi(request: ComicRequest = apiRequest) {
       }).then(normalizeEpisodeDetail)
     },
     createAssemblyBatch(projectId: ComicEntityId, episodeId: ComicEntityId, body: CreateComicAssemblyBatchRequest, options?: RequestOptions): Promise<ComicAssemblyBatch> {
-      return request<ComicAssemblyBatch>("POST", `${episodePath(projectId, episodeId)}/assembly-batches`, { ...options, body })
+      const requestBody: CreateComicAssemblyBatchRequest = {
+        clientRequestId: body.clientRequestId,
+        ...(body.toolCode ? { toolCode: body.toolCode } : {}),
+        confirmed: body.confirmed,
+      }
+      return request<ComicAssemblyBatch>("POST", `${episodePath(projectId, episodeId)}/assembly-batches`, { ...options, body: requestBody }).then(normalizeAssemblyBatch)
     },
     getAssemblyBatch(projectId: ComicEntityId, episodeId: ComicEntityId, batchId: ComicEntityId, options?: RequestOptions): Promise<ComicAssemblyBatch> {
-      return request<ComicAssemblyBatch>("GET", `${episodePath(projectId, episodeId)}/assembly-batches/${encoded(batchId)}`, options)
+      return request<ComicAssemblyBatch>("GET", `${episodePath(projectId, episodeId)}/assembly-batches/${encoded(batchId)}`, options).then(normalizeAssemblyBatch)
+    },
+    getLatestAssemblyBatch(projectId: ComicEntityId, episodeId: ComicEntityId, options?: RequestOptions): Promise<ComicAssemblyBatch> {
+      return request<ComicAssemblyBatch>("GET", `${episodePath(projectId, episodeId)}/assembly-batches/latest`, options).then(normalizeAssemblyBatch)
     },
   }
 }

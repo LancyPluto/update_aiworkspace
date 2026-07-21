@@ -15,12 +15,14 @@ public interface GiftCardMapper extends BaseMapper<GiftCard> {
 
     @Insert("""
             INSERT INTO gift_cards(
-                card_code, package_id, owner_user_id, original_user_id, credits, status,
+                card_code, package_id, owner_user_id, original_user_id, credits,
+                card_type, required_member_tier, status,
                 recharge_order_id, issuance_key, redeemed_at, gifted_from_user_id, gifted_at,
                 created_at, updated_at
             ) VALUES (
                 #{card.cardCode}, #{card.packageId}, #{card.ownerUserId}, #{card.originalUserId},
-                #{card.credits}, #{card.status}, #{card.rechargeOrderId}, #{card.issuanceKey},
+                #{card.credits}, #{card.cardType}, #{card.requiredMemberTier}, #{card.status},
+                #{card.rechargeOrderId}, #{card.issuanceKey},
                 #{card.redeemedAt}, #{card.giftedFromUserId}, #{card.giftedAt},
                 #{card.createdAt}, #{card.updatedAt}
             ) ON DUPLICATE KEY UPDATE issuance_key = issuance_key

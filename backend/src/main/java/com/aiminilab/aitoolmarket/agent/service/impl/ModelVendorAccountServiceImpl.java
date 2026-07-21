@@ -4,6 +4,9 @@ import com.aiminilab.aitoolmarket.agent.balance.VendorBalanceRefreshService;
 import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
 import com.aiminilab.aitoolmarket.agent.config.ModelProviderDefinition;
 import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
+import com.aiminilab.aitoolmarket.agent.connectivity.AccountProbeContext;
+import com.aiminilab.aitoolmarket.agent.connectivity.ConnectivityProbeRegistry;
+import com.aiminilab.aitoolmarket.agent.connectivity.ConnectivityProbeResult;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
 import com.aiminilab.aitoolmarket.agent.dto.DiscoveredModelConfigResponse;
@@ -24,6 +27,7 @@ import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
 import com.aiminilab.aitoolmarket.agent.support.VolcengineEndpointSupport;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.task.routing.mapper.AccountModelRouteStateMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -42,6 +46,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 
 @Service
@@ -60,6 +65,8 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     private final VendorBalanceRefreshService balanceRefreshService;
     private final ModelCapabilitiesCodec capabilitiesCodec;
     private final ObjectMapper objectMapper;
+    private final ConnectivityProbeRegistry connectivityProbeRegistry;
+    private final AccountModelRouteStateMapper routeStateMapper;
 
     public ModelVendorAccountServiceImpl(ModelVendorAccountMapper vendorAccountMapper,
                                          AgentModelConfigMapper agentModelConfigMapper,
@@ -67,8 +74,10 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                                          ModelProviderRegistry providerRegistry,
                                          AgentServiceClient agentServiceClient,
                                          VendorBalanceRefreshService balanceRefreshService,
-                                         ModelCapabilitiesCodec capabilitiesCodec,
-                                         ObjectMapper objectMapper) {
+                                          ModelCapabilitiesCodec capabilitiesCodec,
+                                          ObjectMapper objectMapper,
+                                          ConnectivityProbeRegistry connectivityProbeRegistry,
+                                          AccountModelRouteStateMapper routeStateMapper) {
         this.vendorAccountMapper = vendorAccountMapper;
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.vendorCodeResolver = vendorCodeResolver;
@@ -77,6 +86,8 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         this.balanceRefreshService = balanceRefreshService;
         this.capabilitiesCodec = capabilitiesCodec;
         this.objectMapper = objectMapper;
+        this.connectivityProbeRegistry = connectivityProbeRegistry;
+        this.routeStateMapper = routeStateMapper;
     }
 
     @Override
@@ -149,6 +160,20 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     @Override
     public ModelVendorAccountTestResponse adminTest(Long id) {
         ModelVendorAccount account = findActiveOrThrow(id);
+        Optional<ConnectivityProbeResult> registeredProbe = connectivityProbeRegistry.probeAccount(
+                new AccountProbeContext(
+                        account.getId(),
+                        account.getVendorCode(),
+                        account.getBaseUrl(),
+                        resolveApiKey(account),
+                        account.getExtraAuthJson(),
+                        null,
+                        null
+                )
+        );
+        if (registeredProbe.isPresent()) {
+            return accountProbeResponse(account, registeredProbe.get());
+        }
         String providerCode = resolveAccountProbeProvider(account);
         ModelProviderDefinition provider = providerRegistry.findByCode(providerCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "unsupported model provider for test"));
@@ -169,8 +194,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                     ? (success ? "连接成功" : "连接失败")
                     : result.message();
             latencyMs = result.latencyMs();
-            account.setHealthStatus(success ? "OK" : "ERROR");
-            account.setBalanceErrorMessage(success ? null : message);
+            applyHealth(account, success ? "OK" : "ERROR", message);
             if (!success) {
                 LOGGER.warn(
                         "Vendor account connectivity test failed: accountId={}, vendorCode={}, providerCode={}, modelName={}, stage=agent_service_test, message={}",
@@ -187,8 +211,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                     ? "连接失败"
                     : exception.getMessage();
             latencyMs = null;
-            account.setHealthStatus("ERROR");
-            account.setBalanceErrorMessage(message);
+            applyHealth(account, "ERROR", message);
             LOGGER.warn(
                     "Vendor account connectivity test error: accountId={}, vendorCode={}, providerCode={}, modelName={}, stage=agent_service_test, message={}",
                     account.getId(),
@@ -201,15 +224,44 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         }
         account.setUpdatedAt(LocalDateTime.now());
         vendorAccountMapper.updateAccount(account);
-        if (success) {
-            enableLinkedModelConfigs(account);
-        }
+        recoverAccountCircuitIfHealthy(account);
         return new ModelVendorAccountTestResponse(
                 success,
                 message,
                 latencyMs,
                 testRequest.provider(),
                 testRequest.modelName(),
+                toResponse(account)
+        );
+    }
+
+    private ModelVendorAccountTestResponse accountProbeResponse(
+            ModelVendorAccount account,
+            ConnectivityProbeResult result
+    ) {
+        String healthStatus = result.warning() != null
+                ? "WARNING"
+                : result.success() ? "OK" : "ERROR";
+        applyHealth(account, healthStatus, result.message());
+        account.setUpdatedAt(LocalDateTime.now());
+        vendorAccountMapper.updateAccount(account);
+        recoverAccountCircuitIfHealthy(account);
+        if (!result.success()) {
+            LOGGER.warn(
+                    "Vendor account connectivity probe failed: accountId={}, vendorCode={}, stage={}, httpStatus={}, message={}",
+                    account.getId(),
+                    account.getVendorCode(),
+                    result.stage(),
+                    result.httpStatus(),
+                    result.message()
+            );
+        }
+        return new ModelVendorAccountTestResponse(
+                result.success(),
+                result.message(),
+                result.latencyMs(),
+                account.getVendorCode(),
+                "",
                 toResponse(account)
         );
     }
@@ -739,8 +791,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         long startedAt = System.currentTimeMillis();
         String apiKey = resolveApiKey(account);
         if (!hasUsableCredential(account)) {
-            account.setHealthStatus("ERROR");
-            account.setBalanceErrorMessage("账号凭据未配置");
+            applyHealth(account, "ERROR", "账号凭据未配置");
             account.setUpdatedAt(LocalDateTime.now());
             vendorAccountMapper.updateAccount(account);
             return new ModelVendorAccountTestResponse(
@@ -761,13 +812,11 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         long latencyMs = Math.max(0L, System.currentTimeMillis() - startedAt);
         boolean success = probe.success();
         String message = probe.message();
-        account.setHealthStatus(success ? "OK" : "ERROR");
-        account.setBalanceErrorMessage(success ? null : message);
+        applyHealth(account, success ? "OK" : "ERROR", message);
         account.setUpdatedAt(LocalDateTime.now());
         vendorAccountMapper.updateAccount(account);
-        if (success) {
-            enableLinkedModelConfigs(account);
-        } else {
+        recoverAccountCircuitIfHealthy(account);
+        if (!success) {
             LOGGER.warn(
                     "Vendor account media gateway probe failed: accountId={}, vendorCode={}, providerCode={}, baseUrl={}, message={}",
                     account.getId(),
@@ -824,8 +873,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                                                                        String providerCode,
                                                                        ModelProviderDefinition provider) {
         if (!hasUsableCredential(account)) {
-            account.setHealthStatus("ERROR");
-            account.setBalanceErrorMessage("账号凭据未配置");
+            applyHealth(account, "ERROR", "账号凭据未配置");
             account.setUpdatedAt(LocalDateTime.now());
             vendorAccountMapper.updateAccount(account);
             return new ModelVendorAccountTestResponse(
@@ -840,11 +888,10 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         long started = System.currentTimeMillis();
         String message = "凭证已保存（accept-only 策略不发起网络探测）";
         Long latencyMs = Math.max(0L, System.currentTimeMillis() - started);
-        account.setHealthStatus("OK");
-        account.setBalanceErrorMessage(null);
+        applyHealth(account, "OK", message);
         account.setUpdatedAt(LocalDateTime.now());
         vendorAccountMapper.updateAccount(account);
-        enableLinkedModelConfigs(account);
+        recoverAccountCircuitIfHealthy(account);
         return new ModelVendorAccountTestResponse(
                 true,
                 message,
@@ -853,16 +900,6 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 provider.defaultModel(),
                 toResponse(account)
         );
-    }
-
-    private void enableLinkedModelConfigs(ModelVendorAccount account) {
-        if (account == null || account.getId() == null) {
-            return;
-        }
-        int updated = agentModelConfigMapper.enableByVendorAccountId(account.getId());
-        if (updated > 0) {
-            LOGGER.info("Re-enabled {} model config(s) linked to vendor account {}", updated, account.getId());
-        }
     }
 
     private VendorEndpointProbeResult probeVendorEndpoint(String baseUrl) {
@@ -894,6 +931,18 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
 
     private void refreshBalance(ModelVendorAccount account) {
         balanceRefreshService.refresh(account);
+    }
+
+    private void applyHealth(ModelVendorAccount account, String status, String message) {
+        account.setHealthStatus(status);
+        account.setHealthMessage(message == null || message.isBlank() ? null : message);
+        account.setHealthCheckedAt(LocalDateTime.now());
+    }
+
+    private void recoverAccountCircuitIfHealthy(ModelVendorAccount account) {
+        if (account != null && account.getId() != null && "OK".equalsIgnoreCase(account.getHealthStatus())) {
+            routeStateMapper.recoverByVendorAccountId(account.getId());
+        }
     }
 
     private ModelVendorAccount applyRequest(ModelVendorAccount account,

@@ -19,12 +19,14 @@ import com.aiminilab.aitoolmarket.workflow.service.WorkflowDslService;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowRuntimeAdmission;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowRuntimeAdmissionService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -111,12 +113,10 @@ class WorkflowRuntimeAdmissionServiceTest {
     @Test
     void paidBudgetComesOnlyFromPinnedVersionAndCommittedDatabaseLedger() {
         enableHealthyRuntime(100, 100);
-        version.setBillingPolicyJson("""
-                {"mode":"WORKFLOW_STEP","nodePolicies":{
-                  "writer":{"maxCreditCost":20,"maxProviderCostCny":0.20},
-                  "renderer":{"maxCreditCost":30,"maxProviderCostCny":0.30}
-                }}
-                """);
+        version.setBillingPolicyJson(fallbackBillingPolicy(Map.of(
+                "writer", 20,
+                "renderer", 30
+        )));
         when(dslService.parse(version.getNodesJson(), version.getEdgesJson(), version.getConfigJson()))
                 .thenReturn(dsl(worker("writer"), worker("renderer")));
 
@@ -133,6 +133,32 @@ class WorkflowRuntimeAdmissionServiceTest {
         verify(chargeMapper).sumCommittedCreditsForUserBetween(eq(11L), start.capture(), end.capture());
         assertThat(start.getValue()).isEqualTo(LocalDateTime.of(2026, 7, 15, 0, 0));
         assertThat(end.getValue()).isEqualTo(LocalDateTime.of(2026, 7, 16, 0, 0));
+    }
+
+    @Test
+    void operationScopeChargesTheSumOfAllRequestedWorkerNodes() {
+        enableHealthyRuntime(10, 100);
+        version.setBillingPolicyJson(fallbackBillingPolicy(Map.of(
+                "script", 50,
+                "tts", 2,
+                "keyframe", 3,
+                "video", 4
+        )));
+        when(dslService.parse(version.getNodesJson(), version.getEdgesJson(), version.getConfigJson()))
+                .thenReturn(dsl(
+                        worker("script", "comic.script"),
+                        worker("tts", "comic.shot_tts"),
+                        worker("keyframe", "comic.shot_keyframe"),
+                        worker("video", "comic.shot_video")
+                ));
+
+        WorkflowRuntimeAdmission admitted = service.admitNewRun(
+                11L,
+                7L,
+                List.of("comic.shot_tts", "comic.shot_keyframe", "comic.shot_video")
+        );
+
+        assertThat(admitted.estimatedRunCredits()).isEqualTo(9L);
     }
 
     @ParameterizedTest
@@ -153,15 +179,41 @@ class WorkflowRuntimeAdmissionServiceTest {
     }
 
     @Test
-    void paidRunDoesNotRequirePublishedProviderCostCap() {
+    void legacySnapshotWithoutPricingSourceFailsBeforeBudgetChecks() throws Exception {
         enableHealthyRuntime(100, 100);
-        version.setBillingPolicyJson(
-                "{\"mode\":\"WORKFLOW_STEP\",\"nodePolicies\":{\"writer\":{\"maxCreditCost\":10}}}"
-        );
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode policy = (ObjectNode) mapper.readTree(fallbackBillingPolicy(Map.of("writer", 10)));
+        ((ObjectNode) policy.path("nodePolicies").path("writer")).remove("pricingSource");
+        version.setBillingPolicyJson(policy.toString());
         when(dslService.parse(version.getNodesJson(), version.getEdgesJson(), version.getConfigJson()))
                 .thenReturn(dsl(worker("writer")));
 
-        assertThat(service.admitNewRun(11L, 7L).paidRun()).isTrue();
+        assertBlocked(() -> service.admitNewRun(11L, 7L), "billing_policy_invalid");
+        verify(chargeMapper, never()).sumCommittedCreditsForUserBetween(any(), any(), any());
+    }
+
+    @Test
+    void validModelPricingSnapshotCanBeAdmitted() {
+        enableHealthyRuntime(100, 100);
+        version.setBillingPolicyJson(modelBillingPolicy("writer", 10));
+        when(dslService.parse(version.getNodesJson(), version.getEdgesJson(), version.getConfigJson()))
+                .thenReturn(dsl(worker("writer")));
+
+        assertThat(service.admitNewRun(11L, 7L).estimatedRunCredits()).isEqualTo(10L);
+    }
+
+    @Test
+    void localComposeIsTheOnlyZeroCostWorkerAdmission() {
+        enableHealthyRuntime(100, 100);
+        version.setBillingPolicyJson(localZeroCostBillingPolicy("compose", "comic.compose"));
+        when(dslService.parse(version.getNodesJson(), version.getEdgesJson(), version.getConfigJson()))
+                .thenReturn(dsl(worker("compose", "comic.compose")));
+
+        WorkflowRuntimeAdmission admitted = service.admitNewRun(11L, 7L);
+
+        assertThat(admitted.paidRun()).isFalse();
+        assertThat(admitted.estimatedRunCredits()).isZero();
+        verify(chargeMapper, never()).sumCommittedCreditsForUserBetween(any(), any(), any());
     }
 
     @Test
@@ -184,22 +236,20 @@ class WorkflowRuntimeAdmissionServiceTest {
     }
 
     @Test
-    void canonicalWorkflowExecutionSwitchIsPartOfAdmission() {
+    void canonicalWorkflowExecutionFlagDoesNotBlockAdmission() {
         enableHealthyRuntime(100, 100);
         workflow.setExecutionEnabled(false);
         version.setBillingPolicyJson("{\"mode\":\"WORKFLOW_STEP\",\"nodePolicies\":{}}");
         when(dslService.parse(version.getNodesJson(), version.getEdgesJson(), version.getConfigJson()))
                 .thenReturn(dsl());
 
-        assertBlocked(() -> service.admitNewRun(11L, 7L), "tool_execution_disabled");
+        assertThat(service.admitNewRun(11L, 7L).workflow()).isSameAs(workflow);
     }
 
     @Test
     void paidRunRecordsUnsupportedProviderCurrencyWithoutBlocking() {
         enableHealthyRuntime(100, 100);
-        version.setBillingPolicyJson(
-                "{\"mode\":\"WORKFLOW_STEP\",\"nodePolicies\":{\"writer\":{\"maxCreditCost\":10,\"maxProviderCostCny\":0.10}}}"
-        );
+        version.setBillingPolicyJson(fallbackBillingPolicy(Map.of("writer", 10)));
         when(dslService.parse(version.getNodesJson(), version.getEdgesJson(), version.getConfigJson()))
                 .thenReturn(dsl(worker("writer")));
         when(chargeMapper.countUnsupportedProviderCostCurrenciesBetween(any(), any())).thenReturn(1);
@@ -211,9 +261,7 @@ class WorkflowRuntimeAdmissionServiceTest {
     @Test
     void paidRunRecordsUnknownProviderCostWithoutBlocking() {
         enableHealthyRuntime(100, 100);
-        version.setBillingPolicyJson(
-                "{\"mode\":\"WORKFLOW_STEP\",\"nodePolicies\":{\"writer\":{\"maxCreditCost\":10,\"maxProviderCostCny\":0.10}}}"
-        );
+        version.setBillingPolicyJson(fallbackBillingPolicy(Map.of("writer", 10)));
         when(dslService.parse(version.getNodesJson(), version.getEdgesJson(), version.getConfigJson()))
                 .thenReturn(dsl(worker("writer")));
         when(chargeMapper.countUnknownProviderCostsBetween(any(), any())).thenReturn(1);
@@ -239,6 +287,75 @@ class WorkflowRuntimeAdmissionServiceTest {
                 id,
                 new ObjectMapper().createObjectNode()
         );
+    }
+
+    private WorkflowNodeDef worker(String id, String handlerKey) {
+        return new WorkflowNodeDef(
+                id,
+                WorkflowNodeDefType.LLM_TEXT,
+                id,
+                new ObjectMapper().createObjectNode().put("handlerKey", handlerKey)
+        );
+    }
+
+    private String fallbackBillingPolicy(Map<String, Integer> nodeCosts) {
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode root = mapper.createObjectNode().put("mode", "WORKFLOW_STEP");
+        ObjectNode nodePolicies = root.putObject("nodePolicies");
+        nodeCosts.forEach((nodeId, credits) -> {
+            ObjectNode nodePolicy = baseNodePolicy(mapper, credits, credits, "TOOL_FALLBACK");
+            nodePolicy.putNull("modelPricingSnapshot");
+            nodePolicies.set(nodeId, nodePolicy);
+        });
+        return root.toString();
+    }
+
+    private String modelBillingPolicy(String nodeId, int credits) {
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode root = mapper.createObjectNode().put("mode", "WORKFLOW_STEP");
+        ObjectNode nodePolicy = baseNodePolicy(mapper, credits, 0, "MODEL_PRICING");
+        nodePolicy.put("estimatedProviderCostCny", new BigDecimal("0.100000"));
+        nodePolicy.put("maxProviderCostCny", new BigDecimal("0.100000"));
+        ObjectNode model = nodePolicy.putObject("modelPricingSnapshot");
+        model.put("id", 101L);
+        model.put("provider", "test");
+        model.put("modelName", "test-model");
+        model.put("billingUnit", "PER_CALL");
+        model.put("unitPrice", new BigDecimal("0.100000"));
+        root.putObject("nodePolicies").set(nodeId, nodePolicy);
+        return root.toString();
+    }
+
+    private String localZeroCostBillingPolicy(String nodeId, String handlerKey) {
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode root = mapper.createObjectNode().put("mode", "WORKFLOW_STEP");
+        ObjectNode nodePolicy = baseNodePolicy(mapper, 0, 0, "LOCAL_ZERO_COST");
+        ((ObjectNode) nodePolicy.path("staticParams")).put("handlerKey", handlerKey);
+        nodePolicy.putNull("modelPricingSnapshot");
+        root.putObject("nodePolicies").set(nodeId, nodePolicy);
+        return root.toString();
+    }
+
+    private ObjectNode baseNodePolicy(ObjectMapper mapper,
+                                      int maxCreditCost,
+                                      int fallbackCredits,
+                                      String pricingSource) {
+        ObjectNode nodePolicy = mapper.createObjectNode();
+        nodePolicy.put("maxCreditCost", maxCreditCost);
+        nodePolicy.put("estimatedProviderCostCny", 0);
+        nodePolicy.put("maxProviderCostCny", 0);
+        nodePolicy.put("fallbackChargeCredits", fallbackCredits);
+        nodePolicy.put("pricingSource", pricingSource);
+        nodePolicy.putObject("staticParams");
+        ObjectNode pricingPolicy = nodePolicy.putObject("pricingPolicy");
+        pricingPolicy.put("markupRatio", 1.5);
+        pricingPolicy.put("minCredits", 0);
+        pricingPolicy.put("imageEstimateInputTokens", 8000);
+        pricingPolicy.put("imageEstimateOutputTokens", 8000);
+        pricingPolicy.put("tokenEstimateInputTokens", 1000);
+        pricingPolicy.put("tokenEstimateOutputTokens", 1000);
+        pricingPolicy.putArray("rules");
+        return nodePolicy;
     }
 
     private WorkflowDsl dsl(WorkflowNodeDef... nodes) {

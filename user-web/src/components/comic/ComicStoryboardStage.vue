@@ -23,8 +23,11 @@ import {
   formatComicDuration,
   moveComicShot,
   resequenceComicShots,
+  retainComicClientRequestAttempt,
+  type ComicClientRequestAttempt,
   validateComicStoryboard,
 } from "@/utils/comicProject"
+import { randomUUID } from "@/utils/randomUUID"
 
 const props = defineProps<{
   projectId: ComicEntityId
@@ -42,6 +45,7 @@ const dirty = ref(false)
 const submitting = ref(false)
 const error = ref<string | null>(null)
 const gateOpen = ref(false)
+const storyboardGenerationAttempt = ref<ComicClientRequestAttempt | null>(null)
 
 const validation = computed(() => validateComicStoryboard(shots.value))
 const storyboardGenerating = computed(() => comicEpisodeGenerationStatus(props.episode.status) === "STORYBOARD_GENERATING")
@@ -105,12 +109,27 @@ async function generateStoryboard() {
   submitting.value = true
   error.value = null
   try {
+    const signature = JSON.stringify({
+      operation: "comic.storyboard",
+      projectId: String(props.projectId),
+      episodeId: String(props.episode.id),
+      expectedRevision: props.episode.revision ?? 0,
+    })
+    storyboardGenerationAttempt.value = retainComicClientRequestAttempt(
+      storyboardGenerationAttempt.value,
+      signature,
+      randomUUID,
+    )
     const result = await comicProjectApi.generateStoryboard(
       props.projectId,
       props.episode.id,
-      props.episode.revision ?? 0,
+      {
+        expectedRevision: props.episode.revision ?? 0,
+        clientRequestId: storyboardGenerationAttempt.value.clientRequestId,
+      },
       { token: auth.token },
     )
+    storyboardGenerationAttempt.value = null
     emit("updated", result)
   } catch (generateError) {
     error.value = generateError instanceof Error ? generateError.message : "AI 拆分分镜失败"

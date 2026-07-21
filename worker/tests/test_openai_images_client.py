@@ -5,7 +5,7 @@ from openai import APIStatusError
 from requests import Request
 from typing import Any
 
-from client.openai_images_client import OpenAIImagesClient
+from client.openai_images_client import OpenAIImagesClient, OpenAIImagesError, OpenAIImagesRequestNotSentError
 
 
 def test_openai_images_timeout_has_long_generation_floor():
@@ -566,10 +566,100 @@ def test_openai_images_5xx_does_not_replay_non_idempotent_create(monkeypatch) ->
     )
     monkeypatch.setattr(client.session, "post", fake_post)
 
-    with pytest.raises(Exception, match="status=502"):
+    with pytest.raises(OpenAIImagesError, match="status=502") as raised:
         client._post("/images/generations", {"model": "openai/gpt-image-2", "prompt": "test"})
 
     assert attempts["count"] == 1
+    assert raised.value.delivery_state == "UNKNOWN"
+    assert raised.value.retry_scope == "NONE"
+
+
+def test_openai_images_structured_model_unavailable_5xx_allows_account_failover(monkeypatch) -> None:
+    class Fake503Response:
+        status_code = 503
+        text = '{"error":{"code":"model_unavailable"}}'
+        headers = {}
+
+        def raise_for_status(self) -> None:
+            raise requests.HTTPError(response=self)  # type: ignore[arg-type]
+
+        def json(self) -> dict:
+            return {"error": {"code": "model_unavailable"}}
+
+    client = OpenAIImagesClient(
+        base_url="https://gateway.example/v1",
+        api_key="test-key",
+        extra_auth_json='{"connectionRetries":0}',
+    )
+    monkeypatch.setattr(client.session, "post", lambda *_args, **_kwargs: Fake503Response())
+
+    with pytest.raises(OpenAIImagesError) as raised:
+        client._post("/images/generations", {"model": "gpt-image-2", "prompt": "test"})
+
+    assert raised.value.delivery_state == "REJECTED"
+    assert raised.value.retry_scope == "ACCOUNT"
+    assert raised.value.provider_error_code == "model_unavailable"
+
+
+def test_openai_images_auth_rejection_is_safe_for_account_failover(monkeypatch) -> None:
+    class Fake401Response:
+        status_code = 401
+        text = "invalid api key"
+        headers = {}
+
+        def raise_for_status(self) -> None:
+            raise requests.HTTPError(response=self)  # type: ignore[arg-type]
+
+    client = OpenAIImagesClient(base_url="https://gateway.example/v1", api_key="bad-key")
+    monkeypatch.setattr(client.session, "post", lambda *_args, **_kwargs: Fake401Response())
+
+    with pytest.raises(OpenAIImagesError) as raised:
+        client._post("/images/generations", {"model": "gpt-image-2", "prompt": "test"})
+
+    assert raised.value.delivery_state == "REJECTED"
+    assert raised.value.retry_scope == "ACCOUNT"
+    assert raised.value.provider_error_code is None
+    assert raised.value.http_status == 401
+
+
+def test_openai_images_exhausted_connect_timeout_is_marked_not_sent(monkeypatch) -> None:
+    client = OpenAIImagesClient(
+        base_url="https://gateway.example/v1",
+        api_key="test-key",
+        extra_auth_json='{"connectionRetries":0}',
+    )
+    monkeypatch.setattr(
+        client.session,
+        "post",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(requests.ConnectTimeout("not connected")),
+    )
+
+    with pytest.raises(OpenAIImagesRequestNotSentError) as raised:
+        client._post("/images/generations", {"model": "gpt-image-2", "prompt": "test"})
+
+    assert raised.value.delivery_state == "NOT_SENT"
+    assert raised.value.retry_scope == "ACCOUNT"
+
+
+def test_openai_images_connection_refused_is_marked_not_sent(monkeypatch) -> None:
+    client = OpenAIImagesClient(
+        base_url="https://gateway.example/v1",
+        api_key="test-key",
+        extra_auth_json='{"connectionRetries":0}',
+    )
+    monkeypatch.setattr(
+        client.session,
+        "post",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            requests.ConnectionError(ConnectionRefusedError("connection refused"))
+        ),
+    )
+
+    with pytest.raises(OpenAIImagesRequestNotSentError) as raised:
+        client._post("/images/generations", {"model": "gpt-image-2", "prompt": "test"})
+
+    assert raised.value.delivery_state == "NOT_SENT"
+    assert raised.value.retry_scope == "ACCOUNT"
 
 
 def test_openai_images_connect_timeout_retries_before_request_is_sent(monkeypatch) -> None:

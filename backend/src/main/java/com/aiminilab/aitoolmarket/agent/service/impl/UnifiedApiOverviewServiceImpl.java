@@ -12,10 +12,13 @@ import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
+import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountMigrationService;
 import com.aiminilab.aitoolmarket.agent.service.UnifiedApiOverviewService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
+import com.aiminilab.aitoolmarket.task.routing.ModelRoutingPolicy;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -36,19 +39,25 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
     private final VendorCodeResolver vendorCodeResolver;
     private final ModelProviderRegistry providerRegistry;
     private final ModelCapabilitiesCodec capabilitiesCodec;
+    private final ModelCapabilityService modelCapabilityService;
+    private final ObjectMapper objectMapper;
 
     public UnifiedApiOverviewServiceImpl(ModelVendorAccountMigrationService migrationService,
                                          ModelVendorAccountMapper vendorAccountMapper,
                                          AgentModelConfigMapper agentModelConfigMapper,
                                          VendorCodeResolver vendorCodeResolver,
                                          ModelProviderRegistry providerRegistry,
-                                         ModelCapabilitiesCodec capabilitiesCodec) {
+                                         ModelCapabilitiesCodec capabilitiesCodec,
+                                         ModelCapabilityService modelCapabilityService,
+                                         ObjectMapper objectMapper) {
         this.migrationService = migrationService;
         this.vendorAccountMapper = vendorAccountMapper;
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.vendorCodeResolver = vendorCodeResolver;
         this.providerRegistry = providerRegistry;
         this.capabilitiesCodec = capabilitiesCodec;
+        this.modelCapabilityService = modelCapabilityService;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -84,7 +93,13 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
                 }
             }
             modelsByVendor.computeIfAbsent(vendorCode, key -> new ArrayList<>())
-                    .add(UnifiedApiModelItemResponse.from(config, accountName, capabilitiesCodec, accountHealthStatus));
+                    .add(UnifiedApiModelItemResponse.from(
+                            config,
+                            accountName,
+                            capabilitiesCodec,
+                            accountHealthStatus,
+                            routingExclusionReason(config, vendorCode, configs, accountById)
+                    ));
         }
 
         Set<String> configuredVendors = new HashSet<>();
@@ -154,6 +169,56 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
             return inferred;
         }
         return inferred;
+    }
+
+    private String routingExclusionReason(AgentModelConfig reference,
+                                          String vendorCode,
+                                          List<AgentModelConfig> configs,
+                                          Map<Long, ModelVendorAccount> accountById) {
+        ModelVendorAccount source = accountById.get(reference.getVendorAccountId());
+        if (source == null) {
+            return "ACCOUNT_UNBOUND";
+        }
+        if (!Boolean.TRUE.equals(source.getEnabled())) {
+            return "ACCOUNT_DISABLED";
+        }
+        if (!Boolean.TRUE.equals(source.getLoadBalanceEnabled())) {
+            return "LOAD_BALANCING_DISABLED";
+        }
+        if (!Boolean.TRUE.equals(reference.getEnabled())) {
+            return "MODEL_DISABLED";
+        }
+
+        List<AgentModelConfig> sameRoute = configs.stream()
+                .filter(candidate -> candidate.getVendorAccountId() != null)
+                .filter(candidate -> !candidate.getVendorAccountId().equals(reference.getVendorAccountId()))
+                .filter(candidate -> Boolean.TRUE.equals(candidate.getEnabled()))
+                .filter(candidate -> reference.getProvider() != null
+                        && reference.getProvider().equalsIgnoreCase(candidate.getProvider()))
+                .filter(candidate -> java.util.Objects.equals(reference.getModelName(), candidate.getModelName()))
+                .filter(candidate -> vendorCode.equals(canonicalVendorCode(
+                        resolveConfigVendorCode(candidate, accountById))))
+                .filter(candidate -> {
+                    ModelVendorAccount account = accountById.get(candidate.getVendorAccountId());
+                    return account != null
+                            && Boolean.TRUE.equals(account.getEnabled())
+                            && Boolean.TRUE.equals(account.getLoadBalanceEnabled());
+                })
+                .toList();
+        if (sameRoute.isEmpty()) {
+            return "NO_MATCHING_ACCOUNT";
+        }
+
+        boolean priceMismatch = false;
+        for (AgentModelConfig candidate : sameRoute) {
+            String reason = ModelRoutingPolicy.incompatibilityReason(
+                    reference, candidate, modelCapabilityService, objectMapper);
+            if (reason == null) {
+                return null;
+            }
+            priceMismatch = priceMismatch || "PRICE_MISMATCH".equals(reason);
+        }
+        return priceMismatch ? "PRICE_MISMATCH" : "ROUTE_CONFIG_MISMATCH";
     }
 
     private String resolveAccountVendorCode(ModelVendorAccount account) {

@@ -8,6 +8,8 @@ import com.aiminilab.aitoolmarket.agent.mapper.AgentRunMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentToolCallMapper;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.comic.dto.ComicDtos;
+import com.aiminilab.aitoolmarket.comic.service.ComicProjectApplicationService;
 import com.aiminilab.aitoolmarket.workflow.dto.CreateWorkflowRunCommand;
 import com.aiminilab.aitoolmarket.workflow.dto.WorkflowRunCreated;
 import com.aiminilab.aitoolmarket.workflow.entity.WorkflowRun;
@@ -40,6 +42,7 @@ public class AgentWorkflowDelegationService {
     private final WorkflowRunMapper workflowRunMapper;
     private final ToolMapper toolMapper;
     private final ObjectMapper objectMapper;
+    private final ComicProjectApplicationService comicProjectApplicationService;
 
     public AgentWorkflowDelegationService(AgentToolCallMapper toolCallMapper,
                                           AgentRunMapper agentRunMapper,
@@ -47,7 +50,8 @@ public class AgentWorkflowDelegationService {
                                           WorkflowRunApplicationService workflowService,
                                           WorkflowRunMapper workflowRunMapper,
                                           ToolMapper toolMapper,
-                                          ObjectMapper objectMapper) {
+                                          ObjectMapper objectMapper,
+                                          ComicProjectApplicationService comicProjectApplicationService) {
         this.toolCallMapper = toolCallMapper;
         this.agentRunMapper = agentRunMapper;
         this.descriptorService = descriptorService;
@@ -55,6 +59,7 @@ public class AgentWorkflowDelegationService {
         this.workflowRunMapper = workflowRunMapper;
         this.toolMapper = toolMapper;
         this.objectMapper = objectMapper;
+        this.comicProjectApplicationService = comicProjectApplicationService;
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -91,7 +96,9 @@ public class AgentWorkflowDelegationService {
                 LAUNCH_SOURCE,
                 call.getId()
         ));
-        return DelegatedWorkflowToolCallResponse.of(created.rootTaskId(), created.runId(), created.status());
+        return DelegatedWorkflowToolCallResponse.of(
+                created.rootTaskId(), created.runId(), created.status(), runUrl(created.rootTaskId())
+        );
     }
 
     private DelegatedWorkflowToolCallResponse existingDelegation(AgentToolCall call, AgentRun agentRun) {
@@ -113,8 +120,14 @@ public class AgentWorkflowDelegationService {
         return DelegatedWorkflowToolCallResponse.of(
                 workflowRun.getRootTaskId(),
                 workflowRun.getId(),
-                workflowRun.getStatus()
+                workflowRun.getStatus(),
+                runUrl(workflowRun.getRootTaskId())
         );
+    }
+
+    private String runUrl(Long rootTaskId) {
+        ComicDtos.WorkspaceBinding binding = comicProjectApplicationService.workspaceByRootTaskIdInternal(rootTaskId);
+        return binding == null ? "/agents/runs/" + rootTaskId : binding.workspacePath();
     }
 
     private boolean isPersistedDelegationStatus(AgentToolCall call) {

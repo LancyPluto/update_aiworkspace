@@ -13,11 +13,17 @@ import {
 } from "lucide-vue-next"
 import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import CreditPowerIconWatermark from "@/components/CreditPowerIcon/CreditPowerIconWatermark.vue"
-import type { GiftCardPackage, RechargePackage } from "@/api/types"
-import { MEMBER_GIFT_TIERS, canBuyGiftCard, memberGiftOriginalPrice, getCreditCardDiscount as calcCreditCardDiscount } from "@/utils/giftCardTierConfig"
+import type { GiftCardPackage } from "@/api/types"
+import {
+  MEMBER_GIFT_TIERS,
+  canBuyGiftCard,
+  formatChineseDiscount,
+  getCreditCardDiscount as calcCreditCardDiscount,
+  normalizeMemberTier,
+  type MemberTierKey,
+} from "@/utils/giftCardTierConfig"
 
 const props = defineProps<{
-  packages: RechargePackage[]
   giftCardPackages: GiftCardPackage[]
   loading: boolean
   ordering: boolean
@@ -25,7 +31,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  buyMemberPackage: [pkg: RechargePackage]
   buyCreditGift: [items: Array<{ pkg: GiftCardPackage; quantity: number }>]
 }>()
 
@@ -62,12 +67,10 @@ const TIER_STYLES = {
 const giftSteps = [
   { icon: ShoppingCart, title: "购买礼品卡", desc: "不限时有效，随时赠送兑换" },
   { icon: Gift, title: "会员中心 · 礼品卡", desc: "选择并赠送好友" },
-  { icon: CreditCard, title: "获取卡密兑换", desc: "兑换后优先消耗会员算力" },
+  { icon: CreditCard, title: "获取卡密兑换", desc: "兑换后进入永久礼品卡余额" },
 ]
 
-// 删除不需要的周期相关代码
-// const activeGiftCycle = ref<BillingCycle>("yearly")
-const memberQty = ref<Record<string, number>>({})
+const memberQty = ref<Partial<Record<MemberTierKey, number>>>({})
 const creditQty = ref<Record<number, number>>({})
 
 function formatMoney(value: number | string | undefined | null) {
@@ -75,13 +78,26 @@ function formatMoney(value: number | string | undefined | null) {
   return Number.isInteger(amount) ? String(amount) : amount.toFixed(2)
 }
 
-// 获取某个等级的会员套餐（从props.packages中查找）
-function tierPackage(tierKey: string): RechargePackage | null {
-  return props.packages.find((pkg) => pkg.packageCode.includes(tierKey)) ?? null
+function cardType(pkg: GiftCardPackage) {
+  return pkg.cardType === "MEMBER_CREDIT" ? "MEMBER_CREDIT" : "CREDIT"
+}
+
+function packageMemberTier(pkg: GiftCardPackage): MemberTierKey | null {
+  const structuredTier = normalizeMemberTier(pkg.requiredMemberTier)
+  if (structuredTier) return structuredTier
+  return MEMBER_GIFT_TIERS.find((tier) => pkg.packageCode.toLowerCase().includes(tier.key))?.key ?? null
+}
+
+const memberGiftPackages = computed(() =>
+  props.giftCardPackages.filter((pkg) => cardType(pkg) === "MEMBER_CREDIT" && pkg.priceAmount > 0),
+)
+
+function tierPackage(tierKey: MemberTierKey): GiftCardPackage | null {
+  return memberGiftPackages.value.find((pkg) => packageMemberTier(pkg) === tierKey) ?? null
 }
 
 // 简化数量调整逻辑
-function adjustMemberQty(tierKey: string, delta: number) {
+function adjustMemberQty(tierKey: MemberTierKey, delta: number) {
   const next = Math.max(0, (memberQty.value[tierKey] ?? 0) + delta)
   memberQty.value = { ...memberQty.value, [tierKey]: next }
 }
@@ -93,30 +109,32 @@ function adjustCreditQty(packageId: number, delta: number) {
 
 const sortedCreditPackages = computed(() =>
   [...props.giftCardPackages]
-    .filter(pkg => pkg.priceAmount > 0) // 过滤掉价格为0的套餐（如管理员专用套餐）
+    .filter((pkg) => cardType(pkg) === "CREDIT" && pkg.priceAmount > 0)
     .sort((a, b) => a.credits - b.credits),
 )
 
-// 计算算力礼品卡的折扣率（基于固定列表价，列表价以标准版会员套餐为基准设定）
-// 列表价 GIFT_CARD_LIST_PRICE_PER_CREDIT = 0.020，约为标准版会员单价(¥0.01475/算力)的135%
-// 最低折扣 GIFT_CARD_MIN_DISCOUNT = 0.98，即最优98折，确保不优于标准版会员礼品卡
-function getCreditCardDiscount(pkg: GiftCardPackage): number {
-  return calcCreditCardDiscount(pkg.priceAmount, pkg.credits)
+function normalizeDiscountRate(value: number | null | undefined) {
+  const rate = Number(value)
+  if (!Number.isFinite(rate) || rate <= 0) return null
+  return rate > 1 && rate <= 100 ? rate / 100 : rate
 }
 
-// 格式化折扣显示
-function formatDiscount(discount: number): string {
-  const rate = Math.round(discount * 100)
-  return `${rate}折`
+function giftCardDiscount(pkg: GiftCardPackage, fallback?: number): number {
+  const structuredRate = normalizeDiscountRate(pkg.discountRate)
+  if (structuredRate) return structuredRate
+  if (pkg.listPriceAmount && pkg.listPriceAmount > 0) {
+    return pkg.priceAmount / pkg.listPriceAmount
+  }
+  return fallback ?? calcCreditCardDiscount(pkg.priceAmount, pkg.credits)
 }
 
 const cartSummary = computed(() => {
   let count = 0
   let amount = 0
 
-  for (const tier of MEMBER_GIFT_TIERS) {
+  for (const [tierIndex, tier] of MEMBER_GIFT_TIERS.entries()) {
     const qty = memberQty.value[tier.key] ?? 0
-    if (qty <= 0) continue
+    if (qty <= 0 || !canBuyTier(tierIndex)) continue
     const pkg = tierPackage(tier.key)
     if (!pkg) continue
     count += qty
@@ -133,46 +151,30 @@ const cartSummary = computed(() => {
   return { count, amount }
 })
 
-async function checkout() {
-  // 收集所有需要结算的礼品卡
-  const memberPurchases: Array<{ pkg: RechargePackage; qty: number }> = []
-  const creditPurchases: Array<{ pkg: GiftCardPackage; qty: number }> = []
+function checkout() {
+  const purchases: Array<{ pkg: GiftCardPackage; quantity: number }> = []
 
-  for (const tier of MEMBER_GIFT_TIERS) {
+  for (const [tierIndex, tier] of MEMBER_GIFT_TIERS.entries()) {
     const qty = memberQty.value[tier.key] ?? 0
-    if (qty <= 0) continue
+    if (qty <= 0 || !canBuyTier(tierIndex)) continue
     const pkg = tierPackage(tier.key)
     if (!pkg) continue
-    memberPurchases.push({ pkg, qty })
+    purchases.push({ pkg, quantity: qty })
   }
 
   for (const pkg of sortedCreditPackages.value) {
     const qty = creditQty.value[pkg.id] ?? 0
     if (qty <= 0) continue
-    creditPurchases.push({ pkg, qty })
+    purchases.push({ pkg, quantity: qty })
   }
 
-  // 如果有会员套餐，先结算会员套餐（一次只能买一个）
-  if (memberPurchases.length > 0) {
-    emit("buyMemberPackage", memberPurchases[0].pkg)
-    // 清空所有数量
-    for (const { pkg } of memberPurchases) {
-      const tierKey = MEMBER_GIFT_TIERS.find(t => tierPackage(t.key)?.id === pkg.id)?.key || ''
-      memberQty.value = { ...memberQty.value, [tierKey]: 0 }
-    }
-    return
-  }
-
-  if (creditPurchases.length > 0) {
-    emit("buyCreditGift", creditPurchases.map(({ pkg, qty }) => ({ pkg, quantity: qty })))
-    creditQty.value = {
-      ...creditQty.value,
-      ...Object.fromEntries(creditPurchases.map(({ pkg }) => [pkg.id, 0])),
-    }
-  }
+  if (purchases.length === 0) return
+  emit("buyCreditGift", purchases)
+  memberQty.value = {}
+  creditQty.value = {}
 }
 
-function tierBadge(tierKey: string) {
+function tierBadge(tierKey: MemberTierKey) {
   const tier = MEMBER_GIFT_TIERS.find((item) => item.key === tierKey)
   return tier?.badge ?? null
 }
@@ -207,8 +209,8 @@ function canBuyTier(tierIndex: number): boolean {
 
     <section class="space-y-6">
       <div>
-        <h2 class="text-lg font-semibold text-sky-400">会员礼品卡</h2>
-        <p class="mt-1 text-xs text-slate-500">四档会员卡，购买对应等级会员后可赠送该等级或更低等级的礼品卡</p>
+        <h2 class="text-lg font-semibold text-sky-400">会员专属礼品卡</h2>
+        <p class="mt-1 text-xs text-slate-500">兑换为永久算力，不升级或延长会员；双方均需达到卡片要求的会员等级</p>
       </div>
 
       <div v-if="loading" class="rounded-2xl border border-slate-800 bg-slate-900/50 px-5 py-12 text-center text-sm text-slate-400">
@@ -257,26 +259,20 @@ function canBuyTier(tierIndex: number): boolean {
 
           <template v-if="tierPackage(tier.key)">
             <p class="mt-4 text-xs text-slate-500">
-              含 {{ tierPackage(tier.key)!.credits.toLocaleString() }} 算力
+              {{ tierPackage(tier.key)!.credits.toLocaleString() }} 永久算力
             </p>
             <div class="mt-2 space-y-1 text-[11px] leading-relaxed text-slate-400">
               <p>
                 <span class="text-slate-500">使用期限：</span>
-                <span class="font-medium text-white/85">不限时使用</span>
+                <span class="font-medium text-white/85">永久有效</span>
               </p>
               <p>
-                <span class="text-slate-500">扣减规则：</span>
-                <span class="font-medium text-white/85">兑换后优先消耗会员套餐算力，用尽后再扣礼品卡余额</span>
-              </p>
-            </div>
-            <div class="mt-2 space-y-1 text-[11px] leading-relaxed text-slate-400">
-              <p>
-                <span class="text-slate-500">使用期限：</span>
-                <span class="font-medium text-white/85">不限时使用</span>
+                <span class="text-slate-500">兑换要求：</span>
+                <span class="font-medium text-white/85">{{ tier.label }}及以上有效会员</span>
               </p>
               <p>
-                <span class="text-slate-500">扣减规则：</span>
-                <span class="font-medium text-white/85">兑换后优先消耗会员套餐算力，用尽后再扣礼品卡余额</span>
+                <span class="text-slate-500">到账方式：</span>
+                <span class="font-medium text-white/85">兑换后进入永久礼品卡余额</span>
               </p>
             </div>
 
@@ -286,16 +282,10 @@ function canBuyTier(tierIndex: number): boolean {
                   <span class="text-3xl font-bold tracking-tight text-white">
                     ¥{{ formatMoney(tierPackage(tier.key)!.priceAmount) }}
                   </span>
+                  <span class="text-xs font-semibold text-emerald-400">
+                    {{ formatChineseDiscount(giftCardDiscount(tierPackage(tier.key)!, tier.giftDiscount)) }}
+                  </span>
                 </div>
-                <p
-                  v-if="memberGiftOriginalPrice(tierPackage(tier.key)!.priceAmount, tier.giftDiscount)"
-                  class="mt-1 text-sm text-slate-600 line-through"
-                >
-                  ¥{{ formatMoney(memberGiftOriginalPrice(tierPackage(tier.key)!.priceAmount, tier.giftDiscount)) }}
-                </p>
-                <p class="mt-1 text-xs text-cyan-400">
-                  ¥{{ (tierPackage(tier.key)!.priceAmount / tierPackage(tier.key)!.credits).toFixed(4) }}/算力
-                </p>
               </div>
 
               <div class="qty-control">
@@ -320,7 +310,7 @@ function canBuyTier(tierIndex: number): boolean {
             </div>
           </template>
 
-          <p v-else class="mt-6 text-sm text-slate-500">套餐加载中</p>
+          <p v-else class="mt-6 text-sm text-slate-500">暂未上架</p>
         </article>
       </div>
     </section>
@@ -328,7 +318,7 @@ function canBuyTier(tierIndex: number): boolean {
     <section class="space-y-5">
       <div>
         <h2 class="text-lg font-semibold text-sky-400">算力礼品卡</h2>
-        <p class="mt-1 text-xs text-slate-500">固定面额，即买即送。购买金额越大折扣越多（最低98折起）</p>
+        <p class="mt-1 text-xs text-slate-500">固定永久算力面额，即买即送；面额越大越优惠</p>
       </div>
 
       <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -342,7 +332,7 @@ function canBuyTier(tierIndex: number): boolean {
 
             <div class="credit-gift-card__head">
               <CreditPowerIcon :size="34" class="credit-gift-card__icon" aria-hidden="true" />
-              <span class="credit-gift-card__credits">{{ pkg.credits.toLocaleString() }}</span>
+              <span class="credit-gift-card__credits">{{ pkg.credits.toLocaleString() }} <small>永久算力</small></span>
             </div>
 
             <div class="credit-gift-card__meta">
@@ -361,13 +351,10 @@ function canBuyTier(tierIndex: number): boolean {
             <div>
               <div class="flex items-baseline gap-1">
                 <span class="text-2xl font-bold text-white">¥{{ formatMoney(pkg.priceAmount) }}</span>
-                <span v-if="getCreditCardDiscount(pkg) < 1" class="ml-2 text-xs text-emerald-400">
-                  {{ formatDiscount(getCreditCardDiscount(pkg)) }}
+                <span v-if="giftCardDiscount(pkg) < 1" class="ml-2 text-xs text-emerald-400">
+                  {{ formatChineseDiscount(giftCardDiscount(pkg)) }}
                 </span>
               </div>
-              <p class="mt-1 text-[11px] text-slate-500">
-                ¥{{ (pkg.priceAmount / pkg.credits).toFixed(4) }}/算力
-              </p>
             </div>
           
             <div class="qty-control">
@@ -534,6 +521,13 @@ function canBuyTier(tierIndex: number): boolean {
   line-height: 1;
   letter-spacing: -0.03em;
   color: #fff;
+}
+
+.credit-gift-card__credits small {
+  margin-left: 4px;
+  color: rgb(148 163 184 / 0.88);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .credit-gift-card__meta {

@@ -13,7 +13,13 @@ from client.siliconflow_video_client import (
     SiliconFlowVideoTimeoutError,
 )
 from client.kling_video_client import KlingVideoClient, KlingVideoError, KlingVideoTimeoutError
-from client.openai_images_client import OpenAIImagesClient, OpenAIImagesError, OpenAIImagesTimeoutError
+from client.openai_images_client import (
+    OpenAIImagesClient,
+    OpenAIImagesError,
+    OpenAIImagesRequestNotSentError,
+    OpenAIImagesTimeoutError,
+)
+from client.provider_error import structured_failure_payload
 from config import (
     resolve_kling_api_key,
     resolve_kling_credentials,
@@ -258,13 +264,28 @@ class ImageGenerationHandler:
                     "billableUnits": len(urls),
                     "promptTokens": _optional_int(usage.get("promptTokens")),
                     "completionTokens": _optional_int(usage.get("completionTokens")),
+                    "providerCalled": True,
                 },
                 trace_id=trace_id,
             )
             LOGGER.info("image generation task %s completed traceId=%s images=%s", task_id, trace_id or "-", len(urls))
             return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id, "imageCount": len(urls)}
+        except OpenAIImagesRequestNotSentError as exc:
+            return self._mark_failed(
+                task_id,
+                "MODEL_PROVIDER_UNAVAILABLE",
+                str(exc),
+                trace_id,
+                structured_failure_payload(exc),
+            )
         except (SiliconFlowVideoTimeoutError, KlingVideoTimeoutError, OpenAIImagesTimeoutError) as exc:
-            return self._mark_failed(task_id, "MODEL_TIMEOUT", str(exc), trace_id)
+            return self._mark_failed(
+                task_id,
+                "MODEL_TIMEOUT",
+                str(exc),
+                trace_id,
+                structured_failure_payload(exc),
+            )
         except ProviderRegistryError as exc:
             return self._mark_failed(task_id, "MODEL_PROVIDER_UNAVAILABLE", str(exc), trace_id)
         except PromptRenderError as exc:
@@ -272,7 +293,13 @@ class ImageGenerationHandler:
         except InputImageError as exc:
             return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
         except (SiliconFlowVideoError, KlingVideoError, OpenAIImagesError) as exc:
-            return self._mark_failed(task_id, classify_model_error(str(exc)), str(exc), trace_id)
+            return self._mark_failed(
+                task_id,
+                classify_model_error(str(exc)),
+                str(exc),
+                trace_id,
+                structured_failure_payload(exc),
+            )
         except GeneratedImagePersistError as exc:
             return self._mark_failed(task_id, "MEDIA_PERSIST_FAILED", str(exc), trace_id)
         except BackendClientError:
@@ -326,7 +353,14 @@ class ImageGenerationHandler:
             api_key=resolve_siliconflow_api_key(model_config),
         )
 
-    def _mark_failed(self, task_id: int, error_code: str, error_message: str, trace_id: str | None) -> dict[str, Any]:
+    def _mark_failed(
+        self,
+        task_id: int,
+        error_code: str,
+        error_message: str,
+        trace_id: str | None,
+        failure_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         LOGGER.exception("image generation task %s failed traceId=%s errorCode=%s: %s", task_id, trace_id or "-", error_code, error_message)
         self._mark_processing_safe(task_id, progress=99, progress_message="Image generation failed", trace_id=trace_id)
         self.backend_client.mark_failed(
@@ -334,6 +368,7 @@ class ImageGenerationHandler:
             {
                 "errorCode": error_code,
                 "errorMessage": _limit_text(error_message, 4000),
+                **(failure_metadata or {}),
             },
             trace_id=trace_id,
         )

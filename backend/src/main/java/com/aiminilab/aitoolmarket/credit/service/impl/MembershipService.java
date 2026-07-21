@@ -9,6 +9,7 @@ import com.aiminilab.aitoolmarket.credit.entity.UserMembership;
 import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargeOrderMapper;
 import com.aiminilab.aitoolmarket.credit.mapper.UserMembershipMapper;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
+import com.aiminilab.aitoolmarket.credit.support.MembershipTier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -123,5 +124,28 @@ public class MembershipService {
     public UserMembership current(Long userId) {
         creditService.expireMembershipIfNeeded(userId);
         return membershipMapper.findByUserId(userId);
+    }
+
+    public void requireActiveTierAtLeast(Long userId, String requiredTierCode, String operation) {
+        MembershipTier requiredTier = MembershipTier.fromCode(requiredTierCode)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.SYSTEM_ERROR,
+                        "会员礼品卡等级配置无效"));
+
+        UserMembership membership = current(userId);
+        LocalDateTime now = LocalDateTime.now();
+        MembershipTier currentTier = membership == null
+                ? null
+                : MembershipTier.fromPackageCode(membership.getPackageCode()).orElse(null);
+        boolean active = membership != null
+                && "ACTIVE".equals(membership.getStatus())
+                && membership.getExpiresAt() != null
+                && membership.getExpiresAt().isAfter(now);
+        if (!active || currentTier == null || !currentTier.meetsOrExceeds(requiredTier)) {
+            String action = operation == null || operation.isBlank() ? "使用" : operation.trim();
+            throw new BusinessException(
+                    ErrorCode.FORBIDDEN,
+                    action + "此会员礼品卡需要有效的" + requiredTier.displayName() + "或更高等级会员");
+        }
     }
 }

@@ -5,6 +5,7 @@ import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
+import com.aiminilab.aitoolmarket.comic.service.ComicWorkflowResultProjector;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.task.dto.WorkerFailedRequest;
 import com.aiminilab.aitoolmarket.task.dto.WorkerSuccessRequest;
@@ -82,6 +83,7 @@ public class WorkflowExecutionService {
     private final WorkflowRootTaskFinalizer workflowRootTaskFinalizer;
     private final WorkflowConfirmationTokenService confirmationTokenService;
     private final AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService;
+    private final ComicWorkflowResultProjector comicWorkflowResultProjector;
 
     public WorkflowExecutionService(WorkflowDslService workflowDslService,
                                     WorkflowRunMapper workflowRunMapper,
@@ -94,7 +96,8 @@ public class WorkflowExecutionService {
                                     ObjectMapper objectMapper,
                                     @Lazy WorkflowRootTaskFinalizer workflowRootTaskFinalizer,
                                     WorkflowConfirmationTokenService confirmationTokenService,
-                                    AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService) {
+                                    AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService,
+                                    ComicWorkflowResultProjector comicWorkflowResultProjector) {
         this.workflowDslService = workflowDslService;
         this.workflowRunMapper = workflowRunMapper;
         this.workflowRunStepMapper = workflowRunStepMapper;
@@ -107,6 +110,7 @@ public class WorkflowExecutionService {
         this.workflowRootTaskFinalizer = workflowRootTaskFinalizer;
         this.confirmationTokenService = confirmationTokenService;
         this.delegatedToolCallLifecycleService = delegatedToolCallLifecycleService;
+        this.comicWorkflowResultProjector = comicWorkflowResultProjector;
     }
 
     @Transactional
@@ -362,6 +366,7 @@ public class WorkflowExecutionService {
         saveContext(run, context, node.id());
         if (node.type() == WorkflowNodeDefType.VIDEO_OUTPUT) {
             if (markRunSuccess(run)) {
+                comicWorkflowResultProjector.projectSucceeded(run.getId(), context);
                 finalizeRootTask(run, context);
             }
             return;
@@ -443,6 +448,7 @@ public class WorkflowExecutionService {
         }
         ObjectNode context = readContext(run);
         if (markRunSuccess(run)) {
+            comicWorkflowResultProjector.projectSucceeded(run.getId(), context);
             finalizeRootTask(run, context);
         }
     }
@@ -459,6 +465,7 @@ public class WorkflowExecutionService {
         run.setErrorMessage(limit(errorMessage, 1900));
         run.setFinishedAt(LocalDateTime.now());
         persistRunState(run, expectedStatus, RUN_FAILED);
+        comicWorkflowResultProjector.projectFailed(run.getId());
         AiTask rootTask = taskMapper.findById(run.getRootTaskId())
                 .orElseThrow(() -> new IllegalStateException("Workflow root task not found: " + run.getRootTaskId()));
         creditService.release(
@@ -507,13 +514,14 @@ public class WorkflowExecutionService {
     }
 
     private ObjectNode buildNodeInputs(WorkflowDsl dsl, WorkflowNodeDef node, ObjectNode context, JsonNode formInput) {
+        JsonNode workerFormInput = workerVisibleInput(formInput);
         ObjectNode inputs = objectMapper.createObjectNode();
-        inputs.set("form", formInput);
-        ObjectNode operationInput = formInput != null && formInput.isObject()
-                ? ((ObjectNode) formInput).deepCopy()
+        inputs.set("form", workerFormInput);
+        ObjectNode operationInput = workerFormInput != null && workerFormInput.isObject()
+                ? ((ObjectNode) workerFormInput).deepCopy()
                 : objectMapper.createObjectNode();
-        if (formInput != null && !formInput.isNull() && !formInput.isObject()) {
-            operationInput.set("value", formInput);
+        if (workerFormInput != null && !workerFormInput.isNull() && !workerFormInput.isObject()) {
+            operationInput.set("value", workerFormInput);
         }
         for (WorkflowEdgeDef edge : dsl.edges()) {
             if (!node.id().equals(edge.target())) {
@@ -530,7 +538,32 @@ public class WorkflowExecutionService {
         if (node.parameters() != null && !node.parameters().isMissingNode()) {
             inputs.set("parameters", node.parameters());
         }
+        removeInternalRequestIdentity(inputs);
         return inputs;
+    }
+
+    private JsonNode workerVisibleInput(JsonNode input) {
+        if (input == null || !input.isObject()) {
+            return input;
+        }
+        ObjectNode visible = ((ObjectNode) input).deepCopy();
+        visible.remove("__workflowRequestIdentity");
+        return visible;
+    }
+
+    private void removeInternalRequestIdentity(JsonNode value) {
+        if (value == null || value.isNull()) {
+            return;
+        }
+        if (value.isObject()) {
+            ObjectNode object = (ObjectNode) value;
+            object.remove("__workflowRequestIdentity");
+            object.elements().forEachRemaining(this::removeInternalRequestIdentity);
+            return;
+        }
+        if (value.isArray()) {
+            value.elements().forEachRemaining(this::removeInternalRequestIdentity);
+        }
     }
 
     private boolean dependenciesSucceeded(WorkflowDsl dsl,

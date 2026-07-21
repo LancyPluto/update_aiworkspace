@@ -73,6 +73,51 @@ class ModelVendorAccountDiscoveryApiTest {
     }
 
     @Test
+    void agnesAccountUsesModelsProbeWithoutChangingLinkedModelState() throws Exception {
+        HttpServer server = modelsServer("""
+                {
+                  "object": "list",
+                  "data": [
+                    {"id": "agnes-2.0-flash", "object": "model"}
+                  ]
+                }
+                """);
+        try {
+            String adminToken = loginAdmin();
+            Long accountId = createVendorAccount(adminToken, "agnes", "Agnes account probe",
+                    "http://127.0.0.1:%d/v1".formatted(server.getAddress().getPort()));
+            jdbcTemplate.update("""
+                    INSERT INTO agent_model_configs(vendor_account_id, display_name, config_code, provider, model_name,
+                                                    base_url, api_key, billing_unit, capabilities,
+                                                    enabled, agent_enabled, last_test_success)
+                    VALUES(?, 'Agnes Image', 'agnes-account-probe-model', 'agnes_images', 'agnes-image-2.1-flash',
+                           '', '', 'IMAGE_TOKEN', '["IMAGE_GENERATION"]',
+                           0, 0, 0)
+                    """, accountId);
+            Long modelId = jdbcTemplate.queryForObject(
+                    "SELECT id FROM agent_model_configs WHERE config_code='agnes-account-probe-model'",
+                    Long.class);
+
+            mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
+                            .header("Authorization", "Bearer " + adminToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.success").value(true))
+                    .andExpect(jsonPath("$.data.provider").value("agnes"))
+                    .andExpect(jsonPath("$.data.modelName").value(""))
+                    .andExpect(jsonPath("$.data.account.healthStatus").value("OK"));
+
+            Boolean enabled = jdbcTemplate.queryForObject(
+                    "SELECT enabled FROM agent_model_configs WHERE id=?", Boolean.class, modelId);
+            Boolean lastTestSuccess = jdbcTemplate.queryForObject(
+                    "SELECT last_test_success FROM agent_model_configs WHERE id=?", Boolean.class, modelId);
+            assertThat(enabled).isFalse();
+            assertThat(lastTestSuccess).isFalse();
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void minimaxAccountUsesModelsProbeInsteadOfSendingAChatRequest() throws Exception {
         HttpServer server = modelsServer("""
                 {

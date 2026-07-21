@@ -16,6 +16,17 @@ import {
 } from "lucide-react"
 import type { AgentModelConfig } from "@/lib/api/types"
 
+export interface NodeParameterDefinition {
+  name: string
+  label: string
+  type: "string" | "number" | "boolean" | "select" | "model_selector"
+  default?: unknown
+  options?: Array<{ label: string; value: string }>
+  description?: string
+  min?: number
+  step?: number
+}
+
 export interface NodeTypeDefinition {
   type: string
   category: string
@@ -37,13 +48,7 @@ export interface NodeTypeDefinition {
   }>
   inputSlots: Array<{ name: string; type: string; label: string }>
   outputSlots: Array<{ name: string; type: string; label: string }>
-  parameters?: Array<{
-    name: string
-    label: string
-    type: "string" | "number" | "boolean" | "select" | "model_selector"
-    default?: unknown
-    options?: Array<{ label: string; value: string }>
-  }>
+  parameters?: NodeParameterDefinition[]
 }
 
 export const NODE_TYPES: NodeTypeDefinition[] = [

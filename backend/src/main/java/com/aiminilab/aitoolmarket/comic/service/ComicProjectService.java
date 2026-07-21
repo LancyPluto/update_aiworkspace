@@ -401,27 +401,39 @@ public class ComicProjectService {
         ComicEpisode episode = requireEpisode(userId, projectId, episodeId);
         ComicShot shot = shotMapper.selectInEpisode(shotId, episodeId);
         if (shot == null) throw notFound("分镜不存在");
+        List<ComicShot> episodeShots = shotMapper.selectByEpisode(episodeId);
         ObjectNode input = objectMapper.createObjectNode();
-        input.put("productionMode", "SHOT_VIDEO");
-        input.put("operationHandlerKey", "comic.shot_video");
+        input.put("sourceMode", "IMPORT");
+        input.put("storyTheme", project.getTitle());
+        input.put("scriptText", episode.getScriptText());
+        input.put("productionMode", "SHOT_PIPELINE");
+        ArrayNode handlerKeys = input.putArray("operationHandlerKeys");
+        handlerKeys.add("comic.shot_tts");
+        handlerKeys.add("comic.shot_keyframe");
+        handlerKeys.add("comic.shot_video");
+        input.put("projectId", projectId);
+        input.put("episodeId", episodeId);
+        input.put("shotId", shotId);
         input.put("comicProjectId", projectId);
         input.put("comicEpisodeId", episodeId);
         input.put("comicShotId", shotId);
         input.put("aspectRatio", project.getAspectRatio());
-        input.put("visualStyle", project.getVisualStyle());
-        input.set("shot", objectMapper.valueToTree(toShotDetail(shot)));
+        putIfPresent(input, "visualStyle", project.getVisualStyle());
+        input.set("shot", toWorkerShot(episodeShots, shot));
         ArrayNode refs = input.putArray("referenceAssetVersions");
         for (Long versionId : readLongList(shot.getCharacterVersionIdsJson())) {
             ComicCharacterVersion version = characterVersionMapper.selectById(versionId);
             if (version != null) {
                 ObjectNode ref = refs.addObject();
                 ref.put("assetType", "CHARACTER");
+                ref.put("assetVersionId", version.getId());
                 ref.put("versionId", version.getId());
                 ref.put("visualPrompt", version.getVisualPrompt());
-                ArrayNode urls = ref.putArray("imageUrls");
-                addIfPresent(urls, version.getFrontImageUrl());
-                addIfPresent(urls, version.getSideImageUrl());
-                addIfPresent(urls, version.getBackImageUrl());
+                ref.put("status", version.getStatus());
+                ObjectNode views = ref.putObject("views");
+                putIfPresent(views, "front", version.getFrontImageUrl());
+                putIfPresent(views, "side", version.getSideImageUrl());
+                putIfPresent(views, "back", version.getBackImageUrl());
             }
         }
         if (shot.getSceneVersionId() != null) {
@@ -429,14 +441,62 @@ public class ComicProjectService {
             if (version != null) {
                 ObjectNode ref = refs.addObject();
                 ref.put("assetType", "SCENE");
+                ref.put("assetVersionId", version.getId());
                 ref.put("versionId", version.getId());
                 ref.put("visualPrompt", version.getVisualPrompt());
-                ArrayNode urls = ref.putArray("imageUrls");
-                addIfPresent(urls, version.getAnchorImageUrl());
+                ref.put("status", version.getStatus());
+                ArrayNode anchors = ref.putArray("anchors");
+                if (!blank(version.getAnchorImageUrl())) {
+                    anchors.addObject().put("role", "primary").put("url", version.getAnchorImageUrl());
+                }
             }
         }
         input.put("episodeTitle", episode.getTitle());
         return input;
+    }
+
+    private ObjectNode toWorkerShot(List<ComicShot> episodeShots, ComicShot shot) {
+        int startMs = episodeShots.stream()
+                .filter(item -> item.getSequenceNo() != null && shot.getSequenceNo() != null
+                        && item.getSequenceNo() < shot.getSequenceNo())
+                .mapToInt(item -> item.getDurationMs() == null ? 0 : item.getDurationMs())
+                .sum();
+        int durationMs = shot.getDurationMs() == null ? 0 : shot.getDurationMs();
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("shotId", String.valueOf(shot.getId()));
+        result.put("shotVersionId", shot.getId() + ":r" + value(shot.getRevision()));
+        result.put("order", shot.getSequenceNo());
+        ObjectNode timecode = result.putObject("timecode");
+        timecode.put("startMs", startMs);
+        timecode.put("endMs", startMs + durationMs);
+        timecode.put("targetDurationMs", durationMs);
+        ObjectNode camera = result.putObject("camera");
+        putIfPresent(camera, "shotSize", shot.getShotScale());
+        putIfPresent(camera, "angle", shot.getCameraAngle());
+        putIfPresent(camera, "movement", shot.getCameraMovement());
+        ObjectNode performance = result.putObject("performance");
+        putIfPresent(performance, "emotion", shot.getEmotion());
+        result.put("visualDescription", shot.getVisualDescription());
+        ObjectNode audio = result.putObject("audio");
+        putIfPresent(audio, "dialogue", shot.getDialogue());
+        putIfPresent(audio, "narration", shot.getNarration());
+        putIfPresent(audio, "bgmMood", shot.getBgmCue());
+        ArrayNode sfx = audio.putArray("sfx");
+        addIfPresent(sfx, shot.getSoundEffect());
+        ObjectNode references = result.putObject("references");
+        ArrayNode characterIds = references.putArray("characterVersionIds");
+        readLongList(shot.getCharacterVersionIdsJson()).forEach(characterIds::add);
+        ArrayNode sceneIds = references.putArray("sceneVersionIds");
+        if (shot.getSceneVersionId() != null) sceneIds.add(shot.getSceneVersionId());
+        ObjectNode prompts = result.putObject("prompts");
+        putIfPresent(prompts, "image", shot.getFirstFramePrompt());
+        putIfPresent(prompts, "video", shot.getVideoPrompt());
+        putIfPresent(prompts, "negative", shot.getNegativePrompt());
+        ObjectNode continuity = result.putObject("continuity");
+        if (shot.getDependsOnShotId() != null) {
+            continuity.put("dependsOnShotId", String.valueOf(shot.getDependsOnShotId()));
+        }
+        return result;
     }
 
     ComicProject requireProject(Long userId, Long projectId) {
@@ -569,24 +629,43 @@ public class ComicProjectService {
     }
 
     private ComicDtos.EpisodeDetail toEpisodeDetail(ComicEpisode episode) {
+        List<ComicShot> shots = shotMapper.selectByEpisode(episode.getId());
+        Map<Long, ComicShotAttempt> selectedAttempts = new HashMap<>();
+        for (ComicShotAttempt attempt : attemptMapper.selectSelectedByEpisode(episode.getId())) {
+            selectedAttempts.put(attempt.getShotId(), attempt);
+        }
         return new ComicDtos.EpisodeDetail(
                 episode.getId(), episode.getProjectId(), episode.getEpisodeNo(), episode.getTitle(),
                 episode.getScriptSourceType(), episode.getScriptFileName(), episode.getScriptText(),
                 episode.getStatus(), value(episode.getRevision()),
-                shotMapper.selectByEpisode(episode.getId()).stream().map(this::toShotDetail).toList(),
+                shots.stream().map(shot -> toShotDetail(shot, selectedAttempts.get(shot.getId()))).toList(),
                 episode.getStoryboardLockedAt(), episode.getAssetsConfirmedAt(),
                 episode.getCreatedAt(), episode.getUpdatedAt()
         );
     }
 
     private ComicDtos.ShotDetail toShotDetail(ComicShot shot) {
+        return toShotDetail(shot, null);
+    }
+
+    private ComicDtos.ShotDetail toShotDetail(ComicShot shot, ComicShotAttempt selectedAttempt) {
         return new ComicDtos.ShotDetail(
                 shot.getId(), shot.getShotKey(), shot.getSequenceNo(), shot.getDurationMs(), shot.getShotScale(),
                 shot.getCameraAngle(), shot.getCameraMovement(), shot.getEmotion(), shot.getVisualDescription(),
                 shot.getDialogue(), shot.getNarration(), shot.getSoundEffect(), shot.getBgmCue(),
                 shot.getFirstFramePrompt(), shot.getVideoPrompt(), shot.getNegativePrompt(),
                 readLongList(shot.getCharacterVersionIdsJson()), shot.getSceneVersionId(),
-                shot.getDependsOnShotId(), shot.getSelectedAttemptId(), shot.getStatus(), value(shot.getRevision())
+                shot.getDependsOnShotId(), shot.getSelectedAttemptId(), toAttemptDetail(selectedAttempt),
+                shot.getStatus(), value(shot.getRevision())
+        );
+    }
+
+    private ComicDtos.ShotAttemptDetail toAttemptDetail(ComicShotAttempt attempt) {
+        if (attempt == null) return null;
+        return new ComicDtos.ShotAttemptDetail(
+                attempt.getId(), attempt.getShotId(), attempt.getAttemptNo(), attempt.getStatus(),
+                attempt.getWorkflowRunId(), attempt.getRootTaskId(), readJson(attempt.getResultJson()),
+                attempt.getErrorCode(), attempt.getErrorMessage(), attempt.getStartedAt(), attempt.getFinishedAt()
         );
     }
 
@@ -658,6 +737,10 @@ public class ComicProjectService {
 
     private void addIfPresent(ArrayNode array, String value) {
         if (value != null && !value.isBlank()) array.add(value);
+    }
+
+    private void putIfPresent(ObjectNode object, String field, String value) {
+        if (value != null && !value.isBlank()) object.put(field, value);
     }
 
     private String normalizeAssetStatus(String status) {

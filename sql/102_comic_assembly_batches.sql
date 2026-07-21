@@ -1,0 +1,30 @@
+SET NAMES utf8mb4;
+
+CREATE TABLE IF NOT EXISTS comic_assembly_batches (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  episode_id BIGINT NOT NULL,
+  tool_code VARCHAR(128) NOT NULL,
+  client_request_id VARCHAR(128) NOT NULL,
+  shot_count INT NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'CREATING',
+  workflow_run_id BIGINT NULL,
+  root_task_id BIGINT NULL,
+  selected_shots_json MEDIUMTEXT NOT NULL,
+  result_json MEDIUMTEXT NULL,
+  final_video_url VARCHAR(2048) NULL,
+  subtitle_url VARCHAR(2048) NULL,
+  error_code VARCHAR(64) NULL,
+  error_message VARCHAR(2000) NULL,
+  confirmed_at DATETIME NOT NULL,
+  started_at DATETIME NULL,
+  finished_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_comic_assembly_user_request(user_id, client_request_id),
+  UNIQUE KEY uk_comic_assembly_workflow_run(workflow_run_id),
+  UNIQUE KEY uk_comic_assembly_root_task(root_task_id),
+  KEY idx_comic_assembly_episode_created(episode_id, created_at),
+  KEY idx_comic_assembly_reconcile(status, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

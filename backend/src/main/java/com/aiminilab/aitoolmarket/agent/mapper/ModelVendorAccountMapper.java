@@ -13,20 +13,63 @@ import java.util.List;
 public interface ModelVendorAccountMapper extends BaseMapper<ModelVendorAccount> {
 
     @Select("""
-            SELECT *
-            FROM model_vendor_accounts
-            WHERE COALESCE(is_deleted, 0) = 0
-            ORDER BY vendor_code ASC, id ASC
+            SELECT account.*,
+                   COALESCE(route.in_flight_count, 0) AS routing_in_flight_count,
+                   COALESCE(route.circuit_status, 'CLOSED') AS routing_circuit_status,
+                   route.cooldown_until AS routing_cooldown_until
+            FROM model_vendor_accounts account
+            LEFT JOIN (
+                SELECT vendor_account_id,
+                       SUM(in_flight_count) AS in_flight_count,
+                       CASE
+                           WHEN MAX(CASE WHEN circuit_status = 'OPEN' THEN 1 ELSE 0 END) = 1 THEN 'OPEN'
+                           WHEN MAX(CASE WHEN circuit_status = 'HALF_OPEN' THEN 1 ELSE 0 END) = 1 THEN 'HALF_OPEN'
+                           ELSE 'CLOSED'
+                       END AS circuit_status,
+                       MAX(cooldown_until) AS cooldown_until
+                FROM account_model_route_state
+                GROUP BY vendor_account_id
+            ) route ON route.vendor_account_id = account.id
+            WHERE COALESCE(account.is_deleted, 0) = 0
+            ORDER BY account.vendor_code ASC, account.id ASC
             """)
     List<ModelVendorAccount> findAllActive();
 
     @Select("""
-            SELECT *
-            FROM model_vendor_accounts
+            SELECT account.*,
+                   COALESCE(route.in_flight_count, 0) AS routing_in_flight_count,
+                   COALESCE(route.circuit_status, 'CLOSED') AS routing_circuit_status,
+                   route.cooldown_until AS routing_cooldown_until
+            FROM model_vendor_accounts account
+            LEFT JOIN (
+                SELECT vendor_account_id,
+                       SUM(in_flight_count) AS in_flight_count,
+                       CASE
+                           WHEN MAX(CASE WHEN circuit_status = 'OPEN' THEN 1 ELSE 0 END) = 1 THEN 'OPEN'
+                           WHEN MAX(CASE WHEN circuit_status = 'HALF_OPEN' THEN 1 ELSE 0 END) = 1 THEN 'HALF_OPEN'
+                           ELSE 'CLOSED'
+                       END AS circuit_status,
+                       MAX(cooldown_until) AS cooldown_until
+                FROM account_model_route_state
+                WHERE vendor_account_id = #{id}
+                GROUP BY vendor_account_id
+            ) route ON route.vendor_account_id = account.id
+            WHERE account.id = #{id}
+              AND COALESCE(account.is_deleted, 0) = 0
+            """)
+    ModelVendorAccount findActiveById(@Param("id") Long id);
+
+    @Update("""
+            UPDATE model_vendor_accounts
+            SET load_balance_enabled = #{enabled},
+                load_balance_weight = #{weight},
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = #{id}
               AND COALESCE(is_deleted, 0) = 0
             """)
-    ModelVendorAccount findActiveById(@Param("id") Long id);
+    int updateRouting(@Param("id") Long id,
+                      @Param("enabled") boolean enabled,
+                      @Param("weight") int weight);
 
     @Select("""
             SELECT *
@@ -38,11 +81,26 @@ public interface ModelVendorAccountMapper extends BaseMapper<ModelVendorAccount>
     ModelVendorAccount findActiveByIdForUpdate(@Param("id") Long id);
 
     @Select("""
-            SELECT *
-            FROM model_vendor_accounts
-            WHERE vendor_code = #{vendorCode}
-              AND COALESCE(is_deleted, 0) = 0
-            ORDER BY id ASC
+            SELECT account.*,
+                   COALESCE(route.in_flight_count, 0) AS routing_in_flight_count,
+                   COALESCE(route.circuit_status, 'CLOSED') AS routing_circuit_status,
+                   route.cooldown_until AS routing_cooldown_until
+            FROM model_vendor_accounts account
+            LEFT JOIN (
+                SELECT vendor_account_id,
+                       SUM(in_flight_count) AS in_flight_count,
+                       CASE
+                           WHEN MAX(CASE WHEN circuit_status = 'OPEN' THEN 1 ELSE 0 END) = 1 THEN 'OPEN'
+                           WHEN MAX(CASE WHEN circuit_status = 'HALF_OPEN' THEN 1 ELSE 0 END) = 1 THEN 'HALF_OPEN'
+                           ELSE 'CLOSED'
+                       END AS circuit_status,
+                       MAX(cooldown_until) AS cooldown_until
+                FROM account_model_route_state
+                GROUP BY vendor_account_id
+            ) route ON route.vendor_account_id = account.id
+            WHERE account.vendor_code = #{vendorCode}
+              AND COALESCE(account.is_deleted, 0) = 0
+            ORDER BY account.id ASC
             """)
     List<ModelVendorAccount> findActiveByVendorCode(@Param("vendorCode") String vendorCode);
 
@@ -71,13 +129,15 @@ public interface ModelVendorAccountMapper extends BaseMapper<ModelVendorAccount>
                                               balance_query_mode, balance_amount,
                                               balance_currency, balance_status, balance_low_threshold,
                                               balance_updated_at, balance_error_message, health_status,
+                                              health_message, health_checked_at,
                                               enabled, is_deleted, created_at, updated_at)
             VALUES(#{account.vendorCode}, #{account.accountName}, #{account.baseUrl}, #{account.apiKey},
                    #{account.extraAuthJson}, #{account.consoleUrl}, #{account.balanceUrl},
                    #{account.consoleCookie}, #{account.consoleCookieStatus},
                    #{account.balanceQueryMode}, #{account.balanceAmount}, #{account.balanceCurrency},
                    #{account.balanceStatus}, #{account.balanceLowThreshold}, #{account.balanceUpdatedAt},
-                   #{account.balanceErrorMessage}, #{account.healthStatus}, #{account.enabled},
+                   #{account.balanceErrorMessage}, #{account.healthStatus},
+                   #{account.healthMessage}, #{account.healthCheckedAt}, #{account.enabled},
                    COALESCE(#{account.deleted}, 0), #{account.createdAt}, #{account.updatedAt})
             """)
     @Options(useGeneratedKeys = true, keyProperty = "account.id")
@@ -102,6 +162,8 @@ public interface ModelVendorAccountMapper extends BaseMapper<ModelVendorAccount>
                 balance_updated_at = #{account.balanceUpdatedAt},
                 balance_error_message = #{account.balanceErrorMessage},
                 health_status = #{account.healthStatus},
+                health_message = #{account.healthMessage},
+                health_checked_at = #{account.healthCheckedAt},
                 enabled = #{account.enabled},
                 updated_at = #{account.updatedAt}
             WHERE id = #{account.id}

@@ -68,7 +68,7 @@ public interface WorkflowRunStepMapper extends BaseMapper<WorkflowRunStep> {
             SET status = 'CANCELLED', revision = revision + 1,
                 error_message = #{reason}, finished_at = CURRENT_TIMESTAMP
             WHERE run_id = #{runId}
-              AND status IN ('PENDING', 'READY', 'QUEUED', 'RUNNING', 'AWAITING_USER')
+              AND status IN ('PENDING', 'READY', 'QUEUED', 'RUNNING', 'AWAITING_USER', 'AWAITING_FUNDS')
             """)
     int cancelActiveByRunId(@Param("runId") Long runId, @Param("reason") String reason);
 
@@ -149,6 +149,24 @@ public interface WorkflowRunStepMapper extends BaseMapper<WorkflowRunStep> {
                               @Param("attemptId") Long attemptId,
                               @Param("outputJson") String outputJson,
                               @Param("expectedStatuses") List<String> expectedStatuses);
+
+    @Update("""
+            UPDATE workflow_run_steps
+            SET status = 'AWAITING_FUNDS',
+                revision = revision + 1,
+                output_json = #{outputJson},
+                error_message = #{errorMessage},
+                finished_at = NULL
+            WHERE id = #{stepId}
+              AND revision = #{expectedRevision}
+              AND current_attempt_id = #{attemptId}
+              AND status = 'RUNNING'
+            """)
+    int markActiveAttemptAwaitingFunds(@Param("stepId") Long stepId,
+                                       @Param("expectedRevision") Long expectedRevision,
+                                       @Param("attemptId") Long attemptId,
+                                       @Param("outputJson") String outputJson,
+                                       @Param("errorMessage") String errorMessage);
 
     @Update("""
             <script>

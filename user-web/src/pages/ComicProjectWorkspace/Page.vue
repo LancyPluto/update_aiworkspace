@@ -123,6 +123,7 @@ async function pollEpisodeStatus() {
     refreshError.value = null
     syncEpisode(result)
     if (comicEpisodeGenerationStatus(result.status)) scheduleEpisodeStatusPoll()
+    else await refreshProject()
   } catch (pollError) {
     if (controller.signal.aborted || episode.value?.id !== currentEpisode.id) return
     clearEpisodeStatusPoll()
@@ -134,6 +135,7 @@ async function pollEpisodeStatus() {
 
 async function updateEpisodeQuery(episodeId?: number | null) {
   const query = { ...route.query }
+  delete query.episodeId
   if (episodeId == null) delete query.episode
   else query.episode = String(episodeId)
   await router.replace({ name: "ComicProjectWorkspace", params: { projectId: props.projectId }, query })
@@ -184,7 +186,7 @@ async function loadProject() {
   try {
     const result = await comicProjectApi.get(props.projectId, { token: auth.token, signal: controller.signal })
     project.value = result
-    const queryEpisodeId = Number(route.query.episode)
+    const queryEpisodeId = Number(route.query.episode ?? route.query.episodeId)
     const targetId = Number.isFinite(queryEpisodeId) && queryEpisodeId > 0
       ? queryEpisodeId
       : result.currentEpisodeId ?? result.episodes?.[0]?.id ?? null

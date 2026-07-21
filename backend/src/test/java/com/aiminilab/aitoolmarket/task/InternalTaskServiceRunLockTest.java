@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.task;
 
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
+import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.task.dto.ProviderCheckpointRequest;
 import com.aiminilab.aitoolmarket.task.dto.ProviderCheckpointResponse;
 import com.aiminilab.aitoolmarket.task.dto.WorkerProcessingRequest;
@@ -8,8 +9,10 @@ import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
 import com.aiminilab.aitoolmarket.task.service.impl.InternalTaskServiceImpl;
+import com.aiminilab.aitoolmarket.task.support.ProviderCheckpointLimits;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowRunLockService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -26,13 +29,19 @@ import org.springframework.transaction.support.AbstractPlatformTransactionManage
 import org.springframework.transaction.support.DefaultTransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -107,6 +116,63 @@ class InternalTaskServiceRunLockTest {
                 0,
                 "{\"providerTaskId\":\"provider-31\"}"
         );
+    }
+
+    @Test
+    void providerCheckpointAcceptsCompletedChineseResultJustAboveLegacyLimit() {
+        ObjectNode checkpoint = objectMapper.createObjectNode();
+        checkpoint.put("kind", "COMIC_OPERATION");
+        checkpoint.put("status", "COMPLETED");
+        checkpoint.putObject("result")
+                .putObject("script")
+                .put("screenplay", "中".repeat(20_000));
+        String checkpointJson = checkpoint.toString();
+        assertThat(checkpointJson.getBytes(StandardCharsets.UTF_8).length)
+                .isGreaterThan(60_000)
+                .isLessThan(ProviderCheckpointLimits.MAX_PERSISTED_BYTES);
+
+        AiTask before = workflowChildTask(33L, "claim-33");
+        before.setProviderCheckpointVersion(0);
+        AiTask saved = workflowChildTask(33L, "claim-33");
+        saved.setProviderCheckpointJson(checkpointJson);
+        saved.setProviderCheckpointVersion(1);
+        when(taskMapper.findById(33L)).thenReturn(Optional.of(before), Optional.of(saved));
+        when(taskMapper.updateProviderCheckpointGuarded(33L, "claim-33", 0, checkpointJson))
+                .thenReturn(1);
+
+        ProviderCheckpointResponse response = service.saveProviderCheckpoint(
+                33L,
+                new ProviderCheckpointRequest(checkpoint, 0, "claim-33")
+        );
+
+        assertThat(response.checkpoint()).isEqualTo(checkpoint);
+        assertThat(response.version()).isEqualTo(1);
+    }
+
+    @Test
+    void providerCheckpointRejectsResultAboveHardLimitBeforeDatabaseWrite() {
+        ObjectNode checkpoint = objectMapper.createObjectNode();
+        checkpoint.put("kind", "COMIC_OPERATION");
+        checkpoint.put("status", "COMPLETED");
+        checkpoint.putObject("result")
+                .putObject("script")
+                .put("screenplay", "中".repeat(ProviderCheckpointLimits.MAX_PERSISTED_BYTES / 3 + 1));
+        assertThat(checkpoint.toString().getBytes(StandardCharsets.UTF_8).length)
+                .isGreaterThan(ProviderCheckpointLimits.MAX_PERSISTED_BYTES);
+
+        AiTask before = workflowChildTask(34L, "claim-34");
+        before.setProviderCheckpointVersion(0);
+        when(taskMapper.findById(34L)).thenReturn(Optional.of(before));
+
+        assertThatThrownBy(() -> service.saveProviderCheckpoint(
+                34L,
+                new ProviderCheckpointRequest(checkpoint, 0, "claim-34")
+        ))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("检查点过大");
+
+        verify(taskMapper, never()).updateProviderCheckpointGuarded(any(), any(), anyInt(), any());
+        verify(workflowRunLockService, never()).requireByChildTaskId(any());
     }
 
     @Test

@@ -53,12 +53,19 @@ public class ComicGenerationBatchService {
         if (!Boolean.TRUE.equals(request.confirmed())) {
             throw invalid("请确认参考素材和预计费用后再开始生成");
         }
-        ComicGenerationBatch existing = batchMapper.selectByRequest(userId, request.clientRequestId());
+        String clientRequestId = request.clientRequestId().trim();
+        ComicGenerationBatch existing = batchMapper.selectByRequest(userId, clientRequestId);
         if (existing != null) {
             ensureSameRequest(existing, projectId, episodeId, request.toolCode(), request);
             return detail(existing);
         }
-        ComicEpisode episode = projectService.requireEpisode(userId, projectId, episodeId);
+        ComicEpisode episode = episodeMapper.selectOwnedForUpdate(projectId, episodeId, userId);
+        if (episode == null) throw notFound("漫剧剧集不存在");
+        existing = batchMapper.selectByRequest(userId, clientRequestId);
+        if (existing != null) {
+            ensureSameRequest(existing, projectId, episodeId, request.toolCode(), request);
+            return detail(existing);
+        }
         if (!Set.of("ASSETS_CONFIRMED", "GENERATING").contains(episode.getStatus())) {
             throw invalid("必须先锁定分镜并确认角色与场景素材");
         }
@@ -74,7 +81,7 @@ public class ComicGenerationBatchService {
         batch.setEpisodeId(episodeId);
         batch.setBatchType("SHOT_VIDEO");
         batch.setToolCode(defaultValue(request.toolCode(), DEFAULT_TOOL_CODE));
-        batch.setClientRequestId(request.clientRequestId().trim());
+        batch.setClientRequestId(clientRequestId);
         batch.setMaxParallelism(request.maxParallelism() == null ? 4 : request.maxParallelism());
         batch.setEstimatedCredits(request.estimatedCredits());
         batch.setStatus("CREATED");
@@ -85,7 +92,7 @@ public class ComicGenerationBatchService {
         try {
             batchMapper.insert(batch);
         } catch (DuplicateKeyException duplicate) {
-            ComicGenerationBatch concurrent = batchMapper.selectByRequest(userId, request.clientRequestId());
+            ComicGenerationBatch concurrent = batchMapper.selectByRequest(userId, clientRequestId);
             if (concurrent == null) throw duplicate;
             ensureSameRequest(concurrent, projectId, episodeId, request.toolCode(), request);
             return detail(concurrent);
@@ -100,14 +107,24 @@ public class ComicGenerationBatchService {
     @Transactional
     public ComicDtos.BatchDetail createRetry(Long userId, Long projectId, Long episodeId, Long shotId,
                                               ComicDtos.RetryShotRequest request) {
-        ComicGenerationBatch existing = batchMapper.selectByRequest(userId, request.clientRequestId());
+        String clientRequestId = request.clientRequestId().trim();
+        ComicGenerationBatch existing = batchMapper.selectByRequest(userId, clientRequestId);
         if (existing != null) {
             ensureSameRequest(existing, projectId, episodeId, request.toolCode(), request);
             return detail(existing);
         }
-        ComicEpisode episode = projectService.requireEpisode(userId, projectId, episodeId);
+        ComicEpisode episode = episodeMapper.selectOwnedForUpdate(projectId, episodeId, userId);
+        if (episode == null) throw notFound("漫剧剧集不存在");
+        existing = batchMapper.selectByRequest(userId, clientRequestId);
+        if (existing != null) {
+            ensureSameRequest(existing, projectId, episodeId, request.toolCode(), request);
+            return detail(existing);
+        }
         if (!Set.of("ASSETS_CONFIRMED", "GENERATING", "COMPLETED").contains(episode.getStatus())) {
             throw invalid("当前阶段不能重新生成分镜");
+        }
+        if (batchMapper.countActiveByEpisode(episodeId) > 0) {
+            throw conflict("该剧集已有生成批次正在运行");
         }
         ComicShot shot = shotMapper.selectInEpisode(shotId, episodeId);
         if (shot == null) throw notFound("分镜不存在");
@@ -119,7 +136,7 @@ public class ComicGenerationBatchService {
         batch.setEpisodeId(episodeId);
         batch.setBatchType("SHOT_RETRY");
         batch.setToolCode(defaultValue(request.toolCode(), DEFAULT_TOOL_CODE));
-        batch.setClientRequestId(request.clientRequestId().trim());
+        batch.setClientRequestId(clientRequestId);
         batch.setMaxParallelism(1);
         batch.setStatus("CREATED");
         batch.setRequestJson(writeJson(request));
@@ -129,7 +146,7 @@ public class ComicGenerationBatchService {
         try {
             batchMapper.insert(batch);
         } catch (DuplicateKeyException duplicate) {
-            ComicGenerationBatch concurrent = batchMapper.selectByRequest(userId, request.clientRequestId());
+            ComicGenerationBatch concurrent = batchMapper.selectByRequest(userId, clientRequestId);
             if (concurrent == null) throw duplicate;
             ensureSameRequest(concurrent, projectId, episodeId, request.toolCode(), request);
             return detail(concurrent);

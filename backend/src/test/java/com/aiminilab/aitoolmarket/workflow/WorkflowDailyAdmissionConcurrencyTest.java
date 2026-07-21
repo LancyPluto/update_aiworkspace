@@ -267,8 +267,10 @@ class WorkflowDailyAdmissionConcurrencyTest {
         String billingPolicy = """
                 {"mode":"WORKFLOW_STEP","nodePolicies":{"worker":{
                   "maxCreditCost":40,
-                  "maxProviderCostCny":0.40,
+                  "estimatedProviderCostCny":0,
+                  "maxProviderCostCny":0,
                   "fallbackChargeCredits":5,
+                  "pricingSource":"TOOL_FALLBACK",
                   "staticParams":{},
                   "modelPricingSnapshot":null,
                   "pricingPolicy":{"markupRatio":1.0,"minCredits":0,

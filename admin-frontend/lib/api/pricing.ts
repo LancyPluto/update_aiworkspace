@@ -8,6 +8,8 @@ export interface PricingMargin {
   minCredits: number
   imageEstimateInputTokens?: number | null
   imageEstimateOutputTokens?: number | null
+  tokenEstimateInputTokens?: number | null
+  tokenEstimateOutputTokens?: number | null
   enabled: boolean
   remark?: string | null
 }

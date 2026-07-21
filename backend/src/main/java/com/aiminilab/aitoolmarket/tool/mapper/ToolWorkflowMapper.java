@@ -29,13 +29,12 @@ public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
               ON v.id = w.published_version_id
              AND v.workflow_id = w.id
             WHERE w.tool_id = #{toolId}
-              AND w.execution_enabled = 1
               AND w.published_version_id IS NOT NULL
             ORDER BY CASE WHEN w.workflow_name = 'default' THEN 0 ELSE 1 END,
                      w.id DESC
             LIMIT 1
             """)
-    ToolWorkflow selectExecutableCanonicalByToolId(@Param("toolId") Long toolId);
+    ToolWorkflow selectCanonicalPublishedSnapshotByToolId(@Param("toolId") Long toolId);
 
     @Select("""
             <script>
@@ -44,15 +43,14 @@ public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
             JOIN tool_workflow_versions v
               ON v.id = w.published_version_id
              AND v.workflow_id = w.id
-            WHERE w.execution_enabled = 1
-              AND w.published_version_id IS NOT NULL
+            WHERE w.published_version_id IS NOT NULL
               AND w.tool_id IN
               <foreach collection="toolIds" item="toolId" open="(" separator="," close=")">
                 #{toolId}
               </foreach>
             </script>
             """)
-    List<Long> selectExecutableToolIds(@Param("toolIds") List<Long> toolIds);
+    List<Long> selectPublishedSnapshotToolIds(@Param("toolIds") List<Long> toolIds);
 
     @Select("""
             SELECT w.*
@@ -67,8 +65,6 @@ public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
               AND COALESCE(t.is_deleted, 0) = 0
               AND t.execution_mode = 'WORKFLOW'
               AND t.billing_mode = 'WORKFLOW_STEP'
-              AND t.agent_surface_enabled = 1
-              AND w.execution_enabled = 1
               AND w.published_version_id IS NOT NULL
             ORDER BY CASE WHEN w.workflow_name = 'default' THEN 0 ELSE 1 END,
                      w.id DESC
@@ -84,8 +80,11 @@ public interface ToolWorkflowMapper extends BaseMapper<ToolWorkflow> {
                    w.draft_revision, w.published_version_id, w.execution_enabled,
                    w.created_by, w.updated_by, w.created_at, w.updated_at
             FROM tool_workflows w
-            JOIN tool_workflow_versions v ON v.id = w.published_version_id
-            WHERE w.tool_id = #{toolId} AND w.execution_enabled = 1
+            JOIN tool_workflow_versions v
+              ON v.id = w.published_version_id
+             AND v.workflow_id = w.id
+            WHERE w.tool_id = #{toolId}
+              AND w.published_version_id IS NOT NULL
             ORDER BY CASE WHEN w.workflow_name = 'default' THEN 0 ELSE 1 END, w.id DESC
             LIMIT 1
             """)

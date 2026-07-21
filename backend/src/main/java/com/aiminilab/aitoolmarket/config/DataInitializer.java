@@ -687,6 +687,10 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("ai_tasks", "user_deleted_at", "ALTER TABLE ai_tasks ADD COLUMN user_deleted_at DATETIME NULL");
         ensureColumn("ai_tasks", "model_config_id", "ALTER TABLE ai_tasks ADD COLUMN model_config_id BIGINT NULL");
         ensureIndex("ai_tasks", "idx_tasks_model_config", "CREATE INDEX idx_tasks_model_config ON ai_tasks(model_config_id)");
+        ensureColumn("ai_tasks", "selected_model_config_id", "ALTER TABLE ai_tasks ADD COLUMN selected_model_config_id BIGINT NULL");
+        ensureColumn("ai_tasks", "selected_vendor_account_id", "ALTER TABLE ai_tasks ADD COLUMN selected_vendor_account_id BIGINT NULL");
+        ensureColumn("ai_tasks", "current_route_attempt_id", "ALTER TABLE ai_tasks ADD COLUMN current_route_attempt_id BIGINT NULL");
+        ensureIndex("ai_tasks", "idx_ai_tasks_selected_route", "CREATE INDEX idx_ai_tasks_selected_route ON ai_tasks(selected_vendor_account_id, status, id)");
         ensureColumn("ai_tasks", "model_snapshot_json", "ALTER TABLE ai_tasks ADD COLUMN model_snapshot_json TEXT NULL");
         ensureColumn("ai_tasks", "claimed_by", "ALTER TABLE ai_tasks ADD COLUMN claimed_by VARCHAR(128) NULL");
         ensureColumn("ai_tasks", "claim_token", "ALTER TABLE ai_tasks ADD COLUMN claim_token VARCHAR(128) NULL");
@@ -873,6 +877,10 @@ public class DataInitializer implements CommandLineRunner {
                   balance_updated_at DATETIME NULL,
                   balance_error_message VARCHAR(512) NULL,
                   health_status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
+                  health_message VARCHAR(512) NULL,
+                  health_checked_at DATETIME NULL,
+                  load_balance_enabled TINYINT NOT NULL DEFAULT 0,
+                  load_balance_weight INT NOT NULL DEFAULT 100,
                   enabled TINYINT NOT NULL DEFAULT 1,
                   is_deleted TINYINT NOT NULL DEFAULT 0,
                   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -881,6 +889,54 @@ public class DataInitializer implements CommandLineRunner {
                 """);
         ensureColumn("model_vendor_accounts", "console_cookie", "ALTER TABLE model_vendor_accounts ADD COLUMN console_cookie TEXT NULL AFTER balance_url");
         ensureColumn("model_vendor_accounts", "console_cookie_status", "ALTER TABLE model_vendor_accounts ADD COLUMN console_cookie_status VARCHAR(20) NULL DEFAULT 'UNKNOWN' AFTER console_cookie");
+        ensureColumn("model_vendor_accounts", "health_message", "ALTER TABLE model_vendor_accounts ADD COLUMN health_message VARCHAR(512) NULL AFTER health_status");
+        ensureColumn("model_vendor_accounts", "health_checked_at", "ALTER TABLE model_vendor_accounts ADD COLUMN health_checked_at DATETIME NULL AFTER health_message");
+        ensureColumn("model_vendor_accounts", "load_balance_enabled", "ALTER TABLE model_vendor_accounts ADD COLUMN load_balance_enabled TINYINT NOT NULL DEFAULT 0 AFTER health_checked_at");
+        ensureColumn("model_vendor_accounts", "load_balance_weight", "ALTER TABLE model_vendor_accounts ADD COLUMN load_balance_weight INT NOT NULL DEFAULT 100 AFTER load_balance_enabled");
+        ensureTable("task_model_route_attempts", """
+                CREATE TABLE task_model_route_attempts (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  task_id BIGINT NOT NULL,
+                  attempt_no INT NOT NULL,
+                  model_config_id BIGINT NOT NULL,
+                  vendor_account_id BIGINT NOT NULL,
+                  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+                  delivery_state VARCHAR(32) NULL,
+                  failure_stage VARCHAR(64) NULL,
+                  error_code VARCHAR(64) NULL,
+                  error_message TEXT NULL,
+                  provider_error_code VARCHAR(128) NULL,
+                  provider_request_id VARCHAR(128) NULL,
+                  provider_charged TINYINT NULL,
+                  retry_after_seconds INT NULL,
+                  claim_token VARCHAR(128) NULL,
+                  started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  finished_at DATETIME NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_task_model_route_attempt(task_id, attempt_no),
+                  KEY idx_task_model_route_attempt_active(vendor_account_id, status, task_id),
+                  KEY idx_task_model_route_attempt_task(task_id, status)
+                )
+                """);
+        ensureTable("account_model_route_state", """
+                CREATE TABLE account_model_route_state (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  vendor_account_id BIGINT NOT NULL,
+                  model_config_id BIGINT NOT NULL,
+                  in_flight_count INT NOT NULL DEFAULT 0,
+                  circuit_status VARCHAR(32) NOT NULL DEFAULT 'CLOSED',
+                  consecutive_failures INT NOT NULL DEFAULT 0,
+                  cooldown_until DATETIME NULL,
+                  last_selected_at DATETIME NULL,
+                  version INT NOT NULL DEFAULT 0,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_account_model_route_state_model(model_config_id),
+                  KEY idx_account_model_route_state_account(vendor_account_id, circuit_status),
+                  KEY idx_account_model_route_state_cooldown(circuit_status, cooldown_until)
+                )
+                """);
         executeSql("""
                 UPDATE model_vendor_accounts
                 SET balance_currency = 'USD',
@@ -962,6 +1018,8 @@ public class DataInitializer implements CommandLineRunner {
                   price_amount DECIMAL(18,2) NOT NULL,
                   currency VARCHAR(8) NOT NULL DEFAULT 'CNY',
                   card_theme VARCHAR(32) NOT NULL DEFAULT 'classic',
+                  card_type VARCHAR(32) NOT NULL DEFAULT 'CREDIT',
+                  required_member_tier VARCHAR(32) NULL,
                   status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
                   sort_order INT NOT NULL DEFAULT 0,
                   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -976,6 +1034,8 @@ public class DataInitializer implements CommandLineRunner {
                   owner_user_id BIGINT NOT NULL,
                   original_user_id BIGINT NOT NULL,
                   credits INT NOT NULL,
+                  card_type VARCHAR(32) NOT NULL DEFAULT 'CREDIT',
+                  required_member_tier VARCHAR(32) NULL,
                   status VARCHAR(32) NOT NULL DEFAULT 'UNUSED',
                   recharge_order_id BIGINT NULL,
                   issuance_key VARCHAR(128) NULL,
@@ -988,6 +1048,10 @@ public class DataInitializer implements CommandLineRunner {
                   KEY idx_gift_cards_code (card_code)
                 )
                 """);
+        ensureColumn("gift_card_packages", "card_type", "ALTER TABLE gift_card_packages ADD COLUMN card_type VARCHAR(32) NOT NULL DEFAULT 'CREDIT' AFTER card_theme");
+        ensureColumn("gift_card_packages", "required_member_tier", "ALTER TABLE gift_card_packages ADD COLUMN required_member_tier VARCHAR(32) NULL AFTER card_type");
+        ensureColumn("gift_cards", "card_type", "ALTER TABLE gift_cards ADD COLUMN card_type VARCHAR(32) NOT NULL DEFAULT 'CREDIT' AFTER credits");
+        ensureColumn("gift_cards", "required_member_tier", "ALTER TABLE gift_cards ADD COLUMN required_member_tier VARCHAR(32) NULL AFTER card_type");
         ensureColumn("credit_accounts", "membership_balance", "ALTER TABLE credit_accounts ADD COLUMN membership_balance INT NOT NULL DEFAULT 0 AFTER balance");
         ensureColumn("credit_accounts", "gift_balance", "ALTER TABLE credit_accounts ADD COLUMN gift_balance INT NOT NULL DEFAULT 0 AFTER membership_balance");
         ensureColumn("credit_accounts", "permanent_balance", "ALTER TABLE credit_accounts ADD COLUMN permanent_balance INT NOT NULL DEFAULT 0 AFTER balance");
@@ -1094,11 +1158,15 @@ public class DataInitializer implements CommandLineRunner {
                   credits INT NOT NULL,
                   price_amount DECIMAL(18,2) NOT NULL,
                   item_type VARCHAR(32) NOT NULL DEFAULT 'GIFT_CARD',
+                  card_type_snapshot VARCHAR(32) NOT NULL DEFAULT 'CREDIT',
+                  required_member_tier_snapshot VARCHAR(32) NULL,
                   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                   KEY idx_recharge_order_items_order (order_id)
                 )
                 """);
+        ensureColumn("credit_recharge_order_items", "card_type_snapshot", "ALTER TABLE credit_recharge_order_items ADD COLUMN card_type_snapshot VARCHAR(32) NOT NULL DEFAULT 'CREDIT' AFTER item_type");
+        ensureColumn("credit_recharge_order_items", "required_member_tier_snapshot", "ALTER TABLE credit_recharge_order_items ADD COLUMN required_member_tier_snapshot VARCHAR(32) NULL AFTER card_type_snapshot");
         ensureTable("user_referrals", """
                 CREATE TABLE user_referrals (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -1157,6 +1225,8 @@ public class DataInitializer implements CommandLineRunner {
                   min_credits INT NOT NULL DEFAULT 0,
                   image_estimate_input_tokens INT NULL,
                   image_estimate_output_tokens INT NULL,
+                  token_estimate_input_tokens INT NULL,
+                  token_estimate_output_tokens INT NULL,
                   enabled TINYINT NOT NULL DEFAULT 1,
                   remark VARCHAR(255),
                   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1167,6 +1237,8 @@ public class DataInitializer implements CommandLineRunner {
                 """);
         ensureColumn("pricing_margins", "image_estimate_input_tokens", "ALTER TABLE pricing_margins ADD COLUMN image_estimate_input_tokens INT NULL AFTER min_credits");
         ensureColumn("pricing_margins", "image_estimate_output_tokens", "ALTER TABLE pricing_margins ADD COLUMN image_estimate_output_tokens INT NULL AFTER image_estimate_input_tokens");
+        ensureColumn("pricing_margins", "token_estimate_input_tokens", "ALTER TABLE pricing_margins ADD COLUMN token_estimate_input_tokens INT NULL AFTER image_estimate_output_tokens");
+        ensureColumn("pricing_margins", "token_estimate_output_tokens", "ALTER TABLE pricing_margins ADD COLUMN token_estimate_output_tokens INT NULL AFTER token_estimate_input_tokens");
         ensureTable("pricing_rules", """
                 CREATE TABLE pricing_rules (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,

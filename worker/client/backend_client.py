@@ -17,10 +17,18 @@ from observability.metrics import record_backend_request, record_lease_renew, re
 
 LOGGER = logging.getLogger(__name__)
 _CURRENT_CLAIM_TOKEN: ContextVar[str | None] = ContextVar("worker_claim_token", default=None)
+_CURRENT_ROUTE_ATTEMPT_ID: ContextVar[int | None] = ContextVar("worker_route_attempt_id", default=None)
 
 
 class BackendClientError(RuntimeError):
     pass
+
+
+class RouteFailoverRequested(BackendClientError):
+    def __init__(self, execution_context: dict[str, Any], route_attempt_id: int | None = None) -> None:
+        super().__init__("backend selected a replacement provider account")
+        self.execution_context = execution_context
+        self.route_attempt_id = route_attempt_id
 
 
 class BackendClient:
@@ -160,11 +168,52 @@ class BackendClient:
     ) -> dict[str, Any]:
         payload = dict(payload or {})
         self._attach_claim_token(payload, claim_token)
+        route_attempt_id = _CURRENT_ROUTE_ATTEMPT_ID.get()
+        if route_attempt_id is not None and "routeAttemptId" not in payload:
+            payload["routeAttemptId"] = route_attempt_id
         payload.setdefault("failureStage", _infer_failure_stage(str(payload.get("errorCode") or "")))
+        if _should_attempt_route_failover(payload):
+            try:
+                failover = self.request_route_failover(task_id, payload, trace_id=trace_id)
+            except BackendClientError:
+                LOGGER.warning(
+                    "route failover decision failed; falling back to terminal failure taskId=%s",
+                    task_id,
+                    exc_info=True,
+                )
+            else:
+                switched = bool(failover.get("switched")) or str(failover.get("action") or "").upper() == "SWITCH"
+                execution_context = failover.get("executionContext")
+                if switched and isinstance(execution_context, dict):
+                    route_attempt_id = failover.get("routeAttemptId")
+                    raise RouteFailoverRequested(
+                        execution_context,
+                        int(route_attempt_id) if route_attempt_id is not None else None,
+                    )
+        terminal_payload = _terminal_failure_payload(payload)
         response = self._request(
             "POST",
             f"/api/internal/v1/tasks/{task_id}/failed",
-            json_body=payload,
+            json_body=terminal_payload,
+            timeout=self.timeout,
+            trace_id=trace_id,
+        )
+        return self._parse_response(response)
+
+    def request_route_failover(
+        self,
+        task_id: int,
+        payload: dict[str, Any],
+        *,
+        trace_id: str | None = None,
+        claim_token: str | None = None,
+    ) -> dict[str, Any]:
+        failover_payload = dict(payload or {})
+        self._attach_claim_token(failover_payload, claim_token)
+        response = self._request(
+            "POST",
+            f"/api/internal/v1/tasks/{task_id}/route-failover",
+            json_body=failover_payload,
             timeout=self.timeout,
             trace_id=trace_id,
         )
@@ -282,6 +331,15 @@ def backend_claim_context(claim_token: str | None):
         _CURRENT_CLAIM_TOKEN.reset(token)
 
 
+@contextmanager
+def backend_route_context(route_attempt_id: int | None):
+    token = _CURRENT_ROUTE_ATTEMPT_ID.set(route_attempt_id)
+    try:
+        yield
+    finally:
+        _CURRENT_ROUTE_ATTEMPT_ID.reset(token)
+
+
 def _infer_failure_stage(error_code: str) -> str:
     normalized = (error_code or "").strip().upper()
     if normalized in {"INVALID_TASK_PARAMS", "PROMPT_VARIABLE_MISSING"}:
@@ -297,6 +355,38 @@ def _infer_failure_stage(error_code: str) -> str:
     if normalized.startswith("MODEL_"):
         return "PROVIDER_SUBMITTED"
     return "UNKNOWN"
+
+
+def _should_attempt_route_failover(payload: dict[str, Any]) -> bool:
+    retry_scope = str(payload.get("retryScope") or "").strip().upper()
+    delivery_state = str(payload.get("deliveryState") or "").strip().upper()
+    return (
+        retry_scope == "ACCOUNT"
+        and delivery_state in {"NOT_SENT", "REJECTED"}
+        and not payload.get("providerRequestId")
+        and payload.get("providerCharged") is not True
+    )
+
+
+def _terminal_failure_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    supported = {
+        "errorCode",
+        "errorMessage",
+        "failureStage",
+        "providerCharged",
+        "providerCostAmount",
+        "providerCostCurrency",
+        "providerErrorCode",
+        "providerRequestId",
+        "promptTokens",
+        "completionTokens",
+        "billableUnits",
+        "deliveryState",
+        "retryScope",
+        "retryAfterSeconds",
+        "claimToken",
+    }
+    return {key: value for key, value in payload.items() if key in supported}
 
 
 def _record_backend_operation_metric(path: str, status_code: int) -> None:

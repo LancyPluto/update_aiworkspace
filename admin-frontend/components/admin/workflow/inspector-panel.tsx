@@ -417,9 +417,14 @@ function ParamField({ param, value, onChange, modelOptions }: ParamFieldProps) {
           <Input
             type="number"
             value={String(value ?? "")}
-            onChange={(event) => onChange(Number(event.target.value))}
+            min={param.min}
+            step={param.step}
+            onChange={(event) => onChange(event.target.value === "" ? undefined : Number(event.target.value))}
             className="h-8 text-xs"
           />
+          {param.description ? (
+            <p className="text-[11px] leading-4 text-muted-foreground">{param.description}</p>
+          ) : null}
         </div>
       )
 
@@ -439,6 +444,9 @@ function ParamField({ param, value, onChange, modelOptions }: ParamFieldProps) {
               ))}
             </SelectContent>
           </Select>
+          {param.description ? (
+            <p className="text-[11px] leading-4 text-muted-foreground">{param.description}</p>
+          ) : null}
         </div>
       )
 

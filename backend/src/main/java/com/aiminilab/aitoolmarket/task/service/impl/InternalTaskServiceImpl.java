@@ -34,7 +34,9 @@ import com.aiminilab.aitoolmarket.task.dto.WorkerSuccessRequest;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import com.aiminilab.aitoolmarket.task.metrics.TaskMetrics;
+import com.aiminilab.aitoolmarket.task.routing.ModelRoutingService;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
+import com.aiminilab.aitoolmarket.task.support.ProviderCheckpointLimits;
 import com.aiminilab.aitoolmarket.task.support.TaskFailureMessage;
 import com.aiminilab.aitoolmarket.task.support.TaskParamMediaFields;
 import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
@@ -51,6 +53,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -81,6 +84,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     private final WorkflowRunLockService workflowRunLockService;
     private final PrivateAssetAccessService privateAssetAccessService;
     private final AppProperties appProperties;
+    private ModelRoutingService modelRoutingService;
 
     public InternalTaskServiceImpl(TaskMapper taskMapper, ToolMapper toolMapper,
                                    AgentModelConfigMapper agentModelConfigMapper,
@@ -116,6 +120,11 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         this.workflowRunLockService = workflowRunLockService;
         this.privateAssetAccessService = privateAssetAccessService;
         this.appProperties = appProperties;
+    }
+
+    @Autowired(required = false)
+    public void setModelRoutingService(ModelRoutingService modelRoutingService) {
+        this.modelRoutingService = modelRoutingService;
     }
 
     @Override
@@ -239,7 +248,8 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         }
         int expectedVersion = request.expectedVersion() == null ? -1 : request.expectedVersion();
         String checkpointJson = request.checkpoint().toString();
-        if (checkpointJson.getBytes(StandardCharsets.UTF_8).length > 60_000) {
+        if (checkpointJson.getBytes(StandardCharsets.UTF_8).length
+                > ProviderCheckpointLimits.MAX_PERSISTED_BYTES) {
             throw new BusinessException(ErrorCode.TASK_STATUS_INVALID, "供应商任务检查点过大");
         }
         lockWorkflowRunBeforeCoupledMutation(task);
@@ -257,6 +267,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                 rejectGuardedCallback(taskId, current, "PROVIDER_CHECKPOINT");
             }
         }
+        recordRouteProviderAccepted(taskId, claimToken, request.checkpoint());
         AiTask saved = findTask(taskId);
         return new ProviderCheckpointResponse(
                 taskId,
@@ -296,6 +307,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         if (isWorkflowStepTask(task)) {
             if (TaskStateMachine.isTerminal(task.getStatus())) {
                 workflowStepCallbackService.succeeded(taskId, request);
+                completeRoute(taskId, task.getStatus(), null);
                 return TaskStatusResponse.from(task);
             }
             if (!TaskStatus.PROCESSING.name().equals(task.getStatus())) {
@@ -319,12 +331,15 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                         "Workflow step attempt is no longer active"
                 );
             }
+            completeRouteSuccess(taskId, request);
             return TaskStatusResponse.from(findTask(taskId));
         }
         if (TaskStatus.SUCCESS.name().equals(task.getStatus())) {
+            completeRouteSuccess(taskId, request);
             return TaskStatusResponse.from(task);
         }
         if (TaskStatus.CANCELLED.name().equals(task.getStatus())) {
+            completeRoute(taskId, TaskStatus.CANCELLED.name(), null);
             return TaskStatusResponse.from(task);
         }
         if (!TaskStatus.PROCESSING.name().equals(task.getStatus())) {
@@ -346,6 +361,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             }
             rejectGuardedCallback(taskId, current, TaskStatus.SUCCESS.name());
         }
+        completeRouteSuccess(taskId, request);
         AiTool billingTool = toolMapper.findById(task.getToolId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
         ModelExecutionSnapshot snapshot = modelExecutionSnapshotService.parse(task.getModelSnapshotJson());
@@ -439,6 +455,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         if (isWorkflowStepTask(task)) {
             if (TaskStateMachine.isTerminal(task.getStatus())) {
                 workflowStepCallbackService.failed(taskId, request);
+                completeRoute(taskId, task.getStatus(), terminalFailure(task.getStatus(), request));
                 Long rootTaskId = resolveWorkflowRootTaskId(task);
                 return TaskStatusResponse.from(findTask(rootTaskId == null ? taskId : rootTaskId));
             }
@@ -459,12 +476,14 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                         "Workflow step attempt is no longer active"
                 );
             }
+            completeRoute(taskId, targetStatus, request);
             Long rootTaskId = resolveWorkflowRootTaskId(task);
             return TaskStatusResponse.from(findTask(rootTaskId == null ? taskId : rootTaskId));
         }
         if (TaskStatus.FAILED.name().equals(task.getStatus()) || TaskStatus.TIMEOUT.name().equals(task.getStatus())
                 || TaskStatus.SUCCESS.name().equals(task.getStatus())
                 || TaskStatus.CANCELLED.name().equals(task.getStatus())) {
+            completeRoute(taskId, task.getStatus(), terminalFailure(task.getStatus(), request));
             return TaskStatusResponse.from(task);
         }
         if (!TaskStatus.PROCESSING.name().equals(task.getStatus())) {
@@ -490,6 +509,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             }
             rejectGuardedCallback(taskId, current, targetStatus);
         }
+        completeRoute(taskId, targetStatus, request);
         creditService.release(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
         recordFailureCostIfPresent(task, request, targetStatus, errorCode);
         if (shouldMarkToolUnhealthy(errorCode)) {
@@ -535,6 +555,56 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                 request.providerCostAmount(), providerCostCurrency, null,
                 outcome, errorCode, normalizeFailureStage(request.failureStage()),
                 request.providerErrorCode(), request.providerRequestId(), request.providerCharged());
+    }
+
+    private void completeRoute(Long taskId, String outcome, WorkerFailedRequest failure) {
+        if (modelRoutingService == null) {
+            return;
+        }
+        if (failure == null) {
+            modelRoutingService.completeTask(taskId, outcome);
+        } else {
+            modelRoutingService.completeTask(taskId, outcome, failure);
+        }
+    }
+
+    private void completeRouteSuccess(Long taskId, WorkerSuccessRequest request) {
+        if (modelRoutingService != null) {
+            modelRoutingService.completeSuccess(taskId, request.providerRequestId(), request.providerCalled());
+        }
+    }
+
+    private void recordRouteProviderAccepted(Long taskId, String claimToken, JsonNode checkpoint) {
+        if (modelRoutingService == null) {
+            return;
+        }
+        modelRoutingService.recordProviderAccepted(
+                taskId,
+                claimToken,
+                checkpointProviderRequestId(checkpoint)
+        );
+    }
+
+    private String checkpointProviderRequestId(JsonNode checkpoint) {
+        if (checkpoint == null || !checkpoint.isObject()) {
+            return null;
+        }
+        for (String key : List.of("providerRequestId", "requestId", "providerTaskId", "taskId")) {
+            JsonNode value = checkpoint.get(key);
+            if (value != null && value.isValueNode()) {
+                String normalized = value.asText("").trim();
+                if (!normalized.isEmpty()) {
+                    return limitText(normalized, 128);
+                }
+            }
+        }
+        return null;
+    }
+
+    private WorkerFailedRequest terminalFailure(String status, WorkerFailedRequest request) {
+        return TaskStatus.FAILED.name().equals(status) || TaskStatus.TIMEOUT.name().equals(status)
+                ? request
+                : null;
     }
 
     private String normalizeFailureStage(String failureStage) {

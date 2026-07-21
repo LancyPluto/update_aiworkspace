@@ -12,6 +12,9 @@ public interface ComicShotAttemptMapper extends BaseMapper<ComicShotAttempt> {
     @Select("SELECT * FROM comic_shot_attempts WHERE batch_id = #{batchId} ORDER BY id")
     List<ComicShotAttempt> selectByBatch(@Param("batchId") Long batchId);
 
+    @Select("SELECT * FROM comic_shot_attempts WHERE batch_id = #{batchId} ORDER BY id FOR UPDATE")
+    List<ComicShotAttempt> selectByBatchForUpdate(@Param("batchId") Long batchId);
+
     @Select("SELECT * FROM comic_shot_attempts WHERE batch_id = #{batchId} AND status = 'PENDING' ORDER BY id LIMIT #{limit}")
     List<ComicShotAttempt> selectPending(@Param("batchId") Long batchId, @Param("limit") int limit);
 
@@ -21,7 +24,17 @@ public interface ComicShotAttemptMapper extends BaseMapper<ComicShotAttempt> {
     @Select("SELECT * FROM comic_shot_attempts WHERE id = #{attemptId} AND shot_id = #{shotId} LIMIT 1")
     ComicShotAttempt selectForShot(@Param("attemptId") Long attemptId, @Param("shotId") Long shotId);
 
-    @Select("SELECT COUNT(*) FROM comic_shot_attempts WHERE shot_id = #{shotId} AND status IN ('PENDING','DISPATCHING','RUNNING','AWAITING_USER','AWAITING_FUNDS')")
+    @Select("""
+            SELECT a.*
+            FROM comic_shots s
+            JOIN comic_shot_attempts a
+              ON a.id = s.selected_attempt_id AND a.shot_id = s.id
+            WHERE s.episode_id = #{episodeId}
+            ORDER BY s.sequence_no
+            """)
+    List<ComicShotAttempt> selectSelectedByEpisode(@Param("episodeId") Long episodeId);
+
+    @Select("SELECT COUNT(*) FROM comic_shot_attempts WHERE shot_id = #{shotId} AND status IN ('PENDING','DISPATCHING','RUNNING','AWAITING_USER','AWAITING_FUNDS','CANCELLING')")
     int countActiveByShot(@Param("shotId") Long shotId);
 
     @Update("""
@@ -47,4 +60,14 @@ public interface ComicShotAttemptMapper extends BaseMapper<ComicShotAttempt> {
                   @Param("resultJson") String resultJson, @Param("errorCode") String errorCode,
                   @Param("errorMessage") String errorMessage,
                   @Param("finishedAt") java.time.LocalDateTime finishedAt);
+
+    @Update("""
+            UPDATE comic_shot_attempts SET status = 'FAILED', error_code = #{errorCode},
+              error_message = #{errorMessage}, finished_at = #{finishedAt}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{attemptId} AND status = 'PENDING' AND workflow_run_id IS NULL
+            """)
+    int failPendingLaunch(@Param("attemptId") Long attemptId,
+                          @Param("errorCode") String errorCode,
+                          @Param("errorMessage") String errorMessage,
+                          @Param("finishedAt") java.time.LocalDateTime finishedAt);
 }

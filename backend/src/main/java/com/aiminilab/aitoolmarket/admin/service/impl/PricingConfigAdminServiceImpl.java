@@ -48,6 +48,8 @@ public class PricingConfigAdminServiceImpl implements PricingConfigAdminService 
         int minCredits = request.minCredits() == null ? 0 : Math.max(0, request.minCredits());
         Integer imageEstimateInputTokens = positiveOrNull(request.imageEstimateInputTokens());
         Integer imageEstimateOutputTokens = positiveOrNull(request.imageEstimateOutputTokens());
+        Integer tokenEstimateInputTokens = positiveOrNull(request.tokenEstimateInputTokens());
+        Integer tokenEstimateOutputTokens = positiveOrNull(request.tokenEstimateOutputTokens());
 
         PricingMargin entity;
         if (request.id() != null) {
@@ -67,6 +69,8 @@ public class PricingConfigAdminServiceImpl implements PricingConfigAdminService 
         entity.setMinCredits(minCredits);
         entity.setImageEstimateInputTokens(imageEstimateInputTokens);
         entity.setImageEstimateOutputTokens(imageEstimateOutputTokens);
+        entity.setTokenEstimateInputTokens(tokenEstimateInputTokens);
+        entity.setTokenEstimateOutputTokens(tokenEstimateOutputTokens);
         entity.setEnabled(request.enabled() == null ? Boolean.TRUE : request.enabled());
         entity.setRemark(request.remark());
         if (entity.getId() == null) {

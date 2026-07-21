@@ -9,7 +9,9 @@ import com.aiminilab.aitoolmarket.workflow.config.WorkflowRuntimeGate;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowExecutionService;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowRecoveryScheduler;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowRunApplicationService;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +23,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -43,7 +46,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         "workflow.runtime.canary-percentage=100",
         "workflow.runtime.real-billing-enabled=true",
         "workflow.runtime.confirmation-enabled=true",
-        "workflow.runtime.max-run-cost-credits=1",
+        "workflow.runtime.max-run-cost-credits=3",
         "workflow.runtime.max-user-daily-cost-credits=10000",
         "spring.task.scheduling.enabled=false"
 })
@@ -176,6 +179,13 @@ class WorkflowRunApplicationServiceTest {
         );
 
         WorkflowRunCreated first = service.create(command);
+        JsonNode persistedInput = readJsonDocument(jdbcTemplate.queryForObject(
+                "SELECT input_json FROM workflow_runs WHERE id = ?",
+                String.class,
+                first.runId()
+        ));
+        assertThat(persistedInput.path("__workflowRequestIdentity").path("inputFingerprint").asText())
+                .hasSize(64);
         WorkflowRunCreated repeated = service.create(command);
 
         long secondVersionId = insertVersion(2, 2L);
@@ -212,12 +222,55 @@ class WorkflowRunApplicationServiceTest {
     }
 
     @Test
-    void firstCreationRejectsEveryUnavailableWorkflowToolState() {
+    void sameClientRequestRejectsDifferentOriginalInput() throws Exception {
+        service.create(new CreateWorkflowRunCommand(
+                1L,
+                TOOL_CODE,
+                objectMapper.readTree("{\"prompt\":\"first request\"}"),
+                "workflow-app-input-conflict",
+                "AGENTS_PAGE",
+                null
+        ));
+
+        assertThatThrownBy(() -> service.create(new CreateWorkflowRunCommand(
+                1L,
+                TOOL_CODE,
+                objectMapper.readTree("{\"prompt\":\"changed request\"}"),
+                "workflow-app-input-conflict",
+                "AGENTS_PAGE",
+                null
+        ))).isInstanceOfSatisfying(BusinessException.class, exception ->
+                assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.IDEMPOTENCY_CONFLICT));
+    }
+
+    @Test
+    void sameClientRequestRejectsDifferentLaunchSource() throws Exception {
+        service.create(new CreateWorkflowRunCommand(
+                1L,
+                TOOL_CODE,
+                objectMapper.readTree("{\"prompt\":\"same request\"}"),
+                "workflow-app-source-conflict",
+                "AGENTS_PAGE",
+                null
+        ));
+
+        assertThatThrownBy(() -> service.create(new CreateWorkflowRunCommand(
+                1L,
+                TOOL_CODE,
+                objectMapper.readTree("{\"prompt\":\"same request\"}"),
+                "workflow-app-source-conflict",
+                "AGENT_CHAT",
+                null
+        ))).isInstanceOfSatisfying(BusinessException.class, exception ->
+                assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.IDEMPOTENCY_CONFLICT));
+    }
+
+    @Test
+    void firstCreationRejectsOfflineDirectOrUnsupportedBillingToolState() {
         String[] unavailableUpdates = {
                 "UPDATE ai_tools SET status = 'OFFLINE' WHERE id = ?",
                 "UPDATE ai_tools SET execution_mode = 'DIRECT' WHERE id = ?",
-                "UPDATE ai_tools SET billing_mode = 'FIXED' WHERE id = ?",
-                "UPDATE ai_tools SET agent_surface_enabled = 0 WHERE id = ?"
+                "UPDATE ai_tools SET billing_mode = 'FIXED' WHERE id = ?"
         };
         for (int index = 0; index < unavailableUpdates.length; index++) {
             jdbcTemplate.update("""
@@ -419,13 +472,15 @@ class WorkflowRunApplicationServiceTest {
     }
 
     @Test
-    void trustedOperationRunCreatesAndDispatchesOnlyTheMatchingWorkerStep() throws Exception {
+    void trustedOperationRunCreatesOnlyTheRequestedShotPipelineSteps() throws Exception {
         String nodes = """
                 [
                   {"id":"start","data":{"nodeDefType":"start","title":"Start"}},
-                  {"id":"script","data":{"nodeDefType":"llm_text","title":"Script","parameters":{"handlerKey":"comic.script","maxCreditCost":1}}},
+                  {"id":"script","data":{"nodeDefType":"llm_text","title":"Script","parameters":{"handlerKey":"comic.script"}}},
                   {"id":"review","data":{"nodeDefType":"user_confirm","title":"Review","parameters":{}}},
-                  {"id":"shot-videos","data":{"nodeDefType":"video_model","title":"Shot video","parameters":{"handlerKey":"comic.shot_video","maxCreditCost":1}}},
+                  {"id":"shot-audio","data":{"nodeDefType":"tts_model","title":"Shot audio","parameters":{"handlerKey":"comic.shot_tts"}}},
+                  {"id":"shot-keyframes","data":{"nodeDefType":"image_model","title":"Shot keyframe","parameters":{"handlerKey":"comic.shot_keyframe"}}},
+                  {"id":"shot-videos","data":{"nodeDefType":"video_model","title":"Shot video","parameters":{"handlerKey":"comic.shot_video"}}},
                   {"id":"output","data":{"nodeDefType":"video_output","title":"Output"}}
                 ]
                 """;
@@ -433,16 +488,18 @@ class WorkflowRunApplicationServiceTest {
                 [
                   {"source":"start","target":"script"},
                   {"source":"script","target":"review"},
-                  {"source":"review","target":"shot-videos"},
+                  {"source":"review","target":"shot-audio"},
+                  {"source":"review","target":"shot-keyframes"},
+                  {"source":"shot-keyframes","target":"shot-videos"},
                   {"source":"shot-videos","target":"output"}
                 ]
                 """;
-        String billing = """
-                {"mode":"WORKFLOW_STEP","nodePolicies":{
-                  "script":{"maxCreditCost":1},
-                  "shot-videos":{"maxCreditCost":1}
-                }}
-                """;
+        String billing = fallbackBillingPolicy(Map.of(
+                "script", 1,
+                "shot-audio", 1,
+                "shot-keyframes", 1,
+                "shot-videos", 1
+        ));
         jdbcTemplate.update(
                 "UPDATE tool_workflow_versions SET nodes_json = ?, edges_json = ?, billing_policy_json = ? WHERE id = ?",
                 nodes, edges, billing, firstVersionId
@@ -459,26 +516,132 @@ class WorkflowRunApplicationServiceTest {
         WorkflowRunCreated created = service.create(new CreateWorkflowRunCommand(
                 1L,
                 TOOL_CODE,
-                objectMapper.readTree("{\"operationHandlerKey\":\"comic.shot_video\",\"comicShotId\":7}"),
+                objectMapper.readTree("""
+                        {"operationHandlerKeys":["comic.shot_tts","comic.shot_keyframe","comic.shot_video"],
+                         "comicShotId":7}
+                        """),
                 "workflow-operation-shot-7",
                 "COMIC_PROJECT",
                 null
         ));
 
         assertThat(jdbcTemplate.queryForList(
-                "SELECT node_id, status FROM workflow_run_steps WHERE run_id = ?",
+                "SELECT node_id, status FROM workflow_run_steps WHERE run_id = ? ORDER BY sequence_no",
                 created.runId()
-        )).containsExactly(java.util.Map.of("node_id", "shot-videos", "status", "QUEUED"));
+        )).containsExactly(
+                java.util.Map.of("node_id", "shot-audio", "status", "QUEUED"),
+                java.util.Map.of("node_id", "shot-keyframes", "status", "PENDING"),
+                java.util.Map.of("node_id", "shot-videos", "status", "PENDING")
+        );
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM workflow_step_attempts a JOIN workflow_run_steps s ON s.id = a.step_id WHERE s.run_id = ?",
                 Integer.class,
                 created.runId()
         )).isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject(
-                "SELECT params_json FROM ai_tasks WHERE id = (SELECT task_id FROM workflow_run_steps WHERE run_id = ?)",
+                "SELECT params_json FROM ai_tasks WHERE id = (SELECT task_id FROM workflow_run_steps WHERE run_id = ? AND node_id = 'shot-audio')",
                 String.class,
                 created.runId()
-        )).contains("comic.shot_video");
+        )).contains("comic.shot_tts");
+    }
+
+    @Test
+    void comicAgentLaunchRunsOnlyScriptAndStoryboardBootstrap() throws Exception {
+        String nodes = """
+                [
+                  {"id":"start","data":{"nodeDefType":"start","title":"Start"}},
+                  {"id":"script","data":{"nodeDefType":"llm_text","title":"Script","parameters":{"handlerKey":"comic.script"}}},
+                  {"id":"storyboard","data":{"nodeDefType":"llm_text","title":"Storyboard","parameters":{"handlerKey":"comic.storyboard"}}},
+                  {"id":"review","data":{"nodeDefType":"user_confirm","title":"Review","parameters":{}}},
+                  {"id":"video","data":{"nodeDefType":"video_model","title":"Video","parameters":{"handlerKey":"comic.shot_video"}}},
+                  {"id":"output","data":{"nodeDefType":"video_output","title":"Output"}}
+                ]
+                """;
+        String edges = """
+                [
+                  {"source":"start","target":"script"},
+                  {"source":"script","target":"storyboard"},
+                  {"source":"storyboard","target":"review"},
+                  {"source":"review","target":"video"},
+                  {"source":"video","target":"output"}
+                ]
+                """;
+        String billing = fallbackBillingPolicy(Map.of(
+                "script", 1,
+                "storyboard", 1,
+                "video", 1
+        ));
+        jdbcTemplate.update(
+                "UPDATE tool_workflow_versions SET nodes_json = ?, edges_json = ?, billing_policy_json = ? WHERE id = ?",
+                nodes, edges, billing, firstVersionId
+        );
+        jdbcTemplate.update(
+                "UPDATE ai_tools SET tool_code = 'ai_comic_drama_agent' WHERE id = ?",
+                toolId
+        );
+        try {
+            CreateWorkflowRunCommand command = new CreateWorkflowRunCommand(
+                    1L,
+                    "ai_comic_drama_agent",
+                    objectMapper.readTree("{\"prompt\":\"ancient city adventure\"}"),
+                    "workflow-comic-agent-bootstrap",
+                    "AGENT_CHAT",
+                    null
+            );
+            WorkflowRunCreated created = service.create(command);
+            WorkflowRunCreated repeated = service.create(command);
+
+            assertThat(repeated.runId()).isEqualTo(created.runId());
+            assertThat(repeated.rootTaskId()).isEqualTo(created.rootTaskId());
+            assertThat(jdbcTemplate.queryForList(
+                    "SELECT node_id, status FROM workflow_run_steps WHERE run_id = ? ORDER BY sequence_no",
+                    created.runId()
+            )).containsExactly(
+                    java.util.Map.of("node_id", "script", "status", "QUEUED"),
+                    java.util.Map.of("node_id", "storyboard", "status", "PENDING")
+            );
+            JsonNode persistedInput = readJsonDocument(jdbcTemplate.queryForObject(
+                    "SELECT input_json FROM workflow_runs WHERE id = ?",
+                    String.class,
+                    created.runId()
+            ));
+            assertThat(persistedInput.path("operationHandlerKeys").toString())
+                    .contains("comic.script", "comic.storyboard")
+                    .doesNotContain("comic.shot_video");
+            assertThat(persistedInput.path("__workflowRequestIdentity").path("inputFingerprint").asText())
+                    .hasSize(64);
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT params_json FROM ai_tasks WHERE id = ("
+                            + "SELECT task_id FROM workflow_run_steps WHERE run_id = ? AND node_id = 'script')",
+                    String.class,
+                    created.runId()
+            )).doesNotContain("__workflowRequestIdentity");
+
+            ObjectNode legacyInput = ((ObjectNode) persistedInput).deepCopy();
+            legacyInput.remove("__workflowRequestIdentity");
+            jdbcTemplate.update(
+                    "UPDATE workflow_runs SET input_json = ? WHERE id = ?",
+                    objectMapper.writeValueAsString(legacyInput),
+                    created.runId()
+            );
+            WorkflowRunCreated legacyRepeated = service.create(command);
+            assertThat(legacyRepeated.runId()).isEqualTo(created.runId());
+            assertThatThrownBy(() -> service.create(new CreateWorkflowRunCommand(
+                    1L,
+                    "ai_comic_drama_agent",
+                    objectMapper.readTree("{\"prompt\":\"another city adventure\"}"),
+                    "workflow-comic-agent-bootstrap",
+                    "AGENT_CHAT",
+                    null
+            ))).isInstanceOfSatisfying(BusinessException.class, exception ->
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.IDEMPOTENCY_CONFLICT));
+        } finally {
+            jdbcTemplate.update(
+                    "UPDATE ai_tools SET tool_code = ? WHERE id = ?",
+                    TOOL_CODE,
+                    toolId
+            );
+        }
     }
 
     @Test
@@ -805,6 +968,30 @@ class WorkflowRunApplicationServiceTest {
 
     private long insertVersion(int version, long sourceDraftRevision) {
         return insertVersion(version, sourceDraftRevision, NODES, EDGES);
+    }
+
+    private String fallbackBillingPolicy(Map<String, Integer> nodeCosts) {
+        ObjectNode root = objectMapper.createObjectNode().put("mode", "WORKFLOW_STEP");
+        ObjectNode nodePolicies = root.putObject("nodePolicies");
+        nodeCosts.forEach((nodeId, credits) -> {
+            ObjectNode nodePolicy = nodePolicies.putObject(nodeId);
+            nodePolicy.put("maxCreditCost", credits);
+            nodePolicy.put("estimatedProviderCostCny", 0);
+            nodePolicy.put("maxProviderCostCny", 0);
+            nodePolicy.put("fallbackChargeCredits", credits);
+            nodePolicy.put("pricingSource", "TOOL_FALLBACK");
+            nodePolicy.putObject("staticParams");
+            nodePolicy.putNull("modelPricingSnapshot");
+            ObjectNode pricingPolicy = nodePolicy.putObject("pricingPolicy");
+            pricingPolicy.put("markupRatio", 1.0);
+            pricingPolicy.put("minCredits", 0);
+            pricingPolicy.put("imageEstimateInputTokens", 8000);
+            pricingPolicy.put("imageEstimateOutputTokens", 8000);
+            pricingPolicy.put("tokenEstimateInputTokens", 1000);
+            pricingPolicy.put("tokenEstimateOutputTokens", 1000);
+            pricingPolicy.putArray("rules");
+        });
+        return root.toString();
     }
 
     private PublishedWorkflow insertExecutableWorkflow(String workflowName) {

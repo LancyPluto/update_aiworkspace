@@ -16,6 +16,8 @@ public class CreditRechargeOrderItem {
     private Integer credits;
     private BigDecimal priceAmount;
     private String itemType;
+    private String cardTypeSnapshot;
+    private String requiredMemberTierSnapshot;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -33,6 +35,10 @@ public class CreditRechargeOrderItem {
     public void setPriceAmount(BigDecimal priceAmount) { this.priceAmount = priceAmount; }
     public String getItemType() { return itemType; }
     public void setItemType(String itemType) { this.itemType = itemType; }
+    public String getCardTypeSnapshot() { return cardTypeSnapshot; }
+    public void setCardTypeSnapshot(String cardTypeSnapshot) { this.cardTypeSnapshot = cardTypeSnapshot; }
+    public String getRequiredMemberTierSnapshot() { return requiredMemberTierSnapshot; }
+    public void setRequiredMemberTierSnapshot(String requiredMemberTierSnapshot) { this.requiredMemberTierSnapshot = requiredMemberTierSnapshot; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

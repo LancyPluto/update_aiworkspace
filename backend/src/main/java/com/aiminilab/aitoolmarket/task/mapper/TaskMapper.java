@@ -428,6 +428,61 @@ public interface TaskMapper extends BaseMapper<AiTask> {
                                         @Param("checkpointJson") String checkpointJson);
 
     @Update("""
+            UPDATE ai_tasks
+            SET selected_model_config_id = #{selectedModelConfigId},
+                selected_vendor_account_id = #{selectedVendorAccountId},
+                current_route_attempt_id = #{routeAttemptId},
+                model_snapshot_json = #{modelSnapshotJson},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{taskId}
+              AND current_route_attempt_id IS NULL
+            """)
+    int assignInitialRoute(@Param("taskId") Long taskId,
+                           @Param("selectedModelConfigId") Long selectedModelConfigId,
+                           @Param("selectedVendorAccountId") Long selectedVendorAccountId,
+                           @Param("routeAttemptId") Long routeAttemptId,
+                           @Param("modelSnapshotJson") String modelSnapshotJson);
+
+    @Update("""
+            UPDATE ai_tasks
+            SET selected_model_config_id = #{selectedModelConfigId},
+                selected_vendor_account_id = #{selectedVendorAccountId},
+                current_route_attempt_id = #{newRouteAttemptId},
+                model_snapshot_json = #{modelSnapshotJson},
+                provider_checkpoint_json = NULL,
+                provider_checkpoint_version = 0,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{taskId}
+              AND status = 'PROCESSING'
+              AND claim_token = #{claimToken}
+              AND current_route_attempt_id = #{expectedRouteAttemptId}
+            """)
+    int switchRouteGuarded(@Param("taskId") Long taskId,
+                           @Param("claimToken") String claimToken,
+                           @Param("expectedRouteAttemptId") Long expectedRouteAttemptId,
+                           @Param("selectedModelConfigId") Long selectedModelConfigId,
+                           @Param("selectedVendorAccountId") Long selectedVendorAccountId,
+                           @Param("newRouteAttemptId") Long newRouteAttemptId,
+                           @Param("modelSnapshotJson") String modelSnapshotJson);
+
+    @Update("""
+            UPDATE ai_tasks
+            SET selected_model_config_id = #{selectedModelConfigId},
+                selected_vendor_account_id = #{selectedVendorAccountId},
+                current_route_attempt_id = NULL,
+                model_snapshot_json = #{modelSnapshotJson},
+                provider_checkpoint_json = NULL,
+                provider_checkpoint_version = 0,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{taskId}
+              AND status = 'QUEUED'
+            """)
+    int clearRouteForRetry(@Param("taskId") Long taskId,
+                           @Param("selectedModelConfigId") Long selectedModelConfigId,
+                           @Param("selectedVendorAccountId") Long selectedVendorAccountId,
+                           @Param("modelSnapshotJson") String modelSnapshotJson);
+
+    @Update("""
             <script>
             UPDATE ai_tasks
             SET status = 'AWAITING_USER', progress = #{progress}, progress_message = #{progressMessage},

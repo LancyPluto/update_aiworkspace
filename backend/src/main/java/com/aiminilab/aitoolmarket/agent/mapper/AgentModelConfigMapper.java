@@ -89,6 +89,24 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
     List<AgentModelConfig> findActiveByVendorAccountId(@Param("vendorAccountId") Long vendorAccountId);
 
     @Select("""
+            SELECT model.*
+            FROM agent_model_configs model
+            JOIN model_vendor_accounts account ON account.id = model.vendor_account_id
+            WHERE account.vendor_code = #{vendorCode}
+              AND COALESCE(account.is_deleted, 0) = 0
+              AND account.enabled = 1
+              AND account.load_balance_enabled = 1
+              AND COALESCE(model.is_deleted, 0) = 0
+              AND model.enabled = 1
+              AND LOWER(model.provider) = LOWER(#{provider})
+              AND model.model_name = #{modelName}
+            ORDER BY model.id ASC
+            """)
+    List<AgentModelConfig> findRoutingCandidates(@Param("vendorCode") String vendorCode,
+                                                  @Param("provider") String provider,
+                                                  @Param("modelName") String modelName);
+
+    @Select("""
             SELECT *
             FROM agent_model_configs
             WHERE COALESCE(is_deleted, 0) = 0

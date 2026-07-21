@@ -36,18 +36,27 @@ public record UnifiedApiModelItemResponse(
         Boolean enabled,
         Boolean agentEnabled,
         Boolean isDefault,
+        String routingExclusionReason,
         String healthStatus
 ) {
     public static UnifiedApiModelItemResponse from(AgentModelConfig config,
                                                    String vendorAccountName,
                                                    ModelCapabilitiesCodec codec) {
-        return from(config, vendorAccountName, codec, null);
+        return from(config, vendorAccountName, codec, null, null);
     }
 
     public static UnifiedApiModelItemResponse from(AgentModelConfig config,
                                                    String vendorAccountName,
                                                    ModelCapabilitiesCodec codec,
                                                    String accountHealthStatus) {
+        return from(config, vendorAccountName, codec, accountHealthStatus, null);
+    }
+
+    public static UnifiedApiModelItemResponse from(AgentModelConfig config,
+                                                   String vendorAccountName,
+                                                   ModelCapabilitiesCodec codec,
+                                                   String accountHealthStatus,
+                                                   String routingExclusionReason) {
         AgentModelConfigResponse summary = AgentModelConfigResponse.from(config, codec);
         ModelRoutePreviewResolver.RoutePreview routePreview = ROUTE_PREVIEW_RESOLVER.resolve(config);
         return new UnifiedApiModelItemResponse(
@@ -78,7 +87,8 @@ public record UnifiedApiModelItemResponse(
                 config.getEnabled(),
                 config.getAgentEnabled(),
                 config.getDefault(),
-                resolveModelHealthStatus(config, accountHealthStatus)
+                routingExclusionReason,
+                resolveModelHealthStatus(config)
         );
     }
 
@@ -88,15 +98,12 @@ public record UnifiedApiModelItemResponse(
         return value == null || value.isBlank() ? "" : "********";
     }
 
-    private static String resolveModelHealthStatus(AgentModelConfig config, String accountHealthStatus) {
+    private static String resolveModelHealthStatus(AgentModelConfig config) {
         if (Boolean.FALSE.equals(config.getEnabled())) {
             return "DISABLED";
         }
         if (config.getLastTestSuccess() != null) {
             return Boolean.TRUE.equals(config.getLastTestSuccess()) ? "OK" : "ERROR";
-        }
-        if (accountHealthStatus != null && !accountHealthStatus.isBlank()) {
-            return accountHealthStatus.trim().toUpperCase();
         }
         return "UNKNOWN";
     }

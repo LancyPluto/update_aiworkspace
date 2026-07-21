@@ -21,6 +21,9 @@ public interface CreditService {
      */
     int deductAvailable(Long userId, CreditSourceType sourceType, Long sourceId, int amount);
 
+    int deductAvailable(Long userId, CreditSourceType sourceType, Long sourceId,
+                        int amount, String idempotencyKey);
+
     void release(Long userId, CreditSourceType sourceType, Long sourceId, int amount);
 
     boolean tryFreeze(Long userId, CreditSourceType sourceType, Long sourceId, int amount, String idempotencyKey);

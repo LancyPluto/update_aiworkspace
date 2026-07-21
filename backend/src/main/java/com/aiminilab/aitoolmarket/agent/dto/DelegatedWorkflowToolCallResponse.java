@@ -7,11 +7,15 @@ public record DelegatedWorkflowToolCallResponse(
         String runUrl
 ) {
     public static DelegatedWorkflowToolCallResponse of(Long taskId, Long runId, String status) {
+        return of(taskId, runId, status, "/agents/runs/" + taskId);
+    }
+
+    public static DelegatedWorkflowToolCallResponse of(Long taskId, Long runId, String status, String runUrl) {
         return new DelegatedWorkflowToolCallResponse(
                 taskId,
                 runId,
                 status,
-                "/agents/runs/" + taskId
+                runUrl
         );
     }
 }

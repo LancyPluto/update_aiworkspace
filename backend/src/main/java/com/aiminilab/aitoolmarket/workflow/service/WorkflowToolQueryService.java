@@ -261,12 +261,10 @@ public class WorkflowToolQueryService {
     private PublishedTool requirePublishedTool(String toolCode) {
         AiTool tool = toolMapper.findOnlineByCode(toolCode)
                 .filter(candidate -> "WORKFLOW".equalsIgnoreCase(candidate.getExecutionMode()))
-                .filter(candidate -> Boolean.TRUE.equals(candidate.getAgentSurfaceEnabled()))
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工作流工具不存在或不可用"));
         WorkflowToolSurfaceRow surface = toolSurfaceMapper.selectCanonicalByToolCode(toolCode);
         ToolWorkflow workflow = surface == null ? null : workflowMapper.selectById(surface.getWorkflowId());
         if (workflow == null
-                || !Boolean.TRUE.equals(workflow.getExecutionEnabled())
                 || workflow.getPublishedVersionId() == null) {
             throw new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工作流工具不存在或不可用");
         }
@@ -342,7 +340,8 @@ public class WorkflowToolQueryService {
                 .mapToInt(charge -> value(charge.getChargedCredits()))
                 .sum();
         int reserved = charges.stream()
-                .filter(charge -> "RESERVED".equalsIgnoreCase(charge.getStatus()))
+                .filter(charge -> "RESERVED".equalsIgnoreCase(charge.getStatus())
+                        || "AWAITING_FUNDS".equalsIgnoreCase(charge.getStatus()))
                 .mapToInt(charge -> value(charge.getReservedCredits()))
                 .sum();
         int released = charges.stream()

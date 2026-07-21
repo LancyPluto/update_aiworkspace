@@ -41,6 +41,11 @@ class RecordingBackend:
 
 
 def _context(handler_key: str, operation_input: dict, *, node_type: str = "IMAGE_MODEL") -> dict:
+    billing_unit = {
+        "LLM_TEXT": "TOKEN_PER_M",
+        "VIDEO_MODEL": "PER_SECOND",
+        "TTS_MODEL": "PER_CALL",
+    }.get(node_type, "PER_CALL")
     return {
         "status": "PROCESSING",
         "params": {
@@ -53,6 +58,7 @@ def _context(handler_key: str, operation_input: dict, *, node_type: str = "IMAGE
             "provider": "test-provider",
             "modelName": "test-model",
             "apiKey": "test-key",
+            "billingUnit": billing_unit,
         },
     }
 
@@ -121,7 +127,9 @@ def test_parameters_handler_key_dispatches_imported_script_without_model_call():
 
     assert result["status"] == "SUCCESS"
     assert result["handlerKey"] == "comic.script"
-    assert _output(backend)["script"]["scriptVersionId"] == "script:v7"
+    output = _output(backend)
+    assert output["script"]["scriptVersionId"] == "script:v7"
+    assert "screenplay" not in output
     assert backend.checkpoints == []
 
 
@@ -132,20 +140,24 @@ def test_script_generation_is_separate_from_storyboard_and_checkpointed():
         def __init__(self):
             self.prompt = ""
 
-        def generate(self, prompt, **kwargs):
+        def generate_with_usage(self, prompt, **kwargs):
             self.prompt = prompt
-            return json.dumps(
-                {
-                    "title": "庭院秘密",
-                    "synopsis": "女孩揭开庭院秘密。",
-                    "screenplay": screenplay,
-                    "genre": "悬疑",
-                    "characters": [{"id": "hero", "name": "小雨", "appearance": "短发蓝衣"}],
-                    "locations": [{"id": "yard", "name": "庭院", "description": "老旧庭院"}],
-                    "props": [],
-                },
-                ensure_ascii=False,
-            )
+            return {
+                "content": json.dumps(
+                    {
+                        "title": "庭院秘密",
+                        "synopsis": "女孩揭开庭院秘密。",
+                        "screenplay": screenplay,
+                        "genre": "悬疑",
+                        "characters": [{"id": "hero", "name": "小雨", "appearance": "短发蓝衣"}],
+                        "locations": [{"id": "yard", "name": "庭院", "description": "老旧庭院"}],
+                        "props": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                "promptTokens": 120,
+                "completionTokens": 240,
+            }
 
     backend = RecordingBackend()
     model = FakeModel()
@@ -164,9 +176,39 @@ def test_script_generation_is_separate_from_storyboard_and_checkpointed():
 
     assert result["status"] == "SUCCESS"
     assert "不要输出分镜表" in model.prompt
-    assert "shots" not in _output(backend)["script"]
-    assert _output(backend)["script"]["characters"][0]["assetId"] == "hero"
+    output = _output(backend)
+    assert "shots" not in output["script"]
+    assert output["script"]["characters"][0]["assetId"] == "hero"
+    assert output["script"]["screenplay"] == screenplay
+    assert "screenplay" not in output
     assert [item["status"] for item in backend.checkpoints] == ["STARTED", "COMPLETED"]
+    assert "screenplay" not in backend.checkpoints[-1]["result"]
+
+    class ReplayMustNotCallModel:
+        def generate_with_usage(self, *_args, **_kwargs):
+            raise AssertionError("completed checkpoint replay must not call the provider")
+
+    replay_backend = RecordingBackend()
+    replay_backend.version = backend.version
+    replay_context = _context(
+        "comic.script",
+        {"projectId": "comic-1", "storyTheme": "庭院秘密", "episodeLength": "60s"},
+        node_type="LLM_TEXT",
+    )
+    replay_context["providerCheckpoint"] = backend.checkpoints[-1]
+    replay_context["providerCheckpointVersion"] = backend.version
+    replay_handler = WorkflowStepHandler(
+        backend_client=replay_backend,
+        model_client=ReplayMustNotCallModel(),
+    )
+
+    replay_result = replay_handler.handle({"taskId": 807, "__executionContext": replay_context})
+
+    assert replay_result["status"] == "SUCCESS"
+    replay_output = _output(replay_backend)
+    assert replay_output["promptTokens"] == 120
+    assert replay_output["completionTokens"] == 240
+    assert replay_backend.checkpoints == []
 
 
 def test_storyboard_normalizes_time_camera_emotion_picture_and_audio_fields():
@@ -198,15 +240,48 @@ def test_storyboard_normalizes_time_camera_emotion_picture_and_audio_fields():
     assert shot["audio"]["bgmMood"] == "紧张"
 
 
+def test_storyboard_preserves_named_character_and_scene_references_for_asset_drafts():
+    backend = RecordingBackend()
+    handler = WorkflowStepHandler(backend_client=backend)
+    source_shot = {
+        **_shot(),
+        "characters": [
+            {"name": "小雨", "description": "短发蓝衣的年轻调查员"},
+            "character-id-only",
+        ],
+        "scene": {"name": "旧庭院", "description": "斑驳砖墙笼罩在冷色月光下"},
+    }
+
+    result = handler.handle(
+        {
+            "taskId": 803,
+            "__executionContext": _context(
+                "comic.storyboard",
+                {"storyboard": {"shots": [source_shot]}},
+                node_type="LLM_TEXT",
+            ),
+        }
+    )
+
+    assert result["status"] == "SUCCESS"
+    references = _output(backend)["shots"][0]["references"]
+    assert references["characters"] == [{"name": "小雨", "description": "短发蓝衣的年轻调查员"}]
+    assert references["scenes"] == [{"name": "旧庭院", "description": "斑驳砖墙笼罩在冷色月光下"}]
+
+
 def test_storyboard_splits_imported_script_with_checkpointed_model_call():
     class FakeModel:
         def __init__(self):
             self.calls = 0
 
-        def generate(self, prompt, **kwargs):
+        def generate_with_usage(self, prompt, **kwargs):
             self.calls += 1
             assert "完整剧本" in prompt
-            return json.dumps({"title": "庭院秘密", "shots": [_shot()]}, ensure_ascii=False)
+            return {
+                "content": json.dumps({"title": "庭院秘密", "shots": [_shot()]}, ensure_ascii=False),
+                "promptTokens": 80,
+                "completionTokens": 160,
+            }
 
     backend = RecordingBackend()
     model = FakeModel()
@@ -442,6 +517,7 @@ def test_single_shot_tts_persists_one_selected_shot_audio(monkeypatch):
 def test_compose_uses_only_selected_versions_in_story_order():
     processed: list[str] = []
     concatenated: list[Path] = []
+    subtitle_timeline: list[tuple[list[Path], list[str]]] = []
 
     class FakePostprocessor:
         def process(self, *, task_id, video_url, audio_url, subtitle_text, segment):
@@ -455,6 +531,10 @@ def test_compose_uses_only_selected_versions_in_story_order():
         def concat_videos(self, *, task_id, video_paths, output_name):
             concatenated.extend(video_paths)
             return Path("C:/tmp/comic-final.mp4"), "/rendered/comic-final.mp4"
+
+        def concat_subtitles(self, *, task_id, video_paths, subtitle_texts, output_name):
+            subtitle_timeline.append((video_paths, subtitle_texts))
+            return Path("C:/tmp/comic-final.srt"), "/rendered/comic-final.srt"
 
     selected = [
         {
@@ -501,8 +581,22 @@ def test_compose_uses_only_selected_versions_in_story_order():
     assert result["status"] == "SUCCESS"
     assert processed == ["/clips/shot-1-v9.mp4", "/clips/shot-2-v7.mp4"]
     assert [path.name for path in concatenated] == ["shot-1-shot-1.mp4", "shot-2-shot-2.mp4"]
+    assert subtitle_timeline == [(concatenated, ["第一镜", "第二镜"])]
+    assert _output(backend)["subtitleUrl"] == "/rendered/comic-final.srt"
     manifest = _output(backend)["compositionManifest"]
     assert [item["clipVersionId"] for item in manifest["selectedShotVersions"]] == ["clip-1:v9", "clip-2:v7"]
+
+
+def test_comic_final_srt_offsets_each_shot_by_real_duration():
+    from handlers.digital_human_postprocessor import DigitalHumanPostprocessor
+
+    content = DigitalHumanPostprocessor._build_timeline_srt(
+        [("第一镜", 5.0), ("第二镜", 3.25)]
+    )
+
+    assert "00:00:00,000 --> 00:00:05,000" in content
+    assert "00:00:05,000 --> 00:00:08,250" in content
+    assert content.index("第一镜") < content.index("第二镜")
 
 
 def test_seedance_resolver_orders_base_frame_before_reference_images(monkeypatch):
@@ -542,7 +636,7 @@ def test_openai_image_resolver_passes_reference_assets_to_edit_input(monkeypatch
 
     class FakeImagesClient:
         def __init__(self, **kwargs):
-            pass
+            self.last_usage = {"billableUnits": 1}
 
         def generate_images(self, **kwargs):
             captured.update(kwargs)

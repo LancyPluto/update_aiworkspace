@@ -72,4 +72,37 @@ public interface ComicEpisodeMapper extends BaseMapper<ComicEpisode> {
             WHERE id = #{episodeId} AND status IN ('ASSETS_CONFIRMED', 'GENERATING')
             """)
     int markGenerating(@Param("episodeId") Long episodeId);
+
+    @Update("""
+            UPDATE comic_episodes SET status = 'STORYBOARD_GENERATING', revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{episodeId} AND revision = #{expectedRevision} AND status = 'DRAFT'
+            """)
+    int startStoryboardGeneration(@Param("episodeId") Long episodeId,
+                                  @Param("expectedRevision") Long expectedRevision);
+
+    @Update("""
+            UPDATE comic_episodes SET title = #{title}, script_source_type = 'AI',
+                script_text = #{scriptText}, status = 'DRAFT', revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{episodeId} AND status IN ('SCRIPT_GENERATING', 'DRAFT')
+            """)
+    int completeScriptProjection(@Param("episodeId") Long episodeId,
+                                 @Param("title") String title,
+                                 @Param("scriptText") String scriptText);
+
+    @Update("""
+            UPDATE comic_episodes SET status = 'DRAFT', revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{episodeId} AND status IN ('STORYBOARD_GENERATING', 'DRAFT')
+            """)
+    int completeStoryboardProjection(@Param("episodeId") Long episodeId);
+
+    @Update("""
+            UPDATE comic_episodes SET status = 'DRAFT', revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{episodeId} AND status IN ('SCRIPT_GENERATING', 'STORYBOARD_GENERATING')
+            """)
+    int resetGenerationStatus(@Param("episodeId") Long episodeId);
+
 }

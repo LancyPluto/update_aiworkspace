@@ -13,7 +13,12 @@ import {
   type ComicEntityId,
 } from "@/api/comicProjectApi"
 import { useAuthStore } from "@/store/authStore"
-import { comicEpisodeGenerationStatus } from "@/utils/comicProject"
+import {
+  comicEpisodeGenerationStatus,
+  retainComicClientRequestAttempt,
+  type ComicClientRequestAttempt,
+} from "@/utils/comicProject"
+import { randomUUID } from "@/utils/randomUUID"
 
 type CreateMode = "ai" | "paste" | "file"
 
@@ -37,6 +42,8 @@ const selectedFile = ref<File | null>(null)
 const submitting = ref(false)
 const error = ref<string | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
+const scriptGenerationAttempt = ref<ComicClientRequestAttempt | null>(null)
+const storyboardGenerationAttempt = ref<ComicClientRequestAttempt | null>(null)
 
 const isExisting = computed(() => Boolean(props.episode?.id))
 const canSave = computed(() => title.value.trim().length > 0 && scriptText.value.trim().length >= 20)
@@ -88,11 +95,25 @@ async function submitScript() {
       )
     } else if (mode.value === "ai") {
       if (!title.value.trim() || aiPrompt.value.trim().length < 10) throw new Error("请填写标题和完整的创作要求")
+      const signature = JSON.stringify({
+        operation: "comic.script",
+        projectId: String(props.projectId),
+        title: title.value.trim(),
+        prompt: aiPrompt.value.trim(),
+        episodeNo: props.defaultEpisodeNo ?? null,
+      })
+      scriptGenerationAttempt.value = retainComicClientRequestAttempt(
+        scriptGenerationAttempt.value,
+        signature,
+        randomUUID,
+      )
       result = await comicProjectApi.generateEpisode(props.projectId, {
         title: title.value.trim(),
         prompt: aiPrompt.value.trim(),
         episodeNo: props.defaultEpisodeNo,
+        clientRequestId: scriptGenerationAttempt.value.clientRequestId,
       }, { token: auth.token })
+      scriptGenerationAttempt.value = null
     } else {
       if (!canSave.value) throw new Error("剧本正文至少需要 20 个字")
       result = await comicProjectApi.createEpisode(props.projectId, {
@@ -115,12 +136,27 @@ async function generateStoryboard() {
   submitting.value = true
   error.value = null
   try {
+    const signature = JSON.stringify({
+      operation: "comic.storyboard",
+      projectId: String(props.projectId),
+      episodeId: String(props.episode.id),
+      expectedRevision: props.episode.revision ?? 0,
+    })
+    storyboardGenerationAttempt.value = retainComicClientRequestAttempt(
+      storyboardGenerationAttempt.value,
+      signature,
+      randomUUID,
+    )
     const result = await comicProjectApi.generateStoryboard(
       props.projectId,
       props.episode.id,
-      props.episode.revision ?? 0,
+      {
+        expectedRevision: props.episode.revision ?? 0,
+        clientRequestId: storyboardGenerationAttempt.value.clientRequestId,
+      },
       { token: auth.token },
     )
+    storyboardGenerationAttempt.value = null
     emit("updated", result)
     emit("open-storyboard")
   } catch (generateError) {

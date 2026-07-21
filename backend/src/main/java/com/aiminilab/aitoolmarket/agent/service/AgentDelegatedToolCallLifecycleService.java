@@ -7,6 +7,8 @@ import com.aiminilab.aitoolmarket.agent.mapper.AgentToolCallMapper;
 import com.aiminilab.aitoolmarket.agent.metrics.AgentMetrics;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.comic.dto.ComicDtos;
+import com.aiminilab.aitoolmarket.comic.service.ComicProjectApplicationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,15 +27,18 @@ public class AgentDelegatedToolCallLifecycleService {
     private final AgentRunEventMapper eventMapper;
     private final AgentMetrics metrics;
     private final ObjectMapper objectMapper;
+    private final ComicProjectApplicationService comicProjectApplicationService;
 
     public AgentDelegatedToolCallLifecycleService(AgentToolCallMapper toolCallMapper,
                                                   AgentRunEventMapper eventMapper,
                                                   AgentMetrics metrics,
-                                                  ObjectMapper objectMapper) {
+                                                  ObjectMapper objectMapper,
+                                                  ComicProjectApplicationService comicProjectApplicationService) {
         this.toolCallMapper = toolCallMapper;
         this.eventMapper = eventMapper;
         this.metrics = metrics;
         this.objectMapper = objectMapper;
+        this.comicProjectApplicationService = comicProjectApplicationService;
     }
 
     public void bindDelegated(Long toolCallId,
@@ -105,12 +110,13 @@ public class AgentDelegatedToolCallLifecycleService {
         String errorCode = success ? null : "WORKFLOW_" + normalizedStatus;
         String errorMessage = success ? null : normalizeError(normalizedStatus, workflowError);
         LocalDateTime now = LocalDateTime.now();
+        String runUrl = runUrl(rootTaskId);
         String resultJson = writeJson(Map.of(
                 "success", success,
                 "toolCode", call.getToolCode(),
                 "taskId", rootTaskId,
                 "status", nextStatus,
-                "runUrl", "/agents/runs/" + rootTaskId,
+                "runUrl", runUrl,
                 "data", terminalData(workflowRunId, normalizedStatus, workflowError)
         ));
         int updated = toolCallMapper.finishDelegated(
@@ -139,7 +145,7 @@ public class AgentDelegatedToolCallLifecycleService {
                 "workflowStatus", normalizedStatus,
                 "errorCode", errorCode == null ? "" : errorCode,
                 "workflowError", workflowError == null ? "" : workflowError,
-                "runUrl", "/agents/runs/" + rootTaskId
+                "runUrl", runUrl
         )));
         event.setCreatedAt(now);
         eventMapper.insertEvent(event);
@@ -160,6 +166,7 @@ public class AgentDelegatedToolCallLifecycleService {
                                      String status,
                                      String workflowStatus) {
         LocalDateTime now = LocalDateTime.now();
+        String runUrl = runUrl(rootTaskId);
         AgentRunEvent event = new AgentRunEvent();
         event.setRunId(call.getRunId());
         event.setUserId(call.getUserId());
@@ -172,7 +179,7 @@ public class AgentDelegatedToolCallLifecycleService {
                 "status", status,
                 "workflowRunId", workflowRunId,
                 "workflowStatus", workflowStatus == null ? "RUNNING" : workflowStatus,
-                "runUrl", "/agents/runs/" + rootTaskId
+                "runUrl", runUrl
         )));
         event.setCreatedAt(now);
         eventMapper.insertEvent(event);
@@ -185,6 +192,11 @@ public class AgentDelegatedToolCallLifecycleService {
             case "RUNNING" -> "Workflow resumed";
             default -> "Workflow delegated";
         };
+    }
+
+    private String runUrl(Long rootTaskId) {
+        ComicDtos.WorkspaceBinding binding = comicProjectApplicationService.workspaceByRootTaskIdInternal(rootTaskId);
+        return binding == null ? "/agents/runs/" + rootTaskId : binding.workspacePath();
     }
 
     private String normalizeError(String workflowStatus, String workflowError) {

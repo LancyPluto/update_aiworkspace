@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue"
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
 import {
   Check,
   ImageOff,
@@ -8,6 +8,7 @@ import {
   Plus,
   Save,
   ShieldCheck,
+  Sparkles,
   UserRound,
   X,
 } from "lucide-vue-next"
@@ -22,6 +23,11 @@ import {
   type ComicSceneVersion,
 } from "@/api/comicProjectApi"
 import { useAuthStore } from "@/store/authStore"
+import {
+  retainComicClientRequestAttempt,
+  type ComicClientRequestAttempt,
+} from "@/utils/comicProject"
+import { randomUUID } from "@/utils/randomUUID"
 
 type AssetDraft = { kind: "character" | "scene"; id: number; name: string } | null
 
@@ -52,6 +58,9 @@ const versionPrompt = ref("")
 const characterVersionImages = reactive({ front: "", side: "", back: "" })
 const sceneVersionImageUrl = ref("")
 const gateOpen = ref(false)
+const launchingVersionKeys = reactive(new Set<string>())
+const assetGenerationAttempts = new Map<string, ComicClientRequestAttempt>()
+let assetPollTimer: ReturnType<typeof setTimeout> | null = null
 
 const characters = computed(() => props.project.characters ?? props.episode.characters ?? [])
 const scenes = computed(() => props.project.scenes ?? props.episode.scenes ?? [])
@@ -63,6 +72,78 @@ function readyCharacterVersions(character: ComicCharacter): ComicCharacterVersio
 function readySceneVersions(scene: ComicScene): ComicSceneVersion[] {
   return (scene.versions ?? []).filter((version) => String(version.status ?? "READY").toUpperCase() === "READY")
 }
+
+function assetStatus(version: { status?: string | null }): string {
+  return String(version.status ?? "READY").toUpperCase()
+}
+
+function actionableCharacterVersions(character: ComicCharacter): ComicCharacterVersion[] {
+  return (character.versions ?? []).filter((version) => ["DRAFT", "FAILED", "GENERATING"].includes(assetStatus(version)))
+}
+
+function actionableSceneVersions(scene: ComicScene): ComicSceneVersion[] {
+  return (scene.versions ?? []).filter((version) => ["DRAFT", "FAILED", "GENERATING"].includes(assetStatus(version)))
+}
+
+function selectedCharacterVersion(character: ComicCharacter): ComicCharacterVersion | null {
+  return readyCharacterVersions(character).find((version) => version.id === selectedCharacterVersions[character.id]) ?? null
+}
+
+function characterPreviewImages(version: ComicCharacterVersion | null): Array<{ label: string; url: string | null | undefined }> {
+  return [
+    { label: "正面", url: version?.frontImageUrl },
+    { label: "侧面", url: version?.sideImageUrl },
+    { label: "背面", url: version?.backImageUrl },
+  ]
+}
+
+function isCharacterContactSheet(version: ComicCharacterVersion | null): boolean {
+  if (!version?.frontImageUrl || !version.sideImageUrl || !version.backImageUrl) return false
+  return version.frontImageUrl === version.sideImageUrl && version.sideImageUrl === version.backImageUrl
+}
+
+function versionStatusLabel(version: { status?: string | null }): string {
+  const status = assetStatus(version)
+  if (status === "GENERATING") return "AI 生成中"
+  if (status === "FAILED") return "生成失败"
+  return "待生成"
+}
+
+function versionStatusClass(version: { status?: string | null }): string {
+  const status = assetStatus(version)
+  if (status === "GENERATING") return "bg-primary/10 text-primary"
+  if (status === "FAILED") return "bg-destructive/10 text-destructive"
+  return "bg-secondary text-muted-foreground"
+}
+
+function versionKey(kind: "character" | "scene", versionId: number): string {
+  return `${kind}:${versionId}`
+}
+
+function assetGenerationSignature(
+  kind: "character" | "scene",
+  assetId: number,
+  version: ComicCharacterVersion | ComicSceneVersion,
+): string {
+  return JSON.stringify({
+    operation: kind === "character" ? "comic.character.generate" : "comic.scene.generate",
+    projectId: String(props.projectId),
+    assetId,
+    versionId: version.id,
+    versionNo: version.versionNo ?? null,
+    versionStatus: assetStatus(version),
+  })
+}
+
+function isVersionLaunching(kind: "character" | "scene", versionId: number): boolean {
+  return launchingVersionKeys.has(versionKey(kind, versionId))
+}
+
+const hasGeneratingAssets = computed(() => (
+  launchingVersionKeys.size > 0
+  || characters.value.some((character) => (character.versions ?? []).some((version) => assetStatus(version) === "GENERATING"))
+  || scenes.value.some((scene) => (scene.versions ?? []).some((version) => assetStatus(version) === "GENERATING"))
+))
 
 const selectedCharacterVersionIds = computed(() => Object.values(selectedCharacterVersions).filter((id): id is number => typeof id === "number"))
 const characterVersionImageCount = computed(() => Object.values(characterVersionImages).filter((url) => url.trim()).length)
@@ -82,16 +163,25 @@ const allShotsAssigned = computed(() => {
   })
 })
 
+watch(characters, () => {
+  const characterIds = new Set(characters.value.map((character) => character.id))
+  for (const key of Object.keys(selectedCharacterVersions).map(Number)) {
+    if (!characterIds.has(key)) delete selectedCharacterVersions[key]
+  }
+  for (const character of characters.value) {
+    const versions = readyCharacterVersions(character)
+    const current = selectedCharacterVersions[character.id]
+    if (current != null && versions.some((version) => version.id === current)) continue
+    const preferred = versions.find((version) => version.id === character.selectedVersionId)
+    selectedCharacterVersions[character.id] = preferred?.id ?? versions[0]?.id ?? null
+  }
+}, { immediate: true, deep: true })
+
 watch(
-  () => [props.project, props.episode] as const,
+  () => [props.episode.id, props.episode.revision, props.episode.assetsConfirmed] as const,
   () => {
-    for (const key of Object.keys(selectedCharacterVersions)) delete selectedCharacterVersions[Number(key)]
     for (const key of Object.keys(shotCharacterRefs)) delete shotCharacterRefs[Number(key)]
     for (const key of Object.keys(shotSceneRefs)) delete shotSceneRefs[Number(key)]
-    for (const character of characters.value) {
-      const versions = readyCharacterVersions(character)
-      selectedCharacterVersions[character.id] = character.selectedVersionId ?? versions[0]?.id ?? null
-    }
     for (const shot of props.episode.shots ?? []) {
       if (shot.id == null) continue
       shotCharacterRefs[shot.id] = [...(shot.characterVersionIds ?? [])]
@@ -100,8 +190,45 @@ watch(
     dirty.value = false
     error.value = null
   },
-  { immediate: true, deep: true },
+  { immediate: true },
 )
+
+watch(
+  () => [props.project.characters, props.project.scenes] as const,
+  () => {
+    for (const key of launchingVersionKeys) {
+      const [kind, rawVersionId] = key.split(":")
+      const versionId = Number(rawVersionId)
+      const version = kind === "character"
+        ? characters.value.flatMap((character) => character.versions ?? []).find((item) => item.id === versionId)
+        : scenes.value.flatMap((scene) => scene.versions ?? []).find((item) => item.id === versionId)
+      if (version && !["DRAFT", "FAILED"].includes(assetStatus(version))) {
+        launchingVersionKeys.delete(key)
+        assetGenerationAttempts.delete(key)
+      }
+    }
+  },
+  { deep: true },
+)
+
+function clearAssetPoll() {
+  if (assetPollTimer) clearTimeout(assetPollTimer)
+  assetPollTimer = null
+}
+
+function scheduleAssetPoll(delay = 2_500) {
+  clearAssetPoll()
+  if (!hasGeneratingAssets.value) return
+  assetPollTimer = setTimeout(() => {
+    emit("refresh-project")
+    scheduleAssetPoll()
+  }, delay)
+}
+
+watch(hasGeneratingAssets, (generating) => {
+  if (generating) scheduleAssetPoll()
+  else clearAssetPoll()
+}, { immediate: true })
 
 function versionLabel(version: { versionNo?: number | null; id: number }): string {
   return version.versionNo ? `V${version.versionNo}` : `版本 ${version.id}`
@@ -215,6 +342,37 @@ async function createVersion() {
   }
 }
 
+async function generateAssetVersion(
+  kind: "character" | "scene",
+  assetId: number,
+  version: ComicCharacterVersion | ComicSceneVersion,
+) {
+  const status = assetStatus(version)
+  const key = versionKey(kind, version.id)
+  if (props.episode.assetsConfirmed || !["DRAFT", "FAILED"].includes(status) || launchingVersionKeys.has(key)) return
+  launchingVersionKeys.add(key)
+  error.value = null
+  try {
+    const attempt = retainComicClientRequestAttempt(
+      assetGenerationAttempts.get(key) ?? null,
+      assetGenerationSignature(kind, assetId, version),
+      randomUUID,
+    )
+    assetGenerationAttempts.set(key, attempt)
+    const body = { clientRequestId: attempt.clientRequestId }
+    if (kind === "character") {
+      await comicProjectApi.generateCharacterVersion(props.projectId, assetId, version.id, body, { token: auth.token })
+    } else {
+      await comicProjectApi.generateSceneVersion(props.projectId, assetId, version.id, body, { token: auth.token })
+    }
+    assetGenerationAttempts.delete(key)
+    emit("refresh-project")
+  } catch (generateError) {
+    launchingVersionKeys.delete(key)
+    error.value = generateError instanceof Error ? generateError.message : "AI 素材生成启动失败"
+  }
+}
+
 async function saveAssignments(): Promise<ComicEpisodeDetail | null> {
   if (submitting.value || props.episode.assetsConfirmed) return null
   submitting.value = true
@@ -260,6 +418,8 @@ async function confirmAssets() {
     submitting.value = false
   }
 }
+
+onBeforeUnmount(clearAssetPoll)
 </script>
 
 <template>
@@ -297,25 +457,42 @@ async function confirmAssets() {
             <div class="min-w-0"><h4 class="truncate font-medium">{{ character.name }}</h4><p class="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{{ character.description || "暂无角色描述" }}</p></div>
             <UserRound class="h-5 w-5 shrink-0 text-primary" />
           </div>
-          <div class="mt-4 grid grid-cols-3 gap-2">
-            <template v-if="readyCharacterVersions(character).length">
-              <div v-for="(url, label) in {
-                正面: readyCharacterVersions(character).find((version) => version.id === selectedCharacterVersions[character.id])?.frontImageUrl,
-                侧面: readyCharacterVersions(character).find((version) => version.id === selectedCharacterVersions[character.id])?.sideImageUrl,
-                背面: readyCharacterVersions(character).find((version) => version.id === selectedCharacterVersions[character.id])?.backImageUrl,
-              }" :key="label" class="aspect-[3/4] overflow-hidden rounded-md border border-border bg-background">
-                <img v-if="url" :src="url" :alt="`${character.name}${label}`" class="h-full w-full object-cover" />
-                <span v-else class="flex h-full flex-col items-center justify-center gap-1 text-[11px] text-muted-foreground"><ImageOff class="h-4 w-4" />{{ label }}</span>
+          <div v-if="selectedCharacterVersion(character)" class="mt-4">
+            <div v-if="isCharacterContactSheet(selectedCharacterVersion(character))" class="relative aspect-[4/3] overflow-hidden rounded-md border border-border bg-background">
+              <img :src="selectedCharacterVersion(character)?.frontImageUrl ?? ''" :alt="`${character.name}三视图合板`" class="h-full w-full object-contain" />
+              <span class="absolute bottom-2 left-2 rounded bg-background/90 px-2 py-1 text-[11px] text-muted-foreground">三视图合板</span>
+            </div>
+            <div v-else class="grid grid-cols-3 gap-2">
+              <div v-for="preview in characterPreviewImages(selectedCharacterVersion(character))" :key="preview.label" class="aspect-[3/4] overflow-hidden rounded-md border border-border bg-background">
+                <img v-if="preview.url" :src="preview.url" :alt="`${character.name}${preview.label}`" class="h-full w-full object-cover" />
+                <span v-else class="flex h-full flex-col items-center justify-center gap-1 text-[11px] text-muted-foreground"><ImageOff class="h-4 w-4" />{{ preview.label }}</span>
               </div>
-            </template>
-            <div v-else class="col-span-3 flex h-24 items-center justify-center border-y border-border text-xs text-muted-foreground">暂无可用三视图版本</div>
+            </div>
           </div>
+          <div v-else class="mt-4 flex h-24 items-center justify-center border-y border-border text-xs text-muted-foreground">暂无可用三视图版本</div>
           <div class="mt-4 flex gap-2">
             <select :value="selectedCharacterVersions[character.id] ?? ''" class="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm" :disabled="Boolean(episode.assetsConfirmed)" @change="selectCharacterVersion(character.id, ($event.target as HTMLSelectElement).value)">
               <option value="">选择 READY 版本</option>
               <option v-for="version in readyCharacterVersions(character)" :key="version.id" :value="version.id">{{ versionLabel(version) }}</option>
             </select>
             <button v-if="!episode.assetsConfirmed" type="button" class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border hover:bg-secondary" :aria-label="`为 ${character.name} 创建新版本`" title="创建新版本" @click="openVersion('character', character.id, character.name)"><Plus class="h-4 w-4" /></button>
+          </div>
+          <div v-if="actionableCharacterVersions(character).length" class="mt-3 divide-y divide-border border-t border-border">
+            <div v-for="version in actionableCharacterVersions(character)" :key="version.id" class="flex min-w-0 flex-col gap-2 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="text-xs font-medium">{{ versionLabel(version) }}</span>
+                  <span class="rounded px-1.5 py-0.5 text-[11px]" :class="versionStatusClass(version)">{{ versionStatusLabel(version) }}</span>
+                </div>
+                <p class="mt-1 line-clamp-2 break-words text-xs leading-5 text-muted-foreground">{{ version.visualPrompt || "暂无视觉提示词" }}</p>
+              </div>
+              <span v-if="assetStatus(version) === 'GENERATING' || isVersionLaunching('character', version.id)" class="inline-flex h-8 shrink-0 items-center gap-2 text-xs text-primary">
+                <Loader2 class="h-3.5 w-3.5 animate-spin" />{{ isVersionLaunching('character', version.id) ? '正在启动' : 'AI 生成中' }}
+              </span>
+              <button v-else-if="!episode.assetsConfirmed" type="button" class="inline-flex h-8 w-full shrink-0 items-center justify-center gap-2 rounded-md border border-primary/30 px-2 text-xs text-primary hover:bg-primary/10 sm:w-auto" @click="generateAssetVersion('character', character.id, version)">
+                <Sparkles class="h-3.5 w-3.5" />AI 生成
+              </button>
+            </div>
           </div>
         </article>
       </div>
@@ -335,6 +512,23 @@ async function confirmAssets() {
           </div>
           <div class="p-4"><h4 class="font-medium">{{ scene.name }}</h4><p class="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{{ scene.description || "暂无场景描述" }}</p>
             <button v-if="!episode.assetsConfirmed" type="button" class="mt-3 inline-flex h-8 items-center gap-2 rounded-md border border-border px-2 text-xs hover:bg-secondary" @click="openVersion('scene', scene.id, scene.name)"><Plus class="h-3.5 w-3.5" /> 新版本</button>
+            <div v-if="actionableSceneVersions(scene).length" class="mt-3 divide-y divide-border border-t border-border">
+              <div v-for="version in actionableSceneVersions(scene)" :key="version.id" class="flex min-w-0 flex-col gap-2 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-xs font-medium">{{ versionLabel(version) }}</span>
+                    <span class="rounded px-1.5 py-0.5 text-[11px]" :class="versionStatusClass(version)">{{ versionStatusLabel(version) }}</span>
+                  </div>
+                  <p class="mt-1 line-clamp-2 break-words text-xs leading-5 text-muted-foreground">{{ version.visualPrompt || "暂无视觉提示词" }}</p>
+                </div>
+                <span v-if="assetStatus(version) === 'GENERATING' || isVersionLaunching('scene', version.id)" class="inline-flex h-8 shrink-0 items-center gap-2 text-xs text-primary">
+                  <Loader2 class="h-3.5 w-3.5 animate-spin" />{{ isVersionLaunching('scene', version.id) ? '正在启动' : 'AI 生成中' }}
+                </span>
+                <button v-else-if="!episode.assetsConfirmed" type="button" class="inline-flex h-8 w-full shrink-0 items-center justify-center gap-2 rounded-md border border-primary/30 px-2 text-xs text-primary hover:bg-primary/10 sm:w-auto" @click="generateAssetVersion('scene', scene.id, version)">
+                  <Sparkles class="h-3.5 w-3.5" />AI 生成
+                </button>
+              </div>
+            </div>
           </div>
         </article>
       </div>

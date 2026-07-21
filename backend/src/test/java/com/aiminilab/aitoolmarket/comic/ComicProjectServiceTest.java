@@ -7,6 +7,7 @@ import com.aiminilab.aitoolmarket.comic.service.ComicProjectApplicationService;
 import com.aiminilab.aitoolmarket.comic.service.ComicProjectService;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -106,6 +107,28 @@ class ComicProjectServiceTest {
                 new ComicDtos.RevisionRequest(episode.revision()));
         assertThat(episode.status()).isEqualTo("ASSETS_CONFIRMED");
 
+        ObjectNode operationInput = projectService.buildShotOperationInput(
+                userId, project.id(), episode.id(), stableIds.get(0)
+        );
+        assertThat(operationInput.path("sourceMode").asText()).isEqualTo("IMPORT");
+        assertThat(operationInput.path("operationHandlerKeys").size()).isEqualTo(3);
+        assertThat(operationInput.path("operationHandlerKeys").get(0).asText()).isEqualTo("comic.shot_tts");
+        assertThat(operationInput.path("operationHandlerKeys").get(1).asText()).isEqualTo("comic.shot_keyframe");
+        assertThat(operationInput.path("operationHandlerKeys").get(2).asText()).isEqualTo("comic.shot_video");
+        assertThat(operationInput.path("shot").path("shotId").asText())
+                .isEqualTo(String.valueOf(stableIds.get(0)));
+        assertThat(operationInput.path("shot").path("shotVersionId").asText()).contains(":r");
+        assertThat(operationInput.path("shot").path("camera").path("shotSize").asText())
+                .isEqualTo("中景");
+        assertThat(operationInput.path("shot").path("audio").path("dialogue").asText())
+                .isEqualTo("对白");
+        assertThat(operationInput.path("shot").path("prompts").path("image").asText())
+                .isEqualTo("首帧");
+        assertThat(operationInput.path("referenceAssetVersions").get(0).path("views").path("front").asText())
+                .isEqualTo("https://a/front.png");
+        assertThat(operationInput.path("referenceAssetVersions").get(1).path("anchors").get(0).path("url").asText())
+                .isEqualTo("https://a/scene.png");
+
         ComicDtos.CreateBatchRequest request = new ComicDtos.CreateBatchRequest(
                 "comic-batch-idempotent-1", null, 3, 120, true, null
         );
@@ -117,6 +140,25 @@ class ComicProjectServiceTest {
         assertThat(first.pendingCount()).isEqualTo(6);
         assertThat(first.attempts()).allMatch(item -> item.attemptNo() == 1);
         assertThat(batchService.requireLatest(userId, project.id(), episode.id()).getId()).isEqualTo(first.id());
+
+        ComicDtos.ShotAttemptDetail selected = first.attempts().get(0);
+        jdbcTemplate.update(
+                "UPDATE comic_shot_attempts SET status = 'SUCCESS', result_json = ? WHERE id = ?",
+                "{\"shot-videos\":{\"videoUrl\":\"/generated/shot-1.mp4\"}}",
+                selected.id()
+        );
+        jdbcTemplate.update(
+                "UPDATE comic_shots SET selected_attempt_id = ? WHERE id = ?",
+                selected.id(), selected.shotId()
+        );
+        ComicDtos.EpisodeDetail reloaded = projectService.episodeDetail(userId, project.id(), episode.id());
+        ComicDtos.ShotDetail reloadedShot = reloaded.shots().stream()
+                .filter(item -> item.id().equals(selected.shotId()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(reloadedShot.selectedAttemptId()).isEqualTo(selected.id());
+        assertThat(reloadedShot.selectedAttempt().result().path("shot-videos").path("videoUrl").asText())
+                .isEqualTo("/generated/shot-1.mp4");
         assertThatThrownBy(() -> projectService.detail(2L, project.id()))
                 .isInstanceOf(BusinessException.class);
     }

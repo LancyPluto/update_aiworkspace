@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import logging
+import math
 import re
 from typing import Any
 
@@ -128,21 +129,49 @@ class WorkflowStepHandler:
                 output = self._run_compose(form, workflow_inputs, task_id, trace_id)
             else:
                 raise RuntimeError(f"unsupported workflow node type: {node_def_type}")
-
-            success_payload = {
-                "resourceType": "TEXT",
-                "contentText": json.dumps(output, ensure_ascii=False),
-            }
-            success_payload.update(_provider_accounting_payload(output))
-            self.backend_client.mark_success(task_id, success_payload, trace_id=trace_id)
-            response = {"status": "SUCCESS", "taskId": task_id, "nodeDefType": node_def_type}
-            if handler_key:
-                response["handlerKey"] = handler_key
-            return response
         except Exception as error:
             LOGGER.exception("workflow step failed taskId=%s", task_id)
             self._mark_failed_safe(task_id, error, trace_id=trace_id)
             return {"status": "FAILED", "taskId": task_id, "error": str(error)}
+
+        success_payload = {
+            "resourceType": "TEXT",
+            "contentText": json.dumps(output, ensure_ascii=False),
+        }
+        success_payload.update(_billing_usage_payload(output))
+        try:
+            _validate_success_usage(model_config, success_payload)
+        except Exception as error:
+            LOGGER.exception("workflow step produced invalid billing usage taskId=%s", task_id)
+            try:
+                self._mark_failed_safe(task_id, error, trace_id=trace_id)
+            except BackendClientError:
+                if handler_key:
+                    raise
+                LOGGER.error(
+                    "non-checkpointed workflow failure callback was not accepted; avoiding provider replay taskId=%s",
+                    task_id,
+                )
+            return {"status": "FAILED", "taskId": task_id, "error": str(error)}
+        try:
+            self.backend_client.mark_success(task_id, success_payload, trace_id=trace_id)
+        except BackendClientError as error:
+            if handler_key:
+                LOGGER.exception("checkpointed workflow success settlement will be retried taskId=%s", task_id)
+                raise
+            LOGGER.exception("non-checkpointed workflow success callback failed taskId=%s", task_id)
+            try:
+                self._mark_failed_safe(task_id, error, trace_id=trace_id)
+            except BackendClientError:
+                LOGGER.error(
+                    "non-checkpointed workflow failure callback was not accepted; avoiding provider replay taskId=%s",
+                    task_id,
+                )
+            return {"status": "FAILED", "taskId": task_id, "error": str(error)}
+        response = {"status": "SUCCESS", "taskId": task_id, "nodeDefType": node_def_type}
+        if handler_key:
+            response["handlerKey"] = handler_key
+        return response
 
     def _run_comic_operation(
         self,
@@ -322,7 +351,7 @@ class WorkflowStepHandler:
                 "itemKey": script_version_id,
                 "scriptVersionId": script_version_id,
                 "script": normalized,
-                "screenplay": imported_text,
+                **_empty_usage(provider_called=False),
             }
 
         item_key = requested_version_id or str(operation_input.get("projectId") or "script")
@@ -354,6 +383,7 @@ class WorkflowStepHandler:
         parsed: dict[str, Any] | None = None
         errors: list[str] = []
         previous = ""
+        usage_total = _empty_usage()
         for attempt in range(2):
             attempt_prompt = prompt
             if attempt:
@@ -361,7 +391,8 @@ class WorkflowStepHandler:
                     "\n上一次输出不符合完整剧本 JSON 契约，请完整重写。"
                     f"\n错误：{'；'.join(errors)}\n上一次输出：{previous[:12000]}"
                 )
-            previous = self.model_client.generate(
+            previous, call_usage = _text_generation_with_usage(
+                self.model_client,
                 attempt_prompt,
                 system_prompt="你是专业漫剧编剧。只输出合法 JSON，不要 Markdown，不要提前拆分镜头。",
                 provider=model_config.get("provider"),
@@ -371,6 +402,7 @@ class WorkflowStepHandler:
                 timeout_seconds=max(180, int(model_config.get("timeoutSeconds") or 0)),
                 max_tokens=12000,
             )
+            _accumulate_usage(usage_total, _provider_call_usage(call_usage, model_config))
             parsed = _extract_json(previous)
             errors = _comic_script_errors(parsed)
             if not errors:
@@ -394,8 +426,15 @@ class WorkflowStepHandler:
             "itemKey": script_version_id,
             "scriptVersionId": script_version_id,
             "script": script,
-            "screenplay": script.get("screenplay") or "",
-            "providerCalls": [_comic_provider_call("comic.script", script_version_id, model_config, generated)],
+            **usage_total,
+            "providerCalls": [
+                _comic_provider_call(
+                    "comic.script",
+                    script_version_id,
+                    model_config,
+                    {**generated, **usage_total},
+                )
+            ],
         }
         self._complete_comic_operation(
             task_id=task_id,
@@ -421,7 +460,10 @@ class WorkflowStepHandler:
     ) -> dict[str, Any]:
         direct_storyboard = _comic_storyboard_payload(operation_input)
         if direct_storyboard:
-            return _normalize_comic_storyboard(direct_storyboard, form=form)
+            return {
+                **_normalize_comic_storyboard(direct_storyboard, form=form),
+                **_empty_usage(provider_called=False),
+            }
 
         script_payload = _comic_script_payload(operation_input)
         script_text = _comic_script_text(script_payload)
@@ -460,6 +502,7 @@ class WorkflowStepHandler:
         parsed: dict[str, Any] | None = None
         errors: list[str] = []
         previous = ""
+        usage_total = _empty_usage()
         for attempt in range(2):
             attempt_prompt = prompt
             if attempt:
@@ -467,7 +510,8 @@ class WorkflowStepHandler:
                     "\n上一次输出不符合分镜 JSON 契约，请完整重写。"
                     f"\n错误：{'；'.join(errors)}\n上一次输出：{previous[:12000]}"
                 )
-            previous = self.model_client.generate(
+            previous, call_usage = _text_generation_with_usage(
+                self.model_client,
                 attempt_prompt,
                 system_prompt="你是专业漫剧分镜导演。只输出合法 JSON，不要 Markdown。",
                 provider=model_config.get("provider"),
@@ -477,6 +521,7 @@ class WorkflowStepHandler:
                 timeout_seconds=max(180, int(model_config.get("timeoutSeconds") or 0)),
                 max_tokens=min(16000, max(5000, 700 * requested_shots)),
             )
+            _accumulate_usage(usage_total, _provider_call_usage(call_usage, model_config))
             parsed = _extract_json(previous)
             errors = _comic_storyboard_errors(parsed)
             if not errors:
@@ -487,6 +532,7 @@ class WorkflowStepHandler:
         result = _normalize_comic_storyboard(parsed, form=form)
         result["handlerKey"] = "comic.storyboard"
         result["scriptVersionId"] = item_key
+        result.update(usage_total)
         result["providerCalls"] = [
             _comic_provider_call("comic.storyboard", item_key, model_config, result)
         ]
@@ -552,6 +598,7 @@ class WorkflowStepHandler:
         prompt = _build_three_view_reference_prompt(spec, {**form, **operation_input})
         generator = _resolve_image_generator(model_config)
         source_url = generator(prompt, reference_images=[])
+        call_usage = _provider_call_usage(generator, model_config)
         if not source_url:
             raise RuntimeError(f"{handler_key} returned no image")
         persisted = GeneratedImagePersister().persist_images(task_id=task_id, urls=[source_url])
@@ -572,7 +619,10 @@ class WorkflowStepHandler:
             "itemKey": asset_version_id,
             "referenceAssetVersion": asset_version,
             "referenceAssetVersions": [asset_version],
-            "providerCalls": [_comic_provider_call(handler_key, asset_version_id, model_config, {})],
+            **call_usage,
+            "providerCalls": [
+                _comic_provider_call(handler_key, asset_version_id, model_config, call_usage)
+            ],
         }
         self._complete_comic_operation(
             task_id=task_id,
@@ -619,6 +669,7 @@ class WorkflowStepHandler:
         prompt = _build_comic_shot_image_prompt(shot, form)
         generator = _resolve_image_generator(model_config)
         source_url = generator(prompt, reference_images=reference_images)
+        call_usage = _provider_call_usage(generator, model_config)
         if not source_url:
             raise RuntimeError("comic.shot_keyframe returned no image")
         persisted = GeneratedImagePersister().persist_images(task_id=task_id, urls=[source_url])
@@ -645,8 +696,9 @@ class WorkflowStepHandler:
             "keyframeVersion": keyframe_version,
             "imageUrl": image_url,
             "referenceImages": reference_images,
+            **call_usage,
             "providerCalls": [
-                _comic_provider_call("comic.shot_keyframe", shot_version_id, model_config, {})
+                _comic_provider_call("comic.shot_keyframe", shot_version_id, model_config, call_usage)
             ],
         }
         self._complete_comic_operation(
@@ -745,6 +797,11 @@ class WorkflowStepHandler:
             **(checkpoint.get("providerState") or {}),
             **result_from_provider,
         })
+        call_usage = _provider_call_usage(
+            result_from_provider,
+            model_config,
+            duration_seconds=duration_seconds,
+        )
         clip_version_id = str(
             operation_input.get("clipVersionId")
             or f"{shot_version_id}:clip:{_short_hash(keyframe_version_id + prompt)}"
@@ -771,8 +828,14 @@ class WorkflowStepHandler:
             "clipVersion": clip_version,
             "videoUrl": clip_version["videoUrl"],
             "sourceVideoUrl": provider_video_url,
+            **call_usage,
             "providerCalls": [
-                _comic_provider_call("comic.shot_video", item_key, model_config, clip_version)
+                _comic_provider_call(
+                    "comic.shot_video",
+                    item_key,
+                    model_config,
+                    {**clip_version, **call_usage},
+                )
             ],
         }
         if accounting:
@@ -834,6 +897,7 @@ class WorkflowStepHandler:
                 "skipped": True,
                 "reason": "SHOT_HAS_NO_SPEECH",
                 "audioVersion": None,
+                **_empty_usage(provider_called=False),
             }
 
         checkpoint, checkpoint_version, cached, _ = self._begin_comic_operation(
@@ -869,6 +933,7 @@ class WorkflowStepHandler:
             model=model_config.get("modelName"),
             voice=voice,
         )
+        call_usage = _provider_call_usage(client, model_config)
         persisted = GeneratedAudioPersister().persist_audio_url(
             task_id=task_id,
             source_url=audio_data_url,
@@ -896,7 +961,10 @@ class WorkflowStepHandler:
             "audioUrl": audio_version["audioUrl"],
             "speechText": speech_text,
             "voice": voice,
-            "providerCalls": [_comic_provider_call("comic.shot_tts", shot_version_id, model_config, {})],
+            **call_usage,
+            "providerCalls": [
+                _comic_provider_call("comic.shot_tts", shot_version_id, model_config, call_usage)
+            ],
         }
         self._complete_comic_operation(
             task_id=task_id,
@@ -987,6 +1055,13 @@ class WorkflowStepHandler:
         else:
             final_video_url = segments[0]["renderedVideoUrl"]
 
+        _, subtitle_url = self.postprocessor.concat_subtitles(
+            task_id=task_id,
+            video_paths=segment_paths,
+            subtitle_texts=[item.get("subtitleZh") or "" for item in segments],
+            output_name="comic-final.srt",
+        )
+
         title = str(operation_input.get("title") or form.get("storyTheme") or "AI 漫剧成片")
         markdown = _build_delivery_markdown(
             title=title,
@@ -1026,10 +1101,11 @@ class WorkflowStepHandler:
             "compositionManifest": manifest,
             "finalVideoUrl": final_video_url,
             "videoUrl": final_video_url,
-            "subtitleUrl": segments[0]["subtitleUrl"],
+            "subtitleUrl": subtitle_url,
             "segments": segments,
             "shotCount": total,
             "markdown": markdown,
+            **_empty_usage(provider_called=False),
         }
         self._complete_comic_operation(
             task_id=task_id,
@@ -1072,6 +1148,7 @@ class WorkflowStepHandler:
         parsed: dict[str, Any] | None = None
         validation_errors: list[str] = []
         previous_output = ""
+        usage_total = _empty_usage()
         for attempt in range(2):
             attempt_prompt = prompt
             if attempt > 0:
@@ -1081,7 +1158,8 @@ class WorkflowStepHandler:
                     f"上一次输出：{previous_output[:12000]}"
                 )
             try:
-                raw = self.model_client.generate(
+                raw, call_usage = _text_generation_with_usage(
+                    self.model_client,
                     attempt_prompt,
                     system_prompt="你是专业短剧编剧和分镜导演。严格遵守字段、数量、内容唯一性要求，只输出合法 JSON 对象。",
                     provider=model_config.get("provider"),
@@ -1091,6 +1169,7 @@ class WorkflowStepHandler:
                     timeout_seconds=max(180, int(model_config.get("timeoutSeconds") or 0)),
                     max_tokens=min(16000, max(5000, 900 * scene_count)),
                 )
+                _accumulate_usage(usage_total, _provider_call_usage(call_usage, model_config))
             except ModelClientError:
                 LOGGER.exception(
                     "script planner model call failed provider=%s model=%s",
@@ -1133,6 +1212,7 @@ class WorkflowStepHandler:
             "sceneSeconds": SCENE_SECONDS,
             "totalSeconds": len(scenes) * SCENE_SECONDS,
             "scenes": scenes,
+            **usage_total,
         }
         # 向后兼容：旧版单镜字段取第一镜
         output.update({key: scenes[0][key] for key in (
@@ -1158,9 +1238,11 @@ class WorkflowStepHandler:
         reference_specs = _build_reference_asset_specs(script, form)
         source_urls: list[str] = []
         prompt_entries: list[dict[str, Any]] = []
+        usage_total = _empty_usage()
         for spec in reference_specs:
             prompt = _build_three_view_reference_prompt(spec, form)
             source_urls.append(gen_image(prompt))
+            _accumulate_usage(usage_total, _provider_call_usage(gen_image, model_config))
             prompt_entries.append({**spec, "prompt": prompt, "kind": "reference"})
         for position, scene in enumerate(scenes, start=1):
             scene_description = scene.get("sceneDescription") or scene.get("narration") or form.get("plotOutline") or ""
@@ -1182,6 +1264,7 @@ class WorkflowStepHandler:
                 trace_id=trace_id,
             )
             source_urls.append(gen_image(prompt))
+            _accumulate_usage(usage_total, _provider_call_usage(gen_image, model_config))
             prompt_entries.append(
                 {
                     "kind": "scene",
@@ -1226,6 +1309,7 @@ class WorkflowStepHandler:
             "imageUrl": images[0]["imageUrl"] if images else "",
             "sourceImageUrl": images[0]["sourceImageUrl"] if images else "",
             "prompt": images[0]["prompt"] if images else "",
+            **usage_total,
         }
 
     def _run_tts(
@@ -1244,6 +1328,7 @@ class WorkflowStepHandler:
         )
         total = len(scenes)
         audios: list[dict[str, Any]] = []
+        usage_total = _empty_usage()
         for position, scene in enumerate(scenes, start=1):
             speech_text = scene.get("dialogue") or scene.get("narration") or form.get("plotOutline") or "奶就放心了。"
             presenter_gender = scene.get("presenterGender") or DigitalHumanVideoHandler._resolve_presenter_gender(form)
@@ -1259,6 +1344,7 @@ class WorkflowStepHandler:
                 model=model_config.get("modelName"),
                 voice=voice,
             )
+            _accumulate_usage(usage_total, _provider_call_usage(client, model_config))
             audio_url = _persist_audio_data_url(task_id, audio_data_url, index=position)
             audios.append(
                 {
@@ -1279,6 +1365,7 @@ class WorkflowStepHandler:
             "audioDataUrl": first.get("audioDataUrl") or "",
             "speechText": first.get("speechText") or "",
             "voice": first.get("voice") or "",
+            **usage_total,
         }
 
     def _run_video(
@@ -1323,6 +1410,7 @@ class WorkflowStepHandler:
         scene_checkpoints = checkpoint.setdefault("scenes", {})
         total = len(scenes)
         clips: list[dict[str, Any]] = []
+        usage_total = _empty_usage()
         for position, scene in enumerate(scenes, start=1):
             scene_key = str(position)
             scene_checkpoint = scene_checkpoints.get(scene_key)
@@ -1333,12 +1421,19 @@ class WorkflowStepHandler:
                 and scene_checkpoint.get("videoUrl")
                 and scene_checkpoint.get("sourceVideoUrl")
             ):
+                cached_usage = _provider_call_usage(
+                    scene_checkpoint,
+                    model_config,
+                    duration_seconds=SCENE_SECONDS,
+                )
+                _accumulate_usage(usage_total, cached_usage)
                 clips.append({
                     "sceneIndex": position,
                     "videoUrl": scene_checkpoint["videoUrl"],
                     "sourceVideoUrl": scene_checkpoint["sourceVideoUrl"],
                     "referenceImages": scene_checkpoint.get("referenceImages") or [],
                     **_provider_accounting_payload(scene_checkpoint),
+                    **cached_usage,
                 })
                 continue
             image_entry = keyframe_images[position - 1] if position <= len(keyframe_images) else keyframe_images[-1]
@@ -1395,12 +1490,19 @@ class WorkflowStepHandler:
                 **scene_checkpoints.get(scene_key, {}),
             })
             provider_accounting.update(_provider_accounting_payload(result))
+            call_usage = _provider_call_usage(
+                result,
+                model_config,
+                duration_seconds=SCENE_SECONDS,
+            )
+            _accumulate_usage(usage_total, call_usage)
             clip = {
                 "sceneIndex": position,
                 "videoUrl": persisted["url"],
                 "sourceVideoUrl": result["videoUrl"],
                 "referenceImages": reference_images,
                 **provider_accounting,
+                **call_usage,
             }
             clips.append(clip)
             scene_checkpoints[scene_key] = {
@@ -1416,6 +1518,7 @@ class WorkflowStepHandler:
                 "sourceVideoUrl": clip["sourceVideoUrl"],
                 "referenceImages": reference_images,
                 **provider_accounting,
+                **call_usage,
             }
             saved = self.backend_client.save_provider_checkpoint(
                 task_id,
@@ -1433,6 +1536,7 @@ class WorkflowStepHandler:
             # 向后兼容字段
             "videoUrl": first.get("videoUrl") or "",
             "sourceVideoUrl": first.get("sourceVideoUrl") or "",
+            **usage_total,
         }
         if total == 1:
             output["providerAccounting"] = _provider_accounting_payload(first)
@@ -1546,6 +1650,7 @@ class WorkflowStepHandler:
             "markdown": markdown,
             "subtitleZh": segments[0]["subtitleZh"],
             "subtitleEn": segments[0]["subtitleEn"],
+            **_empty_usage(provider_called=False),
         }
 
     def _mark_failed_safe(self, task_id: int, error: Exception, trace_id: str | None = None) -> None:
@@ -1830,6 +1935,22 @@ def _normalize_comic_shot(raw: dict[str, Any], *, index: int, cursor_ms: int) ->
     subtitle_en = str(audio_raw.get("subtitleEn") or raw.get("subtitleEn") or "")
     references = {
         **references_raw,
+        "characters": _normalize_comic_entity_refs(
+            references_raw.get("characters")
+            or references_raw.get("characterRefs")
+            or raw.get("characters")
+            or raw.get("character")
+        ),
+        "scenes": _normalize_comic_entity_refs(
+            references_raw.get("scenes")
+            or references_raw.get("locations")
+            or references_raw.get("sceneRefs")
+            or references_raw.get("locationRefs")
+            or raw.get("scenes")
+            or raw.get("scene")
+            or raw.get("locations")
+            or raw.get("location")
+        ),
         "characterVersionIds": _dedupe(
             _as_string_list(references_raw.get("characterVersionIds"))
             + _as_string_list(raw.get("characterVersionIds"))
@@ -1904,6 +2025,24 @@ def _normalize_comic_shot(raw: dict[str, Any], *, index: int, cursor_ms: int) ->
     }
 
 
+def _normalize_comic_entity_refs(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        values = [value]
+    elif isinstance(value, list):
+        values = value
+    else:
+        return []
+    entities: list[dict[str, Any]] = []
+    for raw in values:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or raw.get("title") or raw.get("label") or "").strip()
+        if not name:
+            continue
+        entities.append({**raw, "name": name})
+    return entities
+
+
 def _int_or_none(value: Any) -> int | None:
     try:
         return int(value) if value is not None and str(value).strip() else None
@@ -1954,8 +2093,11 @@ def _build_comic_storyboard_prompt(*, script_text: str, shot_count: int, visual_
         "每镜必须包含 shotId、shotVersionId、order、timecode(startMs/endMs/targetDurationMs)、"
         "camera(shotSize/angle/movement/composition)、performance(emotion/action)、"
         "visualDescription、audio(dialogue/narration/subtitleZh/subtitleEn/sfx/bgmMood)、"
-        "references(characterVersionIds/sceneVersionIds/propVersionIds)、"
+        "references(characters[{name,description}]/scenes[{name,description}]/"
+        "characterVersionIds/sceneVersionIds/propVersionIds)、"
         "prompts(image/video/negative)、continuity。\n"
+        "references.characters/scenes 只列本镜实际出现的可命名实体，description 至少 5 字并写明可复用视觉特征；"
+        "不要把 versionId 当成名称。\n"
         "时间码必须连续；每镜画面必须具体且推动剧情，不得写“同上”或“保持不变”。\n"
         "输出结构：{\"title\":\"...\",\"shots\":[{...}]}。\n\n"
         f"完整剧本：\n{script_text}"
@@ -2402,6 +2544,142 @@ def _find_script_payload(workflow_inputs: dict[str, Any] | None) -> dict[str, An
     return {}
 
 
+def _billing_usage_payload(output: Any) -> dict[str, Any]:
+    payload = _provider_accounting_payload(output)
+    if not isinstance(output, dict):
+        return payload
+    accounting = output.get("providerAccounting")
+    usage = output.get("usage")
+    sources = [
+        output,
+        usage if isinstance(usage, dict) else {},
+        accounting if isinstance(accounting, dict) else {},
+    ]
+    fields = {
+        "promptTokens": ("promptTokens", "prompt_tokens", "inputTokens", "input_tokens"),
+        "completionTokens": ("completionTokens", "completion_tokens", "outputTokens", "output_tokens"),
+        "billableUnits": ("billableUnits", "billable_units", "units"),
+    }
+    for target, aliases in fields.items():
+        value = None
+        for source in sources:
+            value = _first_defined(source, *aliases)
+            if value is not None:
+                break
+        if value is not None:
+            payload[target] = _non_negative_int(value)
+    provider_called = None
+    for source in sources:
+        provider_called = _first_defined(source, "providerCalled", "provider_called")
+        if provider_called is not None:
+            break
+    if provider_called is not None:
+        payload["providerCalled"] = _boolean_value(provider_called)
+    return payload
+
+
+def _empty_usage(*, provider_called: bool = False) -> dict[str, Any]:
+    return {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "billableUnits": 0,
+        "providerCalled": provider_called,
+    }
+
+
+def _accumulate_usage(total: dict[str, Any], usage: dict[str, Any]) -> None:
+    total["providerCalled"] = bool(total.get("providerCalled")) or bool(usage.get("providerCalled"))
+    for field in ("promptTokens", "completionTokens", "billableUnits"):
+        total[field] = _non_negative_int(total.get(field)) + _non_negative_int(usage.get(field))
+
+
+def _text_generation_with_usage(model_client: Any, prompt: str, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+    generate_with_usage = getattr(model_client, "generate_with_usage", None)
+    if callable(generate_with_usage):
+        result = generate_with_usage(prompt, **kwargs)
+        content = result.get("content") if isinstance(result, dict) else getattr(result, "content", "")
+        usage = _empty_usage(provider_called=True)
+        usage["promptTokens"] = _non_negative_int(
+            result.get("promptTokens") if isinstance(result, dict) else getattr(result, "prompt_tokens", 0)
+        )
+        usage["completionTokens"] = _non_negative_int(
+            result.get("completionTokens") if isinstance(result, dict) else getattr(result, "completion_tokens", 0)
+        )
+        return str(content or ""), usage
+    return str(model_client.generate(prompt, **kwargs) or ""), _empty_usage(provider_called=True)
+
+
+def _model_billing_unit(model_config: dict[str, Any]) -> str:
+    return str(model_config.get("billingUnit") or "").strip().upper()
+
+
+def _validate_success_usage(model_config: dict[str, Any], payload: dict[str, Any]) -> None:
+    if payload.get("providerCalled") is not True:
+        return
+    unit = _model_billing_unit(model_config)
+    if unit in {"TOKEN_PER_M", "IMAGE_TOKEN"}:
+        if _non_negative_int(payload.get("promptTokens")) + _non_negative_int(payload.get("completionTokens")) <= 0:
+            raise RuntimeError(f"provider usage is missing token counts for {unit}")
+        return
+    if unit in {"PER_CALL", "PER_SECOND"}:
+        if _non_negative_int(payload.get("billableUnits")) <= 0:
+            raise RuntimeError(f"provider usage is missing billable units for {unit}")
+        return
+    raise RuntimeError(f"provider usage has unsupported billing unit: {unit or 'EMPTY'}")
+
+
+def _default_billable_units(
+    model_config: dict[str, Any],
+    *,
+    call_count: int = 1,
+    duration_seconds: int | float | None = None,
+) -> int:
+    unit = _model_billing_unit(model_config)
+    if unit == "PER_CALL":
+        return max(0, int(call_count))
+    if unit == "PER_SECOND" and duration_seconds is not None:
+        return max(0, int(math.ceil(float(duration_seconds))))
+    return 0
+
+
+def _provider_call_usage(
+    source: Any,
+    model_config: dict[str, Any],
+    *,
+    call_count: int = 1,
+    duration_seconds: int | float | None = None,
+) -> dict[str, Any]:
+    raw = source if isinstance(source, dict) else getattr(source, "last_usage", {})
+    usage = _empty_usage(provider_called=True)
+    if isinstance(raw, dict):
+        reported = _billing_usage_payload(raw)
+        for field in ("promptTokens", "completionTokens", "billableUnits"):
+            if field in reported:
+                usage[field] = _non_negative_int(reported[field])
+    if usage["billableUnits"] <= 0:
+        usage["billableUnits"] = _default_billable_units(
+            model_config,
+            call_count=call_count,
+            duration_seconds=duration_seconds,
+        )
+    return usage
+
+
+def _non_negative_int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _boolean_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 def _provider_accounting_payload(output: Any) -> dict[str, Any]:
     if not isinstance(output, dict):
         return {}
@@ -2481,7 +2759,10 @@ def _resolve_image_generator(model_config: dict[str, Any]):
                 batch_size=1,
                 image=reference_images or None,
             )
+            _gen.last_usage = dict(client.last_usage or {})
             return urls[0] if urls else ""
+
+        _gen.last_usage = {}
 
         return _gen
 

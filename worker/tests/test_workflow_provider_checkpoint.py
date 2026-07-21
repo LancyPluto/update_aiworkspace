@@ -182,6 +182,7 @@ def _execution_context(*, checkpoint: dict | None = None, checkpoint_version: in
             "provider": "agnes_video",
             "modelName": "agnes-video-v2.0",
             "apiKey": "test-key",
+            "billingUnit": "PER_SECOND",
         },
     }
 
@@ -214,6 +215,7 @@ def test_workflow_handler_persists_provider_id_before_poll_result_is_consumed(mo
     assert result["status"] == "SUCCESS"
     assert [update["expectedVersion"] for update in backend.checkpoint_updates] == [0, 1]
     assert backend.checkpoint_updates[-1]["checkpoint"]["scenes"]["1"]["status"] == "COMPLETED"
+    assert backend.success_payload["billableUnits"] == 5
     assert all(update["claimToken"] == "claim-701" for update in backend.checkpoint_updates)
 
 
@@ -319,6 +321,7 @@ def test_multi_scene_video_success_does_not_invent_aggregate_provider_accounting
     assert "providerRequestId" not in backend.success_payload
     assert "providerCostAmount" not in backend.success_payload
     assert "providerCostCurrency" not in backend.success_payload
+    assert backend.success_payload["billableUnits"] == 10
     output = json.loads(backend.success_payload["contentText"])
     assert output["providerAccounting"] == {
         "status": "UNKNOWN",
@@ -386,6 +389,8 @@ def test_workflow_handler_reuses_completed_scene_after_message_redelivery(monkey
                 "referenceImages": [],
                 "providerCostAmount": "0.125000",
                 "providerCostCurrency": "USD",
+                "billableUnits": 5,
+                "providerCalled": True,
             }
         },
     }
@@ -404,6 +409,8 @@ def test_workflow_handler_reuses_completed_scene_after_message_redelivery(monkey
     assert result["status"] == "SUCCESS"
     assert backend.checkpoint_updates == []
     assert json.loads(backend.success_payload["contentText"])["videoUrl"] == "/generated/video/701/video-1.mp4"
+    assert backend.success_payload["billableUnits"] == 5
+    assert backend.success_payload["providerCalled"] is True
     assert backend.success_payload["providerRequestId"] == "agnes-request-701-1"
     assert backend.success_payload["providerCostAmount"] == "0.125000"
     assert backend.success_payload["providerCostCurrency"] == "USD"

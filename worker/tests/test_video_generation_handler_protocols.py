@@ -6,6 +6,7 @@ class FakeBackendClient:
     def __init__(self) -> None:
         self.success_payload: dict | None = None
         self.failed_payload: dict | None = None
+        self.checkpoints: list[dict] = []
 
     def get_execution_context(self, task_id: int, trace_id: str | None = None) -> dict:
         return {
@@ -40,6 +41,17 @@ class FakeBackendClient:
         self.failed_payload = payload
         return {}
 
+    def save_provider_checkpoint(
+        self,
+        task_id: int,
+        checkpoint: dict,
+        *,
+        expected_version: int,
+        trace_id: str | None = None,
+    ) -> dict:
+        self.checkpoints.append(checkpoint)
+        return {"version": expected_version + 1, "checkpoint": checkpoint}
+
 
 class StrictSeedanceClient:
     def __init__(self) -> None:
@@ -57,6 +69,8 @@ class StrictSeedanceClient:
         duration: str = "",
         aspect_ratio: str = "",
         resolution: str = "",
+        resume: dict | None = None,
+        submitted_callback=None,
     ) -> dict:
         self.request = {
             "prompt": prompt,
@@ -68,7 +82,10 @@ class StrictSeedanceClient:
             "duration": duration,
             "aspect_ratio": aspect_ratio,
             "resolution": resolution,
+            "resume": resume,
         }
+        if submitted_callback and not resume:
+            submitted_callback({"taskId": "seedance-task-1", "requestId": "seedance-task-1"})
         return {
             "videoUrl": "https://cdn.example/seedance.mp4",
             "requestId": "seedance-task-1",
@@ -140,6 +157,39 @@ def test_seedance_video_handler_omits_tail_frame_protocol_field() -> None:
     assert seedance.request["prompt"] == "扣篮"
     assert seedance.request["duration"] == "3"
     assert seedance.request["aspect_ratio"] == "16:9"
+    assert backend.checkpoints[0]["requestId"] == "seedance-task-1"
+
+
+def test_seedance_video_handler_resumes_saved_submission_without_new_checkpoint() -> None:
+    backend = FakeBackendClient()
+    original_context = backend.get_execution_context
+
+    def context_with_checkpoint(task_id: int, trace_id: str | None = None) -> dict:
+        context = original_context(task_id, trace_id)
+        context["providerCheckpoint"] = {
+            "kind": "VIDEO_SUBMISSION",
+            "provider": "seedance",
+            "model": "doubao-seedance-1-5-pro-251215",
+            "status": "SUBMITTED",
+            "taskId": "seedance-existing",
+            "requestId": "seedance-existing",
+        }
+        context["providerCheckpointVersion"] = 1
+        return context
+
+    backend.get_execution_context = context_with_checkpoint
+    seedance = StrictSeedanceClient()
+    handler = VideoGenerationHandler(
+        backend_client=backend,
+        seedance_client=seedance,
+        video_persister=FakeVideoPersister(),
+    )
+
+    result = handler.handle({"taskId": 132, "traceId": "trace-resume"})
+
+    assert result["status"] == "SUCCESS"
+    assert seedance.request["resume"]["taskId"] == "seedance-existing"
+    assert backend.checkpoints == []
 
 
 def test_video_handler_timeout_marks_failed_for_credit_release() -> None:
@@ -158,4 +208,7 @@ def test_video_handler_timeout_marks_failed_for_credit_release() -> None:
     assert backend.failed_payload == {
         "errorCode": "MODEL_TIMEOUT",
         "errorMessage": "seedance poll timed out",
+        "deliveryState": "UNKNOWN",
+        "retryScope": "NONE",
+        "failureStage": "PROVIDER_SUBMITTED",
     }

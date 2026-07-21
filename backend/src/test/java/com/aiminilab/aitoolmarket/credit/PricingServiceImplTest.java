@@ -176,6 +176,41 @@ class PricingServiceImplTest {
         assertThat(quote.breakdown().get(0).detail()).contains("1000 input + 1000 output");
     }
 
+    @Test
+    void tokenPerMillionEstimate_requiresExplicitConfiguredUsage() {
+        AiTool tool = new AiTool();
+        tool.setId(21L);
+        AgentModelConfig config = new AgentModelConfig();
+        config.setId(10L);
+        config.setBillingUnit("TOKEN_PER_M");
+        config.setInputTokenPricePer1m(new BigDecimal("10"));
+        config.setOutputTokenPricePer1m(new BigDecimal("30"));
+
+        PricingQuote missingEstimate = pricingService.computeQuote(
+                tool, config, OBJECT_MAPPER.createObjectNode(), null, 0
+        );
+        assertThat(missingEstimate.modelDerived()).isFalse();
+        assertThat(missingEstimate.chargeCredits()).isZero();
+
+        PricingMargin margin = new PricingMargin();
+        margin.setScopeType("MODEL");
+        margin.setScopeRef(10L);
+        margin.setMarkupRatio(new BigDecimal("1.50"));
+        margin.setMinCredits(0);
+        margin.setTokenEstimateInputTokens(1000);
+        margin.setTokenEstimateOutputTokens(2000);
+        margin.setEnabled(true);
+        when(pricingMarginMapper.findEnabledByScope(eq("MODEL"), eq(10L))).thenReturn(margin);
+
+        PricingQuote configured = pricingService.computeQuote(
+                tool, config, OBJECT_MAPPER.createObjectNode(), null, 0
+        );
+        assertThat(configured.modelDerived()).isTrue();
+        assertThat(configured.vendorCost()).isEqualByComparingTo("0.07000000");
+        assertThat(configured.chargeCredits()).isEqualTo(11);
+        assertThat(configured.breakdown().get(0).detail()).contains("1000 input + 2000 output");
+    }
+
     private PricingRule gptImage2CountRule() {
         PricingRule rule = new PricingRule();
         rule.setRuleType("MULTIPLIER");

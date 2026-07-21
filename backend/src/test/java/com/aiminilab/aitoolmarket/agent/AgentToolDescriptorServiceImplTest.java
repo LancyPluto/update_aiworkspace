@@ -86,7 +86,7 @@ class AgentToolDescriptorServiceImplTest {
         when(toolMapper.findOnlineByCode(tool.getToolCode())).thenReturn(Optional.of(tool));
         when(extensionMapper.findByToolCode(tool.getToolCode())).thenReturn(Optional.of(extension));
         when(preferenceMapper.findByUserIdAndToolCode(7L, tool.getToolCode())).thenReturn(null);
-        when(workflowMapper.selectExecutableCanonicalByToolId(tool.getId())).thenReturn(workflow);
+        when(workflowMapper.selectCanonicalPublishedSnapshotByToolId(tool.getId())).thenReturn(workflow);
         when(workflowVersionMapper.selectById(workflow.getPublishedVersionId())).thenReturn(version);
         when(taskCreditEstimateService.estimateUserFacingTaskCredits(tool)).thenReturn(12);
 
@@ -100,6 +100,51 @@ class AgentToolDescriptorServiceImplTest {
         assertThat(descriptor.confirmationPolicy()).isEqualTo("WORKFLOW_DEFINED");
         assertThat((JsonNode) descriptor.inputSchema()).isEqualTo(objectMapper.readTree(version.getInputSchemaSnapshotJson()));
         assertThat(descriptor.fields()).extracting(field -> field.fieldKey()).containsExactly("story");
+    }
+
+    @Test
+    void workflowDescriptorVisibilityIgnoresLegacyLaunchFlags() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        AgentToolDescriptorServiceImpl service = new AgentToolDescriptorServiceImpl(
+                toolMapper,
+                toolFieldItemMapper,
+                workflowMapper,
+                workflowVersionMapper,
+                extensionMapper,
+                preferenceMapper,
+                modelConfigMapper,
+                taskCreditEstimateService,
+                objectMapper
+        );
+        AiTool tool = new AiTool();
+        tool.setId(21L);
+        tool.setToolCode("ai_comic_drama_agent");
+        tool.setToolName("AI Comic Drama");
+        tool.setExecutionMode("WORKFLOW");
+        tool.setBillingMode("FIXED");
+        tool.setAgentSurfaceEnabled(false);
+        ToolWorkflow workflow = new ToolWorkflow();
+        workflow.setId(32L);
+        workflow.setToolId(tool.getId());
+        workflow.setPublishedVersionId(42L);
+        workflow.setExecutionEnabled(false);
+        ToolWorkflowVersion version = new ToolWorkflowVersion();
+        version.setId(42L);
+        version.setWorkflowId(workflow.getId());
+        version.setInputSchemaSnapshotJson("{\"type\":\"object\",\"properties\":{}}");
+
+        when(toolMapper.findOnlineByCode(tool.getToolCode())).thenReturn(Optional.of(tool));
+        when(extensionMapper.findByToolCode(tool.getToolCode())).thenReturn(Optional.empty());
+        when(preferenceMapper.findByUserIdAndToolCode(7L, tool.getToolCode())).thenReturn(null);
+        when(workflowMapper.selectCanonicalPublishedSnapshotByToolId(tool.getId())).thenReturn(workflow);
+        when(workflowVersionMapper.selectById(workflow.getPublishedVersionId())).thenReturn(version);
+        when(taskCreditEstimateService.estimateUserFacingTaskCredits(tool)).thenReturn(0);
+
+        var descriptor = service.getToolForAgent(7L, tool.getToolCode());
+
+        assertThat(descriptor.executionMode()).isEqualTo("WORKFLOW");
+        assertThat(descriptor.billingMode()).isEqualTo("FIXED");
+        assertThat(descriptor.runRouteTemplate()).isEqualTo("/agents/runs/{taskId}");
     }
 
     @Test

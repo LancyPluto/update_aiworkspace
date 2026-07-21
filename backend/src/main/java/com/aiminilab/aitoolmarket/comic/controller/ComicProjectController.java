@@ -2,10 +2,13 @@ package com.aiminilab.aitoolmarket.comic.controller;
 
 import com.aiminilab.aitoolmarket.auth.security.AuthContext;
 import com.aiminilab.aitoolmarket.comic.dto.ComicDtos;
+import com.aiminilab.aitoolmarket.comic.service.ComicAssemblyBatchService;
+import com.aiminilab.aitoolmarket.comic.service.ComicAssetGenerationService;
 import com.aiminilab.aitoolmarket.comic.service.ComicBatchDispatchService;
 import com.aiminilab.aitoolmarket.comic.service.ComicGenerationBatchService;
 import com.aiminilab.aitoolmarket.comic.service.ComicProjectApplicationService;
 import com.aiminilab.aitoolmarket.comic.service.ComicProjectService;
+import com.aiminilab.aitoolmarket.comic.service.ComicWorkflowLaunchService;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -32,15 +35,24 @@ public class ComicProjectController {
     private final ComicProjectApplicationService applicationService;
     private final ComicGenerationBatchService batchService;
     private final ComicBatchDispatchService dispatchService;
+    private final ComicAssemblyBatchService assemblyBatchService;
+    private final ComicAssetGenerationService assetGenerationService;
+    private final ComicWorkflowLaunchService workflowLaunchService;
 
     public ComicProjectController(ComicProjectService projectService,
                                   ComicProjectApplicationService applicationService,
                                   ComicGenerationBatchService batchService,
-                                  ComicBatchDispatchService dispatchService) {
+                                  ComicBatchDispatchService dispatchService,
+                                  ComicAssemblyBatchService assemblyBatchService,
+                                  ComicAssetGenerationService assetGenerationService,
+                                  ComicWorkflowLaunchService workflowLaunchService) {
         this.projectService = projectService;
         this.applicationService = applicationService;
         this.batchService = batchService;
         this.dispatchService = dispatchService;
+        this.assemblyBatchService = assemblyBatchService;
+        this.assetGenerationService = assetGenerationService;
+        this.workflowLaunchService = workflowLaunchService;
     }
 
     @PostMapping
@@ -81,6 +93,13 @@ public class ComicProjectController {
         return ApiResponse.success(projectService.createEpisode(userId(), projectId, request));
     }
 
+    @PostMapping("/{projectId}/episodes/generate")
+    public ApiResponse<ComicDtos.EpisodeDetail> generateEpisode(
+            @PathVariable Long projectId,
+            @Valid @RequestBody ComicDtos.GenerateEpisodeRequest request) {
+        return ApiResponse.success(workflowLaunchService.generateScript(userId(), projectId, request));
+    }
+
     @PostMapping(value = "/{projectId}/episodes/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<ComicDtos.EpisodeDetail> importEpisode(
             @PathVariable Long projectId,
@@ -101,6 +120,15 @@ public class ComicProjectController {
             @PathVariable Long projectId, @PathVariable Long episodeId,
             @Valid @RequestBody ComicDtos.UpdateEpisodeRequest request) {
         return ApiResponse.success(projectService.updateEpisode(userId(), projectId, episodeId, request));
+    }
+
+    @PostMapping("/{projectId}/episodes/{episodeId}/generate-storyboard")
+    public ApiResponse<ComicDtos.EpisodeDetail> generateStoryboard(
+            @PathVariable Long projectId, @PathVariable Long episodeId,
+            @Valid @RequestBody ComicDtos.GenerateStoryboardRequest request) {
+        return ApiResponse.success(workflowLaunchService.generateStoryboard(
+                userId(), projectId, episodeId, request
+        ));
     }
 
     @PutMapping("/{projectId}/episodes/{episodeId}/shots")
@@ -148,6 +176,15 @@ public class ComicProjectController {
         ));
     }
 
+    @PostMapping("/{projectId}/characters/{characterId}/versions/{versionId}/generate")
+    public ApiResponse<ComicDtos.AssetGenerationDetail> generateCharacterVersion(
+            @PathVariable Long projectId, @PathVariable Long characterId, @PathVariable Long versionId,
+            @Valid @RequestBody ComicDtos.GenerateAssetVersionRequest request) {
+        return ApiResponse.success(assetGenerationService.generateCharacter(
+                userId(), projectId, characterId, versionId, request
+        ));
+    }
+
     @PostMapping("/{projectId}/scenes")
     public ApiResponse<ComicDtos.SceneDetail> createScene(
             @PathVariable Long projectId, @Valid @RequestBody ComicDtos.CreateSceneRequest request) {
@@ -159,6 +196,15 @@ public class ComicProjectController {
             @PathVariable Long projectId, @PathVariable Long sceneId,
             @Valid @RequestBody ComicDtos.CreateSceneVersionRequest request) {
         return ApiResponse.success(projectService.createSceneVersion(userId(), projectId, sceneId, request));
+    }
+
+    @PostMapping("/{projectId}/scenes/{sceneId}/versions/{versionId}/generate")
+    public ApiResponse<ComicDtos.AssetGenerationDetail> generateSceneVersion(
+            @PathVariable Long projectId, @PathVariable Long sceneId, @PathVariable Long versionId,
+            @Valid @RequestBody ComicDtos.GenerateAssetVersionRequest request) {
+        return ApiResponse.success(assetGenerationService.generateScene(
+                userId(), projectId, sceneId, versionId, request
+        ));
     }
 
     @PostMapping("/{projectId}/episodes/{episodeId}/generation-batches")
@@ -210,6 +256,25 @@ public class ComicProjectController {
         return ApiResponse.success(projectService.selectAttempt(
                 userId(), projectId, episodeId, shotId, request
         ));
+    }
+
+    @PostMapping("/{projectId}/episodes/{episodeId}/assembly-batches")
+    public ApiResponse<ComicDtos.AssemblyBatchDetail> createAssemblyBatch(
+            @PathVariable Long projectId, @PathVariable Long episodeId,
+            @Valid @RequestBody ComicDtos.CreateAssemblyBatchRequest request) {
+        return ApiResponse.success(assemblyBatchService.create(userId(), projectId, episodeId, request));
+    }
+
+    @GetMapping("/{projectId}/episodes/{episodeId}/assembly-batches/{batchId}")
+    public ApiResponse<ComicDtos.AssemblyBatchDetail> assemblyBatch(
+            @PathVariable Long projectId, @PathVariable Long episodeId, @PathVariable Long batchId) {
+        return ApiResponse.success(assemblyBatchService.get(userId(), projectId, episodeId, batchId));
+    }
+
+    @GetMapping("/{projectId}/episodes/{episodeId}/assembly-batches/latest")
+    public ApiResponse<ComicDtos.AssemblyBatchDetail> latestAssemblyBatch(
+            @PathVariable Long projectId, @PathVariable Long episodeId) {
+        return ApiResponse.success(assemblyBatchService.latest(userId(), projectId, episodeId));
     }
 
     private Long userId() {

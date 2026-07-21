@@ -24,6 +24,7 @@ import com.aiminilab.aitoolmarket.credit.mapper.CreditRechargePackageMapper;
 import com.aiminilab.aitoolmarket.credit.mapper.GiftCardPackageMapper;
 import com.aiminilab.aitoolmarket.credit.service.CreditRechargeService;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
+import com.aiminilab.aitoolmarket.credit.support.MembershipTier;
 import com.aiminilab.aitoolmarket.credit.wechat.NativePrepayRequest;
 import com.aiminilab.aitoolmarket.credit.wechat.NativePrepayResponse;
 import com.aiminilab.aitoolmarket.credit.wechat.QrCodeDataUriGenerator;
@@ -38,6 +39,8 @@ import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -118,6 +121,11 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         );
     }
 
+    @EventListener(ApplicationReadyEvent.class)
+    public void invalidateRechargePackageCacheOnStartup() {
+        bypassCacheService.invalidateRechargePackages();
+    }
+
     @Override
     public List<RechargePackageResponse> packages() {
         JavaType type = objectMapper.getTypeFactory()
@@ -126,9 +134,13 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
                 CacheNamespaces.RECHARGE_PACKAGES,
                 bypassCacheService.packageTtl(),
                 type,
-                () -> packageMapper.findActive().stream()
-                        .map(item -> RechargePackageResponse.from(item, objectMapper))
-                        .toList()
+                () -> {
+                    List<CreditRechargePackage> packages = packageMapper.findActive();
+                    Map<String, BigDecimal> monthlyPriceByTier = monthlyPriceByTier(packages);
+                    return packages.stream()
+                            .map(item -> RechargePackageResponse.from(item, objectMapper, monthlyPriceByTier))
+                            .toList();
+                }
         );
     }
 
@@ -170,7 +182,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         order.setQrCodeUrl(null);
 
         if (isGiftCard) {
-            List<GiftCardOrderLine> lines = resolveGiftCardOrderLines(request);
+            List<GiftCardOrderLine> lines = resolveGiftCardOrderLines(userId, request);
             order.setPackageId(null);
             order.setCredits(lines.stream().mapToInt(line -> line.pkg().getCredits() * line.quantity()).sum());
             order.setPriceAmount(lines.stream()
@@ -652,7 +664,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         return rechargePackage;
     }
 
-    private List<GiftCardOrderLine> resolveGiftCardOrderLines(CreateRechargeOrderRequest request) {
+    private List<GiftCardOrderLine> resolveGiftCardOrderLines(Long userId, CreateRechargeOrderRequest request) {
         Map<Long, Integer> quantities = new LinkedHashMap<>();
         if (request.giftCardItems() != null && !request.giftCardItems().isEmpty()) {
             for (CreateRechargeOrderRequest.GiftCardItemRequest item : request.giftCardItems()) {
@@ -684,6 +696,12 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
                 currency = giftPkg.getCurrency();
             } else if (!currency.equals(giftPkg.getCurrency())) {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "gift card currency mismatch");
+            }
+            if ("MEMBER_CREDIT".equalsIgnoreCase(giftPkg.getCardType())) {
+                membershipService.requireActiveTierAtLeast(
+                        userId,
+                        giftPkg.getRequiredMemberTier(),
+                        "购买");
             }
             lines.add(new GiftCardOrderLine(giftPkg, entry.getValue()));
         }
@@ -727,11 +745,37 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
             item.setCredits(line.pkg().getCredits());
             item.setPriceAmount(line.pkg().getPriceAmount());
             item.setItemType("GIFT_CARD");
+            item.setCardTypeSnapshot(normalizeCardType(line.pkg().getCardType()));
+            item.setRequiredMemberTierSnapshot(normalizeRequiredMemberTier(line.pkg().getRequiredMemberTier()));
             item.setCreatedAt(now);
             item.setUpdatedAt(now);
             items.add(item);
         }
         return items;
+    }
+
+    private Map<String, BigDecimal> monthlyPriceByTier(List<CreditRechargePackage> packages) {
+        Map<String, BigDecimal> monthlyPrices = new LinkedHashMap<>();
+        for (CreditRechargePackage pkg : packages) {
+            if (pkg.getPackageCode() == null || !pkg.getPackageCode().startsWith("monthly_")) {
+                continue;
+            }
+            MembershipTier.fromPackageCode(pkg.getPackageCode())
+                    .ifPresent(tier -> monthlyPrices.put(tier.code(), pkg.getPriceAmount()));
+        }
+        return monthlyPrices;
+    }
+
+    private String normalizeCardType(String cardType) {
+        return cardType == null || cardType.isBlank()
+                ? "CREDIT"
+                : cardType.trim().toUpperCase(java.util.Locale.ROOT);
+    }
+
+    private String normalizeRequiredMemberTier(String requiredMemberTier) {
+        return MembershipTier.fromCode(requiredMemberTier)
+                .map(MembershipTier::code)
+                .orElse(null);
     }
 
     private CreditRechargeOrder orderOrThrow(Long userId, Long orderId) {

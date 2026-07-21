@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue"
 import { Check, CreditCard, Crown, Loader2, MessageCircle, QrCode, X } from "lucide-vue-next"
-import type { CreditAccount, GiftCardPackage, RechargeOrder, RechargePackage } from "@/api/types"
+import type { CreditAccount, GiftCardPackage, MemberTierCode, RechargeOrder, RechargePackage } from "@/api/types"
 import {
   createRechargeOrder,
   fetchGiftCardPackages,
@@ -23,7 +23,7 @@ import {
   cyclePeriodLabel,
   type BillingCycle,
 } from "@/utils/billingCycleConfig"
-import { getUserMemberLevel } from "@/utils/giftCardTierConfig"
+import { formatChineseDiscount, getUserMemberLevel } from "@/utils/giftCardTierConfig"
 
 const props = defineProps<{
   account: CreditAccount | null
@@ -57,15 +57,16 @@ let pollingTimer: ReturnType<typeof setInterval> | null = null
 const mode = ref<'credits' | 'giftcard'>('credits')
 const giftCardPackages = ref<GiftCardPackage[]>([])
 const loadingGiftCards = ref(false)
-const pendingGiftCardPackage = ref<GiftCardPackage | null>(null)
 const pendingGiftCardItems = ref<Array<{ pkg: GiftCardPackage; quantity: number }>>([])
 
 // 用户当前会员等级（0-3），-1表示未开通会员
 // 基于后端返回的 membershipPlan（用户最近一次CREDITED订单的套餐代码）
-const userMemberLevel = computed(() => getUserMemberLevel(auth.user?.membershipPlan))
 const hasActiveMembership = computed(() => auth.user?.membershipStatus === "ACTIVE")
 const hasPendingMembership = computed(() =>
   auth.user?.membershipStatus === "PENDING" && Boolean(auth.user.pendingMembershipOrderId),
+)
+const userMemberLevel = computed(() =>
+  hasActiveMembership.value ? getUserMemberLevel(auth.user?.membershipPlan) : -1,
 )
 
 const TRIAL_PLAN_NAME = "体验版"
@@ -82,23 +83,20 @@ const membershipStatus = computed(() => {
   }
 })
 
-const TIER_META: Record<string, { label: string; subtitle: string; featured?: boolean }> = {
+const TIER_META: Record<MemberTierCode, { label: string; subtitle: string; featured?: boolean }> = {
   starter: { label: "标准版", subtitle: "适合轻度创作者" },
   growth: { label: "进阶版", subtitle: "适合日常创作" },
   pro: { label: "高级版", subtitle: "适合专业团队" },
   flagship: { label: "豪华版", subtitle: "旗舰尊享", featured: true },
 }
 
-const TIER_ORDER = ["starter", "growth", "pro", "flagship"]
+const TIER_ORDER: MemberTierCode[] = ["starter", "growth", "pro", "flagship"]
 
 const filteredPackages = computed(() => {
-  const prefix = BILLING_CYCLES.find((tab) => tab.value === activeTab.value)?.prefix ?? "monthly_"
   return packages.value
-    .filter((pkg) => pkg.packageCode.startsWith(prefix))
-    .sort((a, b) => TIER_ORDER.indexOf(tierKey(a.packageCode)) - TIER_ORDER.indexOf(tierKey(b.packageCode)))
+    .filter((pkg) => packageBillingCycle(pkg) === activeTab.value)
+    .sort((a, b) => tierOrderIndex(a) - tierOrderIndex(b))
 })
-
-const activeCycleMeta = computed(() => BILLING_CYCLES.find((tab) => tab.value === activeTab.value) ?? BILLING_CYCLES[2])
 
 const paymentOptions = computed(() =>
   DEFAULT_RECHARGE_PAYMENT_CHANNELS.map((option) => ({
@@ -135,7 +133,7 @@ const pendingDisplay = computed(() => {
     return {
       name: skuCount === 1
         ? `${pendingGiftCardItems.value[0].pkg.packageName} x ${pendingGiftCardItems.value[0].quantity}`
-        : `算力礼品卡 ${itemCount} 张`,
+        : `礼品卡 ${itemCount} 张`,
       credits: pendingGiftCardItems.value.reduce((sum, item) => sum + item.pkg.credits * item.quantity, 0),
       price: pendingGiftCardItems.value.reduce((sum, item) => sum + item.pkg.priceAmount * item.quantity, 0),
     }
@@ -169,17 +167,6 @@ function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
     year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
   }).format(date)
-}
-
-const GIFT_CARD_THEMES: Record<string, string> = {
-  blue: 'from-blue-600 to-blue-800 border-blue-400/30',
-  purple: 'from-purple-600 to-purple-800 border-purple-400/30',
-  gold: 'from-amber-600 to-yellow-800 border-amber-400/30',
-  dark: 'from-slate-800 to-slate-950 border-slate-600/30',
-}
-
-function giftCardThemeClass(theme: string | undefined | null) {
-  return GIFT_CARD_THEMES[theme || 'dark'] || GIFT_CARD_THEMES.dark
 }
 
 const PACKAGE_NAME_ZH: Record<string, string> = {
@@ -217,33 +204,61 @@ function localizeBenefit(benefit: string) {
     .replace(/\bmodel\s+consulting\b/gi, "模型咨询服务")
 }
 
-function tierKey(packageCode: string) {
-  const parts = packageCode.split("_")
-  return parts[parts.length - 1] ?? packageCode
+function packageBillingCycle(pkg: RechargePackage): BillingCycle | null {
+  if (pkg.billingCycle && BILLING_CYCLES.some((cycle) => cycle.value === pkg.billingCycle)) {
+    return pkg.billingCycle
+  }
+  return BILLING_CYCLES.find((cycle) => pkg.packageCode.startsWith(cycle.prefix))?.value ?? null
 }
 
-function tierMeta(packageCode: string) {
-  return TIER_META[tierKey(packageCode)] ?? { label: localizePackageName(packageCode), subtitle: "" }
+function packageTierCode(pkg: RechargePackage): MemberTierCode | null {
+  if (pkg.tierCode && TIER_ORDER.includes(pkg.tierCode)) return pkg.tierCode
+  const legacyTier = pkg.packageCode.split("_").at(-1) as MemberTierCode | undefined
+  return legacyTier && TIER_ORDER.includes(legacyTier) ? legacyTier : null
+}
+
+function tierOrderIndex(pkg: RechargePackage) {
+  const index = packageTierCode(pkg) ? TIER_ORDER.indexOf(packageTierCode(pkg)!) : -1
+  return index >= 0 ? index : TIER_ORDER.length
+}
+
+function tierMeta(pkg: RechargePackage) {
+  const tier = packageTierCode(pkg)
+  return tier ? TIER_META[tier] : { label: localizePackageName(pkg.packageName), subtitle: "" }
 }
 
 function periodLabel(cycle: BillingCycle) {
   return cyclePeriodLabel(cycle)
 }
 
-function originalPrice(pkg: RechargePackage, cycle: BillingCycle) {
-  const rate = BILLING_CYCLES.find((tab) => tab.value === cycle)?.discountRate
-  if (!rate) return null
-  return pkg.priceAmount / rate
-}
-
 function creditsPerMonth(pkg: RechargePackage, cycle: BillingCycle) {
   return Math.round(pkg.credits / cycleMonthDivisor(cycle))
 }
 
-function creditUnitPrice(pkg: RechargePackage) {
-  if (!pkg.credits) return "0"
-  const unit = pkg.priceAmount / pkg.credits
-  return unit < 0.01 ? unit.toFixed(4) : unit.toFixed(3)
+function normalizeDiscountRate(value: number | null | undefined) {
+  const rate = Number(value)
+  if (!Number.isFinite(rate) || rate <= 0) return null
+  return rate > 1 && rate <= 100 ? rate / 100 : rate
+}
+
+function packageDiscountLabel(pkg: RechargePackage) {
+  const structuredRate = normalizeDiscountRate(pkg.discountRate)
+  const derivedRate = pkg.listPriceAmount && pkg.listPriceAmount > pkg.priceAmount
+    ? pkg.priceAmount / pkg.listPriceAmount
+    : null
+  const rate = structuredRate ?? derivedRate
+  return rate && rate < 1 ? `套餐 ${formatChineseDiscount(rate)}` : null
+}
+
+function cycleSavingsLabel(pkg: RechargePackage) {
+  const cycle = packageBillingCycle(pkg)
+  if (!cycle || cycle === "monthly") return null
+  const fallbackRate = BILLING_CYCLES.find((item) => item.value === cycle)?.discountRate
+  const rate = normalizeDiscountRate(pkg.cycleDiscountRate) ?? fallbackRate
+  if (!rate || rate >= 1) return null
+  const saving = Math.round((1 - rate) * 100)
+  const savingPrefix = cycle === "quarterly" ? "立省约" : "立省"
+  return `约${formatChineseDiscount(rate)} · ${savingPrefix}${saving}%`
 }
 
 function renewalHint(pkg: RechargePackage, cycle: BillingCycle) {
@@ -253,19 +268,14 @@ function renewalHint(pkg: RechargePackage, cycle: BillingCycle) {
   return `次年续费 ¥${amount}，可随时取消`
 }
 
-function monthlyEquivalentPrice(pkg: RechargePackage, cycle: BillingCycle) {
-  return pkg.priceAmount / cycleMonthDivisor(cycle)
-}
-
 function isFeaturedCard(pkg: RechargePackage) {
   if (pkg.recommended) return true
-  return tierMeta(pkg.packageCode).featured === true && activeTab.value === "yearly"
+  return tierMeta(pkg).featured === true && activeTab.value === "yearly"
 }
 
 function selectDefaultPackage(list: RechargePackage[]) {
-  const prefix = activeCycleMeta.value.prefix
-  const recommended = list.find((item) => item.recommended && item.packageCode.startsWith(prefix))
-  const first = list.find((item) => item.packageCode.startsWith(prefix))
+  const recommended = list.find((item) => item.recommended && packageBillingCycle(item) === activeTab.value)
+  const first = list.find((item) => packageBillingCycle(item) === activeTab.value)
   selectedId.value = recommended?.id ?? first?.id ?? list[0]?.id ?? null
 }
 
@@ -295,7 +305,6 @@ function closeChannelModal() {
   if (ordering.value) return
   showChannelModal.value = false
   pendingPackage.value = null
-  pendingGiftCardPackage.value = null
   pendingGiftCardItems.value = []
   membershipPaymentAttemptId.value = null
   giftCardPaymentAttemptId.value = null
@@ -431,7 +440,6 @@ function openGiftCardPayment(items: Array<{ pkg: GiftCardPackage; quantity: numb
   const normalized = items.filter((item) => item.quantity > 0)
   if (normalized.length === 0) return
   pendingPackage.value = null
-  pendingGiftCardPackage.value = normalized[0].pkg
   pendingGiftCardItems.value = normalized
   giftCardPaymentAttemptId.value = crypto.randomUUID()
   paymentResult.value = null
@@ -580,13 +588,13 @@ onUnmounted(clearPolling)
             v-if="isFeaturedCard(pkg)"
             class="absolute -top-px left-0 right-0 rounded-t-2xl bg-gradient-to-r from-cyan-500 to-blue-500 px-4 py-1.5 text-center text-xs font-semibold text-slate-950"
           >
-            {{ activeTab === 'yearly' ? '特惠上新 · 比月卡立省 37%' : '🔥 推荐套餐' }}
+            {{ activeTab === 'yearly' ? '年付立省10%' : activeTab === 'quarterly' ? '季付立省约5%' : '推荐套餐' }}
           </div>
 
           <div :class="isFeaturedCard(pkg) ? 'mt-6' : 'mt-1'">
-            <p class="text-sm font-medium text-slate-400">{{ tierMeta(pkg.packageCode).subtitle }}</p>
+            <p class="text-sm font-medium text-slate-400">{{ tierMeta(pkg).subtitle }}</p>
             <h3 class="mt-1 text-2xl font-bold tracking-tight text-white">
-              {{ tierMeta(pkg.packageCode).label }}
+              {{ tierMeta(pkg).label }}
             </h3>
           </div>
 
@@ -594,30 +602,23 @@ onUnmounted(clearPolling)
             <span class="text-4xl font-bold leading-none text-white">¥{{ formatMoney(pkg.priceAmount) }}</span>
             <span class="pb-1 text-sm text-slate-400">/{{ periodLabel(activeTab) }}</span>
             <span
-              v-if="originalPrice(pkg, activeTab)"
-              class="pb-1 text-sm text-slate-500 line-through"
+              v-if="packageDiscountLabel(pkg)"
+              class="mb-0.5 rounded-md bg-cyan-400/10 px-2 py-1 text-xs font-semibold text-cyan-300"
             >
-              ¥{{ formatMoney(originalPrice(pkg, activeTab)) }}
+              {{ packageDiscountLabel(pkg) }}
             </span>
           </div>
 
           <p class="mt-2 text-xs text-slate-500">{{ renewalHint(pkg, activeTab) }}</p>
 
-          <p class="mt-3 text-xs text-slate-400">
-            约 ¥{{ formatMoney(monthlyEquivalentPrice(pkg, activeTab)) }}/月
-            <span class="mx-1 text-slate-600">·</span>
-            ¥{{ creditUnitPrice(pkg) }}/算力
+          <p v-if="cycleSavingsLabel(pkg)" class="mt-3 text-xs font-medium text-emerald-400">
+            {{ cycleSavingsLabel(pkg) }}
           </p>
 
           <div class="mt-5 rounded-xl border border-slate-700/80 bg-slate-800/40 px-4 py-4">
             <p class="text-3xl font-bold text-white">
               {{ creditsPerMonth(pkg, activeTab).toLocaleString() }}
               <span class="text-sm font-medium text-slate-400">算力/月</span>
-            </p>
-            <p class="mt-2 text-xs text-slate-500">
-              约可生成 {{ Math.floor(creditsPerMonth(pkg, activeTab) / 10).toLocaleString() }} 张图
-              <span class="mx-1">|</span>
-              {{ Math.floor(creditsPerMonth(pkg, activeTab) / 50).toLocaleString() }} 个视频
             </p>
             <p class="mt-1 text-[11px] text-slate-600">
               本周期共 {{ pkg.credits.toLocaleString() }} 算力 · 有效期 {{ pkg.validityDays }} 天
@@ -649,12 +650,10 @@ onUnmounted(clearPolling)
 
     <GiftCardSection
       v-if="mode === 'giftcard'"
-      :packages="packages"
       :gift-card-packages="giftCardPackages"
-      :loading="loadingGiftCards || loadingPackages"
+      :loading="loadingGiftCards"
       :ordering="ordering"
       :user-member-level="userMemberLevel"
-      @buy-member-package="openPaymentChoice"
       @buy-credit-gift="openGiftCardPayment"
     />
     <Teleport to="body">
@@ -895,6 +894,8 @@ onUnmounted(clearPolling)
 /* 计费周期切换标签 */
 .billing-cycle-tabs {
   display: flex;
+  width: min(100%, 420px);
+  box-sizing: border-box;
   justify-content: center;
   gap: 6px;
   padding: 5px;
@@ -964,6 +965,25 @@ onUnmounted(clearPolling)
 
   .billing-mode-tab {
     font-size: 15px;
+  }
+
+  .billing-cycle-tabs {
+    gap: 3px;
+    padding: 4px;
+  }
+
+  .billing-cycle-tab {
+    min-width: 0;
+    min-height: 62px;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 3px;
+    font-size: 12px;
+  }
+
+  .billing-cycle-badge,
+  .billing-cycle-hint {
+    font-size: 9px;
   }
 }
 </style>
