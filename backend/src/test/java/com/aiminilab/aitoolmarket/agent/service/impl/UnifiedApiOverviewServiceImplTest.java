@@ -11,10 +11,13 @@ import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountMigrationService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
+import com.aiminilab.aitoolmarket.task.routing.entity.AccountModelRouteState;
+import com.aiminilab.aitoolmarket.task.routing.mapper.AccountModelRouteStateMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -49,6 +52,7 @@ class UnifiedApiOverviewServiceImplTest {
         ModelProviderRegistry providerRegistry = mock(ModelProviderRegistry.class);
         ModelCapabilitiesCodec capabilitiesCodec = mock(ModelCapabilitiesCodec.class);
         ModelCapabilityService capabilityService = mock(ModelCapabilityService.class);
+        AccountModelRouteStateMapper routeStateMapper = mock(AccountModelRouteStateMapper.class);
         UnifiedApiOverviewServiceImpl service = new UnifiedApiOverviewServiceImpl(
                 migrationService,
                 accountMapper,
@@ -57,6 +61,7 @@ class UnifiedApiOverviewServiceImplTest {
                 providerRegistry,
                 capabilitiesCodec,
                 capabilityService,
+                routeStateMapper,
                 new ObjectMapper()
         );
         ModelVendorAccount sourceAccount = routingAccount(10L, "source");
@@ -81,6 +86,95 @@ class UnifiedApiOverviewServiceImplTest {
                         .containsOnlyNulls());
     }
 
+    @Test
+    void accountModeDoesNotReportAPoolExclusion() {
+        ModelVendorAccountMigrationService migrationService = mock(ModelVendorAccountMigrationService.class);
+        ModelVendorAccountMapper accountMapper = mock(ModelVendorAccountMapper.class);
+        AgentModelConfigMapper modelConfigMapper = mock(AgentModelConfigMapper.class);
+        VendorCodeResolver vendorCodeResolver = mock(VendorCodeResolver.class);
+        ModelProviderRegistry providerRegistry = mock(ModelProviderRegistry.class);
+        ModelCapabilitiesCodec capabilitiesCodec = mock(ModelCapabilitiesCodec.class);
+        ModelCapabilityService capabilityService = mock(ModelCapabilityService.class);
+        AccountModelRouteStateMapper routeStateMapper = mock(AccountModelRouteStateMapper.class);
+        UnifiedApiOverviewServiceImpl service = new UnifiedApiOverviewServiceImpl(
+                migrationService,
+                accountMapper,
+                modelConfigMapper,
+                vendorCodeResolver,
+                providerRegistry,
+                capabilitiesCodec,
+                capabilityService,
+                routeStateMapper,
+                new ObjectMapper()
+        );
+        ModelVendorAccount account = routingAccount(10L, "single");
+        account.setLoadBalanceEnabled(false);
+        account.setRoutingPoolId(null);
+        AgentModelConfig model = routingModel(1L, 10L, null);
+        model.setRoutingPoolId(null);
+        when(accountMapper.findAllActive()).thenReturn(List.of(account));
+        when(modelConfigMapper.findAllActive()).thenReturn(List.of(model));
+        when(accountMapper.countActiveModelsByAccountId(anyLong())).thenReturn(1);
+        when(vendorCodeResolver.resolveVendorCode(anyString(), any(), any(), any())).thenReturn("openai");
+        when(vendorCodeResolver.vendorLabel("openai")).thenReturn("OpenAI");
+        when(vendorCodeResolver.vendorIconAsset("openai")).thenReturn(null);
+        when(vendorCodeResolver.vendorCatalog()).thenReturn(Map.of("openai", "OpenAI"));
+        when(capabilitiesCodec.parse(any())).thenReturn(List.of("IMAGE_GENERATION"));
+
+        UnifiedApiOverviewResponse response = service.overview();
+
+        assertThat(response.vendors()).singleElement().satisfies(vendor ->
+                assertThat(vendor.models()).singleElement().satisfies(item ->
+                        assertThat(item.routingExclusionReason()).isNull()));
+    }
+
+    @Test
+    void poolPreviewReportsWhenEveryCompatibleModelCircuitIsOpen() {
+        ModelVendorAccountMigrationService migrationService = mock(ModelVendorAccountMigrationService.class);
+        ModelVendorAccountMapper accountMapper = mock(ModelVendorAccountMapper.class);
+        AgentModelConfigMapper modelConfigMapper = mock(AgentModelConfigMapper.class);
+        VendorCodeResolver vendorCodeResolver = mock(VendorCodeResolver.class);
+        ModelProviderRegistry providerRegistry = mock(ModelProviderRegistry.class);
+        ModelCapabilitiesCodec capabilitiesCodec = mock(ModelCapabilitiesCodec.class);
+        ModelCapabilityService capabilityService = mock(ModelCapabilityService.class);
+        AccountModelRouteStateMapper routeStateMapper = mock(AccountModelRouteStateMapper.class);
+        UnifiedApiOverviewServiceImpl service = new UnifiedApiOverviewServiceImpl(
+                migrationService,
+                accountMapper,
+                modelConfigMapper,
+                vendorCodeResolver,
+                providerRegistry,
+                capabilitiesCodec,
+                capabilityService,
+                routeStateMapper,
+                new ObjectMapper()
+        );
+        ModelVendorAccount sourceAccount = routingAccount(10L, "source");
+        ModelVendorAccount candidateAccount = routingAccount(20L, "candidate");
+        AgentModelConfig source = routingModel(1L, 10L, null);
+        AgentModelConfig candidate = routingModel(2L, 20L, null);
+        when(accountMapper.findAllActive()).thenReturn(List.of(sourceAccount, candidateAccount));
+        when(modelConfigMapper.findAllActive()).thenReturn(List.of(source, candidate));
+        when(routeStateMapper.selectList(any())).thenReturn(List.of(
+                openState(1L), openState(2L)));
+        when(accountMapper.countActiveModelsByAccountId(anyLong())).thenReturn(1);
+        when(vendorCodeResolver.resolveVendorCode(anyString(), any(), any(), any())).thenReturn("openai");
+        when(vendorCodeResolver.vendorLabel("openai")).thenReturn("OpenAI");
+        when(vendorCodeResolver.vendorIconAsset("openai")).thenReturn(null);
+        when(vendorCodeResolver.vendorCatalog()).thenReturn(Map.of("openai", "OpenAI"));
+        when(capabilitiesCodec.parse(any())).thenReturn(List.of("IMAGE_GENERATION"));
+        when(capabilityService.resolveCapabilities(any())).thenReturn(List.of("IMAGE_GENERATION"));
+
+        UnifiedApiOverviewResponse response = service.overview();
+
+        assertThat(response.vendors()).singleElement().satisfies(vendor ->
+                assertThat(vendor.models()).allSatisfy(model -> {
+                    assertThat(model.routingPoolId()).isEqualTo(100L);
+                    assertThat(model.routingPoolName()).isEqualTo("main-pool");
+                    assertThat(model.routingExclusionReason()).isEqualTo("CIRCUIT_OPEN");
+                }));
+    }
+
     private static ModelVendorAccount accountWithBalance(String amount, String status) {
         ModelVendorAccount account = new ModelVendorAccount();
         account.setBalanceAmount(new BigDecimal(amount));
@@ -96,6 +190,8 @@ class UnifiedApiOverviewServiceImplTest {
         account.setEnabled(true);
         account.setLoadBalanceEnabled(true);
         account.setLoadBalanceWeight(100);
+        account.setRoutingPoolId(100L);
+        account.setRoutingPoolName("main-pool");
         return account;
     }
 
@@ -113,6 +209,17 @@ class UnifiedApiOverviewServiceImplTest {
         model.setCapabilities("[\"IMAGE_GENERATION\"]");
         model.setEnabled(true);
         model.setLastTestSuccess(lastTestSuccess);
+        model.setRoutingPoolId(100L);
         return model;
+    }
+
+    private static AccountModelRouteState openState(Long modelConfigId) {
+        AccountModelRouteState state = new AccountModelRouteState();
+        state.setId(100L + modelConfigId);
+        state.setModelConfigId(modelConfigId);
+        state.setCircuitStatus("OPEN");
+        state.setCooldownUntil(LocalDateTime.now().plusMinutes(5));
+        state.setInFlightCount(0);
+        return state;
     }
 }

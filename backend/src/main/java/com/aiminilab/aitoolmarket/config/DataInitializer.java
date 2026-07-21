@@ -857,6 +857,17 @@ public class DataInitializer implements CommandLineRunner {
                   enabled = VALUES(enabled),
                   updated_at = CURRENT_TIMESTAMP
                 """);
+        ensureTable("model_account_routing_pools", """
+                CREATE TABLE model_account_routing_pools (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  vendor_code VARCHAR(64) NOT NULL,
+                  pool_name VARCHAR(128) NOT NULL,
+                  pool_key VARCHAR(128) NOT NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_model_account_routing_pool_vendor_key(vendor_code, pool_key)
+                )
+                """);
         ensureTable("model_vendor_accounts", """
                 CREATE TABLE model_vendor_accounts (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -881,6 +892,7 @@ public class DataInitializer implements CommandLineRunner {
                   health_checked_at DATETIME NULL,
                   load_balance_enabled TINYINT NOT NULL DEFAULT 0,
                   load_balance_weight INT NOT NULL DEFAULT 100,
+                  routing_pool_id BIGINT NULL,
                   enabled TINYINT NOT NULL DEFAULT 1,
                   is_deleted TINYINT NOT NULL DEFAULT 0,
                   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -893,6 +905,18 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("model_vendor_accounts", "health_checked_at", "ALTER TABLE model_vendor_accounts ADD COLUMN health_checked_at DATETIME NULL AFTER health_message");
         ensureColumn("model_vendor_accounts", "load_balance_enabled", "ALTER TABLE model_vendor_accounts ADD COLUMN load_balance_enabled TINYINT NOT NULL DEFAULT 0 AFTER health_checked_at");
         ensureColumn("model_vendor_accounts", "load_balance_weight", "ALTER TABLE model_vendor_accounts ADD COLUMN load_balance_weight INT NOT NULL DEFAULT 100 AFTER load_balance_enabled");
+        ensureColumn("model_vendor_accounts", "routing_pool_id", "ALTER TABLE model_vendor_accounts ADD COLUMN routing_pool_id BIGINT NULL AFTER load_balance_weight");
+        ensureIndex(
+                "model_vendor_accounts",
+                "idx_model_vendor_accounts_routing_pool",
+                "CREATE INDEX idx_model_vendor_accounts_routing_pool ON model_vendor_accounts(routing_pool_id, enabled, is_deleted)"
+        );
+        ensureColumn("agent_model_configs", "routing_pool_id", "ALTER TABLE agent_model_configs ADD COLUMN routing_pool_id BIGINT NULL AFTER vendor_account_id");
+        ensureIndex(
+                "agent_model_configs",
+                "idx_agent_model_configs_routing_pool",
+                "CREATE INDEX idx_agent_model_configs_routing_pool ON agent_model_configs(routing_pool_id, enabled, is_deleted)"
+        );
         ensureTable("task_model_route_attempts", """
                 CREATE TABLE task_model_route_attempts (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,

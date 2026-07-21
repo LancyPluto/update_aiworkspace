@@ -18,15 +18,20 @@ import com.aiminilab.aitoolmarket.agent.service.UnifiedApiOverviewService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
 import com.aiminilab.aitoolmarket.task.routing.ModelRoutingPolicy;
+import com.aiminilab.aitoolmarket.task.routing.entity.AccountModelRouteState;
+import com.aiminilab.aitoolmarket.task.routing.mapper.AccountModelRouteStateMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -40,6 +45,7 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
     private final ModelProviderRegistry providerRegistry;
     private final ModelCapabilitiesCodec capabilitiesCodec;
     private final ModelCapabilityService modelCapabilityService;
+    private final AccountModelRouteStateMapper routeStateMapper;
     private final ObjectMapper objectMapper;
 
     public UnifiedApiOverviewServiceImpl(ModelVendorAccountMigrationService migrationService,
@@ -49,6 +55,7 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
                                          ModelProviderRegistry providerRegistry,
                                          ModelCapabilitiesCodec capabilitiesCodec,
                                          ModelCapabilityService modelCapabilityService,
+                                         AccountModelRouteStateMapper routeStateMapper,
                                          ObjectMapper objectMapper) {
         this.migrationService = migrationService;
         this.vendorAccountMapper = vendorAccountMapper;
@@ -57,6 +64,7 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
         this.providerRegistry = providerRegistry;
         this.capabilitiesCodec = capabilitiesCodec;
         this.modelCapabilityService = modelCapabilityService;
+        this.routeStateMapper = routeStateMapper;
         this.objectMapper = objectMapper;
     }
 
@@ -66,6 +74,7 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
 
         List<ModelVendorAccount> accounts = vendorAccountMapper.findAllActive();
         List<AgentModelConfig> configs = agentModelConfigMapper.findAllActive();
+        Map<Long, AccountModelRouteState> routeStateByModelId = loadRouteStates(configs);
 
         Map<Long, ModelVendorAccount> accountById = accounts.stream()
                 .collect(Collectors.toMap(ModelVendorAccount::getId, account -> account, (a, b) -> a));
@@ -90,6 +99,9 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
                 if (account != null) {
                     accountName = account.getAccountName();
                     accountHealthStatus = account.getHealthStatus();
+                    if (Objects.equals(config.getRoutingPoolId(), account.getRoutingPoolId())) {
+                        config.setRoutingPoolName(account.getRoutingPoolName());
+                    }
                 }
             }
             modelsByVendor.computeIfAbsent(vendorCode, key -> new ArrayList<>())
@@ -98,7 +110,8 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
                             accountName,
                             capabilitiesCodec,
                             accountHealthStatus,
-                            routingExclusionReason(config, vendorCode, configs, accountById)
+                            routingExclusionReason(
+                                    config, vendorCode, configs, accountById, routeStateByModelId)
                     ));
         }
 
@@ -174,51 +187,97 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
     private String routingExclusionReason(AgentModelConfig reference,
                                           String vendorCode,
                                           List<AgentModelConfig> configs,
-                                          Map<Long, ModelVendorAccount> accountById) {
+                                          Map<Long, ModelVendorAccount> accountById,
+                                          Map<Long, AccountModelRouteState> routeStateByModelId) {
+        if (reference.getRoutingPoolId() == null) {
+            return null;
+        }
+        List<ModelVendorAccount> poolMembers = accountById.values().stream()
+                .filter(account -> Objects.equals(
+                        account.getRoutingPoolId(), reference.getRoutingPoolId()))
+                .filter(account -> vendorCode.equals(canonicalVendorCode(
+                        resolveAccountVendorCode(account))))
+                .toList();
+        if (poolMembers.isEmpty()) {
+            return "ROUTING_POOL_EMPTY";
+        }
         ModelVendorAccount source = accountById.get(reference.getVendorAccountId());
         if (source == null) {
             return "ACCOUNT_UNBOUND";
         }
-        if (!Boolean.TRUE.equals(source.getEnabled())) {
-            return "ACCOUNT_DISABLED";
-        }
-        if (!Boolean.TRUE.equals(source.getLoadBalanceEnabled())) {
-            return "LOAD_BALANCING_DISABLED";
+        if (!Objects.equals(source.getRoutingPoolId(), reference.getRoutingPoolId())) {
+            return "ACCOUNT_POOL_MISMATCH";
         }
         if (!Boolean.TRUE.equals(reference.getEnabled())) {
             return "MODEL_DISABLED";
         }
 
+        Set<Long> eligibleAccountIds = poolMembers.stream()
+                .filter(account -> Boolean.TRUE.equals(account.getEnabled()))
+                .filter(account -> Boolean.TRUE.equals(account.getLoadBalanceEnabled()))
+                .map(ModelVendorAccount::getId)
+                .collect(Collectors.toSet());
+        if (eligibleAccountIds.isEmpty()) {
+            return "NO_ELIGIBLE_POOL_ACCOUNT";
+        }
+
         List<AgentModelConfig> sameRoute = configs.stream()
                 .filter(candidate -> candidate.getVendorAccountId() != null)
-                .filter(candidate -> !candidate.getVendorAccountId().equals(reference.getVendorAccountId()))
+                .filter(candidate -> eligibleAccountIds.contains(candidate.getVendorAccountId()))
                 .filter(candidate -> Boolean.TRUE.equals(candidate.getEnabled()))
-                .filter(candidate -> reference.getProvider() != null
-                        && reference.getProvider().equalsIgnoreCase(candidate.getProvider()))
+                .filter(candidate -> equalsIgnoreCase(reference.getProvider(), candidate.getProvider()))
                 .filter(candidate -> java.util.Objects.equals(reference.getModelName(), candidate.getModelName()))
-                .filter(candidate -> vendorCode.equals(canonicalVendorCode(
-                        resolveConfigVendorCode(candidate, accountById))))
-                .filter(candidate -> {
-                    ModelVendorAccount account = accountById.get(candidate.getVendorAccountId());
-                    return account != null
-                            && Boolean.TRUE.equals(account.getEnabled())
-                            && Boolean.TRUE.equals(account.getLoadBalanceEnabled());
-                })
                 .toList();
         if (sameRoute.isEmpty()) {
-            return "NO_MATCHING_ACCOUNT";
+            return "NO_COMPATIBLE_MODEL";
         }
 
         boolean priceMismatch = false;
+        List<AgentModelConfig> compatible = new ArrayList<>();
         for (AgentModelConfig candidate : sameRoute) {
             String reason = ModelRoutingPolicy.incompatibilityReason(
                     reference, candidate, modelCapabilityService, objectMapper);
             if (reason == null) {
-                return null;
+                compatible.add(candidate);
+            } else {
+                priceMismatch = priceMismatch || "PRICE_MISMATCH".equals(reason);
             }
-            priceMismatch = priceMismatch || "PRICE_MISMATCH".equals(reason);
         }
-        return priceMismatch ? "PRICE_MISMATCH" : "ROUTE_CONFIG_MISMATCH";
+        if (compatible.isEmpty()) {
+            return priceMismatch ? "PRICE_MISMATCH" : "ROUTE_CONFIG_MISMATCH";
+        }
+        List<AgentModelConfig> uniqueCandidates = ModelRoutingPolicy.deduplicateByAccount(compatible);
+        LocalDateTime now = LocalDateTime.now();
+        boolean allCircuitBlocked = uniqueCandidates.stream().allMatch(candidate ->
+                !ModelRoutingPolicy.circuitAllowsSelection(
+                        routeStateByModelId.get(candidate.getId()), now));
+        return allCircuitBlocked ? "CIRCUIT_OPEN" : null;
+    }
+
+    private Map<Long, AccountModelRouteState> loadRouteStates(List<AgentModelConfig> configs) {
+        List<Long> modelIds = configs.stream()
+                .map(AgentModelConfig::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (modelIds.isEmpty()) {
+            return Map.of();
+        }
+        List<AccountModelRouteState> states = routeStateMapper.selectList(
+                new LambdaQueryWrapper<AccountModelRouteState>()
+                        .in(AccountModelRouteState::getModelConfigId, modelIds));
+        if (states == null || states.isEmpty()) {
+            return Map.of();
+        }
+        return states.stream().collect(Collectors.toMap(
+                AccountModelRouteState::getModelConfigId,
+                state -> state,
+                (left, right) -> left
+        ));
+    }
+
+    private static boolean equalsIgnoreCase(String left, String right) {
+        return left == null ? right == null : right != null && left.equalsIgnoreCase(right);
     }
 
     private String resolveAccountVendorCode(ModelVendorAccount account) {

@@ -32,6 +32,7 @@ public class ModelVendorAccount {
     private LocalDateTime healthCheckedAt;
     private Boolean loadBalanceEnabled;
     private Integer loadBalanceWeight;
+    private Long routingPoolId;
     private Boolean enabled;
     private Boolean deleted;
     private LocalDateTime createdAt;
@@ -42,6 +43,8 @@ public class ModelVendorAccount {
     private String routingCircuitStatus;
     @TableField(exist = false)
     private LocalDateTime routingCooldownUntil;
+    @TableField(exist = false)
+    private String routingPoolName;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -87,6 +90,8 @@ public class ModelVendorAccount {
     public void setLoadBalanceEnabled(Boolean loadBalanceEnabled) { this.loadBalanceEnabled = loadBalanceEnabled; }
     public Integer getLoadBalanceWeight() { return loadBalanceWeight; }
     public void setLoadBalanceWeight(Integer loadBalanceWeight) { this.loadBalanceWeight = loadBalanceWeight; }
+    public Long getRoutingPoolId() { return routingPoolId; }
+    public void setRoutingPoolId(Long routingPoolId) { this.routingPoolId = routingPoolId; }
     public Boolean getEnabled() { return enabled; }
     public void setEnabled(Boolean enabled) { this.enabled = enabled; }
     public Boolean getDeleted() { return deleted; }
@@ -101,4 +106,6 @@ public class ModelVendorAccount {
     public void setRoutingCircuitStatus(String routingCircuitStatus) { this.routingCircuitStatus = routingCircuitStatus; }
     public LocalDateTime getRoutingCooldownUntil() { return routingCooldownUntil; }
     public void setRoutingCooldownUntil(LocalDateTime routingCooldownUntil) { this.routingCooldownUntil = routingCooldownUntil; }
+    public String getRoutingPoolName() { return routingPoolName; }
+    public void setRoutingPoolName(String routingPoolName) { this.routingPoolName = routingPoolName; }
 }

@@ -8,8 +8,10 @@ import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
 import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentModelConfigResponse;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
+import com.aiminilab.aitoolmarket.agent.entity.ModelAccountRoutingPool;
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.ModelAccountRoutingPoolMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
@@ -52,6 +54,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     private final AgentModelConfigMapper agentModelConfigMapper;
     private final ModelVendorAccountMapper vendorAccountMapper;
+    private final ModelAccountRoutingPoolMapper routingPoolMapper;
     private final AgentServiceClient agentServiceClient;
     private final ModelProviderRegistry providerRegistry;
     private final ModelProviderMetadataService providerMetadataService;
@@ -66,6 +69,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     public AgentModelConfigServiceImpl(AgentModelConfigMapper agentModelConfigMapper,
                                        ModelVendorAccountMapper vendorAccountMapper,
+                                       ModelAccountRoutingPoolMapper routingPoolMapper,
                                        AgentServiceClient agentServiceClient,
                                        ModelProviderRegistry providerRegistry,
                                        ModelProviderMetadataService providerMetadataService,
@@ -79,6 +83,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                                         AccountModelRouteStateMapper routeStateMapper) {
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.vendorAccountMapper = vendorAccountMapper;
+        this.routingPoolMapper = routingPoolMapper;
         this.agentServiceClient = agentServiceClient;
         this.providerRegistry = providerRegistry;
         this.providerMetadataService = providerMetadataService;
@@ -124,9 +129,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     @Override
     @Transactional
     public AgentModelConfigResponse adminCreate(AgentModelConfigRequest request) {
-        validate(request);
+        ModelVendorAccount lockedVendorAccount = validateForAdminWrite(request);
         ensureConfigCodeAvailable(request.configCode(), null);
-        validateEnabledModelAccount(request);
+        validateEnabledModelAccount(request, lockedVendorAccount);
         LocalDateTime now = LocalDateTime.now();
         AgentModelConfig config = applyRequest(new AgentModelConfig(), request, null, now);
         config.setCreatedAt(now);
@@ -140,10 +145,10 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     @Override
     @Transactional
     public AgentModelConfigResponse adminUpdate(Long id, AgentModelConfigRequest request) {
-        validate(request);
+        ModelVendorAccount lockedVendorAccount = validateForAdminWrite(request);
         AgentModelConfig existing = findActiveOrThrow(id);
         ensureConfigCodeAvailable(request.configCode(), existing.getId());
-        validateEnabledModelAccount(request);
+        validateEnabledModelAccount(request, lockedVendorAccount);
         AgentModelConfig config = applyRequest(existing, request, existing, LocalDateTime.now());
         agentModelConfigMapper.updateConfig(config);
         if (Boolean.TRUE.equals(config.getDefault())) {
@@ -193,6 +198,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                                           LocalDateTime now) {
         String previousProvider = existing != null ? existing.getProvider() : null;
         config.setVendorAccountId(request.vendorAccountId());
+        config.setRoutingPoolId(request.routingPoolId());
         config.setDisplayName(blankToNull(request.displayName()));
         config.setConfigCode(blankToNull(request.configCode()));
         String providerTrimmed = request.provider().trim();
@@ -616,6 +622,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         List<String> capabilities = capabilitiesCodec.parse(config.getCapabilities());
         return normalizeProviderBaseUrl(new AgentModelConfigRequest(
                 config.getVendorAccountId(),
+                config.getRoutingPoolId(),
                 config.getDisplayName(),
                 config.getConfigCode(),
                 config.getProvider(),
@@ -758,6 +765,13 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 vendorAccountName = account.getAccountName();
             }
         }
+        config.setRoutingPoolName(null);
+        if (config.getRoutingPoolId() != null) {
+            ModelAccountRoutingPool pool = routingPoolMapper.findById(config.getRoutingPoolId());
+            if (pool != null) {
+                config.setRoutingPoolName(pool.getPoolName());
+            }
+        }
         String channelCode = vendorCodeResolver.resolveVendorCode(config);
         return AgentModelConfigResponse.from(
                 config,
@@ -862,6 +876,23 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     }
 
     private void validate(AgentModelConfigRequest request) {
+        validateRequestFields(request);
+        ModelVendorAccount account = request.vendorAccountId() == null
+                ? null
+                : vendorAccountMapper.findActiveById(request.vendorAccountId());
+        validateModelAccountBinding(request, account);
+    }
+
+    private ModelVendorAccount validateForAdminWrite(AgentModelConfigRequest request) {
+        validateRequestFields(request);
+        ModelVendorAccount account = request.vendorAccountId() == null
+                ? null
+                : vendorAccountMapper.findActiveByIdForUpdate(request.vendorAccountId());
+        validateModelAccountBinding(request, account);
+        return account;
+    }
+
+    private void validateRequestFields(AgentModelConfigRequest request) {
         String provider = request.provider() == null ? "" : request.provider().trim();
         providerMetadataService.get(provider);
         if (request.modelName() == null || request.modelName().isBlank()) {
@@ -893,12 +924,44 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "executionOptionsJson must be valid JSON");
             }
         }
+    }
+
+    private void validateModelAccountBinding(AgentModelConfigRequest request, ModelVendorAccount account) {
         if (request.vendorAccountId() != null) {
-            ModelVendorAccount account = vendorAccountMapper.findActiveById(request.vendorAccountId());
             if (account == null) {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account not found");
             }
             validateVendorAccountMatchesModel(request, account);
+            validateRoutingPoolMatchesModel(request, account);
+        } else if (request.routingPoolId() != null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "vendorAccountId is required when routingPoolId is selected");
+        }
+    }
+
+    private void validateRoutingPoolMatchesModel(AgentModelConfigRequest request, ModelVendorAccount account) {
+        if (request.routingPoolId() == null) {
+            return;
+        }
+        ModelAccountRoutingPool pool = routingPoolMapper.findById(request.routingPoolId());
+        if (pool == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "routing pool not found");
+        }
+        if (!java.util.Objects.equals(account.getRoutingPoolId(), pool.getId())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account does not belong to the selected routing pool");
+        }
+        String modelBaseUrl = blankToNull(request.baseUrl());
+        if (modelBaseUrl == null) {
+            modelBaseUrl = account.getBaseUrl();
+        }
+        String modelVendor = vendorCodeResolver.canonicalVendorCode(vendorCodeResolver.resolveVendorCode(
+                request.provider(),
+                modelBaseUrl,
+                request.displayName(),
+                request.modelName()
+        ));
+        String poolVendor = vendorCodeResolver.canonicalVendorCode(pool.getVendorCode());
+        if (!modelVendor.equals(poolVendor)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "routing pool does not belong to the model provider vendor");
         }
     }
 
@@ -922,7 +985,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         }
     }
 
-    private void validateEnabledModelAccount(AgentModelConfigRequest request) {
+    private void validateEnabledModelAccount(AgentModelConfigRequest request, ModelVendorAccount account) {
         boolean enabled = request.enabled() == null || request.enabled();
         boolean agentEnabled = request.agentEnabled() == null || request.agentEnabled();
         if (!enabled && !agentEnabled) {
@@ -931,7 +994,6 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (request.vendorAccountId() == null) {
             return;
         }
-        ModelVendorAccount account = vendorAccountMapper.findActiveById(request.vendorAccountId());
         if (account != null) {
             validateAccountReadyForEnabledModel(account);
         }
@@ -1008,6 +1070,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         }
         AgentModelConfigRequest merged = new AgentModelConfigRequest(
                 request.vendorAccountId() != null ? request.vendorAccountId() : (existing == null ? null : existing.getVendorAccountId()),
+                request.routingPoolId(),
                 request.displayName(),
                 request.configCode(),
                 request.provider(),
@@ -1062,6 +1125,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         String extraAuthJson = blankToNull(request.extraAuthJson()) != null ? request.extraAuthJson() : resolved.getExtraAuthJson();
         return normalizeProviderBaseUrl(new AgentModelConfigRequest(
                 accountId,
+                request.routingPoolId(),
                 request.displayName(),
                 request.configCode(),
                 request.provider(),
@@ -1111,6 +1175,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         boolean hasBaseUrl = request.baseUrl() != null && !request.baseUrl().isBlank();
         return normalizeProviderBaseUrl(new AgentModelConfigRequest(
                 accountId,
+                request.routingPoolId(),
                 request.displayName(),
                 request.configCode(),
                 request.provider(),
@@ -1154,6 +1219,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         }
         return new AgentModelConfigRequest(
                 request.vendorAccountId(),
+                request.routingPoolId(),
                 request.displayName(),
                 request.configCode(),
                 request.provider(),

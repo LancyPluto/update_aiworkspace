@@ -396,6 +396,8 @@ export interface AgentModelConfig {
   id: number
   vendorAccountId?: number | null
   vendorAccountName?: string | null
+  routingPoolId?: number | null
+  routingPoolName?: string | null
   displayName?: string | null
   configCode?: string | null
   provider: string
@@ -538,6 +540,8 @@ export interface ModelVendorAccount {
   modelCount: number
   loadBalanceEnabled?: boolean | null
   loadBalanceWeight?: number | null
+  routingPoolId?: number | null
+  routingPoolName?: string | null
   inFlightCount?: number | null
   circuitState?: string | null
   circuitOpenUntil?: string | null
@@ -599,6 +603,7 @@ export interface ModelVendorAccountPayload {
 export interface ModelVendorAccountRoutingPayload {
   loadBalanceEnabled: boolean
   loadBalanceWeight: number
+  routingPoolName: string | null
 }
 
 export interface ModelVendorPayload {
@@ -621,6 +626,8 @@ export interface UnifiedApiModelItem {
   id: number
   vendorAccountId?: number | null
   vendorAccountName?: string | null
+  routingPoolId?: number | null
+  routingPoolName?: string | null
   displayName?: string | null
   configCode?: string | null
   provider: string
@@ -682,7 +689,8 @@ export interface UnifiedApiOverview {
 }
 
 export interface AgentModelConfigPayload {
-  vendorAccountId?: number
+  vendorAccountId?: number | null
+  routingPoolId?: number | null
   displayName?: string
   configCode?: string
   provider: string

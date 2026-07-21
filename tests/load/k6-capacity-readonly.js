@@ -6,6 +6,7 @@ import { Gauge, Rate } from "k6/metrics";
 const DEFAULT_BASE_URL = "https://wlcloudai.com";
 const BASE_URL = (__ENV.BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
 const RESULTS_DIR = __ENV.RESULTS_DIR || "tests/load/results";
+const CAPACITY_PROFILE = (__ENV.CAPACITY_PROFILE || "full").trim().toLowerCase();
 
 const businessFailureRate = new Rate("api_business_failed");
 const activeVus = new Gauge("capacity_active_vus");
@@ -41,7 +42,7 @@ for (const endpoint of endpoints) {
   endpointThresholds[`api_business_failed{endpoint:${endpoint.id}}`] = ["rate<0.01"];
 }
 
-const capacityPlan = [
+const fullCapacityPlan = [
   { id: "qps_100", targetQps: 100, rampSeconds: 10, holdSeconds: 180 },
   { id: "qps_300", targetQps: 300, rampSeconds: 15, holdSeconds: 180 },
   { id: "qps_500", targetQps: 500, rampSeconds: 15, holdSeconds: 180 },
@@ -49,6 +50,21 @@ const capacityPlan = [
   { id: "qps_1500", targetQps: 1500, rampSeconds: 15, holdSeconds: 180 },
   { id: "qps_2000", targetQps: 2000, rampSeconds: 15, holdSeconds: 180 },
 ];
+
+const edgeCapacityPlan = [
+  { id: "qps_50", targetQps: 50, rampSeconds: 10, holdSeconds: 120 },
+  { id: "qps_60", targetQps: 60, rampSeconds: 10, holdSeconds: 120 },
+  { id: "qps_70", targetQps: 70, rampSeconds: 10, holdSeconds: 120 },
+  { id: "qps_80", targetQps: 80, rampSeconds: 10, holdSeconds: 120 },
+  { id: "qps_90", targetQps: 90, rampSeconds: 10, holdSeconds: 120 },
+  { id: "qps_100", targetQps: 100, rampSeconds: 10, holdSeconds: 120 },
+];
+
+if (CAPACITY_PROFILE !== "full" && CAPACITY_PROFILE !== "edge") {
+  throw new Error("CAPACITY_PROFILE must be either full or edge");
+}
+
+const capacityPlan = CAPACITY_PROFILE === "edge" ? edgeCapacityPlan : fullCapacityPlan;
 
 const capacityStages = [];
 const capacityWindows = [];
@@ -78,7 +94,6 @@ for (const stage of capacityPlan) {
   }
 }
 
-// Scheduled duration: 10s initial ramp + 6 * 3m plateaus + 5 * 15s ramps = 19m25s.
 export const options = {
   scenarios: {
     capacity_readonly: {
@@ -91,7 +106,7 @@ export const options = {
       gracefulStop: "30s",
     },
   },
-  userAgent: "k6-capacity-readonly/1.0",
+  userAgent: `k6-capacity-readonly/${CAPACITY_PROFILE}/1.0`,
   summaryTrendStats: ["avg", "med", "p(90)", "p(95)", "p(99)", "max"],
   thresholds: {
     http_req_failed: [
@@ -187,33 +202,39 @@ function requestTags(endpoint, capacityStage) {
 
 export function handleSummary(data) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const outputPath = `${RESULTS_DIR}/capacity-summary-${timestamp}.json`;
+  const outputPrefix = CAPACITY_PROFILE === "edge" ? "capacity-edge" : "capacity";
+  const outputPath = `${RESULTS_DIR}/${outputPrefix}-summary-${timestamp}.json`;
+  const testRunDurationMs = data.state && data.state.testRunDurationMs;
+  const testRunDurationSeconds = typeof testRunDurationMs === "number"
+    ? testRunDurationMs / 1000
+    : 0;
   const stageReports = capacityWindows.map(capacityStageReport);
   const lines = [
-    "\nProduction read-only capacity test summary",
+    `\nProduction read-only capacity test summary (${CAPACITY_PROFILE})`,
+    `test run duration: ${formatNumber(testRunDurationSeconds, 2)} s`,
     `requests: ${formatNumber(metricValue(data, "http_reqs", "count"), 0)}`,
     `average QPS: ${formatNumber(metricValue(data, "http_reqs", "rate"), 2)}`,
     `P95: ${formatNumber(metricValue(data, "http_req_duration", "p(95)"), 2)} ms`,
     `HTTP failure rate: ${formatPercent(metricValue(data, "http_req_failed", "rate"))}`,
     `API business failure rate: ${formatPercent(metricValue(data, "api_business_failed", "rate"))}`,
     `dropped iterations: ${formatNumber(metricValue(data, "dropped_iterations", "count"), 0)}`,
-    "stage       target  actual  achieved  dropped  drop%   P50     P95     P99     max     HTTP fail  API fail  max VU  valid",
+    "stage       status       target  hold(s) expected completed  QPS    achieved shortfall  P95(ms) HTTP fail API fail valid",
   ];
 
   for (const stage of stageReports) {
     lines.push(
-      `${stage.id.padEnd(11)} ${formatNumber(stage.targetQps, 0).padStart(6)} `
-        + `${formatNumber(stage.actualQps, 2).padStart(7)} `
-        + `${formatPercent(stage.achievementRate).padStart(9)} `
-        + `${formatNumber(stage.estimatedDroppedIterations, 0).padStart(7)} `
-        + `${formatPercent(stage.estimatedDroppedRate).padStart(7)} `
-        + `${formatNumber(stage.p50Ms, 1).padStart(7)} `
+      `${stage.id.padEnd(11)} ${stage.status.padEnd(11)} `
+        + `${formatNumber(stage.targetQps, 0).padStart(6)} `
+        + `${formatNumber(stage.elapsedHoldSeconds, 1).padStart(7)} `
+        + `${formatNumber(stage.expectedScheduled, 0).padStart(8)} `
+        + `${formatNumber(stage.completedRequests, 0).padStart(9)} `
+        + `${formatNumber(stage.completionQps, 2).padStart(6)} `
+        + `${formatPercent(stage.completionRate).padStart(9)} `
+        + `${formatNumber(stage.shortfall, 0).padStart(9)} `
         + `${formatNumber(stage.p95Ms, 1).padStart(7)} `
-        + `${formatNumber(stage.p99Ms, 1).padStart(7)} `
-        + `${formatNumber(stage.maxMs, 1).padStart(7)} `
-        + `${formatPercent(stage.httpFailureRate).padStart(10)} `
-        + `${formatPercent(stage.businessFailureRate).padStart(9)} `
-        + `${formatNumber(stage.maxVus, 0).padStart(7)}  ${stage.valid ? "yes" : "no"}`,
+        + `${formatPercent(stage.httpFailureRate).padStart(9)} `
+        + `${formatPercent(stage.businessFailureRate).padStart(8)} `
+        + `${stage.valid ? "yes" : "no"}`,
     );
   }
 
@@ -228,9 +249,11 @@ export function handleSummary(data) {
   }
 
   lines.push(
-    "A stage is valid only when achieved QPS >= 99% and estimated dropped <= 0.1%.",
+    "A stage is valid only when its full hold completed, completion >= 99%, and both failure rates < 1%.",
+    "not_run stages have no scheduled requests; interrupted stages use only elapsed hold time.",
+    "shortfall is completed-vs-scheduled for the elapsed hold and is not k6 dropped_iterations.",
     "An invalid stage may indicate load-generator capacity, not the server limit.",
-    "The 2000 QPS stage is mixed total traffic, approximately 500 QPS per endpoint.",
+    "All targets are mixed total QPS distributed evenly across four endpoints.",
     `JSON summary: ${outputPath}`,
     "",
   );
@@ -238,6 +261,8 @@ export function handleSummary(data) {
     ...data,
     capacityReport: {
       scheduledDurationSeconds: scheduledSeconds,
+      testRunDurationSeconds,
+      profile: CAPACITY_PROFILE,
       mixedScenario: true,
       endpointCount: endpoints.length,
       globalDroppedIterations: metricValue(data, "dropped_iterations", "count"),
@@ -251,31 +276,49 @@ export function handleSummary(data) {
 
   function capacityStageReport(stage) {
     const selector = `{capacity_stage:${stage.id}}`;
-    const requestCount = metricValue(data, `http_reqs${selector}`, "count");
-    const expectedRequests = stage.targetQps * stage.holdSeconds;
-    const estimatedDroppedIterations = Math.max(expectedRequests - requestCount, 0);
-    const achievementRate = expectedRequests > 0 ? requestCount / expectedRequests : 0;
-    const estimatedDroppedRate = expectedRequests > 0
-      ? estimatedDroppedIterations / expectedRequests
+    const elapsedHoldSeconds = Math.max(
+      Math.min(testRunDurationSeconds - stage.startSeconds, stage.holdSeconds),
+      0,
+    );
+    const status = elapsedHoldSeconds <= 0
+      ? "not_run"
+      : (testRunDurationSeconds >= stage.endSeconds - 0.5 ? "completed" : "interrupted");
+    const completedRequests = metricValue(data, `http_reqs${selector}`, "count");
+    const expectedScheduled = stage.targetQps * elapsedHoldSeconds;
+    const shortfall = Math.max(expectedScheduled - completedRequests, 0);
+    const completionRate = expectedScheduled > 0
+      ? completedRequests / expectedScheduled
       : 0;
+    const httpFailureRate = metricValue(data, `http_req_failed${selector}`, "rate");
+    const businessFailureRate = metricValue(
+      data,
+      `api_business_failed${selector}`,
+      "rate",
+    );
     return {
       id: stage.id,
+      status,
       targetQps: stage.targetQps,
       holdSeconds: stage.holdSeconds,
-      requestCount,
-      expectedRequests,
-      actualQps: requestCount / stage.holdSeconds,
-      achievementRate,
-      estimatedDroppedIterations,
-      estimatedDroppedRate,
+      elapsedHoldSeconds,
+      completedRequests,
+      completionQps: elapsedHoldSeconds > 0
+        ? completedRequests / elapsedHoldSeconds
+        : 0,
+      expectedScheduled,
+      shortfall,
+      completionRate,
       p50Ms: metricValue(data, `http_req_duration${selector}`, "med"),
       p95Ms: metricValue(data, `http_req_duration${selector}`, "p(95)"),
       p99Ms: metricValue(data, `http_req_duration${selector}`, "p(99)"),
       maxMs: metricValue(data, `http_req_duration${selector}`, "max"),
-      httpFailureRate: metricValue(data, `http_req_failed${selector}`, "rate"),
-      businessFailureRate: metricValue(data, `api_business_failed${selector}`, "rate"),
+      httpFailureRate,
+      businessFailureRate,
       maxVus: metricValue(data, `capacity_active_vus${selector}`, "max"),
-      valid: achievementRate >= 0.99 && estimatedDroppedRate <= 0.001,
+      valid: status === "completed"
+        && completionRate >= 0.99
+        && httpFailureRate < 0.01
+        && businessFailureRate < 0.01,
       endpoints: endpoints.map((endpoint) => {
         const endpointSelector = `{capacity_stage:${stage.id},endpoint:${endpoint.id}}`;
         const endpointRequestCount = metricValue(
@@ -287,7 +330,9 @@ export function handleSummary(data) {
           id: endpoint.id,
           route: endpoint.name,
           requestCount: endpointRequestCount,
-          actualQps: endpointRequestCount / stage.holdSeconds,
+          actualQps: elapsedHoldSeconds > 0
+            ? endpointRequestCount / elapsedHoldSeconds
+            : 0,
           expectedQps: stage.targetQps / endpoints.length,
         };
       }),

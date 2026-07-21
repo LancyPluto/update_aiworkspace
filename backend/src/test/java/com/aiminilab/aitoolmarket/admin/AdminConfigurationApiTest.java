@@ -11,6 +11,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -350,6 +351,258 @@ class AdminConfigurationApiTest {
                 .andExpect(jsonPath("$.data[?(@.configCode=='secret_model')].readTimeoutSeconds").value(600))
                 .andExpect(jsonPath("$.data[?(@.configCode=='secret_model')].apiKeyMasked").value("sk***ue"))
                 .andExpect(jsonPath("$.data[?(@.configCode=='secret_model')].extraAuthJsonMasked").value("********"));
+    }
+
+    @Test
+    void configBundleRoutingVersionKeepsLegacyStateAndHonorsV2ExplicitClear() throws Exception {
+        String adminToken = loginAdmin();
+        String existingAccountName = "legacy-routing-v1-existing";
+        String newAccountName = "legacy-routing-v1-new";
+        String existingConfigCode = "legacy_routing_v1_existing_model";
+        String newConfigCode = "legacy_routing_v1_new_model";
+
+        jdbcTemplate.update("""
+                INSERT INTO model_account_routing_pools(vendor_code, pool_name, pool_key)
+                VALUES ('mock', 'Legacy Compatibility Pool', 'legacy compatibility pool')
+                """);
+        Long routingPoolId = jdbcTemplate.queryForObject(
+                "SELECT id FROM model_account_routing_pools WHERE vendor_code = 'mock' AND pool_key = 'legacy compatibility pool'",
+                Long.class
+        );
+        jdbcTemplate.update("""
+                INSERT INTO model_vendor_accounts(
+                    vendor_code, account_name, base_url, api_key,
+                    balance_query_mode, balance_status, health_status,
+                    load_balance_enabled, load_balance_weight, routing_pool_id,
+                    enabled, is_deleted
+                ) VALUES ('mock', ?, 'https://legacy-routing-existing.example/v1', 'existing-secret',
+                          'MANUAL', 'UNKNOWN', 'UNKNOWN', 1, 37, ?, 1, 0)
+                """, existingAccountName, routingPoolId);
+        Long existingAccountId = jdbcTemplate.queryForObject(
+                "SELECT id FROM model_vendor_accounts WHERE vendor_code = 'mock' AND account_name = ?",
+                Long.class,
+                existingAccountName
+        );
+        jdbcTemplate.update("""
+                INSERT INTO agent_model_configs(
+                    vendor_account_id, routing_pool_id, display_name, config_code,
+                    provider, model_name, base_url, api_key, capabilities,
+                    enabled, agent_enabled, is_default, is_deleted
+                ) VALUES (?, ?, 'Legacy routing model', ?, 'mock', 'mock',
+                          'https://legacy-routing-existing.example/v1', '', '["TEXT_GENERATION"]',
+                          1, 1, 0, 0)
+                """, existingAccountId, routingPoolId, existingConfigCode);
+
+        mockMvc.perform(get("/api/admin/v1/config-bundles/export")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.version").value(2));
+
+        mockMvc.perform(post("/api/admin/v1/config-bundles/import")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "format": "ai-tool-market-config-bundle",
+                                  "version": 1,
+                                  "exportScope": "SELECTED_TOOLS",
+                                  "secretsRedacted": false,
+                                  "settings": {},
+                                  "vendorAccounts": [
+                                    {
+                                      "vendorCode": "mock",
+                                      "accountName": "legacy-routing-v1-existing",
+                                      "accountRef": "mock::legacy-routing-v1-existing",
+                                      "baseUrl": "https://legacy-routing-existing.example/v1",
+                                      "secretsRedacted": true,
+                                      "balanceQueryMode": "MANUAL",
+                                      "enabled": true
+                                    },
+                                    {
+                                      "vendorCode": "mock",
+                                      "accountName": "legacy-routing-v1-new",
+                                      "accountRef": "mock::legacy-routing-v1-new",
+                                      "baseUrl": "https://legacy-routing-new.example/v1",
+                                      "apiKey": "new-secret",
+                                      "secretsRedacted": false,
+                                      "balanceQueryMode": "MANUAL",
+                                      "enabled": true
+                                    }
+                                  ],
+                                  "modelConfigs": [
+                                    {
+                                      "displayName": "Legacy routing model updated",
+                                      "configCode": "legacy_routing_v1_existing_model",
+                                      "vendorAccountRef": "mock::legacy-routing-v1-existing",
+                                      "provider": "mock",
+                                      "modelName": "mock",
+                                      "secretsRedacted": true,
+                                      "enabled": true,
+                                      "agentEnabled": true,
+                                      "isDefault": false,
+                                      "capabilities": ["TEXT_GENERATION"]
+                                    },
+                                    {
+                                      "displayName": "Legacy routing new model",
+                                      "configCode": "legacy_routing_v1_new_model",
+                                      "vendorAccountRef": "mock::legacy-routing-v1-new",
+                                      "provider": "mock",
+                                      "modelName": "mock",
+                                      "secretsRedacted": true,
+                                      "enabled": true,
+                                      "agentEnabled": true,
+                                      "isDefault": false,
+                                      "capabilities": ["TEXT_GENERATION"]
+                                    }
+                                  ],
+                                  "categories": [],
+                                  "tools": []
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.vendorAccounts").value(2))
+                .andExpect(jsonPath("$.data.modelConfigs").value(2));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT load_balance_enabled FROM model_vendor_accounts WHERE id = ?",
+                Integer.class,
+                existingAccountId
+        )).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT load_balance_weight FROM model_vendor_accounts WHERE id = ?",
+                Integer.class,
+                existingAccountId
+        )).isEqualTo(37);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT routing_pool_id FROM model_vendor_accounts WHERE id = ?",
+                Long.class,
+                existingAccountId
+        )).isEqualTo(routingPoolId);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT routing_pool_id FROM agent_model_configs WHERE config_code = ?",
+                Long.class,
+                existingConfigCode
+        )).isEqualTo(routingPoolId);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT load_balance_enabled FROM model_vendor_accounts WHERE vendor_code = 'mock' AND account_name = ?",
+                Integer.class,
+                newAccountName
+        )).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT routing_pool_id FROM model_vendor_accounts WHERE vendor_code = 'mock' AND account_name = ?",
+                Long.class,
+                newAccountName
+        )).isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT routing_pool_id FROM agent_model_configs WHERE config_code = ?",
+                Long.class,
+                newConfigCode
+        )).isNull();
+
+        mockMvc.perform(post("/api/admin/v1/config-bundles/import")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "format": "ai-tool-market-config-bundle",
+                                  "version": 2,
+                                  "exportScope": "SELECTED_TOOLS",
+                                  "secretsRedacted": true,
+                                  "settings": {},
+                                  "vendorAccounts": [
+                                    {
+                                      "vendorCode": "mock",
+                                      "accountName": "legacy-routing-v1-existing",
+                                      "accountRef": "mock::legacy-routing-v1-existing",
+                                      "baseUrl": "https://legacy-routing-existing.example/v1",
+                                      "secretsRedacted": true,
+                                      "balanceQueryMode": "MANUAL",
+                                      "routingPoolName": "Legacy Compatibility Pool",
+                                      "loadBalanceEnabled": true,
+                                      "loadBalanceWeight": 37,
+                                      "enabled": true
+                                    }
+                                  ],
+                                  "modelConfigs": [
+                                    {
+                                      "displayName": "Legacy routing model updated",
+                                      "configCode": "legacy_routing_v1_existing_model",
+                                      "vendorAccountRef": "mock::legacy-routing-v1-existing",
+                                      "routingPoolName": null,
+                                      "provider": "mock",
+                                      "modelName": "mock",
+                                      "secretsRedacted": true,
+                                      "enabled": true,
+                                      "agentEnabled": true,
+                                      "isDefault": false,
+                                      "capabilities": ["TEXT_GENERATION"]
+                                    }
+                                  ],
+                                  "categories": [],
+                                  "tools": []
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.modelConfigs").value(1));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT routing_pool_id FROM agent_model_configs WHERE config_code = ?",
+                Long.class,
+                existingConfigCode
+        )).isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT routing_pool_id FROM model_vendor_accounts WHERE id = ?",
+                Long.class,
+                existingAccountId
+        )).isEqualTo(routingPoolId);
+
+        mockMvc.perform(post("/api/admin/v1/config-bundles/import")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "format": "ai-tool-market-config-bundle",
+                                  "version": 2,
+                                  "exportScope": "SELECTED_TOOLS",
+                                  "secretsRedacted": true,
+                                  "settings": {},
+                                  "vendorAccounts": [
+                                    {
+                                      "vendorCode": "mock",
+                                      "accountName": "legacy-routing-v1-existing",
+                                      "accountRef": "mock::legacy-routing-v1-existing",
+                                      "baseUrl": "https://legacy-routing-existing.example/v1",
+                                      "secretsRedacted": true,
+                                      "balanceQueryMode": "MANUAL",
+                                      "routingPoolName": null,
+                                      "loadBalanceEnabled": false,
+                                      "loadBalanceWeight": 61,
+                                      "enabled": true
+                                    }
+                                  ],
+                                  "modelConfigs": [],
+                                  "categories": [],
+                                  "tools": []
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.vendorAccounts").value(1));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT load_balance_enabled FROM model_vendor_accounts WHERE id = ?",
+                Integer.class,
+                existingAccountId
+        )).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT load_balance_weight FROM model_vendor_accounts WHERE id = ?",
+                Integer.class,
+                existingAccountId
+        )).isEqualTo(61);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT routing_pool_id FROM model_vendor_accounts WHERE id = ?",
+                Long.class,
+                existingAccountId
+        )).isNull();
     }
 
     @Test
@@ -1010,6 +1263,123 @@ class AdminConfigurationApiTest {
                         .value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("http://localhost"))))
                 .andExpect(jsonPath("$.data.tools[0].configNote")
                         .value(org.hamcrest.Matchers.containsString("\"modelIconUrl\":\"\"")));
+    }
+
+    @Test
+    void selectedToolExportIncludesRoutingPoolExecutionClosure() throws Exception {
+        String adminToken = loginAdmin();
+        String poolKey = "selected export closure pool";
+        jdbcTemplate.update("""
+                INSERT INTO model_account_routing_pools(vendor_code, pool_name, pool_key)
+                VALUES ('mock', 'Selected Export Closure Pool', ?)
+                """, poolKey);
+        Long poolId = jdbcTemplate.queryForObject(
+                "SELECT id FROM model_account_routing_pools WHERE vendor_code = 'mock' AND pool_key = ?",
+                Long.class,
+                poolKey
+        );
+        jdbcTemplate.update("""
+                INSERT INTO model_vendor_accounts(
+                    vendor_code, account_name, base_url, api_key,
+                    balance_query_mode, balance_status, health_status,
+                    load_balance_enabled, load_balance_weight, routing_pool_id,
+                    enabled, is_deleted
+                ) VALUES ('mock', 'selected-export-source', 'https://selected-export-source.example/v1', 'source-key',
+                          'MANUAL', 'UNKNOWN', 'UNKNOWN', 1, 100, ?, 1, 0)
+                """, poolId);
+        jdbcTemplate.update("""
+                INSERT INTO model_vendor_accounts(
+                    vendor_code, account_name, base_url, api_key,
+                    balance_query_mode, balance_status, health_status,
+                    load_balance_enabled, load_balance_weight, routing_pool_id,
+                    enabled, is_deleted
+                ) VALUES ('mock', 'selected-export-candidate', 'https://selected-export-candidate.example/v1', 'candidate-key',
+                          'MANUAL', 'UNKNOWN', 'UNKNOWN', 1, 80, ?, 1, 0)
+                """, poolId);
+        Long sourceAccountId = jdbcTemplate.queryForObject(
+                "SELECT id FROM model_vendor_accounts WHERE vendor_code = 'mock' AND account_name = 'selected-export-source'",
+                Long.class
+        );
+        Long candidateAccountId = jdbcTemplate.queryForObject(
+                "SELECT id FROM model_vendor_accounts WHERE vendor_code = 'mock' AND account_name = 'selected-export-candidate'",
+                Long.class
+        );
+        jdbcTemplate.update("""
+                INSERT INTO agent_model_configs(
+                    vendor_account_id, routing_pool_id, display_name, config_code, provider, model_name,
+                    billing_unit, unit_price, capabilities, enabled, agent_enabled, is_default, is_deleted
+                ) VALUES (?, ?, 'Selected export source', 'selected_export_source_model', 'mock', 'shared-upstream-model',
+                          'PER_CALL', 1.25, '["TEXT_GENERATION"]', 1, 1, 0, 0)
+                """, sourceAccountId, poolId);
+        jdbcTemplate.update("""
+                INSERT INTO agent_model_configs(
+                    vendor_account_id, display_name, config_code, provider, model_name,
+                    billing_unit, unit_price, capabilities, enabled, agent_enabled, is_default, is_deleted
+                ) VALUES (?, 'Selected export candidate', 'selected_export_candidate_model', 'mock', 'shared-upstream-model',
+                          'PER_CALL', 1.25, '["TEXT_GENERATION"]', 1, 1, 0, 0)
+                """, candidateAccountId);
+        jdbcTemplate.update("""
+                INSERT INTO agent_model_configs(
+                    vendor_account_id, display_name, config_code, provider, model_name,
+                    billing_unit, unit_price, capabilities, enabled, agent_enabled, is_default, is_deleted
+                ) VALUES (?, 'Selected export price mismatch', 'selected_export_price_mismatch_model', 'mock', 'shared-upstream-model',
+                          'PER_CALL', 2.50, '["TEXT_GENERATION"]', 1, 1, 0, 0)
+                """, candidateAccountId);
+        Long sourceModelId = jdbcTemplate.queryForObject(
+                "SELECT id FROM agent_model_configs WHERE config_code = 'selected_export_source_model'",
+                Long.class
+        );
+
+        String categoryResponse = mockMvc.perform(post("/api/admin/v1/tool-categories")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "categoryCode": "selected_export_closure_test",
+                                  "categoryName": "Selected Export Closure Test",
+                                  "sortOrder": 1,
+                                  "status": "ACTIVE"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long categoryId = Long.parseLong(categoryResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+        mockMvc.perform(post("/api/admin/v1/tools")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "selected_export_closure_tool",
+                                  "toolName": "Selected Export Closure Tool",
+                                  "categoryId": %d,
+                                  "description": "Selected pool tool",
+                                  "toolType": "TEXT_GENERATION",
+                                  "inputModality": "TEXT",
+                                  "outputModality": "TEXT",
+                                  "estimatedCreditCost": 1,
+                                  "modelConfigId": %d,
+                                  "executionHandler": "TEXT_GENERATION"
+                                }
+                                """.formatted(categoryId, sourceModelId)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/admin/v1/config-bundles/export")
+                        .param("toolCodes", "selected_export_closure_tool")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.version").value(2))
+                .andExpect(jsonPath("$.data.vendorAccounts.length()").value(2))
+                .andExpect(jsonPath("$.data.vendorAccounts[*].accountName").value(hasItem("selected-export-source")))
+                .andExpect(jsonPath("$.data.vendorAccounts[*].accountName").value(hasItem("selected-export-candidate")))
+                .andExpect(jsonPath("$.data.modelConfigs.length()").value(2))
+                .andExpect(jsonPath("$.data.modelConfigs[*].configCode").value(hasItem("selected_export_source_model")))
+                .andExpect(jsonPath("$.data.modelConfigs[*].configCode").value(hasItem("selected_export_candidate_model")))
+                .andExpect(jsonPath("$.data.modelConfigs[*].configCode").value(
+                        org.hamcrest.Matchers.not(hasItem("selected_export_price_mismatch_model"))))
+                .andExpect(jsonPath("$.data.modelConfigs[?(@.configCode=='selected_export_source_model')].routingPoolName")
+                        .value("Selected Export Closure Pool"));
     }
 
     private String loginAdmin() throws Exception {

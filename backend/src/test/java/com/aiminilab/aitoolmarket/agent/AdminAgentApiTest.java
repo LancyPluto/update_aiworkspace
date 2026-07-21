@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.agent;
 import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
 import com.aiminilab.aitoolmarket.agent.dto.AdminAgentRouteDebugResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
+import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentRateLimitService;
 import com.aiminilab.aitoolmarket.auth.security.InternalRequestSignatureVerifier;
 import com.aiminilab.aitoolmarket.auth.security.TokenDenylistService;
@@ -12,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
@@ -63,6 +65,9 @@ class AdminAgentApiTest {
 
     @MockBean
     private AgentServiceClient agentServiceClient;
+
+    @SpyBean
+    private ModelVendorAccountMapper vendorAccountMapper;
 
     @Test
     void adminCanObserveAgentRunsEventsToolCallsAndCancelActiveRun() throws Exception {
@@ -620,6 +625,129 @@ class AdminAgentApiTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
                 .andExpect(jsonPath("$.message").value(containsString("does not belong")));
+    }
+
+    @Test
+    void modelRoutingPoolUsesStableVendorScopedPoolAndProtectsModelAnchor() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long firstAccount = createVendorAccount(
+                adminToken, "qwen", "Routing pool account A", "https://dashscope.aliyuncs.com"
+        );
+        Long secondAccount = createVendorAccount(
+                adminToken, "qwen", "Routing pool account B", "https://dashscope.aliyuncs.com"
+        );
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(
+                                "/api/admin/v1/model-vendor-accounts/{id}/routing", firstAccount)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "loadBalanceEnabled": true,
+                                  "loadBalanceWeight": 80,
+                                  "routingPoolName": "  "
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
+                .andExpect(jsonPath("$.message").value(containsString("routingPoolName")));
+
+        String firstRoutingResponse = mockMvc.perform(
+                        org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(
+                                        "/api/admin/v1/model-vendor-accounts/{id}/routing", firstAccount)
+                                .header("Authorization", "Bearer " + adminToken)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {
+                                          "loadBalanceEnabled": true,
+                                          "loadBalanceWeight": 80,
+                                          "routingPoolName": "  HappyHorse Pool  "
+                                        }
+                                        """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.routingPoolName").value("HappyHorse Pool"))
+                .andExpect(jsonPath("$.data.loadBalanceEnabled").value(true))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long routingPoolId = Long.parseLong(firstRoutingResponse.replaceAll(
+                "(?s).*\\\"routingPoolId\\\"\\s*:\\s*(\\d+).*", "$1"
+        ));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(
+                                "/api/admin/v1/model-vendor-accounts/{id}/routing", secondAccount)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "loadBalanceEnabled": true,
+                                  "loadBalanceWeight": 20,
+                                  "routingPoolName": "happyhorse pool"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.routingPoolId").value(routingPoolId.intValue()));
+
+        String modelRequestBody = """
+                {
+                  "vendorAccountId": %d,
+                  "routingPoolId": %d,
+                  "displayName": "HappyHorse routing pool test",
+                  "configCode": "happyhorse_routing_pool_test",
+                  "provider": "bailian_happyhorse",
+                  "modelName": "happyhorse-1.1-t2v",
+                  "baseUrl": "",
+                  "timeoutSeconds": 60,
+                  "billingUnit": "PER_SECOND",
+                  "unitPrice": 0.9,
+                  "enabled": false,
+                  "agentEnabled": false,
+                  "isDefault": false,
+                  "capabilities": ["VIDEO_GENERATION"]
+                }
+                """.formatted(firstAccount, routingPoolId);
+
+        Mockito.clearInvocations(vendorAccountMapper);
+        mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(modelRequestBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.vendorAccountId").value(firstAccount.intValue()))
+                .andExpect(jsonPath("$.data.routingPoolId").value(routingPoolId.intValue()))
+                .andExpect(jsonPath("$.data.routingPoolName").value("HappyHorse Pool"));
+        Mockito.verify(vendorAccountMapper).findActiveByIdForUpdate(firstAccount);
+
+        Long modelConfigId = jdbcTemplate.queryForObject(
+                "SELECT id FROM agent_model_configs WHERE config_code = ?",
+                Long.class,
+                "happyhorse_routing_pool_test"
+        );
+        Mockito.clearInvocations(vendorAccountMapper);
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(
+                                "/api/admin/v1/agent/model-config/{id}", modelConfigId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(modelRequestBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.routingPoolId").value(routingPoolId.intValue()));
+        Mockito.verify(vendorAccountMapper).findActiveByIdForUpdate(firstAccount);
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch(
+                                "/api/admin/v1/model-vendor-accounts/{id}/routing", firstAccount)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "loadBalanceEnabled": true,
+                                  "loadBalanceWeight": 80,
+                                  "routingPoolName": "Another Pool"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
+                .andExpect(jsonPath("$.message").value(containsString("anchor")));
     }
 
     @Test

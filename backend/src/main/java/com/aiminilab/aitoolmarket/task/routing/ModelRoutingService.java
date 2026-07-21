@@ -7,7 +7,9 @@ import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.agent.service.ModelExecutionSnapshotService;
+import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
+import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.task.dto.RouteFailoverRequest;
 import com.aiminilab.aitoolmarket.task.dto.WorkerFailedRequest;
@@ -68,13 +70,18 @@ public class ModelRoutingService {
 
     @Transactional
     public void assignInitialRoute(AiTask task, AgentModelConfig originalModelConfig) {
-        if (!routingEnabled() || task == null || task.getId() == null || originalModelConfig == null
-                || originalModelConfig.getVendorAccountId() == null) {
+        if (task == null || task.getId() == null || originalModelConfig == null) {
             return;
         }
-        ModelVendorAccount sourceAccount = accountMapper.findActiveById(originalModelConfig.getVendorAccountId());
-        if (!accountCanBalance(sourceAccount)) {
+        if (!routingEnabled() || originalModelConfig.getRoutingPoolId() == null) {
             return;
+        }
+        if (originalModelConfig.getVendorAccountId() == null) {
+            throw routingUnavailable("routing pool model has no anchor account");
+        }
+        ModelVendorAccount sourceAccount = accountMapper.findActiveById(originalModelConfig.getVendorAccountId());
+        if (!accountBelongsToPool(sourceAccount, originalModelConfig.getRoutingPoolId())) {
+            throw routingUnavailable("routing pool does not match the anchor account");
         }
         CandidatePool pool = lockCandidatePool(originalModelConfig, sourceAccount);
         ModelRoutingPolicy.Candidate selected = ModelRoutingPolicy.choose(
@@ -82,7 +89,7 @@ public class ModelRoutingService {
                 LocalDateTime.now()
         );
         if (selected == null) {
-            return;
+            throw routingUnavailable("no eligible model account in the selected routing pool");
         }
 
         reserve(selected.state());
@@ -171,13 +178,16 @@ public class ModelRoutingService {
         if (attemptCount >= maxAttempts) {
             return FailoverDecision.notSwitched("failover_limit_reached", currentAttemptId);
         }
-        AgentModelConfig reference = resolveReferenceModel(task, currentAttempt);
+        AgentModelConfig reference = resolveReferenceModel(task);
         if (reference == null || reference.getVendorAccountId() == null) {
             return FailoverDecision.notSwitched("reference_model_unavailable", currentAttemptId);
         }
+        if (reference.getRoutingPoolId() == null) {
+            return FailoverDecision.notSwitched("task_not_load_balanced", currentAttemptId);
+        }
         ModelVendorAccount sourceAccount = accountMapper.findActiveById(reference.getVendorAccountId());
-        if (sourceAccount == null) {
-            return FailoverDecision.notSwitched("source_account_unavailable", currentAttemptId);
+        if (!accountBelongsToPool(sourceAccount, reference.getRoutingPoolId())) {
+            return FailoverDecision.notSwitched("routing_pool_unavailable", currentAttemptId);
         }
 
         CandidatePool pool = lockCandidatePool(reference, sourceAccount, currentAttempt.getModelConfigId());
@@ -190,7 +200,7 @@ public class ModelRoutingService {
                 LocalDateTime.now()
         );
         if (selected == null) {
-            return FailoverDecision.notSwitched("no_eligible_account", currentAttemptId);
+            return FailoverDecision.notSwitched("no_eligible_pool_account", currentAttemptId);
         }
 
         AccountModelRouteState currentState = pool.statesByModel().get(currentAttempt.getModelConfigId());
@@ -316,7 +326,12 @@ public class ModelRoutingService {
     private CandidatePool lockCandidatePool(AgentModelConfig reference,
                                             ModelVendorAccount sourceAccount,
                                             Long... additionalStateModelIds) {
-        List<ModelVendorAccount> accounts = accountMapper.findActiveByVendorCode(sourceAccount.getVendorCode());
+        Long routingPoolId = reference.getRoutingPoolId();
+        List<ModelVendorAccount> accounts = accountMapper.findActiveByVendorCode(sourceAccount.getVendorCode())
+                .stream()
+                .filter(this::accountCanBalance)
+                .filter(account -> accountBelongsToPool(account, routingPoolId))
+                .toList();
         Map<Long, ModelVendorAccount> accountsById = new HashMap<>();
         for (ModelVendorAccount account : accounts) {
             accountsById.put(account.getId(), account);
@@ -327,13 +342,12 @@ public class ModelRoutingService {
         if (rawCandidates.stream().noneMatch(candidate -> Objects.equals(candidate.getId(), reference.getId()))) {
             rawCandidates.add(reference);
         }
-        List<AgentModelConfig> compatible = rawCandidates.stream()
+        List<AgentModelConfig> compatible = ModelRoutingPolicy.deduplicateByAccount(rawCandidates.stream()
                 .filter(candidate -> candidate.getVendorAccountId() != null)
                 .filter(candidate -> accountsById.containsKey(candidate.getVendorAccountId()))
                 .filter(candidate -> ModelRoutingPolicy.compatible(
                         reference, candidate, capabilityService, objectMapper))
-                .sorted((left, right) -> Long.compare(left.getId(), right.getId()))
-                .toList();
+                .toList());
         for (AgentModelConfig candidate : compatible) {
             stateMapper.insertIfAbsent(candidate.getVendorAccountId(), candidate.getId());
         }
@@ -375,6 +389,12 @@ public class ModelRoutingService {
         return account != null
                 && Boolean.TRUE.equals(account.getEnabled())
                 && Boolean.TRUE.equals(account.getLoadBalanceEnabled());
+    }
+
+    private boolean accountBelongsToPool(ModelVendorAccount account, Long routingPoolId) {
+        return account != null
+                && routingPoolId != null
+                && Objects.equals(account.getRoutingPoolId(), routingPoolId);
     }
 
     private void reserve(AccountModelRouteState state) {
@@ -459,16 +479,14 @@ public class ModelRoutingService {
         return new CircuitDecision("CLOSED", null, 0);
     }
 
-    private AgentModelConfig resolveReferenceModel(AiTask task, TaskModelRouteAttempt currentAttempt) {
-        AgentModelConfig original = task.getModelConfigId() == null
+    private AgentModelConfig resolveReferenceModel(AiTask task) {
+        return task.getModelConfigId() == null
                 ? null
                 : modelConfigMapper.findActiveById(task.getModelConfigId());
-        if (original != null) {
-            return original;
-        }
-        return currentAttempt.getModelConfigId() == null
-                ? null
-                : modelConfigMapper.findActiveById(currentAttempt.getModelConfigId());
+    }
+
+    private BusinessException routingUnavailable(String message) {
+        return new BusinessException(ErrorCode.MODEL_CALL_FAILED, message);
     }
 
     private AccountModelRouteState findStateForUpdate(Long modelConfigId) {

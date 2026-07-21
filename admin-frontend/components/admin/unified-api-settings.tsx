@@ -16,7 +16,15 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -42,6 +50,7 @@ import {
   findModelProvider,
   selectDefaultModelProvider,
 } from "@/lib/model-provider-selection"
+import { buildModelRoutingPools, resolveModelRoutingTarget } from "@/lib/model-routing-target"
 import type {
   AgentModelConfigPayload,
   ModelVendorPayload,
@@ -55,13 +64,13 @@ import type {
 import {
   AlertCircle,
   Activity,
-  CheckCircle2,
   ChevronDown,
   ExternalLink,
   Layers,
   Loader2,
   Plus,
   RefreshCw,
+  Save,
   Search,
   ServerCog,
   Settings2,
@@ -103,15 +112,11 @@ function isNegativeBalance(account: ModelVendorAccount) {
 }
 
 function balanceStatusBadge(account: ModelVendorAccount) {
-  const status = account.balanceStatus
   if (isNegativeBalance(account)) {
     return <Badge variant="destructive">欠费</Badge>
   }
-  if (account.balanceAmount != null) {
-    return <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">正常</Badge>
-  }
-  if (status === "ERROR") {
-    return null
+  if (account.balanceStatus === "ERROR") {
+    return <Badge variant="destructive">余额异常</Badge>
   }
   if (account.balanceQueryMode === "NONE") {
     return <Badge variant="outline">仅外链</Badge>
@@ -119,7 +124,7 @@ function balanceStatusBadge(account: ModelVendorAccount) {
   if (account.balanceQueryMode === "MANUAL" && account.balanceAmount == null) {
     return <Badge variant="outline">待手填</Badge>
   }
-  return <Badge variant="outline">未知</Badge>
+  return null
 }
 
 function formatBalance(account: ModelVendorAccount) {
@@ -174,13 +179,6 @@ function diagnoseProviderIssue(
     return `未获取到余额：${raw}。如果该供应商没有稳定余额接口，请把余额查询方式改成“手填”或“仅外链”，不要让余额探测承担连通性判断。`
   }
   return `${stageLabel}失败：${raw}`
-}
-
-function formatBalanceUpdatedAt(value?: string | null) {
-  if (!value) return ""
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
-  return `更新于 ${date.toLocaleString("zh-CN", { hour12: false })}`
 }
 
 function pickPrimaryAccount(accounts: ModelVendorAccount[]): ModelVendorAccount | undefined {
@@ -263,21 +261,12 @@ function modelHealthBadge(model: UnifiedApiModelItem) {
 
 function accountCardTone(account: ModelVendorAccount) {
   if (!account.enabled) return ""
-  if (isHealthyStatus(account.healthStatus)) return "border-emerald-200 bg-emerald-50/60"
   if (isWarningStatus(account.healthStatus)) return "border-amber-200 bg-amber-50/70"
   if (isErrorStatus(account.healthStatus)) return "border-rose-200 bg-rose-50/70"
   return "bg-muted/20"
 }
 
 function accountHealthBadge(account: ModelVendorAccount) {
-  if (isHealthyStatus(account.healthStatus)) {
-    return (
-      <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
-        <CheckCircle2 className="mr-1 h-3 w-3" />
-        连通正常
-      </Badge>
-    )
-  }
   if (isWarningStatus(account.healthStatus)) {
     return (
       <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">
@@ -289,7 +278,7 @@ function accountHealthBadge(account: ModelVendorAccount) {
   if (isErrorStatus(account.healthStatus)) {
     return <Badge variant="destructive">连通异常</Badge>
   }
-  return <Badge variant="outline">尚未探活</Badge>
+  return null
 }
 
 function formatHealthCheckedAt(value?: string | null) {
@@ -313,7 +302,7 @@ function circuitStatusBadge(account: ModelVendorAccount) {
   if (state === "HALF_OPEN") {
     return <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">半开探测</Badge>
   }
-  return <Badge variant="outline">熔断器正常</Badge>
+  return null
 }
 
 function formatCircuitOpenUntil(value?: string | null) {
@@ -334,6 +323,10 @@ function routingExclusionReasonLabel(value?: string | null) {
     PRICE_MISMATCH: "同名模型价格配置不一致",
     ROUTE_CONFIG_MISMATCH: "同名模型执行协议或能力配置不一致",
     CIRCUIT_OPEN: "账户处于熔断冷却中",
+    ROUTING_POOL_EMPTY: "负载池没有成员账户",
+    NO_ELIGIBLE_POOL_ACCOUNT: "负载池没有可用账户",
+    NO_COMPATIBLE_MODEL: "负载池内没有兼容的同名模型",
+    ACCOUNT_POOL_MISMATCH: "模型锚点账户不属于所选负载池",
   }
   return labels[reason.toUpperCase()] || reason
 }
@@ -684,6 +677,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
   const [togglingAccountId, setTogglingAccountId] = useState<number | null>(null)
   const [routingAccountId, setRoutingAccountId] = useState<number | null>(null)
   const [routingWeightDrafts, setRoutingWeightDrafts] = useState<Record<number, string>>({})
+  const [routingPoolNameDrafts, setRoutingPoolNameDrafts] = useState<Record<number, string>>({})
   const [testingModelId, setTestingModelId] = useState<number | null>(null)
   const [testingAccountId, setTestingAccountId] = useState<number | null>(null)
   const [vendorFilter, setVendorFilter] = useState<VendorFilter>("ALL")
@@ -706,13 +700,26 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
   )
 
   const modelAccountOptions = useMemo(() => {
-    const vendorAccounts = overview?.vendors.find((vendor) => vendor.vendorCode === modelVendorCode)?.accounts ?? []
-    const selected = modelForm.vendorAccountId ? accountById.get(modelForm.vendorAccountId) : undefined
-    if (selected && !vendorAccounts.some((account) => account.id === selected.id)) {
-      return [selected, ...vendorAccounts]
-    }
-    return vendorAccounts
-  }, [accountById, modelForm.vendorAccountId, modelVendorCode, overview])
+    return overview?.vendors.find((vendor) => vendor.vendorCode === modelVendorCode)?.accounts ?? []
+  }, [modelVendorCode, overview])
+
+  const modelRoutingPools = useMemo(
+    () => buildModelRoutingPools(modelAccountOptions),
+    [modelAccountOptions],
+  )
+
+  const modelRouteTargetValue = modelForm.routingPoolId
+    ? `pool:${modelForm.routingPoolId}`
+    : modelForm.vendorAccountId
+      ? `account:${modelForm.vendorAccountId}`
+      : undefined
+
+  const selectedModelRoutingPool = useMemo(
+    () => (modelForm.routingPoolId
+      ? modelRoutingPools.find((pool) => pool.id === modelForm.routingPoolId)
+      : undefined),
+    [modelForm.routingPoolId, modelRoutingPools],
+  )
 
   const selectedModelAccount = useMemo(
     () => (modelForm.vendorAccountId ? accountById.get(modelForm.vendorAccountId) : undefined),
@@ -1018,6 +1025,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       try {
         await updateAgentModelConfig(model.id, {
           vendorAccountId: model.vendorAccountId ?? undefined,
+          routingPoolId: model.routingPoolId ?? null,
           displayName: model.displayName || "",
           configCode: model.configCode || "",
           provider: model.provider,
@@ -1063,6 +1071,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       try {
         await updateAgentModelConfig(model.id, {
           vendorAccountId: model.vendorAccountId ?? undefined,
+          routingPoolId: model.routingPoolId ?? null,
           displayName: model.displayName || "",
           configCode: model.configCode || "",
           provider: model.provider,
@@ -1129,9 +1138,26 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
   const saveAccountRouting = useCallback(
     async (
       account: ModelVendorAccount,
-      next: { loadBalanceEnabled?: boolean; loadBalanceWeight?: number },
+      next: {
+        loadBalanceEnabled?: boolean
+        loadBalanceWeight?: number
+        routingPoolName?: string | null
+      },
     ) => {
-      const loadBalanceEnabled = next.loadBalanceEnabled ?? account.loadBalanceEnabled ?? false
+      const routingPoolName = (
+        next.routingPoolName !== undefined
+          ? next.routingPoolName || ""
+          : routingPoolNameDrafts[account.id] ?? account.routingPoolName ?? ""
+      ).trim() || null
+      const requestedLoadBalanceEnabled = next.loadBalanceEnabled ?? account.loadBalanceEnabled ?? false
+      if (requestedLoadBalanceEnabled && !routingPoolName && next.loadBalanceEnabled === true) {
+        const message = "请先填写池名称"
+        setError(message)
+        toast.warning(`${displayAccountName(account)}：${message}`)
+        window.requestAnimationFrame(() => document.getElementById(`routing-pool-${account.id}`)?.focus())
+        return
+      }
+      const loadBalanceEnabled = routingPoolName ? requestedLoadBalanceEnabled : false
       const loadBalanceWeight = clampRoutingWeight(next.loadBalanceWeight ?? account.loadBalanceWeight)
       setRoutingAccountId(account.id)
       setError(null)
@@ -1139,16 +1165,23 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         const updated = await updateModelVendorAccountRouting(account.id, {
           loadBalanceEnabled,
           loadBalanceWeight,
+          routingPoolName,
         })
         patchVendorAccount(updated)
         setRoutingWeightDrafts((current) => ({
           ...current,
           [account.id]: String(clampRoutingWeight(updated.loadBalanceWeight)),
         }))
+        setRoutingPoolNameDrafts((current) => ({
+          ...current,
+          [account.id]: updated.routingPoolName || "",
+        }))
         toast.success(`${displayAccountName(updated)}：路由设置已更新`, {
           description: updated.loadBalanceEnabled
-            ? `已加入负载均衡，权重 ${clampRoutingWeight(updated.loadBalanceWeight)}`
-            : "已退出负载均衡，模型继续使用绑定账户",
+            ? `负载池 ${updated.routingPoolName} · 权重 ${clampRoutingWeight(updated.loadBalanceWeight)}`
+            : updated.routingPoolName
+              ? `已加入负载池 ${updated.routingPoolName}，负载均衡保持关闭`
+              : "已退出负载池，模型继续使用绑定账户",
         })
       } catch (err) {
         const message = err instanceof ApiError ? err.message : "更新负载均衡设置失败"
@@ -1156,13 +1189,17 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
           ...current,
           [account.id]: String(clampRoutingWeight(account.loadBalanceWeight)),
         }))
+        setRoutingPoolNameDrafts((current) => ({
+          ...current,
+          [account.id]: account.routingPoolName || "",
+        }))
         setError(message)
         toast.error(`${displayAccountName(account)}：路由设置更新失败`, { description: message })
       } finally {
         setRoutingAccountId((current) => (current === account.id ? null : current))
       }
     },
-    [patchVendorAccount],
+    [patchVendorAccount, routingPoolNameDrafts],
   )
 
   useEffect(() => {
@@ -1355,12 +1392,18 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
   function openEditModel(model: UnifiedApiModelItem, vendorCode: string) {
     const meta = findModelProvider(providers, model.provider)
       || selectDefaultModelProvider(providers, vendorCode)
-    const account = model.vendorAccountId ? accountById.get(model.vendorAccountId) : undefined
+    const vendorAccounts = overview?.vendors.find((vendor) => vendor.vendorCode === vendorCode)?.accounts ?? []
+    const resolvedPoolTarget = model.routingPoolId
+      ? resolveModelRoutingTarget(`pool:${model.routingPoolId}`, model.vendorAccountId, vendorAccounts)
+      : null
+    const resolvedAccountId = resolvedPoolTarget?.vendorAccountId ?? model.vendorAccountId
+    const account = resolvedAccountId ? accountById.get(resolvedAccountId) : undefined
     const pricingCurrency = normalizedCurrency(account?.balanceCurrency)
     setModelVendorCode(vendorCode)
     setModelForm({
       id: model.id,
-      vendorAccountId: model.vendorAccountId ?? undefined,
+      vendorAccountId: resolvedAccountId ?? undefined,
+      routingPoolId: model.routingPoolId ?? null,
       displayName: model.displayName || "",
       configCode: model.configCode || "",
       provider: model.provider,
@@ -1418,7 +1461,11 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
 
   async function saveModel() {
     if (!modelForm.vendorAccountId) {
-      setError("请选择厂商账户")
+      setError("请选择路由目标")
+      return
+    }
+    if (modelForm.routingPoolId && (!selectedModelRoutingPool || selectedModelRoutingPool.eligibleAccounts.length === 0)) {
+      setError("所选负载池没有已启用且开启负载均衡的账户")
       return
     }
     if (!modelForm.capabilities || modelForm.capabilities.length === 0) {
@@ -1537,16 +1584,30 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     )
   }
 
-  function renderAccountRoutingSettings(account: ModelVendorAccount) {
+  function renderAccountRoutingSettings(account: ModelVendorAccount, vendorAccounts: ModelVendorAccount[]) {
     const currentWeight = clampRoutingWeight(account.loadBalanceWeight)
     const weightDraft = routingWeightDrafts[account.id] ?? String(currentWeight)
+    const currentPoolName = account.routingPoolName || ""
+    const poolNameDraft = routingPoolNameDrafts[account.id] ?? currentPoolName
+    const poolNameSuggestions = [...new Set(
+      vendorAccounts
+        .map((candidate) => candidate.routingPoolName?.trim())
+        .filter((name): name is string => Boolean(name)),
+    )].sort((left, right) => left.localeCompare(right, "zh-CN"))
     const routingSaving = routingAccountId === account.id
 
-    const commitWeight = () => {
-      const nextWeight = weightDraft.trim() ? clampRoutingWeight(Number(weightDraft)) : currentWeight
-      setRoutingWeightDrafts((current) => ({ ...current, [account.id]: String(nextWeight) }))
-      if (nextWeight !== currentWeight) {
-        void saveAccountRouting(account, { loadBalanceWeight: nextWeight })
+    const draftWeight = weightDraft.trim() ? clampRoutingWeight(Number(weightDraft)) : currentWeight
+    const normalizedPoolNameDraft = poolNameDraft.trim()
+    const routingDraftChanged = draftWeight !== currentWeight || normalizedPoolNameDraft !== currentPoolName
+
+    const commitRoutingDrafts = () => {
+      setRoutingWeightDrafts((current) => ({ ...current, [account.id]: String(draftWeight) }))
+      setRoutingPoolNameDrafts((current) => ({ ...current, [account.id]: normalizedPoolNameDraft }))
+      if (routingDraftChanged) {
+        void saveAccountRouting(account, {
+          loadBalanceWeight: draftWeight,
+          routingPoolName: normalizedPoolNameDraft || null,
+        })
       }
     }
 
@@ -1565,17 +1626,36 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
             disabled={routingSaving}
             label={`负载均衡 ${displayAccountName(account)}`}
             onCheckedChange={(loadBalanceEnabled) => {
-              void saveAccountRouting(account, { loadBalanceEnabled })
+              void saveAccountRouting(account, {
+                loadBalanceEnabled,
+                loadBalanceWeight: draftWeight,
+                routingPoolName: normalizedPoolNameDraft || null,
+              })
             }}
           />
         </div>
-        <div className="mt-2 flex flex-wrap items-end justify-between gap-2">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-            <Badge variant="outline">在途 {Math.max(0, account.inFlightCount ?? 0)}</Badge>
-            {circuitStatusBadge(account)}
-            {formatCircuitOpenUntil(account.circuitOpenUntil) ? (
-              <span className="text-[11px] text-amber-800">{formatCircuitOpenUntil(account.circuitOpenUntil)}</span>
-            ) : null}
+        <div className="mt-2 grid items-end gap-2 sm:grid-cols-[minmax(0,1fr)_5rem_auto]">
+          <div className="min-w-0 space-y-1">
+            <Label htmlFor={`routing-pool-${account.id}`} className="text-[11px] text-muted-foreground">池名称</Label>
+            <Input
+              id={`routing-pool-${account.id}`}
+              list={`routing-pools-${account.id}`}
+              value={poolNameDraft}
+              disabled={routingSaving}
+              className="h-8 min-w-0"
+              placeholder="输入或选择同厂商负载池"
+              autoComplete="off"
+              aria-label={`${displayAccountName(account)} 负载均衡池名称`}
+              onChange={(event) => {
+                setRoutingPoolNameDrafts((current) => ({ ...current, [account.id]: event.target.value }))
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") commitRoutingDrafts()
+              }}
+            />
+            <datalist id={`routing-pools-${account.id}`}>
+              {poolNameSuggestions.map((name) => <option key={name} value={name} />)}
+            </datalist>
           </div>
           <div className="w-20 space-y-1">
             <Label htmlFor={`routing-weight-${account.id}`} className="text-[11px] text-muted-foreground">权重</Label>
@@ -1593,12 +1673,30 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               onChange={(event) => {
                 setRoutingWeightDrafts((current) => ({ ...current, [account.id]: event.target.value }))
               }}
-              onBlur={commitWeight}
               onKeyDown={(event) => {
-                if (event.key === "Enter") event.currentTarget.blur()
+                if (event.key === "Enter") commitRoutingDrafts()
               }}
             />
           </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
+            disabled={routingSaving || !routingDraftChanged}
+            title="保存负载设置"
+            aria-label={`${displayAccountName(account)} 保存负载设置`}
+            onClick={commitRoutingDrafts}
+          >
+            {routingSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          </Button>
+        </div>
+        <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
+          <Badge variant="outline">在途 {Math.max(0, account.inFlightCount ?? 0)}</Badge>
+          {circuitStatusBadge(account)}
+          {formatCircuitOpenUntil(account.circuitOpenUntil) ? (
+            <span className="text-[11px] text-amber-800">{formatCircuitOpenUntil(account.circuitOpenUntil)}</span>
+          ) : null}
         </div>
         {account.routingExclusionReason ? (
           <p className="mt-2 text-[11px] text-amber-800">
@@ -1613,10 +1711,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     const primaryAccount = pickPrimaryAccount(vendor.accounts)
     const isOpen = openVendors[vendor.vendorCode] ?? false
     const accountIdForNewModel = primaryAccount?.id
-    const lowBalanceCount = vendor.accounts.filter(isNegativeBalance).length
-    const unhealthyAccountCount = vendor.accounts.filter((account) => isErrorStatus(account.healthStatus)).length
-    const warningAccountCount = vendor.accounts.filter((account) => isWarningStatus(account.healthStatus)).length
-    const unhealthyModelCount = vendor.models.filter((model) => isErrorStatus(model.healthStatus)).length
+    const vendorRoutingPools = buildModelRoutingPools(vendor.accounts)
 
     return (
       <Collapsible
@@ -1632,50 +1727,17 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="font-semibold">{vendor.label}</p>
-                {lowBalanceCount > 0 ? <Badge variant="destructive" className="text-xs">低余额 {lowBalanceCount}</Badge> : null}
-                {unhealthyAccountCount > 0 ? <Badge variant="destructive" className="text-xs">账户异常 {unhealthyAccountCount}</Badge> : null}
-                {unhealthyModelCount > 0 ? <Badge variant="destructive" className="text-xs">模型异常 {unhealthyModelCount}</Badge> : null}
-                {warningAccountCount > 0 ? (
-                  <Badge variant="outline" className="border-amber-200 bg-amber-50 text-xs text-amber-800">
-                    账户告警 {warningAccountCount}
-                  </Badge>
-                ) : null}
               </div>
               <p className="text-xs text-muted-foreground">{vendor.accounts.length} 个账户 · {vendor.models.length} 个模型</p>
             </div>
           </CollapsibleTrigger>
           <div className="flex flex-wrap items-center gap-2">
-            {primaryAccount ? (
-              <div className="flex flex-col items-end gap-0.5 sm:flex-row sm:items-center sm:gap-2">
-                <span className="text-sm font-semibold tabular-nums">{formatBalance(primaryAccount)}</span>
-                {balanceStatusBadge(primaryAccount)}
-                {accountHealthBadge(primaryAccount)}
-                {formatBalanceUpdatedAt(primaryAccount.balanceUpdatedAt) ? (
-                  <span className="text-xs text-muted-foreground">{formatBalanceUpdatedAt(primaryAccount.balanceUpdatedAt)}</span>
-                ) : null}
-                <EmbeddedOnOffSwitch
-                  checked={primaryAccount.enabled}
-                  disabled={togglingAccountId === primaryAccount.id}
-                  label={`启用账户 ${primaryAccount.accountName}`}
-                  onCheckedChange={(enabled) => toggleAccountEnabled(primaryAccount, enabled)}
-                />
-                <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="添加账户" onClick={() => openCreateAccount(vendor.vendorCode, vendor.label)}>
-                  <Plus className="h-4 w-4" />
-                </Button>
-                <Button type="button" variant="outline" size="icon" className="h-8 w-8 text-destructive" title="删除厂商" onClick={() => deleteVendor(vendor)}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            ) : (
-              <>
-                <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="添加账户" onClick={() => openCreateAccount(vendor.vendorCode, vendor.label)}>
-                  <Plus className="h-4 w-4" />
-                </Button>
-                <Button type="button" variant="outline" size="icon" className="h-8 w-8 text-destructive" title="删除厂商" onClick={() => deleteVendor(vendor)}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </>
-            )}
+            <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="添加账户" onClick={() => openCreateAccount(vendor.vendorCode, vendor.label)}>
+              <Plus className="h-4 w-4" />
+            </Button>
+            <Button type="button" variant="outline" size="icon" className="h-8 w-8 text-destructive" title="删除厂商" onClick={() => deleteVendor(vendor)}>
+              <Trash2 className="h-4 w-4" />
+            </Button>
           </div>
         </div>
         <CollapsibleContent className="px-4 py-3">
@@ -1717,14 +1779,14 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     {balanceStatusBadge(account)}
                     {accountHealthBadge(account)}
-                    <Badge variant={account.enabled ? "outline" : "destructive"}>{account.enabled ? "已启用" : "已停用"}</Badge>
-                    <span className="text-xs text-muted-foreground">{account.modelCount} 个模型</span>
+                    {!account.enabled ? <Badge variant="destructive">已停用</Badge> : null}
                   </div>
                   <p className="mt-2 text-xs font-medium tabular-nums">{formatBalance(account)}</p>
-                  {formatHealthCheckedAt(account.healthCheckedAt) ? (
+                  {(isWarningStatus(account.healthStatus) || isErrorStatus(account.healthStatus))
+                    && formatHealthCheckedAt(account.healthCheckedAt) ? (
                     <p className="mt-1 text-[11px] text-muted-foreground">{formatHealthCheckedAt(account.healthCheckedAt)}</p>
                   ) : null}
-                  {account.healthMessage ? (
+                  {account.healthMessage && (isWarningStatus(account.healthStatus) || isErrorStatus(account.healthStatus)) ? (
                     <p className={`mt-1 line-clamp-2 text-xs ${
                       isErrorStatus(account.healthStatus)
                         ? "text-rose-700"
@@ -1738,7 +1800,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                   <p className={`mt-1 text-xs ${hasAccountCredential(account) ? "text-muted-foreground" : "text-amber-700"}`}>
                     {accountCredentialLabel(account)}
                   </p>
-                  {renderAccountRoutingSettings(account)}
+                  {renderAccountRoutingSettings(account, vendor.accounts)}
                 </div>
               ))}
             </div>
@@ -1767,7 +1829,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[220px] text-center">模型名称</TableHead>
-                    <TableHead className="w-[150px] text-center">{"API \u8d26\u6237"}</TableHead>
+                    <TableHead className="w-[170px] text-center">路由目标</TableHead>
                     <TableHead className="w-[180px] text-center">能力</TableHead>
                     <TableHead className="w-[120px] text-center">文档</TableHead>
                     <TableHead className="w-[150px] text-center">成本</TableHead>
@@ -1789,27 +1851,49 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                             </div>
                             <p className="truncate font-mono text-xs text-muted-foreground">{model.modelName}</p>
                             <div className="mt-1">{modelHealthBadge(model)}</div>
-                            {model.routingExclusionReason && [
-                              "NO_MATCHING_ACCOUNT",
-                              "PRICE_MISMATCH",
-                              "ROUTE_CONFIG_MISMATCH",
-                            ].includes(model.routingExclusionReason.toUpperCase()) ? (
+                            {model.routingExclusionReason ? (
                               <p
                                 className="mt-1 line-clamp-2 text-[11px] text-amber-800"
                                 title={routingExclusionReasonLabel(model.routingExclusionReason)}
                               >
-                                未入负载池：{routingExclusionReasonLabel(model.routingExclusionReason)}
+                                路由提示：{routingExclusionReasonLabel(model.routingExclusionReason)}
                               </p>
                             ) : null}
                           </div>
                         </div>
                         {!model.vendorAccountId ? (
                           <Badge variant="outline" className="mt-1 text-xs text-amber-700">
-                            未绑定账户                          </Badge>
+                            未绑定路由目标
+                          </Badge>
                         ) : null}
                       </TableCell>
                       <TableCell className="align-middle text-center">
-                        {model.vendorAccountId ? (() => {
+                        {model.routingPoolId ? (() => {
+                          const pool = vendorRoutingPools.find((candidate) => candidate.id === model.routingPoolId)
+                          const poolName = model.routingPoolName || pool?.name || `池 #${model.routingPoolId}`
+                          const anchor = model.vendorAccountId
+                            ? accountById.get(model.vendorAccountId)
+                              || vendor.accounts.find((account) => account.id === model.vendorAccountId)
+                            : undefined
+                          const accountIndex = anchor
+                            ? vendor.accounts.findIndex((account) => account.id === anchor.id)
+                            : -1
+                          return (
+                            <div className="mx-auto grid max-w-[180px] gap-1 text-left">
+                              <Badge
+                                variant="outline"
+                                className="w-fit max-w-[180px] truncate border-blue-200 bg-blue-50 text-xs text-blue-800"
+                                title={`负载池 #${model.routingPoolId}：${poolName}`}
+                              >
+                                负载池：{poolName}
+                              </Badge>
+                              <span className="truncate text-[11px] text-muted-foreground">
+                                {pool ? `${pool.eligibleAccounts.length} 个可路由账户` : "池成员详情未加载"}
+                                {anchor ? ` · 锚点 #${anchor.id} ${displayAccountName(anchor, accountIndex)}` : ""}
+                              </span>
+                            </div>
+                          )
+                        })() : model.vendorAccountId ? (() => {
                           const boundAccount = accountById.get(model.vendorAccountId) || vendor.accounts.find((account) => account.id === model.vendorAccountId)
                           const accountIndex = vendor.accounts.findIndex((account) => account.id === model.vendorAccountId)
                           const fallbackAccount = {
@@ -1826,7 +1910,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                                 className="w-fit max-w-[170px] truncate text-xs"
                                 title={`模型 ${model.displayName || model.modelName} 使用账号 #${model.vendorAccountId}：${displayAccountName(account, accountIndex)}`}
                               >
-                                #{model.vendorAccountId} {displayAccountName(account, accountIndex)}
+                                账户：#{model.vendorAccountId} {displayAccountName(account, accountIndex)}
                               </Badge>
                               <span className={`truncate text-[11px] ${hasAccountCredential(account) ? "text-muted-foreground" : "text-amber-700"}`}>
                                 {boundAccount ? accountCredentialLabel(boundAccount) : "账号详情未加载"}
@@ -1838,14 +1922,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                               ) : null}
                             </div>
                           )
-                        })() : vendor.accounts.length > 0 ? (
-                          <Badge
-                            variant="outline"
-                            className="max-w-[150px] truncate text-xs text-amber-700"
-                            title={vendor.accounts.map((account, index) => displayAccountName(account, index)).join("\u3001")}
-                          >{"\u53ef\u5339\u914d\uff1a"}{vendor.accounts.map((account, index) => displayAccountName(account, index)).slice(0, 3).join("\u3001")}</Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-xs text-amber-700">{"\u672a\u7ed1\u5b9a\u8d26\u6237"}</Badge>
+                        })() : (
+                          <Badge variant="outline" className="text-xs text-amber-700">未绑定路由目标</Badge>
                         )}
                       </TableCell>
                       <TableCell className="align-middle">
@@ -2363,29 +2441,45 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
           <div className="grid gap-4 py-2">
             <div className="space-y-2 rounded-md border p-3">
               <div className="flex items-center justify-between gap-3">
-                <Label>绑定 API 账户</Label>
-                <span className="text-xs text-muted-foreground">模型调用时继承该账户凭据</span>
+                <Label>路由目标</Label>
+                <span className="text-xs text-muted-foreground">选择单账户或同厂商负载池</span>
               </div>
               <Select
-                value={modelForm.vendorAccountId ? String(modelForm.vendorAccountId) : undefined}
+                value={modelRouteTargetValue}
                 onValueChange={(value) => {
-                  const accountId = Number(value)
-                  setModelForm((form) => ({
-                    ...form,
-                    vendorAccountId: Number.isFinite(accountId) ? accountId : undefined,
-                  }))
+                  setModelForm((form) => {
+                    const target = resolveModelRoutingTarget(value, form.vendorAccountId, modelAccountOptions)
+                    return target ? { ...form, ...target } : form
+                  })
                 }}
               >
-                <SelectTrigger>
-                  <SelectValue placeholder={modelAccountOptions.length > 0 ? "选择该模型使用的 API 账户" : "请先接入厂商账户"} />
+                <SelectTrigger className="w-full min-w-0">
+                  <SelectValue placeholder={modelAccountOptions.length > 0 ? "选择账户或负载池" : "请先接入厂商账户"} />
                 </SelectTrigger>
                 <SelectContent>
-                  {modelAccountOptions.map((account, index) => (
-                    <SelectItem key={account.id} value={String(account.id)}>
-                      #{account.id} {displayAccountName(account, index)}
-                      {account.enabled ? "" : "（已停用）"}
-                    </SelectItem>
-                  ))}
+                  <SelectGroup>
+                    <SelectLabel>账户</SelectLabel>
+                    {modelAccountOptions.map((account, index) => (
+                      <SelectItem key={`account:${account.id}`} value={`account:${account.id}`}>
+                        账户：#{account.id} {displayAccountName(account, index)}
+                        {account.enabled ? "" : "（已停用）"}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                  {modelRoutingPools.length > 0 ? (
+                    <SelectGroup>
+                      <SelectLabel>负载池</SelectLabel>
+                      {modelRoutingPools.map((pool) => (
+                        <SelectItem
+                          key={`pool:${pool.id}`}
+                          value={`pool:${pool.id}`}
+                          disabled={pool.eligibleAccounts.length === 0}
+                        >
+                          负载池：{pool.name}（{pool.eligibleAccounts.length > 0 ? `${pool.eligibleAccounts.length} 个可路由账户` : "无可路由账户"}）
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ) : null}
                 </SelectContent>
               </Select>
               {modelForm.vendorAccountId ? (() => {
@@ -2393,8 +2487,10 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 return (
                   <div className="space-y-2">
                     <p className={`text-xs ${account && hasAccountCredential(account) ? "text-muted-foreground" : "text-amber-700"}`}>
-                      {account
-                        ? `${account.vendorLabel || account.vendorCode} · ${accountCredentialLabel(account)} · ${account.healthStatus || "UNKNOWN"}`
+                      {account && selectedModelRoutingPool
+                        ? `负载池 ${selectedModelRoutingPool.name} · ${selectedModelRoutingPool.eligibleAccounts.length} 个可路由账户 · 当前锚点 #${account.id} ${displayAccountName(account)}`
+                        : account
+                          ? `${account.vendorLabel || account.vendorCode} · ${accountCredentialLabel(account)} · ${account.healthStatus || "UNKNOWN"}`
                         : `账号 #${modelForm.vendorAccountId} 详情未加载，请重新选择一个可用账户`}
                     </p>
                     {account && isErrorStatus(account.healthStatus) ? (
@@ -2409,7 +2505,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                   </div>
                 )
               })() : (
-                <p className="text-xs text-amber-700">必须绑定一个厂商账户；API Key/AK/SK 只在账户里维护。</p>
+                <p className="text-xs text-amber-700">必须选择一个账户或负载池；API Key/AK/SK 只在账户里维护。</p>
               )}
             </div>
             <div className="space-y-2">

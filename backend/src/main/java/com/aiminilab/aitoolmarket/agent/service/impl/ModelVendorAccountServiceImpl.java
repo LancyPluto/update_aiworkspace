@@ -656,6 +656,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         if (linked != null) {
             return normalizeProviderBaseUrl(new AgentModelConfigRequest(
                     account.getId(),
+                    linked.getRoutingPoolId(),
                     linked.getDisplayName() == null || linked.getDisplayName().isBlank()
                             ? account.getAccountName()
                             : linked.getDisplayName(),
@@ -696,6 +697,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         }
         return normalizeProviderBaseUrl(new AgentModelConfigRequest(
                 account.getId(),
+                null,
                 account.getAccountName(),
                 "vendor_account_test",
                 providerCode,
@@ -738,6 +740,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         }
         return new AgentModelConfigRequest(
                 request.vendorAccountId(),
+                request.routingPoolId(),
                 request.displayName(),
                 request.configCode(),
                 request.provider(),

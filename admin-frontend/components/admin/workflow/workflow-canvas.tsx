@@ -131,7 +131,6 @@ function findComicDramaModelConfigId(modelConfigs: AgentModelConfig[], role: str
   const providerPriority: Record<string, string[]> = {
     text_generation: ["agnes_chat"],
     image_generation: ["agnes_images"],
-    text_to_speech: ["minimax_speech", "siliconflow_speech"],
     video_generation: ["agnes_video", "seedance"],
   }
   const candidates = modelConfigs
@@ -964,7 +963,8 @@ function buildComicDramaDefaultWorkflow(
 ): { nodes: WFNode[]; edges: WFEdge[] } {
   const textModelId = findComicDramaModelConfigId(modelConfigs, "text_generation")
   const imageModelId = findComicDramaModelConfigId(modelConfigs, "image_generation")
-  const ttsModelId = findComicDramaModelConfigId(modelConfigs, "text_to_speech")
+  // TTS binding is an administrator-owned draft choice, not a template default.
+  const ttsModelId: number | null = null
   const videoModelId = findComicDramaModelConfigId(modelConfigs, "video_generation")
 
   const start = fixedNode("start", "start", { x: 40, y: 300 }, {

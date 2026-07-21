@@ -11,8 +11,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 public final class ModelRoutingPolicy {
@@ -68,6 +70,20 @@ public final class ModelRoutingPolicy {
                 .orElse(null);
     }
 
+    public static List<AgentModelConfig> deduplicateByAccount(List<AgentModelConfig> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, AgentModelConfig> byAccount = new LinkedHashMap<>();
+        candidates.stream()
+                .filter(Objects::nonNull)
+                .filter(candidate -> candidate.getVendorAccountId() != null)
+                .sorted(Comparator.comparing(AgentModelConfig::getId,
+                        Comparator.nullsLast(Long::compareTo)))
+                .forEach(candidate -> byAccount.putIfAbsent(candidate.getVendorAccountId(), candidate));
+        return List.copyOf(byAccount.values());
+    }
+
     public static boolean canFailover(RouteFailoverRequest request,
                                       boolean hasProviderCheckpoint,
                                       String persistedProviderRequestId,
@@ -106,7 +122,7 @@ public final class ModelRoutingPolicy {
         };
     }
 
-    private static boolean circuitAllowsSelection(AccountModelRouteState state, LocalDateTime now) {
+    public static boolean circuitAllowsSelection(AccountModelRouteState state, LocalDateTime now) {
         if (state == null || "CLOSED".equalsIgnoreCase(state.getCircuitStatus())) {
             return true;
         }

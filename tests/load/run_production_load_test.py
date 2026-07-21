@@ -87,6 +87,14 @@ CAPACITY_PLATFORM_WINDOWS = (
     ("qps_1500", 1500, 790.0, 970.0),
     ("qps_2000", 2000, 985.0, 1165.0),
 )
+EDGE_CAPACITY_PLATFORM_WINDOWS = (
+    ("qps_50", 50, 10.0, 130.0),
+    ("qps_60", 60, 140.0, 260.0),
+    ("qps_70", 70, 270.0, 390.0),
+    ("qps_80", 80, 400.0, 520.0),
+    ("qps_90", 90, 530.0, 650.0),
+    ("qps_100", 100, 660.0, 780.0),
+)
 
 
 class RunnerError(RuntimeError):
@@ -173,6 +181,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Run the 19m25s anonymous read-only capacity test up to 2000 QPS",
     )
     mode.add_argument(
+        "--capacity-edge",
+        action="store_true",
+        help="Run the 13-minute anonymous edge profile from 50 to 100 QPS",
+    )
+    mode.add_argument(
         "--preflight",
         action="store_true",
         help="Only verify SSH, Prometheus targets, and required metrics",
@@ -201,11 +214,23 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     if not WINDOW_PATTERN.fullmatch(args.window):
         parser.error("--window must use a positive Prometheus duration such as 15m or 1h")
     if not args.dry_run and not args.self_test and not (
-        args.smoke or args.full or args.capacity or args.preflight or args.report
+        args.smoke
+        or args.full
+        or args.capacity
+        or args.capacity_edge
+        or args.preflight
+        or args.report
     ):
-        parser.error("choose --smoke, --full, --capacity, --preflight, or --report")
+        parser.error(
+            "choose --smoke, --full, --capacity, --capacity-edge, --preflight, or --report"
+        )
     if args.dry_run and not (
-        args.smoke or args.full or args.capacity or args.preflight or args.report
+        args.smoke
+        or args.full
+        or args.capacity
+        or args.capacity_edge
+        or args.preflight
+        or args.report
     ):
         args.smoke = True
     return args
@@ -539,7 +564,32 @@ def evaluate_guardrails(
     return None
 
 
-def build_k6_command(smoke: bool, *, capacity: bool = False) -> list[str]:
+def build_k6_command(
+    smoke: bool,
+    *,
+    capacity: bool = False,
+    capacity_profile: str = "full",
+    k6_binary: str | None = None,
+) -> list[str]:
+    if capacity_profile not in {"full", "edge"}:
+        raise RunnerError("capacity profile must be full or edge")
+    if not capacity and capacity_profile != "full":
+        raise RunnerError("capacity profile requires capacity mode")
+    native_binary = (
+        k6_binary
+        if k6_binary is not None
+        else os.environ.get("K6_BINARY", "").strip()
+    )
+    script = CAPACITY_K6_SCRIPT if capacity else K6_SCRIPT
+    if native_binary:
+        command = [native_binary, "run"]
+        if capacity and capacity_profile != "full":
+            command.extend(["--env", f"CAPACITY_PROFILE={capacity_profile}"])
+        elif smoke and not capacity:
+            command.extend(["--env", "SMOKE=1"])
+        command.append(script)
+        return command
+
     volume = f"{REPO_ROOT}:/work:rw"
     command = [
         "docker",
@@ -554,13 +604,17 @@ def build_k6_command(smoke: bool, *, capacity: bool = False) -> list[str]:
         command.extend(["--env", "K6_ACCESS_TOKEN"])
     if smoke and not capacity:
         command.extend(["--env", "SMOKE=1"])
-    command.extend([K6_IMAGE, "run", CAPACITY_K6_SCRIPT if capacity else K6_SCRIPT])
+    command.extend([K6_IMAGE, "run"])
+    if capacity and capacity_profile != "full":
+        command.extend(["--env", f"CAPACITY_PROFILE={capacity_profile}"])
+    command.append(script)
     return command
 
 
 def start_k6(command: list[str]) -> subprocess.Popen[Any]:
-    if shutil.which("docker") is None:
-        raise RunnerError("docker was not found on PATH")
+    executable = command[0]
+    if shutil.which(executable) is None and not Path(executable).is_file():
+        raise RunnerError(f"load-generator executable was not found: {executable}")
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     child_environment = os.environ.copy()
     for name in tuple(child_environment):
@@ -600,8 +654,11 @@ def stop_k6(process: subprocess.Popen[Any]) -> None:
         process.wait(timeout=5)
 
 
-def capacity_stage_at_elapsed(elapsed_seconds: float) -> str:
-    for stage_id, target_qps, start_seconds, end_seconds in CAPACITY_PLATFORM_WINDOWS:
+def capacity_stage_at_elapsed(
+    elapsed_seconds: float,
+    windows: tuple[tuple[str, int, float, float], ...] = CAPACITY_PLATFORM_WINDOWS,
+) -> str:
+    for stage_id, target_qps, start_seconds, end_seconds in windows:
         if start_seconds <= elapsed_seconds < end_seconds:
             return stage_id
         if elapsed_seconds < start_seconds:
@@ -615,9 +672,11 @@ def write_capacity_monitoring_report(
     started_at: datetime,
     outcome: str,
     reason: str | None = None,
+    capacity_profile: str = "full",
+    windows: tuple[tuple[str, int, float, float], ...] = CAPACITY_PLATFORM_WINDOWS,
 ) -> Path:
     stage_reports = []
-    for stage_id, target_qps, _, _ in CAPACITY_PLATFORM_WINDOWS:
+    for stage_id, target_qps, _, _ in windows:
         stage_samples = [sample for sample in samples if sample.capacity_stage == stage_id]
         stage_reports.append(
             {
@@ -660,6 +719,7 @@ def write_capacity_monitoring_report(
         "startedAt": started_at.isoformat(),
         "outcome": outcome,
         "reason": reason,
+        "capacityProfile": capacity_profile,
         "pollIntervalSeconds": POLL_INTERVAL_SECONDS,
         "note": "Prometheus P95, CPU, Tomcat and error values use rolling 1-minute queries.",
         "stages": stage_reports,
@@ -679,7 +739,8 @@ def write_capacity_monitoring_report(
     }
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = generated_at.strftime("%Y%m%dT%H%M%SZ")
-    output_path = RESULTS_DIR / f"capacity-prometheus-{timestamp}.json"
+    output_prefix = "capacity-edge" if capacity_profile == "edge" else "capacity"
+    output_path = RESULTS_DIR / f"{output_prefix}-prometheus-{timestamp}.json"
     output_path.write_text(
         json.dumps(document, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
@@ -692,12 +753,16 @@ def monitor_k6(
     process: subprocess.Popen[Any],
     prometheus: RemotePrometheus,
     profile: GuardrailProfile = STANDARD_GUARDRAILS,
+    capacity_profile: str | None = None,
+    capacity_windows: tuple[
+        tuple[str, int, float, float], ...
+    ] = CAPACITY_PLATFORM_WINDOWS,
 ) -> int:
     state = GuardState()
     started_at = datetime.now(timezone.utc)
     started_monotonic = time.monotonic()
     samples: list[MonitoringSample] = []
-    is_capacity = profile.name == CAPACITY_GUARDRAILS.name
+    is_capacity = capacity_profile is not None
     while True:
         try:
             exit_code = process.wait(timeout=POLL_INTERVAL_SECONDS)
@@ -707,6 +772,8 @@ def monitor_k6(
                     started_at=started_at,
                     outcome="completed" if exit_code == 0 else "k6_failed",
                     reason=None if exit_code == 0 else f"k6 exited with code {exit_code}",
+                    capacity_profile=capacity_profile or "full",
+                    windows=capacity_windows,
                 )
             return exit_code
         except subprocess.TimeoutExpired:
@@ -722,6 +789,8 @@ def monitor_k6(
                     started_at=started_at,
                     outcome="monitoring_failed",
                     reason=str(exc),
+                    capacity_profile=capacity_profile or "full",
+                    windows=capacity_windows,
                 )
             raise
 
@@ -731,7 +800,9 @@ def monitor_k6(
                 MonitoringSample(
                     timestamp=datetime.now(timezone.utc).isoformat(),
                     elapsed_seconds=elapsed_seconds,
-                    capacity_stage=capacity_stage_at_elapsed(elapsed_seconds),
+                    capacity_stage=capacity_stage_at_elapsed(
+                        elapsed_seconds, capacity_windows
+                    ),
                     metrics=snapshot,
                 )
             )
@@ -754,6 +825,8 @@ def monitor_k6(
                     started_at=started_at,
                     outcome="guardrail_breached",
                     reason=breach,
+                    capacity_profile=capacity_profile or "full",
+                    windows=capacity_windows,
                 )
             return 3
 
@@ -798,10 +871,42 @@ def run_self_test() -> None:
     capacity_command = build_k6_command(smoke=False, capacity=True)
     assert CAPACITY_K6_SCRIPT in capacity_command
     assert "K6_ACCESS_TOKEN" not in capacity_command
+    edge_command = build_k6_command(
+        smoke=False, capacity=True, capacity_profile="edge"
+    )
+    assert "CAPACITY_PROFILE=edge" in edge_command
+    assert "K6_ACCESS_TOKEN" not in edge_command
+    native_command = build_k6_command(
+        smoke=False,
+        capacity=True,
+        k6_binary="C:/tools/k6.exe",
+    )
+    assert native_command == [
+        "C:/tools/k6.exe",
+        "run",
+        CAPACITY_K6_SCRIPT,
+    ]
+    native_edge_command = build_k6_command(
+        smoke=False,
+        capacity=True,
+        capacity_profile="edge",
+        k6_binary="C:/tools/k6.exe",
+    )
+    assert native_edge_command == [
+        "C:/tools/k6.exe",
+        "run",
+        "--env",
+        "CAPACITY_PROFILE=edge",
+        CAPACITY_K6_SCRIPT,
+    ]
+    assert "K6_ACCESS_TOKEN" not in native_edge_command
     assert capacity_stage_at_elapsed(10.0) == "qps_100"
     assert capacity_stage_at_elapsed(190.0) == "ramp_to_300"
     assert capacity_stage_at_elapsed(205.0) == "qps_300"
     assert capacity_stage_at_elapsed(985.0) == "qps_2000"
+    assert capacity_stage_at_elapsed(10.0, EDGE_CAPACITY_PLATFORM_WINDOWS) == "qps_50"
+    assert capacity_stage_at_elapsed(130.0, EDGE_CAPACITY_PLATFORM_WINDOWS) == "ramp_to_60"
+    assert capacity_stage_at_elapsed(660.0, EDGE_CAPACITY_PLATFORM_WINDOWS) == "qps_100"
     queries = report_queries("15m")
     assert "[15m:15s]" in queries["peak_qps"]
     assert "sum by (method, uri)" in queries["average_qps"]
@@ -837,7 +942,11 @@ def main(argv: list[str] | None = None) -> int:
                 else (
                     "capacity"
                     if args.capacity
-                    else ("full" if args.full else "smoke")
+                    else (
+                        "capacity-edge"
+                        if args.capacity_edge
+                        else ("full" if args.full else "smoke")
+                    )
                 )
             )
         )
@@ -845,14 +954,25 @@ def main(argv: list[str] | None = None) -> int:
         if args.report:
             print(f"report queries validated: window={args.window}")
         elif not args.preflight:
-            if args.capacity:
-                print("dockerized k6 command validated; capacity mode passes no access token")
+            is_capacity = args.capacity or args.capacity_edge
+            capacity_profile = "edge" if args.capacity_edge else "full"
+            command = build_k6_command(
+                smoke=args.smoke,
+                capacity=is_capacity,
+                capacity_profile=capacity_profile,
+            )
+            backend = "native k6" if os.environ.get("K6_BINARY", "").strip() else "dockerized k6"
+            if args.capacity or args.capacity_edge:
+                print(f"{backend} command validated; capacity mode passes no access token")
             else:
-                print("dockerized k6 command validated; secrets are passed by environment name only")
+                print(f"{backend} command validated; secrets are passed by environment name only")
+            assert command
         return 0
 
     secrets = read_runtime_secrets(
-        require_access_token=not (args.preflight or args.report or args.capacity)
+        require_access_token=not (
+            args.preflight or args.report or args.capacity or args.capacity_edge
+        )
     )
     ssh_client = connect_ssh(secrets)
     process: subprocess.Popen[Any] | None = None
@@ -866,8 +986,19 @@ def main(argv: list[str] | None = None) -> int:
             generate_report(prometheus, args.window)
             return 0
 
-        command = build_k6_command(smoke=args.smoke, capacity=args.capacity)
-        guardrails = CAPACITY_GUARDRAILS if args.capacity else STANDARD_GUARDRAILS
+        is_capacity = args.capacity or args.capacity_edge
+        capacity_profile = "edge" if args.capacity_edge else "full"
+        capacity_windows = (
+            EDGE_CAPACITY_PLATFORM_WINDOWS
+            if args.capacity_edge
+            else CAPACITY_PLATFORM_WINDOWS
+        )
+        command = build_k6_command(
+            smoke=args.smoke,
+            capacity=is_capacity,
+            capacity_profile=capacity_profile,
+        )
+        guardrails = CAPACITY_GUARDRAILS if is_capacity else STANDARD_GUARDRAILS
         print(
             f"watchdog profile={guardrails.name}: "
             f"5xx>{guardrails.five_xx_percent:g}%, "
@@ -878,7 +1009,13 @@ def main(argv: list[str] | None = None) -> int:
             f"Tomcat>{guardrails.tomcat_percent:g}%"
         )
         process = start_k6(command)
-        return monitor_k6(process, prometheus, guardrails)
+        return monitor_k6(
+            process,
+            prometheus,
+            guardrails,
+            capacity_profile=capacity_profile if is_capacity else None,
+            capacity_windows=capacity_windows,
+        )
     except KeyboardInterrupt:
         if process is not None:
             stop_k6(process)
