@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 import { useRouter } from "vue-router"
-import { Camera, Check, ClipboardCopy, ExternalLink, Loader2, Shield, Sparkles, ToggleLeft, Trash2, X } from "lucide-vue-next"
+import { Camera, Check, ChevronRight, ClipboardCopy, ExternalLink, Loader2, Sparkles, Trash2, X } from "lucide-vue-next"
 import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import { fetchCreditAccount, fetchMyGiftCards, redeemGiftCard, redeemGiftCardByCode } from "@/api/creditApi"
@@ -27,7 +27,6 @@ const error = ref("")
 const success = ref("")
 const credit = ref<CreditAccount | null>(null)
 const totalTasks = ref<number | null>(null)
-const successTasks = ref<number | null>(null)
 const cancelDialogOpen = ref(false)
 const cancelSmsCode = ref("")
 const cancelConfirmText = ref("")
@@ -40,23 +39,13 @@ const cancelDebugCode = ref<string | null>(null)
 const giftCards = ref<GiftCard[]>([])
 const loadingGiftCards = ref(false)
 const redeemingCardId = ref<number | null>(null)
+const giftListDialogOpen = ref(false)
 const redeemCodeDialogOpen = ref(false)
 const redeemCodeInput = ref("")
 const redeemingByCode = ref(false)
 const shareDialogOpen = ref(false)
 const shareCard = ref<GiftCard | null>(null)
 const copyingShareCode = ref(false)
-
-const GIFT_CARD_STYLE_THEMES: Record<string, { bg: string; border: string }> = {
-  blue: { bg: "linear-gradient(135deg, rgb(30 64 175), rgb(15 23 42))", border: "rgb(59 130 246 / 0.3)" },
-  purple: { bg: "linear-gradient(135deg, rgb(107 33 168), rgb(15 23 42))", border: "rgb(168 85 247 / 0.3)" },
-  gold: { bg: "linear-gradient(135deg, rgb(161 98 7), rgb(15 23 42))", border: "rgb(250 204 21 / 0.3)" },
-  dark: { bg: "linear-gradient(135deg, rgb(30 41 59), rgb(10 10 15))", border: "rgb(100 116 139 / 0.3)" },
-}
-
-function giftCardStyle(theme: string | undefined | null) {
-  return GIFT_CARD_STYLE_THEMES[theme || "dark"] || GIFT_CARD_STYLE_THEMES.dark
-}
 
 function maskCardCode(code: string | undefined | null) {
   if (!code) return "--"
@@ -118,29 +107,46 @@ const completedProfileItems = computed(() => {
   return count
 })
 const profileCompletion = computed(() => Math.round((completedProfileItems.value / 4) * 100))
-const successRateLabel = computed(() => {
-  if (!totalTasks.value || successTasks.value == null) return "--"
-  return `${Math.round((successTasks.value / totalTasks.value) * 100)}%`
-})
 const unusedGiftCards = computed(() => giftCards.value.filter((card) => card.status === "UNUSED").length)
 const giftCardCreditTotal = computed(() =>
   giftCards.value
     .filter((card) => card.status === "UNUSED")
     .reduce((sum, card) => sum + card.credits, 0),
 )
+const giftCardPreview = computed(() => giftCards.value.slice(0, 2))
+
+let bodyOverflowBeforeGiftDialog = ""
+
+function openGiftListDialog() {
+  bodyOverflowBeforeGiftDialog = document.body.style.overflow
+  document.body.style.overflow = "hidden"
+  giftListDialogOpen.value = true
+}
+
+function closeGiftListDialog() {
+  giftListDialogOpen.value = false
+  document.body.style.overflow = bodyOverflowBeforeGiftDialog
+}
+
+function openRedeemFromGiftList() {
+  closeGiftListDialog()
+  openRedeemCodeDialog()
+}
+
+function handleProfileKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape" && giftListDialogOpen.value) closeGiftListDialog()
+}
 
 async function loadProfileStats() {
   if (!auth.isLoggedIn) return
   loadingStats.value = true
   try {
-    const [creditRes, allTasks, completedTasks] = await Promise.all([
+    const [creditRes, allTasks] = await Promise.all([
       fetchCreditAccount({ token: auth.token }),
       fetchTasks({ token: auth.token, query: { pageNo: 1, pageSize: 1 } }),
-      fetchTasks({ token: auth.token, query: { pageNo: 1, pageSize: 1, status: "SUCCESS" } }),
     ])
     credit.value = creditRes
     totalTasks.value = allTasks.total
-    successTasks.value = completedTasks.total
     window.dispatchEvent(new CustomEvent("credits:updated", { detail: creditRes }))
   } finally {
     loadingStats.value = false
@@ -292,6 +298,7 @@ async function redeemCard(id: number) {
 }
 
 function openShareDialog(card: GiftCard) {
+  if (giftListDialogOpen.value) closeGiftListDialog()
   shareCard.value = card
   shareDialogOpen.value = true
 }
@@ -336,6 +343,7 @@ async function submitRedeemByCode() {
 }
 
 onMounted(async () => {
+  document.addEventListener("keydown", handleProfileKeydown)
   if (!auth.user) await auth.fetchCurrentUser({ clearOnFailure: false })
   nickname.value = safeDisplayName(auth.user?.nickname) || safeDisplayName(auth.user?.username) || ""
   bio.value = auth.user?.bio || ""
@@ -343,6 +351,11 @@ onMounted(async () => {
   promptPublicByDefault.value = auth.user?.promptPublicByDefault === true
   void loadProfileStats()
   void loadGiftCards()
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener("keydown", handleProfileKeydown)
+  if (giftListDialogOpen.value) document.body.style.overflow = bodyOverflowBeforeGiftDialog
 })
 </script>
 
@@ -366,7 +379,7 @@ onMounted(async () => {
         {{ success }}
       </div>
 
-      <section class="profile-summary">
+      <section class="profile-summary" aria-label="账户摘要">
         <div class="identity-card">
           <div class="avatar-stack">
             <UserAvatar :src="auth.user?.avatarUrl" :name="displayName" size="xl" />
@@ -404,11 +417,6 @@ onMounted(async () => {
             <strong>{{ totalTasks ?? "--" }}</strong>
           </div>
           <div class="metric-card">
-            <Shield class="h-4 w-4" />
-            <span>成功率</span>
-            <strong>{{ successRateLabel }}</strong>
-          </div>
-          <div class="metric-card">
             <CreditPowerIcon :size="16" />
             <span>可用算力</span>
             <strong>{{ credit?.balance ?? "--" }}</strong>
@@ -416,57 +424,47 @@ onMounted(async () => {
         </div>
       </section>
 
-      <section class="profile-content">
-        <div class="settings-column">
-          <section class="profile-panel">
-            <div class="panel-heading">
-              <div>
-                <p class="panel-kicker">基础资料</p>
-                <h2>公开身份</h2>
-              </div>
-              <span class="completion-badge">{{ profileCompletion }}%</span>
-            </div>
-
+      <section class="settings-list" aria-label="个人配置">
+        <section class="setting-band">
+          <div class="section-copy">
+            <p class="panel-kicker">公开资料</p>
+            <h2>公开身份</h2>
+            <p>这些信息会显示在社区主页和公开作品中。</p>
+          </div>
+          <div class="band-content public-fields">
             <label class="form-field">
               <span>昵称</span>
               <input v-model="nickname" maxlength="40" placeholder="设置一个好记的昵称" />
             </label>
-
-            <div class="account-lines">
-              <div>
-                <span>账号</span>
-                <strong>{{ accountLabel }}</strong>
-              </div>
-              <div>
-                <span>身份</span>
-                <strong>{{ userTypeLabel }}</strong>
-              </div>
-              <div>
-                <span>会员</span>
-                <strong>{{ membershipLabel }}</strong>
-              </div>
+            <div class="read-only-field">
+              <span>账号</span>
+              <strong>{{ accountLabel }}</strong>
             </div>
-
+            <div class="account-lines">
+              <div><span>身份</span><strong>{{ userTypeLabel }}</strong></div>
+              <div><span>会员</span><strong>{{ membershipLabel }}</strong></div>
+              <div><span>资料完成度</span><strong>{{ profileCompletion }}%</strong></div>
+            </div>
+          </div>
+          <div class="band-action">
             <button type="button" class="primary-action" :disabled="saving || !nickname.trim()" @click="saveProfile">
               <Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
               保存资料
             </button>
-          </section>
+          </div>
+        </section>
 
-          <section class="profile-panel">
-            <div class="panel-heading">
-              <div>
-                <p class="panel-kicker">社区展示</p>
-                <h2>公开偏好</h2>
-              </div>
-              <ToggleLeft class="panel-icon h-5 w-5" />
-            </div>
-
+        <section class="setting-band">
+          <div class="section-copy">
+            <p class="panel-kicker">社区展示</p>
+            <h2>作品公开设置</h2>
+            <p>决定新作品的默认展示方式，单个作品仍可独立调整。</p>
+          </div>
+          <div class="band-content community-content">
             <label class="form-field">
               <span>个人简介</span>
               <textarea v-model="bio" maxlength="280" placeholder="写一句会出现在公开主页上的介绍"></textarea>
             </label>
-
             <div class="switch-list">
               <label class="switch-line">
                 <span>
@@ -483,118 +481,72 @@ onMounted(async () => {
                 <input v-model="promptPublicByDefault" type="checkbox" />
               </label>
             </div>
+          </div>
+          <div class="band-action action-stack">
+            <button type="button" class="primary-action" :disabled="savingCommunity" @click="saveCommunitySettings">
+              <Loader2 v-if="savingCommunity" class="h-4 w-4 animate-spin" />
+              保存公开设置
+            </button>
+            <button type="button" class="secondary-action" @click="$router.push(publicProfileUrl)">
+              <ExternalLink class="h-4 w-4" />
+              查看公开主页
+            </button>
+          </div>
+        </section>
 
-            <div class="settings-actions">
-              <button type="button" class="secondary-action" @click="$router.push(publicProfileUrl)">
-                <ExternalLink class="h-4 w-4" />
-                查看公开主页
-              </button>
-              <button type="button" class="primary-action compact" :disabled="savingCommunity" @click="saveCommunitySettings">
-                <Loader2 v-if="savingCommunity" class="h-4 w-4 animate-spin" />
-                保存设置
-              </button>
-            </div>
-          </section>
-        </div>
-
-        <aside class="side-column">
-          <section class="profile-panel compact-panel">
-            <div class="panel-heading">
-              <div>
-                <p class="panel-kicker">账户状态</p>
-                <h2>安全概览</h2>
-              </div>
-            </div>
-            <div class="security-list">
-              <div>
-                <span>绑定手机</span>
-                <strong>{{ maskedPhone }}</strong>
-              </div>
-              <div>
-                <span>账号状态</span>
-                <strong>{{ accountStatusLabel }}</strong>
-              </div>
-              <div>
-                <span>冻结算力</span>
-                <strong>{{ credit?.frozen ?? "--" }}</strong>
-              </div>
-            </div>
-          </section>
-
-          <section class="profile-panel compact-panel gift-overview">
-            <div class="panel-heading">
-              <div>
-                <p class="panel-kicker">礼品卡</p>
-                <h2>可兑换资产</h2>
-              </div>
-              <button type="button" class="icon-button" aria-label="兑换礼品卡" @click="openRedeemCodeDialog">
-                <CreditPowerIcon :size="16" />
-              </button>
-            </div>
+        <section class="setting-band gift-card-zone">
+          <div class="section-copy">
+            <p class="panel-kicker">礼品卡</p>
+            <h2>我的礼品卡</h2>
+            <p>查看未使用礼品卡，或输入兑换码添加算力。</p>
+          </div>
+          <div class="band-content gift-band-content">
             <div class="gift-summary">
               <strong>{{ unusedGiftCards }}</strong>
               <span>张未使用礼品卡，共 {{ giftCardCreditTotal.toLocaleString() }} 算力</span>
             </div>
-          </section>
-        </aside>
-      </section>
-
-      <section class="gift-card-zone">
-        <div class="section-heading">
-          <div>
-            <p class="panel-kicker">我的礼品卡</p>
-            <h2>使用与赠送</h2>
+            <div v-if="loadingGiftCards" class="gift-card-state">
+              <Loader2 class="h-4 w-4 animate-spin" />
+              加载中
+            </div>
+            <div v-else-if="giftCards.length === 0" class="gift-card-state">暂无礼品卡</div>
+            <div v-else class="gift-card-preview-list">
+              <article v-for="card in giftCardPreview" :key="card.id" class="gift-card-row">
+                <div class="gift-card-row-copy">
+                  <strong>{{ card.packageName }}</strong>
+                  <code>{{ maskCardCode(card.cardCode) }}</code>
+                </div>
+                <span class="gift-card-status" :class="giftCardStatusClass(card.status)">
+                  {{ giftCardStatusLabel(card.status) }}
+                </span>
+                <div class="gift-card-credits">{{ card.credits.toLocaleString() }} <span>算力</span></div>
+              </article>
+            </div>
           </div>
-          <button type="button" class="secondary-action" @click="openRedeemCodeDialog">
-            <CreditPowerIcon :size="16" />
-            兑换礼品卡
-          </button>
-        </div>
+          <div class="band-action action-stack">
+            <button type="button" class="more-action" aria-haspopup="dialog" @click="openGiftListDialog">
+              更多
+              <ChevronRight class="h-4 w-4" />
+            </button>
+            <button type="button" class="secondary-action" @click="openRedeemCodeDialog">
+              <CreditPowerIcon :size="16" />
+              输入兑换码
+            </button>
+          </div>
+        </section>
 
-        <div v-if="loadingGiftCards" class="gift-card-state">
-          <Loader2 class="h-4 w-4 animate-spin" />
-          加载中
-        </div>
-        <div v-else-if="giftCards.length === 0" class="gift-card-state">暂无礼品卡</div>
-        <div v-else class="gift-card-list">
-          <article
-            v-for="card in giftCards"
-            :key="card.id"
-            class="gift-card-item"
-            :style="{ background: giftCardStyle(card.cardTheme).bg, borderColor: giftCardStyle(card.cardTheme).border }"
-          >
-            <div class="gift-card-info">
-              <span class="gift-card-status" :class="giftCardStatusClass(card.status)">
-                {{ giftCardStatusLabel(card.status) }}
-              </span>
-              <div class="gift-card-credits">
-                {{ card.credits.toLocaleString() }} <span>算力</span>
-              </div>
-              <p v-if="giftCardMemberRequirement(card)" class="gift-card-member-requirement">
-                {{ giftCardMemberRequirement(card) }}
-              </p>
-              <code class="gift-card-code">{{ maskCardCode(card.cardCode) }}</code>
-            </div>
-            <div class="gift-card-actions">
-              <template v-if="card.status === 'UNUSED'">
-                <button
-                  type="button"
-                  class="gift-card-btn redeem-btn"
-                  :disabled="redeemingCardId === card.id || !canRedeemOwnedGiftCard(card)"
-                  @click="redeemCard(card.id)"
-                >
-                  <Loader2 v-if="redeemingCardId === card.id" class="h-4 w-4 animate-spin" />
-                  {{ canRedeemOwnedGiftCard(card) ? "使用" : "仅可赠送" }}
-                </button>
-                <button type="button" class="gift-card-btn" @click="openShareDialog(card)">赠送</button>
-              </template>
-              <span v-else-if="card.status === 'USED' && card.redeemedAt" class="gift-card-time">
-                兑换于 {{ card.redeemedAt }}
-              </span>
-              <span v-else-if="card.status === 'USED'" class="gift-card-time">已使用</span>
-            </div>
-          </article>
-        </div>
+        <section class="setting-band security-band">
+          <div class="section-copy">
+            <p class="panel-kicker">账号安全</p>
+            <h2>安全概览</h2>
+            <p>确认当前账号状态和绑定的联系方式。</p>
+          </div>
+          <div class="band-content security-list">
+            <div><span>绑定手机</span><strong>{{ maskedPhone }}</strong></div>
+            <div><span>账号状态</span><strong>{{ accountStatusLabel }}</strong></div>
+          </div>
+          <div class="band-action"></div>
+        </section>
       </section>
 
       <section class="danger-zone">
@@ -608,6 +560,66 @@ onMounted(async () => {
           注销账号
         </button>
       </section>
+
+      <div v-if="giftListDialogOpen" class="modal-backdrop gift-library-backdrop" @click.self="closeGiftListDialog">
+        <section class="gift-library-dialog" role="dialog" aria-modal="true" aria-labelledby="gift-library-title">
+          <header class="gift-library-header">
+            <div>
+              <h2 id="gift-library-title">我的礼品卡</h2>
+              <p>共 {{ giftCards.length }} 张，可使用的礼品卡会直接兑换为账户算力。</p>
+            </div>
+            <button type="button" class="gift-library-close" aria-label="关闭礼品卡列表" autofocus @click="closeGiftListDialog">
+              <X class="h-5 w-5" />
+            </button>
+          </header>
+          <div class="gift-library-scroll">
+            <div v-if="loadingGiftCards" class="gift-card-state">
+              <Loader2 class="h-4 w-4 animate-spin" />
+              加载中
+            </div>
+            <div v-else-if="giftCards.length === 0" class="gift-card-state">暂无礼品卡</div>
+            <div v-else class="gift-library-list">
+              <article v-for="card in giftCards" :key="card.id" class="gift-library-card">
+                <div class="gift-library-copy">
+                  <div class="gift-library-title-row">
+                    <strong>{{ card.packageName }}</strong>
+                    <span class="gift-card-status" :class="giftCardStatusClass(card.status)">
+                      {{ giftCardStatusLabel(card.status) }}
+                    </span>
+                  </div>
+                  <code>{{ maskCardCode(card.cardCode) }}</code>
+                  <small v-if="giftCardMemberRequirement(card)" class="gift-card-member-requirement">
+                    {{ giftCardMemberRequirement(card) }}
+                  </small>
+                  <small v-if="card.status === 'USED' && card.redeemedAt">兑换于 {{ card.redeemedAt }}</small>
+                </div>
+                <div class="gift-card-credits">{{ card.credits.toLocaleString() }} <span>算力</span></div>
+                <div class="gift-card-actions">
+                  <template v-if="card.status === 'UNUSED'">
+                    <button
+                      type="button"
+                      class="gift-card-btn redeem-btn"
+                      :disabled="redeemingCardId === card.id || !canRedeemOwnedGiftCard(card)"
+                      @click="redeemCard(card.id)"
+                    >
+                      <Loader2 v-if="redeemingCardId === card.id" class="h-4 w-4 animate-spin" />
+                      {{ canRedeemOwnedGiftCard(card) ? "使用" : "仅可赠送" }}
+                    </button>
+                    <button type="button" class="gift-card-btn" @click="openShareDialog(card)">赠送</button>
+                  </template>
+                  <span v-else class="gift-card-time">{{ giftCardStatusLabel(card.status) }}</span>
+                </div>
+              </article>
+            </div>
+          </div>
+          <footer class="gift-library-footer">
+            <button type="button" class="secondary-action" @click="openRedeemFromGiftList">
+              <CreditPowerIcon :size="16" />
+              输入兑换码
+            </button>
+          </footer>
+        </section>
+      </div>
 
       <div v-if="cancelDialogOpen" class="modal-backdrop" @click.self="cancelDialogOpen = false">
         <section class="cancel-dialog" role="dialog" aria-modal="true" aria-labelledby="cancel-account-title">
@@ -626,7 +638,7 @@ onMounted(async () => {
             </section>
             <section>
               <h3>充值余额不会退款</h3>
-              <p>注销不会要求余额为 0，但当前账号剩余余额和冻结算力会随账号关闭失效，系统不会自动退款。</p>
+              <p>注销不会要求余额为 0，但当前账号剩余算力会随账号关闭失效，系统不会自动退款。</p>
             </section>
             <section>
               <h3>请勿频繁重复注销</h3>
@@ -638,10 +650,6 @@ onMounted(async () => {
             <div>
               <span>余额</span>
               <strong>{{ credit?.balance ?? "--" }}</strong>
-            </div>
-            <div>
-              <span>冻结算力</span>
-              <strong>{{ credit?.frozen ?? "--" }}</strong>
             </div>
           </div>
 
@@ -1448,7 +1456,7 @@ onMounted(async () => {
 
 .cancel-checks {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 10px;
   margin-top: 18px;
 }
@@ -1777,7 +1785,7 @@ onMounted(async () => {
 
 .summary-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -2228,7 +2236,7 @@ onMounted(async () => {
   }
 
   .summary-metrics {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -2272,3 +2280,4 @@ onMounted(async () => {
   }
 }
 </style>
+<style scoped src="./Page.layout-b.css"></style>
