@@ -138,13 +138,14 @@ class ModelRouteFailoverApiIntegrationTest {
     private Fixture fixture(String providerCheckpointJson) {
         String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 10);
         String vendorCode = "route-contract-" + suffix;
-        Long sourceAccountId = insertAccount(vendorCode, "source-" + suffix,
+        Long routingPoolId = insertRoutingPool(vendorCode, suffix);
+        Long sourceAccountId = insertAccount(routingPoolId, vendorCode, "source-" + suffix,
                 "http://source-route.invalid/v1", "source-key");
-        Long targetAccountId = insertAccount(vendorCode, "target-" + suffix,
+        Long targetAccountId = insertAccount(routingPoolId, vendorCode, "target-" + suffix,
                 "http://target-route.invalid/v1", "target-key");
-        Long sourceModelId = insertModel(sourceAccountId, "source-model-" + suffix,
+        Long sourceModelId = insertModel(routingPoolId, sourceAccountId, "source-model-" + suffix,
                 "route_contract_source_" + suffix);
-        Long targetModelId = insertModel(targetAccountId, "target-model-" + suffix,
+        Long targetModelId = insertModel(routingPoolId, targetAccountId, "target-model-" + suffix,
                 "route_contract_target_" + suffix);
         Long toolId = insertTool(sourceModelId, suffix);
         Long taskId = insertTask(toolId, sourceModelId, sourceAccountId, suffix, providerCheckpointJson);
@@ -157,26 +158,41 @@ class ModelRouteFailoverApiIntegrationTest {
                 sourceModelId, targetModelId);
     }
 
-    private Long insertAccount(String vendorCode, String accountName, String baseUrl, String apiKey) {
+    private Long insertRoutingPool(String vendorCode, String suffix) {
+        String poolKey = "route-contract-" + suffix;
+        jdbcTemplate.update("""
+                INSERT INTO model_account_routing_pools(vendor_code, pool_name, pool_key)
+                VALUES (?, 'Route contract pool', ?)
+                """, vendorCode, poolKey);
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM model_account_routing_pools WHERE vendor_code = ? AND pool_key = ?",
+                Long.class, vendorCode, poolKey);
+    }
+
+    private Long insertAccount(Long routingPoolId,
+                               String vendorCode,
+                               String accountName,
+                               String baseUrl,
+                               String apiKey) {
         jdbcTemplate.update("""
                 INSERT INTO model_vendor_accounts(
                     vendor_code, account_name, base_url, api_key, enabled, is_deleted,
-                    load_balance_enabled, load_balance_weight
-                ) VALUES (?, ?, ?, ?, 1, 0, 1, 100)
-                """, vendorCode, accountName, baseUrl, apiKey);
+                    load_balance_enabled, load_balance_weight, routing_pool_id
+                ) VALUES (?, ?, ?, ?, 1, 0, 1, 100, ?)
+                """, vendorCode, accountName, baseUrl, apiKey, routingPoolId);
         return jdbcTemplate.queryForObject(
                 "SELECT id FROM model_vendor_accounts WHERE vendor_code = ? AND account_name = ?",
                 Long.class, vendorCode, accountName);
     }
 
-    private Long insertModel(Long accountId, String displayName, String configCode) {
+    private Long insertModel(Long routingPoolId, Long accountId, String displayName, String configCode) {
         jdbcTemplate.update("""
                 INSERT INTO agent_model_configs(
-                    vendor_account_id, display_name, config_code, provider, model_name,
+                    vendor_account_id, routing_pool_id, display_name, config_code, provider, model_name,
                     billing_unit, unit_price, capabilities, enabled, agent_enabled, is_deleted
-                ) VALUES (?, ?, ?, 'openai_compatible', 'fake-chat-model',
+                ) VALUES (?, ?, ?, ?, 'openai_compatible', 'fake-chat-model',
                           'TOKEN_PER_M', 0, 'TEXT_GENERATION', 1, 1, 0)
-                """, accountId, displayName, configCode);
+                """, accountId, routingPoolId, displayName, configCode);
         return jdbcTemplate.queryForObject(
                 "SELECT id FROM agent_model_configs WHERE config_code = ?", Long.class, configCode);
     }
