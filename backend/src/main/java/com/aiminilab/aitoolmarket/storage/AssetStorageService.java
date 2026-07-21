@@ -788,7 +788,8 @@ public class AssetStorageService {
         return relativeKey.startsWith("tool-covers/")
                 || relativeKey.startsWith("avatars/")
                 || relativeKey.startsWith("icons/")
-                || relativeKey.startsWith("customer-service/");
+                || relativeKey.startsWith("customer-service/")
+                || relativeKey.startsWith("learning-center/covers/");
     }
 
     public AssetVisibility resolveVisibility(String relativeKey) {

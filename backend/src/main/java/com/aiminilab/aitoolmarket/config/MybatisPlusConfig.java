@@ -19,6 +19,7 @@ import java.time.LocalDateTime;
         "com.aiminilab.aitoolmarket.credit.mapper",
         "com.aiminilab.aitoolmarket.comic.mapper",
         "com.aiminilab.aitoolmarket.community.mapper",
+        "com.aiminilab.aitoolmarket.learning.mapper",
         "com.aiminilab.aitoolmarket.task.mapper",
         "com.aiminilab.aitoolmarket.task.routing.mapper",
         "com.aiminilab.aitoolmarket.tool.mapper",

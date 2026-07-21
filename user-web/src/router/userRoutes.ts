@@ -53,6 +53,9 @@ export const userRoutes = {
   get community() {
     return { name: "CommunityDiscover" }
   },
+  get learningCenter() {
+    return { name: "LearningCenter" }
+  },
   get profile() {
     return { name: "Profile" }
   },
