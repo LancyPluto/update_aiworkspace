@@ -144,6 +144,77 @@ class MonitoringContractTests(unittest.TestCase):
         self.assertIn('|= ${traceId:doublequote}', expressions)
         self.assertNotIn("${traceId:raw}", expressions)
 
+        variables = {
+            item["name"]: item for item in dashboard["templating"]["list"]
+        }
+        self.assertEqual({"traceId", "uri"}, set(variables))
+        uri = variables["uri"]
+        self.assertEqual("query", uri["type"])
+        self.assertIs(uri["includeAll"], True)
+        self.assertIs(uri["multi"], True)
+        self.assertEqual(".*", uri["allValue"])
+        self.assertIn("http_server_requests_seconds_count", uri["definition"])
+        self.assertIn('job="backend-actuator"', uri["definition"])
+        self.assertIn('uri!~"/actuator.*"', uri["definition"])
+
+        api_panels = {panel["id"]: panel for panel in dashboard["panels"]}
+        self.assertEqual("timeseries", api_panels[7]["type"])
+        self.assertEqual("timeseries", api_panels[8]["type"])
+        self.assertEqual("bargauge", api_panels[20]["type"])
+        self.assertEqual("timeseries", api_panels[21]["type"])
+
+        for panel_id in (7, 8, 20, 21):
+            panel_expressions = self.expressions(
+                {"panels": [api_panels[panel_id]]}
+            )
+            self.assertIn('job="backend-actuator"', panel_expressions)
+            self.assertIn('uri!~"/actuator.*"', panel_expressions)
+            self.assertIn('uri=~"${uri:regex}"', panel_expressions)
+            self.assertIn("[$__rate_interval]", panel_expressions)
+
+        qps_expression = api_panels[7]["targets"][0]["expr"]
+        self.assertIn("sum by (method, uri)", qps_expression)
+        self.assertNotIn("status)", qps_expression)
+        p95_expression = api_panels[8]["targets"][0]["expr"]
+        self.assertIn("histogram_quantile(0.95", p95_expression)
+        self.assertIn("sum by (le, method, uri)", p95_expression)
+
+        top_qps_target = api_panels[20]["targets"][0]
+        self.assertIn("topk(10", top_qps_target["expr"])
+        self.assertIs(top_qps_target["instant"], True)
+        error_rate_expression = api_panels[21]["targets"][0]["expr"]
+        self.assertIn('status=~"5.."', error_rate_expression)
+        self.assertIn("sum by (method, uri)", error_rate_expression)
+        self.assertIn("clamp_min", error_rate_expression)
+
+        expected_api_grid = {
+            7: (0, 4, 12, 8),
+            8: (12, 4, 12, 8),
+            20: (0, 12, 12, 8),
+            21: (12, 12, 12, 8),
+        }
+        for panel_id, expected in expected_api_grid.items():
+            grid = api_panels[panel_id]["gridPos"]
+            self.assertEqual(
+                expected,
+                (grid["x"], grid["y"], grid["w"], grid["h"]),
+            )
+
+        for index, left in enumerate(dashboard["panels"]):
+            left_grid = left["gridPos"]
+            for right in dashboard["panels"][index + 1 :]:
+                right_grid = right["gridPos"]
+                overlaps = not (
+                    left_grid["x"] + left_grid["w"] <= right_grid["x"]
+                    or right_grid["x"] + right_grid["w"] <= left_grid["x"]
+                    or left_grid["y"] + left_grid["h"] <= right_grid["y"]
+                    or right_grid["y"] + right_grid["h"] <= left_grid["y"]
+                )
+                self.assertFalse(
+                    overlaps,
+                    f'panels {left["id"]} and {right["id"]} overlap',
+                )
+
     def test_grafana_dashboards_are_valid_and_cover_failures_and_logs(self) -> None:
         overview = json.loads(
             self.read(

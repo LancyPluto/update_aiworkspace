@@ -188,6 +188,52 @@ public class CreditServiceImpl implements CreditService {
 
     @Override
     @Transactional
+    public int deductAvailable(Long userId, CreditSourceType sourceType, Long sourceId,
+                               int amount, String idempotencyKey) {
+        if (amount <= 0) {
+            return 0;
+        }
+        if (userId == null || sourceType == null || sourceId == null
+                || idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new IllegalArgumentException("Idempotent credit deduction arguments are required");
+        }
+        CreditLog existing = creditLogMapper.selectByIdempotencyKey(idempotencyKey);
+        if (existing != null) {
+            return validateAvailableDeduction(existing, userId, sourceType, sourceId, amount);
+        }
+        expireMembershipIfNeeded(userId);
+        CreditAccount before = lockedAccount(userId);
+        existing = creditLogMapper.selectByIdempotencyKeyForUpdate(idempotencyKey);
+        if (existing != null) {
+            return validateAvailableDeduction(existing, userId, sourceType, sourceId, amount);
+        }
+        int available = before.getBalance() - before.getFrozen();
+        int toDeduct = Math.min(available, amount);
+        if (toDeduct <= 0) {
+            return 0;
+        }
+        insertIdempotentLog(
+                before,
+                sourceType,
+                sourceId,
+                CreditLogType.DEDUCT.name(),
+                toDeduct,
+                0,
+                before.getBalance() - toDeduct,
+                before.getFrozen(),
+                idempotencyKey,
+                sourceLabel(sourceType) + " over-budget credit deduction"
+        );
+        if (deductAvailableBuckets(before, toDeduct) != toDeduct) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "credit bucket balance is inconsistent");
+        }
+        creditMapper.updateById(before);
+        creditChangeNotifier.notifyAfterCommit(userId);
+        return toDeduct;
+    }
+
+    @Override
+    @Transactional
     public void release(Long userId, CreditSourceType sourceType, Long sourceId, int amount) {
         if (amount <= 0) {
             return;
@@ -469,14 +515,18 @@ public class CreditServiceImpl implements CreditService {
 
     @Override
     @Transactional
-    public CreditAccountResponse referralBonusAdd(Long userId, Long rechargeOrderId, int amount, String reason) {
+    public CreditAccountResponse referralRegistrationBonusAdd(Long userId, Long referralId, String beneficiaryRole,
+                                                              int amount, String reason) {
         if (amount <= 0) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "referral bonus amount must be positive");
         }
-        if (rechargeOrderId == null) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order id is required");
+        if (referralId == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "referral id is required");
         }
-        String idempotencyKey = "REFERRAL_REWARD_ORDER:" + rechargeOrderId;
+        if (!"INVITEE".equals(beneficiaryRole) && !"INVITER".equals(beneficiaryRole)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "referral beneficiary role is invalid");
+        }
+        String idempotencyKey = "REFERRAL_REGISTRATION:" + referralId + ":" + beneficiaryRole;
         expireMembershipIfNeeded(userId);
         CreditAccount before = lockedAccount(userId);
         try {
@@ -491,13 +541,13 @@ public class CreditServiceImpl implements CreditService {
                     before.getFrozen(),
                     "REFERRAL",
                     null,
-                    normalizeReason(reason, "Referral recharge reward"),
+                    normalizeReason(reason, "Referral registration reward"),
                     idempotencyKey
             );
         } catch (DuplicateKeyException ignored) {
             return account(userId);
         }
-        if (!creditMapper.referralBonusAdd(before.getId(), amount)) {
+        if (!creditMapper.referralRegistrationBonusAdd(before.getId(), amount)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "credit account is unavailable");
         }
         creditChangeNotifier.notifyAfterCommit(userId);
@@ -527,6 +577,25 @@ public class CreditServiceImpl implements CreditService {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "credit account lock unavailable");
         }
         return locked;
+    }
+
+    private int validateAvailableDeduction(CreditLog existing,
+                                           Long userId,
+                                           CreditSourceType sourceType,
+                                           Long sourceId,
+                                           int requestedAmount) {
+        boolean matches = userId.equals(existing.getUserId())
+                && sourceType.name().equals(existing.getSourceType())
+                && sourceId.equals(existing.getSourceRef())
+                && CreditLogType.DEDUCT.name().equals(existing.getLogType())
+                && existing.getAmount() != null
+                && existing.getAmount() > 0
+                && existing.getAmount() <= requestedAmount
+                && Integer.valueOf(0).equals(existing.getFrozenAmount());
+        if (!matches) {
+            throw new IllegalStateException("Idempotent available credit deduction conflicts with an existing log");
+        }
+        return existing.getAmount();
     }
 
     private boolean allocateFreeze(CreditAccount account, int amount) {

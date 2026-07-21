@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import type { UserProfile } from "@/api/types"
 
 const props = defineProps<{
   available?: number | null
@@ -14,8 +13,8 @@ const getMembershipLabel = (packageCode: string | null | undefined): string => {
   // 提取套餐类型（starter/growth/pro/flagship）
   const code = packageCode.toLowerCase()
   if (code.includes("starter")) return "标准版"
-  if (code.includes("growth")) return "高级版"
-  if (code.includes("pro")) return "进阶版"
+  if (code.includes("growth")) return "进阶版"
+  if (code.includes("pro")) return "高级版"
   if (code.includes("flagship")) return "豪华版"
   
   return "体验版"

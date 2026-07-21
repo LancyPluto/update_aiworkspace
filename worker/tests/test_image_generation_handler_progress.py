@@ -1,5 +1,6 @@
 import time
 
+from client.openai_images_client import OpenAIImagesRequestNotSentError
 from handlers.image_generation_handler import ImageGenerationHandler, ImageProgressTicker, _resolve_openai_image_size
 
 
@@ -102,6 +103,11 @@ class RecordingImageClient:
         return ["https://cdn.example/image.png"]
 
 
+class NotSentImageClient:
+    def generate_images(self, **_kwargs):
+        raise OpenAIImagesRequestNotSentError("connect refused before request was sent")
+
+
 def test_image_progress_ticker_finishes_without_large_jump_or_regression():
     progress_values: list[int] = []
     ticker = ImageProgressTicker(progress_values.append, current_progress=13, interval_seconds=999)
@@ -135,6 +141,23 @@ def test_image_generation_handler_reports_one_percent_progress_until_saved():
     assert all(next_value - value == 1 for value, next_value in zip(progress_values, progress_values[1:]))
     assert backend.processing[0]["progressMessage"] == "实时进度：1%"
     assert backend.processing[-1]["progressMessage"] == "实时进度：99%"
+
+
+def test_image_generation_handler_reports_safe_failover_metadata_for_not_sent_request():
+    backend = RecordingBackendClient()
+    handler = ImageGenerationHandler(
+        backend_client=backend,
+        image_client=NotSentImageClient(),
+        image_persister=PassthroughImagePersister(),
+        final_progress_interval_seconds=0,
+    )
+
+    result = handler.handle({"taskId": 99142, "traceId": "image-not-sent-test"})
+
+    assert result["status"] == "FAILED"
+    assert backend.failed_payload["deliveryState"] == "NOT_SENT"
+    assert backend.failed_payload["retryScope"] == "ACCOUNT"
+    assert backend.failed_payload["failureStage"] == "BEFORE_PROVIDER"
 
 
 def test_image_generation_handler_renders_tool_prompt_template_for_image_tools():

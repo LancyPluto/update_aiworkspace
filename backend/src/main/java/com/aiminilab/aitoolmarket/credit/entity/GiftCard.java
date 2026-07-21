@@ -14,6 +14,8 @@ public class GiftCard {
     private Long ownerUserId;
     private Long originalUserId;
     private Integer credits;
+    private String cardType;
+    private String requiredMemberTier;
     private String status;
     private Long rechargeOrderId;
     private String issuanceKey;
@@ -35,6 +37,10 @@ public class GiftCard {
     public void setOriginalUserId(Long originalUserId) { this.originalUserId = originalUserId; }
     public Integer getCredits() { return credits; }
     public void setCredits(Integer credits) { this.credits = credits; }
+    public String getCardType() { return cardType; }
+    public void setCardType(String cardType) { this.cardType = cardType; }
+    public String getRequiredMemberTier() { return requiredMemberTier; }
+    public void setRequiredMemberTier(String requiredMemberTier) { this.requiredMemberTier = requiredMemberTier; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public Long getRechargeOrderId() { return rechargeOrderId; }

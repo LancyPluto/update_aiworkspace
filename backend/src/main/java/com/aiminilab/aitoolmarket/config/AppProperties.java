@@ -17,6 +17,7 @@ public class AppProperties {
     private String taskQueueBackend = "rabbitmq";
     private Rabbitmq rabbitmq = new Rabbitmq();
     private TaskExecution taskExecution = new TaskExecution();
+    private ModelRouting modelRouting = new ModelRouting();
     private String generatedMediaDir = "../data/generated-media";
     private Agent agent = new Agent();
     private Auth auth = new Auth();
@@ -92,6 +93,14 @@ public class AppProperties {
 
     public void setTaskExecution(TaskExecution taskExecution) {
         this.taskExecution = taskExecution == null ? new TaskExecution() : taskExecution;
+    }
+
+    public ModelRouting getModelRouting() {
+        return modelRouting;
+    }
+
+    public void setModelRouting(ModelRouting modelRouting) {
+        this.modelRouting = modelRouting == null ? new ModelRouting() : modelRouting;
     }
 
     public String getGeneratedMediaDir() {
@@ -368,6 +377,27 @@ public class AppProperties {
 
         public void setLeaseMinutes(long leaseMinutes) {
             this.leaseMinutes = leaseMinutes <= 0 ? 30 : leaseMinutes;
+        }
+    }
+
+    public static class ModelRouting {
+        private boolean enabled;
+        private int maxFailovers = 2;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public int getMaxFailovers() {
+            return Math.max(0, Math.min(maxFailovers, 2));
+        }
+
+        public void setMaxFailovers(int maxFailovers) {
+            this.maxFailovers = maxFailovers;
         }
     }
 

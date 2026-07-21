@@ -143,6 +143,9 @@ CREATE TABLE ai_tasks (
   user_id BIGINT NOT NULL,
   tool_id BIGINT NOT NULL,
   model_config_id BIGINT,
+  selected_model_config_id BIGINT,
+  selected_vendor_account_id BIGINT,
+  current_route_attempt_id BIGINT,
   field_schema_id BIGINT,
   prompt_version_id BIGINT,
   status VARCHAR(32) NOT NULL DEFAULT 'CREATED',
@@ -163,7 +166,7 @@ CREATE TABLE ai_tasks (
   claimed_at DATETIME,
   lease_renewed_at DATETIME,
   execution_attempt INT NOT NULL DEFAULT 0,
-  provider_checkpoint_json TEXT,
+  provider_checkpoint_json MEDIUMTEXT,
   provider_checkpoint_version INT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   queued_at DATETIME,
@@ -171,6 +174,44 @@ CREATE TABLE ai_tasks (
   finished_at DATETIME,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT uk_ai_tasks_user_idempotency UNIQUE (user_id, idempotency_key)
+);
+
+CREATE TABLE task_model_route_attempts (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  task_id BIGINT NOT NULL,
+  attempt_no INT NOT NULL,
+  model_config_id BIGINT NOT NULL,
+  vendor_account_id BIGINT NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  delivery_state VARCHAR(32),
+  failure_stage VARCHAR(64),
+  error_code VARCHAR(64),
+  error_message CLOB,
+  provider_error_code VARCHAR(128),
+  provider_request_id VARCHAR(128),
+  provider_charged TINYINT,
+  retry_after_seconds INT,
+  claim_token VARCHAR(128),
+  started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  finished_at DATETIME,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_task_model_route_attempt UNIQUE (task_id, attempt_no)
+);
+
+CREATE TABLE account_model_route_state (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  vendor_account_id BIGINT NOT NULL,
+  model_config_id BIGINT NOT NULL,
+  in_flight_count INT NOT NULL DEFAULT 0,
+  circuit_status VARCHAR(32) NOT NULL DEFAULT 'CLOSED',
+  consecutive_failures INT NOT NULL DEFAULT 0,
+  cooldown_until DATETIME,
+  last_selected_at DATETIME,
+  version INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_account_model_route_state_model UNIQUE (model_config_id)
 );
 
 CREATE TABLE ai_result_resources (
@@ -310,6 +351,8 @@ CREATE TABLE credit_recharge_order_items (
   credits INT NOT NULL,
   price_amount DECIMAL(18,2) NOT NULL,
   item_type VARCHAR(32) NOT NULL DEFAULT 'GIFT_CARD',
+  card_type_snapshot VARCHAR(32) NOT NULL DEFAULT 'CREDIT',
+  required_member_tier_snapshot VARCHAR(32),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -341,6 +384,21 @@ CREATE TABLE referral_rewards (
 );
 CREATE UNIQUE INDEX uk_referral_rewards_order ON referral_rewards(recharge_order_id);
 CREATE INDEX idx_referral_rewards_inviter ON referral_rewards(inviter_user_id, created_at);
+
+CREATE TABLE referral_registration_rewards (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  referral_id BIGINT NOT NULL,
+  beneficiary_user_id BIGINT NOT NULL,
+  beneficiary_role VARCHAR(16) NOT NULL,
+  reward_credits INT NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'CREDITED',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX uk_referral_registration_reward_role
+  ON referral_registration_rewards(referral_id, beneficiary_role);
+CREATE INDEX idx_referral_registration_reward_user
+  ON referral_registration_rewards(beneficiary_user_id, created_at);
 
 CREATE TABLE tool_prompts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -757,6 +815,10 @@ CREATE TABLE model_vendor_accounts (
   balance_updated_at DATETIME,
   balance_error_message VARCHAR(512),
   health_status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
+  health_message VARCHAR(512),
+  health_checked_at DATETIME,
+  load_balance_enabled TINYINT NOT NULL DEFAULT 0,
+  load_balance_weight INT NOT NULL DEFAULT 100,
   enabled TINYINT NOT NULL DEFAULT 1,
   is_deleted TINYINT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -880,6 +942,8 @@ CREATE TABLE pricing_margins (
   min_credits INT NOT NULL DEFAULT 0,
   image_estimate_input_tokens INT,
   image_estimate_output_tokens INT,
+  token_estimate_input_tokens INT,
+  token_estimate_output_tokens INT,
   enabled TINYINT NOT NULL DEFAULT 1,
   remark VARCHAR(255),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1187,6 +1251,7 @@ CREATE TABLE workflow_step_charges (
   idempotency_key VARCHAR(128) NOT NULL,
   credit_log_id BIGINT,
   billing_usage_id BIGINT,
+  settlement_payload_json CLOB,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT uk_workflow_charge_attempt UNIQUE (attempt_id),
@@ -1210,6 +1275,206 @@ CREATE TABLE workflow_confirmations (
   consumed_at TIMESTAMP,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT uk_workflow_confirmation_token UNIQUE (token_hash)
+);
+
+CREATE TABLE comic_projects (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  description VARCHAR(1000),
+  aspect_ratio VARCHAR(16) NOT NULL DEFAULT '16:9',
+  visual_style VARCHAR(1000),
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  revision BIGINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TIMESTAMP
+);
+
+CREATE TABLE comic_episodes (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  project_id BIGINT NOT NULL,
+  episode_no INT NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  script_source_type VARCHAR(32) NOT NULL DEFAULT 'PASTE',
+  script_file_name VARCHAR(255),
+  script_text CLOB NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+  revision BIGINT NOT NULL DEFAULT 0,
+  storyboard_locked_at TIMESTAMP,
+  assets_confirmed_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_episode_project_no UNIQUE (project_id, episode_no)
+);
+
+CREATE TABLE comic_characters (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  project_id BIGINT NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  description VARCHAR(2000),
+  voice_config_json CLOB,
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_character_project_name UNIQUE (project_id, name)
+);
+
+CREATE TABLE comic_character_versions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  character_id BIGINT NOT NULL,
+  version_no INT NOT NULL,
+  visual_prompt CLOB NOT NULL,
+  front_image_url VARCHAR(2048),
+  side_image_url VARCHAR(2048),
+  back_image_url VARCHAR(2048),
+  status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_character_version UNIQUE (character_id, version_no)
+);
+
+CREATE TABLE comic_scenes (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  project_id BIGINT NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  description VARCHAR(2000),
+  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_scene_project_name UNIQUE (project_id, name)
+);
+
+CREATE TABLE comic_scene_versions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  scene_id BIGINT NOT NULL,
+  version_no INT NOT NULL,
+  visual_prompt CLOB NOT NULL,
+  anchor_image_url VARCHAR(2048),
+  status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_scene_version UNIQUE (scene_id, version_no)
+);
+
+CREATE TABLE comic_shots (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  episode_id BIGINT NOT NULL,
+  shot_key CHAR(36) NOT NULL,
+  sequence_no INT NOT NULL,
+  duration_ms INT NOT NULL DEFAULT 5000,
+  shot_scale VARCHAR(64),
+  camera_angle VARCHAR(128),
+  camera_movement VARCHAR(128),
+  emotion VARCHAR(128),
+  visual_description CLOB NOT NULL,
+  dialogue CLOB,
+  narration CLOB,
+  sound_effect VARCHAR(1000),
+  bgm_cue VARCHAR(1000),
+  first_frame_prompt CLOB,
+  video_prompt CLOB,
+  negative_prompt CLOB,
+  character_version_ids_json CLOB NOT NULL,
+  scene_version_id BIGINT,
+  depends_on_shot_id BIGINT,
+  selected_attempt_id BIGINT,
+  status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+  revision BIGINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_shot_key UNIQUE (shot_key),
+  CONSTRAINT uk_comic_shot_episode_sequence UNIQUE (episode_id, sequence_no)
+);
+
+CREATE TABLE comic_generation_batches (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  episode_id BIGINT NOT NULL,
+  batch_type VARCHAR(32) NOT NULL DEFAULT 'SHOT_VIDEO',
+  tool_code VARCHAR(128) NOT NULL,
+  client_request_id VARCHAR(128) NOT NULL,
+  max_parallelism INT NOT NULL DEFAULT 4,
+  estimated_credits INT,
+  status VARCHAR(32) NOT NULL DEFAULT 'CREATED',
+  request_json CLOB NOT NULL,
+  confirmed_at TIMESTAMP NOT NULL,
+  started_at TIMESTAMP,
+  finished_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_batch_user_request UNIQUE (user_id, client_request_id)
+);
+
+CREATE TABLE comic_shot_attempts (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  batch_id BIGINT NOT NULL,
+  shot_id BIGINT NOT NULL,
+  attempt_no INT NOT NULL,
+  idempotency_key VARCHAR(128) NOT NULL,
+  workflow_run_id BIGINT,
+  root_task_id BIGINT,
+  status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+  result_json CLOB,
+  error_code VARCHAR(64),
+  error_message VARCHAR(2000),
+  started_at TIMESTAMP,
+  finished_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_attempt_shot_no UNIQUE (shot_id, attempt_no),
+  CONSTRAINT uk_comic_attempt_idempotency UNIQUE (idempotency_key),
+  CONSTRAINT uk_comic_attempt_workflow_run UNIQUE (workflow_run_id),
+  CONSTRAINT uk_comic_attempt_root_task UNIQUE (root_task_id)
+);
+
+CREATE TABLE comic_project_workflow_runs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  episode_id BIGINT,
+  shot_id BIGINT,
+  workflow_run_id BIGINT NOT NULL,
+  root_task_id BIGINT NOT NULL,
+  launch_source VARCHAR(32) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_workflow_run UNIQUE (workflow_run_id),
+  CONSTRAINT uk_comic_root_task UNIQUE (root_task_id)
+);
+
+CREATE TABLE comic_workflow_projections (
+  workflow_run_id BIGINT PRIMARY KEY,
+  projection_type VARCHAR(32) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'PROJECTING',
+  projected_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE comic_assembly_batches (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  episode_id BIGINT NOT NULL,
+  tool_code VARCHAR(128) NOT NULL,
+  client_request_id VARCHAR(128) NOT NULL,
+  shot_count INT NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'CREATING',
+  workflow_run_id BIGINT,
+  root_task_id BIGINT,
+  selected_shots_json CLOB NOT NULL,
+  result_json CLOB,
+  final_video_url VARCHAR(2048),
+  subtitle_url VARCHAR(2048),
+  error_code VARCHAR(64),
+  error_message VARCHAR(2000),
+  confirmed_at TIMESTAMP NOT NULL,
+  started_at TIMESTAMP,
+  finished_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_comic_assembly_user_request UNIQUE (user_id, client_request_id),
+  CONSTRAINT uk_comic_assembly_workflow_run UNIQUE (workflow_run_id),
+  CONSTRAINT uk_comic_assembly_root_task UNIQUE (root_task_id)
 );
 
 CREATE TABLE IF NOT EXISTS user_generation_subjects (
@@ -1268,6 +1533,23 @@ INSERT INTO credit_recharge_packages (
   'ACTIVE'
 );
 
+INSERT INTO credit_recharge_packages (
+  package_code, package_name, credits, price_amount, currency, validity_days,
+  benefits_json, recommended, sort_order, status
+) VALUES
+('monthly_starter', '标准版·月卡', 4000, 59.00, 'CNY', 30, '["优先排队","每日登录送20算力","灵活月付"]', 0, 110, 'ACTIVE'),
+('monthly_growth', '进阶版·月卡', 10500, 149.00, 'CNY', 30, '["优先排队","API 加速","每日登录送30算力","灵活月付"]', 1, 120, 'ACTIVE'),
+('monthly_pro', '高级版·月卡', 22000, 299.00, 'CNY', 30, '["优先排队","API 加速","模型咨询服务","每日登录送50算力","灵活月付"]', 0, 130, 'ACTIVE'),
+('monthly_flagship', '豪华版·月卡', 45000, 599.00, 'CNY', 30, '["无限并发","专属客服","定制模型支持","每日登录送100算力","灵活月付"]', 0, 140, 'ACTIVE'),
+('quarterly_starter', '标准版·季卡', 12000, 169.00, 'CNY', 90, '["优先排队","每日登录送20算力","季卡约9.5折"]', 0, 150, 'ACTIVE'),
+('quarterly_growth', '进阶版·季卡', 31500, 425.00, 'CNY', 90, '["优先排队","API 加速","每日登录送30算力","季卡约9.5折"]', 1, 160, 'ACTIVE'),
+('quarterly_pro', '高级版·季卡', 66000, 849.00, 'CNY', 90, '["优先排队","API 加速","模型咨询服务","每日登录送50算力","季卡约9.5折"]', 0, 170, 'ACTIVE'),
+('quarterly_flagship', '豪华版·季卡', 135000, 1699.00, 'CNY', 90, '["无限并发","专属客服","定制模型支持","每日登录送100算力","季卡约9.5折"]', 0, 180, 'ACTIVE'),
+('yearly_starter', '标准版·年卡', 48000, 639.00, 'CNY', 365, '["优先排队","每日登录送20算力","年付立省10%"]', 0, 190, 'ACTIVE'),
+('yearly_growth', '进阶版·年卡', 126000, 1609.00, 'CNY', 365, '["优先排队","API 加速","每日登录送30算力","年付立省10%"]', 1, 200, 'ACTIVE'),
+('yearly_pro', '高级版·年卡', 264000, 3229.00, 'CNY', 365, '["优先排队","API 加速","模型咨询服务","每日登录送50算力","年付立省10%"]', 0, 210, 'ACTIVE'),
+('yearly_flagship', '豪华版·年卡', 540000, 6469.00, 'CNY', 365, '["无限并发","专属客服","定制模型支持","每日登录送100算力","年付立省10%"]', 0, 220, 'ACTIVE');
+
 CREATE TABLE IF NOT EXISTS gift_card_packages (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   package_code VARCHAR(64) NOT NULL UNIQUE,
@@ -1276,6 +1558,8 @@ CREATE TABLE IF NOT EXISTS gift_card_packages (
   price_amount DECIMAL(18,2) NOT NULL,
   currency VARCHAR(8) NOT NULL DEFAULT 'CNY',
   card_theme VARCHAR(32) NOT NULL DEFAULT 'classic',
+  card_type VARCHAR(32) NOT NULL DEFAULT 'CREDIT',
+  required_member_tier VARCHAR(32),
   status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
   sort_order INT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1289,6 +1573,8 @@ CREATE TABLE IF NOT EXISTS gift_cards (
   owner_user_id BIGINT NOT NULL,
   original_user_id BIGINT NOT NULL,
   credits INT NOT NULL,
+  card_type VARCHAR(32) NOT NULL DEFAULT 'CREDIT',
+  required_member_tier VARCHAR(32),
   status VARCHAR(32) NOT NULL DEFAULT 'UNUSED',
   recharge_order_id BIGINT,
   issuance_key VARCHAR(128) UNIQUE,
@@ -1299,12 +1585,19 @@ CREATE TABLE IF NOT EXISTS gift_cards (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-INSERT INTO gift_card_packages (package_code, package_name, credits, price_amount, card_theme, status, sort_order) VALUES
-('gift_200', '200算力礼品卡', 200, 4.00, 'blue', 'ACTIVE', 1),
-('gift_500', '500算力礼品卡', 500, 9.90, 'purple', 'ACTIVE', 2),
-('gift_1000', '1000算力礼品卡', 1000, 19.60, 'gold', 'ACTIVE', 3),
-('gift_3000', '3000算力礼品卡', 3000, 58.50, 'dark', 'ACTIVE', 4),
-('admin_default', '管理员赠送礼品卡', 0, 0.00, 'green', 'ACTIVE', 999);
+INSERT INTO gift_card_packages (
+  package_code, package_name, credits, price_amount, card_theme,
+  card_type, required_member_tier, status, sort_order
+) VALUES
+('gift_200', '200算力礼品卡', 200, 4.00, 'blue', 'CREDIT', NULL, 'ACTIVE', 1),
+('gift_500', '500算力礼品卡', 500, 9.90, 'purple', 'CREDIT', NULL, 'ACTIVE', 2),
+('gift_1000', '1000算力礼品卡', 1000, 19.60, 'gold', 'CREDIT', NULL, 'ACTIVE', 3),
+('gift_3000', '3000算力礼品卡', 3000, 58.50, 'dark', 'CREDIT', NULL, 'ACTIVE', 4),
+('member_gift_starter', '标准版会员礼品卡', 4000, 69.00, 'blue', 'MEMBER_CREDIT', 'starter', 'ACTIVE', 101),
+('member_gift_growth', '进阶版会员礼品卡', 10500, 169.00, 'purple', 'MEMBER_CREDIT', 'growth', 'ACTIVE', 102),
+('member_gift_pro', '高级版会员礼品卡', 22000, 339.00, 'gold', 'MEMBER_CREDIT', 'pro', 'ACTIVE', 103),
+('member_gift_flagship', '豪华版会员礼品卡', 45000, 679.00, 'dark', 'MEMBER_CREDIT', 'flagship', 'ACTIVE', 104),
+('admin_default', '管理员赠送礼品卡', 0, 0.00, 'green', 'CREDIT', NULL, 'ACTIVE', 999);
 
 CREATE TABLE admin_operation_logs (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,

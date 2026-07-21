@@ -290,7 +290,7 @@ def test_keyframe_generates_white_background_three_view_reference_assets(monkeyp
     result = handler._run_keyframe(
         {"visualStyle": "cinematic comic"},
         {"script-planner": script},
-        {"provider": "agnes_images", "modelName": "test-image"},
+        {"provider": "agnes_images", "modelName": "test-image", "billingUnit": "PER_CALL"},
         task_id=987,
         trace_id=None,
     )
@@ -302,6 +302,8 @@ def test_keyframe_generates_white_background_three_view_reference_assets(monkeyp
     assert all("pure white background" in asset["prompt"].lower() for asset in reference_assets)
     assert all("three-view" in asset["prompt"].lower() for asset in reference_assets)
     assert result["images"][0]["referenceAssetIds"] == ["hero", "key", "observatory"]
+    assert result["billableUnits"] == 4
+    assert result["providerCalled"] is True
     assert any("front view" in prompt.lower() and "side view" in prompt.lower() and "back view" in prompt.lower() for prompt in generated_prompts)
 
 
@@ -346,7 +348,7 @@ def test_video_node_injects_scene_specific_reference_images_for_agnes_multi_imag
                 ],
             },
         },
-        {"provider": "agnes_video", "modelName": "test-agnes-video"},
+        {"provider": "agnes_video", "modelName": "test-agnes-video", "billingUnit": "PER_SECOND"},
         task_id=654,
         trace_id=None,
     )
@@ -357,6 +359,8 @@ def test_video_node_injects_scene_specific_reference_images_for_agnes_multi_imag
     assert captured_calls[0]["reference_images"] == ["/hero-board.png", "/key-board.png", "/observatory-board.png"]
     assert captured_calls[1]["image"] == "/scene-2.png"
     assert captured_calls[1]["reference_images"] == ["/villain-board.png", "/alley-board.png"]
+    assert [clip["billableUnits"] for clip in result["clips"]] == [5, 5]
+    assert result["billableUnits"] == 10
 
 
 class NoopBackendClient:
@@ -370,6 +374,167 @@ class NoopBackendClient:
         assert expected_version == self.checkpoint_version
         self.checkpoint_version += 1
         return {"version": self.checkpoint_version}
+
+
+class SettlementBackendClient:
+    def __init__(self):
+        self.checkpoint_version = 0
+        self.checkpoint = None
+        self.checkpoints = []
+        self.success_payload = None
+        self.failed_payload = None
+        self.fail_success = False
+
+    def mark_processing(self, *args, **kwargs):
+        return None
+
+    def save_provider_checkpoint(self, task_id, checkpoint, *, expected_version, **kwargs):
+        assert expected_version == self.checkpoint_version
+        self.checkpoint_version += 1
+        self.checkpoint = json.loads(json.dumps(checkpoint))
+        self.checkpoints.append(self.checkpoint)
+        return {"version": self.checkpoint_version, "checkpoint": self.checkpoint}
+
+    def mark_success(self, task_id, payload, **kwargs):
+        self.success_payload = payload
+        if self.fail_success:
+            raise BackendClientError("backend request failed: status=500")
+
+    def mark_failed(self, task_id, payload, **kwargs):
+        self.failed_payload = payload
+
+
+class UsageSequenceModelClient:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.prompts = []
+
+    def generate_with_usage(self, prompt, **kwargs):
+        self.prompts.append(prompt)
+        content, prompt_tokens, completion_tokens = self.responses.pop(0)
+        return {
+            "content": content,
+            "promptTokens": prompt_tokens,
+            "completionTokens": completion_tokens,
+        }
+
+
+def test_checkpointed_text_retry_accumulates_usage_and_replays_without_provider_call():
+    valid = _valid_script(1)
+    valid["screenplay"] = (
+        "A complete dramatic screenplay with a hook, escalating conflict, reversal, climax, and resolution. "
+        * 6
+    )
+    model = UsageSequenceModelClient([
+        ("not-json", 11, 2),
+        (json.dumps(valid, ensure_ascii=False), 23, 29),
+    ])
+    backend = SettlementBackendClient()
+    operation_input = {
+        "projectId": "comic-usage-1",
+        "storyTheme": "checkpoint usage",
+        "episodeLength": "10s",
+    }
+    context = {
+        "status": "PROCESSING",
+        "params": {
+            "workflowStep": True,
+            "nodeDefType": "LLM_TEXT",
+            "handlerKey": "comic.script",
+            "workflowInputs": {"operationInput": operation_input},
+        },
+        "modelConfig": {
+            "provider": "agnes_chat",
+            "modelName": "agnes-2.0-flash",
+            "billingUnit": "TOKEN_PER_M",
+        },
+    }
+    handler = WorkflowStepHandler(backend_client=backend, model_client=model)
+
+    result = handler.handle({"taskId": 330, "__executionContext": context})
+
+    assert result["status"] == "SUCCESS"
+    assert len(model.prompts) == 2
+    assert backend.success_payload["promptTokens"] == 34
+    assert backend.success_payload["completionTokens"] == 31
+    assert backend.success_payload["providerCalled"] is True
+    assert [checkpoint["status"] for checkpoint in backend.checkpoints] == ["STARTED", "COMPLETED"]
+
+    replay_context = {
+        **context,
+        "providerCheckpoint": backend.checkpoint,
+        "providerCheckpointVersion": backend.checkpoint_version,
+    }
+    backend.fail_success = True
+
+    with pytest.raises(BackendClientError, match="status=500"):
+        handler.handle({"taskId": 330, "__executionContext": replay_context})
+
+    assert len(model.prompts) == 2
+    assert backend.success_payload["promptTokens"] == 34
+    assert backend.success_payload["completionTokens"] == 31
+
+
+def test_missing_model_usage_reports_failure_before_success(monkeypatch):
+    backend = SettlementBackendClient()
+    handler = WorkflowStepHandler(backend_client=backend)
+    monkeypatch.setattr(
+        handler,
+        "_run_script_planner",
+        lambda *_args, **_kwargs: {"result": "provider returned content", "providerCalled": True},
+    )
+
+    result = handler.handle({
+        "taskId": 331,
+        "__executionContext": {
+            "status": "PROCESSING",
+            "params": {
+                "workflowStep": True,
+                "nodeDefType": "LLM_TEXT",
+                "workflowInputs": {},
+            },
+            "modelConfig": {"billingUnit": "TOKEN_PER_M"},
+        },
+    })
+
+    assert result["status"] == "FAILED"
+    assert backend.success_payload is None
+    assert "missing token counts" in backend.failed_payload["errorMessage"]
+
+
+def test_non_checkpointed_success_callback_failure_does_not_replay_provider(monkeypatch):
+    backend = SettlementBackendClient()
+    backend.fail_success = True
+    handler = WorkflowStepHandler(backend_client=backend)
+    provider_calls = {"count": 0}
+
+    def provider_result(*_args, **_kwargs):
+        provider_calls["count"] += 1
+        return {
+            "result": "ok",
+            "promptTokens": 8,
+            "completionTokens": 5,
+            "providerCalled": True,
+        }
+
+    monkeypatch.setattr(handler, "_run_script_planner", provider_result)
+
+    result = handler.handle({
+        "taskId": 332,
+        "__executionContext": {
+            "status": "PROCESSING",
+            "params": {
+                "workflowStep": True,
+                "nodeDefType": "LLM_TEXT",
+                "workflowInputs": {},
+            },
+            "modelConfig": {"billingUnit": "TOKEN_PER_M"},
+        },
+    })
+
+    assert result["status"] == "FAILED"
+    assert provider_calls["count"] == 1
+    assert "status=500" in backend.failed_payload["errorMessage"]
 
 
 def test_workflow_success_callback_carries_provider_accounting(monkeypatch):

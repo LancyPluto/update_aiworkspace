@@ -4,7 +4,7 @@
   "tags": ["ai-tool-market", "业务可靠性", "Grafana", "Loki", "Alloy"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "refresh": "15s",
   "time": { "from": "now-6h", "to": "now" },
   "templating": {
@@ -15,6 +15,21 @@
         "label": "TraceId / X-Request-Id",
         "query": "",
         "current": { "text": "", "value": "" },
+        "hide": 0
+      },
+      {
+        "name": "uri",
+        "type": "query",
+        "label": "接口 URI",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\"}, uri)",
+        "definition": "label_values(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\"}, uri)",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "refresh": 1,
+        "sort": 1,
+        "current": { "text": "All", "value": "$__all" },
         "hide": 0
       }
     ]
@@ -86,9 +101,9 @@
       "title": "后端接口 QPS",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "sum by (uri, method, status) (rate(http_server_requests_seconds_count{job=\"backend-actuator\"}[5m]))", "legendFormat": "{{method}} {{uri}} {{status}}" }],
+      "targets": [{ "refId": "A", "expr": "sum by (method, uri) (rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval]))", "legendFormat": "{{method}} {{uri}}" }],
       "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
     },
     {
       "id": 8,
@@ -96,15 +111,37 @@
       "title": "后端接口 P95 延迟",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, method, uri) (rate(http_server_requests_seconds_bucket{job=\"backend-actuator\",uri!~\"/actuator.*\"}[5m])))", "legendFormat": "{{method}} {{uri}}" }],
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } }
+      "targets": [{ "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, method, uri) (rate(http_server_requests_seconds_bucket{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])))", "legendFormat": "{{method}} {{uri}}" }],
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 3, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 2 }, { "color": "red", "value": 5 }] }, "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 20,
+      "type": "bargauge",
+      "title": "Top 10 接口 QPS",
+      "description": "当前时间窗口内 QPS 最高的接口，按请求方法和 URI 聚合。",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "topk(10, sum by (method, uri) (rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])))", "legendFormat": "{{method}} {{uri}}", "instant": true }],
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2, "min": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } }, "overrides": [] },
+      "options": { "displayMode": "lcd", "minVizHeight": 10, "minVizWidth": 0, "namePlacement": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true, "sizing": "auto", "valueMode": "color" }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "各接口 5xx 错误率",
+      "description": "按请求方法和 URI 展示 5xx 占比；无 5xx 的活跃接口显示为 0%。",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "100 * ((sum by (method, uri) (rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\",status=~\"5..\"}[$__rate_interval])) or 0 * sum by (method, uri) (rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval]))) / clamp_min(sum by (method, uri) (rate(http_server_requests_seconds_count{job=\"backend-actuator\",uri!~\"/actuator.*\",uri=~\"${uri:regex}\"}[$__rate_interval])), 0.000001))", "legendFormat": "{{method}} {{uri}}" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 2, "min": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 5 }] }, "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 14, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
     },
     {
       "id": 9,
       "type": "timeseries",
       "title": "Web Vitals 前端体验",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         { "expr": "sum by (name, rating, page) (increase({__name__=~\"web_vital_total(_total)?\"}[15m]))", "legendFormat": "{{name}} {{rating}} {{page}}" },
@@ -117,7 +154,7 @@
       "id": 10,
       "type": "timeseries",
       "title": "管理端操作审计",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         { "expr": "sum by (resource, method, result) (increase({__name__=~\"admin_operation_total(_total)?\"}[15m]))", "legendFormat": "{{method}} {{resource}} {{result}}" },
@@ -130,7 +167,7 @@
       "id": 11,
       "type": "timeseries",
       "title": "Agent Service 指标",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         { "expr": "sum by (path, status) (rate(agent_service_http_requests_total[5m]))", "legendFormat": "HTTP {{path}} {{status}}" },
@@ -144,7 +181,7 @@
       "id": 12,
       "type": "timeseries",
       "title": "Worker 任务与租约",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         { "expr": "sum by (tool_code, tool_type, status, error_code) (increase(worker_tasks_completed_total[15m]))", "legendFormat": "Task {{tool_code}} {{status}} {{error_code}}" },
@@ -158,7 +195,7 @@
       "id": 13,
       "type": "timeseries",
       "title": "失败成本归因",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         { "expr": "sum by (provider, failure_stage, error_code) (increase({__name__=~\"ai_billing_vendor_cost_cny_total(_total)?\",outcome!=\"SUCCESS\"}[30m]))", "legendFormat": "成本 {{provider}} {{failure_stage}} {{error_code}}" },
@@ -171,7 +208,7 @@
       "id": 14,
       "type": "timeseries",
       "title": "RabbitMQ 队列积压",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         { "expr": "rabbitmq_queue_messages_ready", "legendFormat": "ready {{queue}}" },
@@ -185,7 +222,7 @@
       "id": 17,
       "type": "timeseries",
       "title": "Tomcat 工作线程 / 最大线程",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 44 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         { "refId": "A", "expr": "tomcat_threads_busy_threads", "legendFormat": "busy {{name}}" },
@@ -198,7 +235,7 @@
       "id": 18,
       "type": "timeseries",
       "title": "Tomcat 线程利用率",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 44 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [{ "refId": "A", "expr": "tomcat_threads_busy_threads / clamp_min(tomcat_threads_config_max_threads, 1) * 100", "legendFormat": "{{name}}" }],
       "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "min": 0, "max": 100, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 70 }, { "color": "red", "value": 90 }] }, "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 16, "showPoints": "never" } }, "overrides": [] },
@@ -208,7 +245,7 @@
       "id": 19,
       "type": "timeseries",
       "title": "媒体交付与回退",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 44 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 52 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         { "expr": "sum by (kind, stage, outcome) (increase({__name__=~\"media_client_event_total(_total)?\"}[15m]))", "legendFormat": "前端 {{kind}} {{stage}} {{outcome}}" },
@@ -225,7 +262,7 @@
       "id": 15,
       "type": "logs",
       "title": "TraceId 跨服务日志查询",
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 52 },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 60 },
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [{ "expr": "{container=~\".+\"} |= ${traceId:doublequote}", "refId": "A" }],
       "options": { "showTime": true, "showLabels": true, "wrapLogMessage": true, "sortOrder": "Descending" }
@@ -234,7 +271,7 @@
       "id": 16,
       "type": "logs",
       "title": "最近错误日志",
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 61 },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 69 },
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [{ "expr": "{container=~\".+\"} |~ \"(?i)(error|exception|failed|timeout|warn)\"", "refId": "A" }],
       "options": { "showTime": true, "showLabels": true, "wrapLogMessage": true, "sortOrder": "Descending" }

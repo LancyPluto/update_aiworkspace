@@ -25,6 +25,7 @@ import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 
@@ -64,6 +65,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
+    @Transactional
     public AuthenticatedSession register(RegisterRequest request) {
         String username = normalizeBlank(request.username());
         String phone = normalizeBlank(request.phone());
@@ -152,6 +154,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
+    @Transactional
     public AuthenticatedSession registerWithSmsCode(SmsAuthRequest request) {
         String phone = normalizePhone(request.phone());
         smsCodeService.verifyCode(phone, "REGISTER", normalizeBlank(request.code()));
@@ -179,6 +182,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
+    @Transactional
     public AuthenticatedSession loginWithSmsCode(SmsAuthRequest request) {
         try {
             String phone = normalizePhone(request.phone());

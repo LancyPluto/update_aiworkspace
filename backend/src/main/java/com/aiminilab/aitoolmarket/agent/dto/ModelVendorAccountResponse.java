@@ -30,6 +30,14 @@ public record ModelVendorAccountResponse(
         LocalDateTime balanceUpdatedAt,
         String balanceErrorMessage,
         String healthStatus,
+        String healthMessage,
+        LocalDateTime healthCheckedAt,
+        Boolean loadBalanceEnabled,
+        Integer loadBalanceWeight,
+        Integer inFlightCount,
+        String circuitState,
+        LocalDateTime circuitOpenUntil,
+        String routingExclusionReason,
         Boolean enabled,
         int modelCount,
         String proxyMode,
@@ -61,6 +69,14 @@ public record ModelVendorAccountResponse(
                 account.getBalanceUpdatedAt(),
                 account.getBalanceErrorMessage(),
                 account.getHealthStatus(),
+                account.getHealthMessage(),
+                account.getHealthCheckedAt(),
+                Boolean.TRUE.equals(account.getLoadBalanceEnabled()),
+                normalizeWeight(account.getLoadBalanceWeight()),
+                account.getRoutingInFlightCount() == null ? 0 : account.getRoutingInFlightCount(),
+                account.getRoutingCircuitStatus() == null ? "CLOSED" : account.getRoutingCircuitStatus(),
+                account.getRoutingCooldownUntil(),
+                routingExclusionReason(account),
                 account.getEnabled(),
                 modelCount,
                 extraAuthText(account.getExtraAuthJson(), "proxyMode"),
@@ -68,6 +84,23 @@ public record ModelVendorAccountResponse(
                 account.getCreatedAt(),
                 account.getUpdatedAt()
         );
+    }
+
+    private static int normalizeWeight(Integer value) {
+        return value == null ? 100 : Math.max(1, Math.min(100, value));
+    }
+
+    private static String routingExclusionReason(ModelVendorAccount account) {
+        if (!Boolean.TRUE.equals(account.getEnabled())) {
+            return "ACCOUNT_DISABLED";
+        }
+        if (!Boolean.TRUE.equals(account.getLoadBalanceEnabled())) {
+            return "LOAD_BALANCING_DISABLED";
+        }
+        if ("OPEN".equalsIgnoreCase(account.getRoutingCircuitStatus())) {
+            return "CIRCUIT_OPEN";
+        }
+        return null;
     }
 
     private static String mask(String value) {

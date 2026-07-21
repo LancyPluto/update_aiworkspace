@@ -85,6 +85,7 @@ class TextToSpeechHandler:
                     "resourceType": "AUDIO",
                     "contentText": content,
                     "billableUnits": 1,
+                    "providerCalled": True,
                 },
                 trace_id=trace_id,
             )

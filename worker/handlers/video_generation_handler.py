@@ -2,10 +2,16 @@ import json
 import logging
 from typing import Any
 
-from client.agnes_video_client import AgnesVideoClient, AgnesVideoError, AgnesVideoTimeoutError
+from client.agnes_video_client import (
+    AgnesVideoClient,
+    AgnesVideoError,
+    AgnesVideoRequestNotSentError,
+    AgnesVideoTimeoutError,
+)
 from client.backend_client import BackendClient, BackendClientError
 from client.dashscope_video_client import DashScopeVideoClient, DashScopeVideoError, DashScopeVideoTimeoutError
 from client.kling_video_client import KlingVideoClient, KlingVideoError, KlingVideoTimeoutError
+from client.provider_error import RETRY_NONE, structured_failure_payload
 from client.seedance_video_client import SeedanceVideoClient, SeedanceVideoError, SeedanceVideoTimeoutError
 from config import resolve_kling_api_key, resolve_kling_credentials, resolve_kling_credentials_source
 from handlers.error_classifier import classify_model_error
@@ -40,9 +46,15 @@ class VideoGenerationHandler:
     def handle(self, message: dict[str, Any]) -> dict[str, Any]:
         task_id = int(message["taskId"])
         trace_id = message.get("traceId")
+        provider_checkpoint: dict[str, Any] | None = None
+        provider_checkpoint_version = 0
+        provider_request_id: str | None = None
         try:
             context = message.get("__executionContext") or self.backend_client.get_execution_context(task_id, trace_id=trace_id)
             trace_id = trace_id or context.get("traceId")
+            raw_checkpoint = context.get("providerCheckpoint")
+            provider_checkpoint = raw_checkpoint if isinstance(raw_checkpoint, dict) else None
+            provider_checkpoint_version = max(0, int(context.get("providerCheckpointVersion") or 0))
             status = str(context.get("status") or "").upper()
             if status in TERMINAL_TASK_STATUSES:
                 LOGGER.info("skip terminal video task taskId=%s status=%s", task_id, status)
@@ -145,7 +157,39 @@ class VideoGenerationHandler:
                         provider_progress,
                         trace_id,
                     )
+                if provider_protocol in {"agnes_video", "seedance"}:
+                    resume = _matching_video_resume(provider_checkpoint, provider, resolved_model)
+                    if resume:
+                        video_request["resume"] = resume
+
+                    def save_submission(submission: dict[str, Any]) -> None:
+                        nonlocal provider_checkpoint, provider_checkpoint_version, provider_request_id
+                        provider_request_id = str(
+                            submission.get("requestId") or submission.get("taskId") or ""
+                        ).strip() or None
+                        checkpoint = {
+                            "kind": "VIDEO_SUBMISSION",
+                            "provider": provider,
+                            "model": resolved_model,
+                            "status": "SUBMITTED",
+                            "taskId": submission.get("taskId"),
+                            "videoId": submission.get("videoId"),
+                            "requestId": provider_request_id,
+                        }
+                        saved = self.backend_client.save_provider_checkpoint(
+                            task_id,
+                            checkpoint,
+                            expected_version=provider_checkpoint_version,
+                            trace_id=trace_id,
+                        )
+                        provider_checkpoint_version = int(
+                            saved.get("version") or provider_checkpoint_version + 1
+                        )
+                        provider_checkpoint = checkpoint
+
+                    video_request["submitted_callback"] = save_submission
                 result = client.generate_video(**video_request)
+                provider_request_id = str(result.get("requestId") or provider_request_id or "").strip() or None
 
             self.backend_client.mark_processing(
                 task_id,
@@ -179,17 +223,42 @@ class VideoGenerationHandler:
                     "resourceType": "VIDEO",
                     "contentText": content,
                     "billableUnits": billable_units,
+                    "providerRequestId": provider_request_id,
+                    "providerCalled": True,
                 },
                 trace_id=trace_id,
             )
             LOGGER.info("video generation task %s completed traceId=%s provider=%s", task_id, trace_id or "-", provider)
             return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id, "provider": provider}
+        except AgnesVideoRequestNotSentError as exc:
+            return self._mark_failed(
+                task_id,
+                "MODEL_PROVIDER_UNAVAILABLE",
+                str(exc),
+                trace_id,
+                structured_failure_payload(exc),
+                provider_checkpoint,
+            )
         except (KlingVideoTimeoutError, SeedanceVideoTimeoutError, AgnesVideoTimeoutError, DashScopeVideoTimeoutError) as exc:
-            return self._mark_failed(task_id, "MODEL_TIMEOUT", str(exc), trace_id)
+            return self._mark_failed(
+                task_id,
+                "MODEL_TIMEOUT",
+                str(exc),
+                trace_id,
+                structured_failure_payload(exc),
+                provider_checkpoint,
+            )
         except InputImageError as exc:
             return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
         except (KlingVideoError, SeedanceVideoError, AgnesVideoError, DashScopeVideoError, provider_registry.ProviderRegistryError) as exc:
-            return self._mark_failed(task_id, classify_model_error(str(exc)), str(exc), trace_id)
+            return self._mark_failed(
+                task_id,
+                classify_model_error(str(exc)),
+                str(exc),
+                trace_id,
+                structured_failure_payload(exc),
+                provider_checkpoint,
+            )
         except GeneratedVideoPersistError as exc:
             return self._mark_failed(task_id, "MEDIA_PERSIST_FAILED", str(exc), trace_id)
         except BackendClientError:
@@ -251,14 +320,34 @@ class VideoGenerationHandler:
             )
         raise KlingVideoError(f"unsupported video provider: {provider or 'empty'}")
 
-    def _mark_failed(self, task_id: int, error_code: str, error_message: str, trace_id: str | None) -> dict[str, Any]:
+    def _mark_failed(
+        self,
+        task_id: int,
+        error_code: str,
+        error_message: str,
+        trace_id: str | None,
+        failure_metadata: dict[str, Any] | None = None,
+        provider_checkpoint: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         LOGGER.exception("video generation task %s failed traceId=%s errorCode=%s: %s", task_id, trace_id or "-", error_code, error_message)
         self._mark_processing_safe(task_id, progress=99, progress_message="Video generation failed", trace_id=trace_id)
+        metadata = dict(failure_metadata or {})
+        checkpoint_request_id = _checkpoint_request_id(provider_checkpoint)
+        if checkpoint_request_id:
+            metadata.update(
+                {
+                    "deliveryState": "ACCEPTED",
+                    "retryScope": RETRY_NONE,
+                    "failureStage": "PROVIDER_POLLING",
+                    "providerRequestId": checkpoint_request_id,
+                }
+            )
         self.backend_client.mark_failed(
             task_id,
             {
                 "errorCode": error_code,
                 "errorMessage": error_message,
+                **metadata,
             },
             trace_id=trace_id,
         )
@@ -299,6 +388,32 @@ class VideoGenerationHandler:
             progress_message=f"实时进度：{normalized}%",
             trace_id=trace_id,
         )
+
+
+def _matching_video_resume(
+    checkpoint: dict[str, Any] | None,
+    provider: str,
+    model: str,
+) -> dict[str, Any] | None:
+    if not isinstance(checkpoint, dict):
+        return None
+    if str(checkpoint.get("kind") or "") != "VIDEO_SUBMISSION":
+        return None
+    if str(checkpoint.get("provider") or "") != provider:
+        return None
+    if str(checkpoint.get("model") or "") != model:
+        return None
+    if not str(checkpoint.get("taskId") or "").strip():
+        return None
+    return checkpoint
+
+
+def _checkpoint_request_id(checkpoint: dict[str, Any] | None) -> str | None:
+    if not isinstance(checkpoint, dict):
+        return None
+    value = checkpoint.get("requestId") or checkpoint.get("taskId")
+    normalized = str(value or "").strip()
+    return normalized or None
 
 
 def _build_prompt(params: dict[str, Any]) -> str:

@@ -34,6 +34,7 @@ import com.aiminilab.aitoolmarket.task.service.TaskService;
 import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
 import com.aiminilab.aitoolmarket.task.support.TaskParamMediaFields;
 import com.aiminilab.aitoolmarket.task.metrics.TaskMetrics;
+import com.aiminilab.aitoolmarket.task.routing.ModelRoutingService;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.AgentToolCall;
 import com.aiminilab.aitoolmarket.agent.service.AgentAttachmentUrlResolver;
@@ -96,6 +97,7 @@ public class TaskServiceImpl implements TaskService {
     private final WorkflowInteractionService workflowInteractionService;
     private final WorkflowRuntimeAdmissionService workflowRuntimeAdmissionService;
     private final TaskIdempotencyRecoveryService taskIdempotencyRecoveryService;
+    private final ModelRoutingService modelRoutingService;
     private final TransactionTemplate transactionTemplate;
 
     public TaskServiceImpl(
@@ -121,6 +123,7 @@ public class TaskServiceImpl implements TaskService {
             @Lazy WorkflowInteractionService workflowInteractionService,
             WorkflowRuntimeAdmissionService workflowRuntimeAdmissionService,
             TaskIdempotencyRecoveryService taskIdempotencyRecoveryService,
+            ModelRoutingService modelRoutingService,
             TransactionTemplate transactionTemplate
     ) {
         this.taskMapper = taskMapper;
@@ -145,6 +148,7 @@ public class TaskServiceImpl implements TaskService {
         this.workflowInteractionService = workflowInteractionService;
         this.workflowRuntimeAdmissionService = workflowRuntimeAdmissionService;
         this.taskIdempotencyRecoveryService = taskIdempotencyRecoveryService;
+        this.modelRoutingService = modelRoutingService;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -299,6 +303,7 @@ public class TaskServiceImpl implements TaskService {
             AiTask current = findTask(taskId, userId);
             TaskStateMachine.ensureTransition(current.getStatus(), TaskStatus.CANCELLED.name());
         } else {
+            modelRoutingService.completeTask(taskId, TaskStatus.CANCELLED.name());
             creditService.release(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
             taskMetrics.recordTaskOutcome(task.getToolCode(), "CANCELLED", task.getCreatedAt(), findTask(taskId, userId).getFinishedAt());
         }
@@ -357,9 +362,16 @@ public class TaskServiceImpl implements TaskService {
             TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.RETRYING.name());
         }
         AiTask retryingTask = findTask(taskId);
+        modelRoutingService.completeTask(taskId, task.getStatus());
         TaskStateMachine.ensureTransition(retryingTask.getStatus(), TaskStatus.QUEUED.name());
         if (taskMapper.resetToQueued(taskId, List.of(TaskStatus.RETRYING.name())) == 0) {
             TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.QUEUED.name());
+        }
+        AgentModelConfig originalModelConfig = task.getModelConfigId() == null
+                ? null
+                : agentModelConfigMapper.findActiveById(task.getModelConfigId());
+        if (originalModelConfig != null) {
+            modelRoutingService.assignRetryRoute(findTask(taskId), originalModelConfig);
         }
         creditService.freeze(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
         taskOutboxService.enqueueTaskRetry(taskId);
@@ -380,6 +392,7 @@ public class TaskServiceImpl implements TaskService {
         if (updated == 0) {
             TaskStateMachine.ensureTransition(findTask(taskId).getStatus(), TaskStatus.CANCELLED.name());
         } else {
+            modelRoutingService.completeTask(taskId, TaskStatus.CANCELLED.name());
             creditService.release(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
             taskMetrics.recordTaskOutcome(task.getToolCode(), "CANCELLED", task.getCreatedAt(), findTask(taskId).getFinishedAt());
         }
@@ -407,6 +420,7 @@ public class TaskServiceImpl implements TaskService {
             if (updated == 0) {
                 continue;
             }
+            modelRoutingService.completeTask(task.getId(), TaskStatus.TIMEOUT.name());
             creditService.release(task.getUserId(), CreditSourceType.TASK, task.getId(), task.getEstimatedCreditCost());
             taskMetrics.recordTaskOutcome(task.getToolCode(), TaskStatus.TIMEOUT.name(), task.getCreatedAt(), findTask(task.getId()).getFinishedAt());
             timedOutTaskIds.add(task.getId());
@@ -433,6 +447,8 @@ public class TaskServiceImpl implements TaskService {
         task.setUserId(userId);
         task.setToolId(tool.getId());
         task.setModelConfigId(modelConfig == null ? null : modelConfig.getId());
+        task.setSelectedModelConfigId(modelConfig == null ? null : modelConfig.getId());
+        task.setSelectedVendorAccountId(modelConfig == null ? null : modelConfig.getVendorAccountId());
         task.setParamsJson(normalizedParams.toString());
         task.setModelSnapshotJson(modelExecutionSnapshotService.serialize(modelSnapshot));
         task.setIdempotencyKey(idempotencyKey);
@@ -450,6 +466,7 @@ public class TaskServiceImpl implements TaskService {
                     duplicate
             );
         }
+        modelRoutingService.assignInitialRoute(task, modelConfig);
         if (chargeTaskCredits) {
             creditService.freeze(userId, CreditSourceType.TASK, taskId, estimatedCredits);
         }

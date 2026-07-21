@@ -30,3 +30,15 @@ def test_validate_video_file_accepts_mp4_header(tmp_path):
     good = tmp_path / "good.mp4"
     good.write_bytes(b"\x00\x00\x00\x18ftypisom\x00\x00\x00\x00")
     DigitalHumanPostprocessor._validate_video_file(good)
+
+
+def test_validate_video_file_does_not_read_entire_asset(tmp_path, monkeypatch):
+    good = tmp_path / "large.mp4"
+    good.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"x" * 1024)
+    monkeypatch.setattr(
+        Path,
+        "read_bytes",
+        lambda _path: (_ for _ in ()).throw(AssertionError("full file read is forbidden")),
+    )
+
+    DigitalHumanPostprocessor._validate_video_file(good)

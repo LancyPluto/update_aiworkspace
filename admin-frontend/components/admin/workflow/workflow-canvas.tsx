@@ -316,12 +316,43 @@ const DIGITAL_HUMAN_FIELD_DRAFT: EditableField[] = ([
 
 const COMIC_DRAMA_FIELD_DRAFT: EditableField[] = ([
   {
+    fieldKey: "sourceMode",
+    fieldName: "剧本来源",
+    fieldType: "select",
+    placeholder: "选择 AI 创作或导入完整剧本",
+    required: true,
+    defaultValue: "AI_CREATE",
+    sortOrder: 1,
+    options: [
+      { label: "AI 创作", value: "AI_CREATE" },
+      { label: "粘贴或导入剧本", value: "IMPORT" },
+    ],
+  },
+  {
     fieldKey: "storyTheme",
     fieldName: "漫剧主题",
     fieldType: "text",
     placeholder: "例如：穿越后我靠 AI 开店逆袭",
-    required: true,
-    sortOrder: 1,
+    required: false,
+    sortOrder: 2,
+    options: [],
+  },
+  {
+    fieldKey: "scriptText",
+    fieldName: "完整剧本（可选）",
+    fieldType: "textarea",
+    placeholder: "可直接粘贴完整剧本；选择 AI 创作时可以留空",
+    required: false,
+    sortOrder: 3,
+    options: [],
+  },
+  {
+    fieldKey: "scriptFile",
+    fieldName: "剧本文件（可选）",
+    fieldType: "file",
+    placeholder: "上传 TXT、Markdown 或 DOCX 文件",
+    required: false,
+    sortOrder: 4,
     options: [],
   },
   {
@@ -330,7 +361,7 @@ const COMIC_DRAMA_FIELD_DRAFT: EditableField[] = ([
     fieldType: "select",
     placeholder: "选择漫剧题材",
     required: false,
-    sortOrder: 2,
+    sortOrder: 5,
     options: [
       { label: "都市逆袭", value: "都市逆袭" },
       { label: "甜宠恋爱", value: "甜宠恋爱" },
@@ -344,8 +375,22 @@ const COMIC_DRAMA_FIELD_DRAFT: EditableField[] = ([
     fieldType: "textarea",
     placeholder: "留空则由大模型自动生成剧本与分镜",
     required: false,
-    sortOrder: 3,
+    sortOrder: 6,
     options: [],
+  },
+  {
+    fieldKey: "episodeDuration",
+    fieldName: "本集目标时长",
+    fieldType: "select",
+    placeholder: "选择 30–90 秒",
+    required: false,
+    defaultValue: "60",
+    sortOrder: 7,
+    options: [
+      { label: "30 秒", value: "30" },
+      { label: "60 秒", value: "60" },
+      { label: "90 秒", value: "90" },
+    ],
   },
   {
     fieldKey: "visualStyle",
@@ -353,7 +398,7 @@ const COMIC_DRAMA_FIELD_DRAFT: EditableField[] = ([
     fieldType: "select",
     placeholder: "选择画面风格",
     required: false,
-    sortOrder: 4,
+    sortOrder: 8,
     options: [
       { label: "电影感写实", value: "电影感写实" },
       { label: "国漫厚涂", value: "国漫厚涂" },
@@ -367,7 +412,7 @@ const COMIC_DRAMA_FIELD_DRAFT: EditableField[] = ([
     fieldType: "select",
     placeholder: "选择发布画幅",
     required: false,
-    sortOrder: 5,
+    sortOrder: 9,
     options: [
       { label: "9:16 竖屏", value: "9:16 竖屏" },
       { label: "16:9 横屏", value: "16:9 横屏" },
@@ -380,7 +425,7 @@ const COMIC_DRAMA_FIELD_DRAFT: EditableField[] = ([
     fieldType: "select",
     placeholder: "480p 更快更省算力",
     required: false,
-    sortOrder: 6,
+    sortOrder: 10,
     options: [
       { label: "480p", value: "480p" },
       { label: "720p", value: "720p" },
@@ -392,7 +437,7 @@ const COMIC_DRAMA_FIELD_DRAFT: EditableField[] = ([
     fieldType: "textarea",
     placeholder: "参考作品、角色设定、禁用元素等",
     required: false,
-    sortOrder: 7,
+    sortOrder: 11,
     options: [],
   },
 ] satisfies EditableFieldDraft[]).map(withFieldDefaults)
@@ -894,25 +939,23 @@ function buildSimplifiedDefaultWorkflow(
   }
 }
 
-function userInputNode(
+const COMIC_WORKFLOW_TEMPLATE_VERSION = "comic-project-v2"
+
+function userConfirmNode(
   id: string,
   position: { x: number; y: number },
-  options: { title: string; fieldKey: string; stageLabel: string },
+  options: { title: string; detail: string; sourceNodeId: string; stageKey: string },
 ): WFNode {
-  const def = NODE_TYPE_MAP.get("user_input")
-  if (!def) throw new Error("user_input node type is missing")
-  return {
-    ...createNodeFromDef(def, position, {
-      title: options.title,
-      detail: `用户在工作台填写「${options.stageLabel}」，留空则沿用上一步结果。`,
-      kind: "input",
-      nodeDefType: "user_input",
-      inputSlots: [{ name: "upstream", type: "any", label: "上一步结果" }],
-      outputSlots: [{ name: options.fieldKey, type: "text", label: options.stageLabel }],
-      parameters: { fieldKey: options.fieldKey, stageLabel: options.stageLabel },
-    }),
-    id,
-  }
+  return fixedNode(id, "user_confirm", position, {
+    title: options.title,
+    detail: options.detail,
+    inputSlots: [{ name: "artifact", type: "any", label: "待确认产物" }],
+    outputSlots: [{ name: "confirmed", type: "json", label: "确认结果" }],
+    parameters: {
+      sourceNodeId: options.sourceNodeId,
+      stageKey: options.stageKey,
+    },
+  })
 }
 
 function buildComicDramaDefaultWorkflow(
@@ -924,103 +967,191 @@ function buildComicDramaDefaultWorkflow(
   const ttsModelId = findComicDramaModelConfigId(modelConfigs, "text_to_speech")
   const videoModelId = findComicDramaModelConfigId(modelConfigs, "video_generation")
 
-  const start = fixedNode("start", "start", { x: 40, y: 280 }, {
-    title: "Start",
-    detail: `当前工具：${tool?.toolName || "AI 漫剧"}`,
+  const start = fixedNode("start", "start", { x: 40, y: 300 }, {
+    title: "开始项目",
+    detail: `当前工具：${tool?.toolName || "AI 漫剧项目"}`,
     outputSlots: [{ name: "context", type: "json", label: "会话上下文" }],
+    parameters: {
+      templateVersion: COMIC_WORKFLOW_TEMPLATE_VERSION,
+      handlerKey: "comic.project",
+    },
   })
-  const input = fixedNode("field-input", "field_input", { x: 400, y: 280 }, {
-    title: "初始表单",
-    detail: "用户首次提交的主题、画风、比例等参数。",
+  const input = fixedNode("project-input", "field_input", { x: 340, y: 300 }, {
+    title: "创建或导入剧本",
+    detail: "支持 AI 创作、直接粘贴、TXT、Markdown 和 DOCX 导入。",
     inputSlots: [{ name: "context", type: "json", label: "会话上下文" }],
     outputSlots: [{ name: "params", type: "json", label: "用户填写参数" }],
   })
-  const scriptPlanner = fixedNode("script-planner", "llm_text", { x: 780, y: 280 }, {
-    title: "剧本与分镜",
-    detail: "大模型根据初始表单生成剧本与分镜 JSON。",
-    inputSlots: [{ name: "form", type: "json", label: "初始表单" }],
-    outputSlots: [{ name: "script", type: "json", label: "剧本分镜" }],
+  const scriptPlanner = fixedNode("script-normalize", "script_planner", { x: 680, y: 300 }, {
+    title: "整理完整剧本",
+    detail: "保留导入原文，将人物、场景、对白和段落整理成统一剧本版本。",
+    inputSlots: [{ name: "form", type: "json", label: "项目与剧本输入" }],
+    outputSlots: [{ name: "script", type: "json", label: "结构化剧本" }],
     parameters: {
       modelConfigId: textModelId,
-      role: "comic_script_planner",
-      progressStep: "生成剧本与分镜",
+      handlerKey: "comic.script",
+      role: "comic_script",
+      progressStep: "整理完整剧本",
     },
   })
-  const scriptFeedback = userInputNode("user-input-script", { x: 1140, y: 60 }, {
-    title: "脚本意见",
-    fieldKey: "scriptFeedback",
-    stageLabel: "脚本意见",
+  const storyboard = fixedNode("storyboard", "storyboard_generator", { x: 1020, y: 300 }, {
+    title: "AI 分镜拆解",
+    detail: "生成镜号、时码、景别、机位、运镜、情绪、画面、台词、声音和生成提示词。",
+    inputSlots: [{ name: "script", type: "json", label: "结构化剧本" }],
+    outputSlots: [{ name: "storyboard", type: "json", label: "可编辑分镜表" }],
+    parameters: {
+      modelConfigId: textModelId,
+      handlerKey: "comic.storyboard",
+      role: "comic_storyboard",
+      progressStep: "拆分结构化分镜",
+    },
   })
-  const storyboardFeedback = userInputNode("user-input-storyboard", { x: 1140, y: 280 }, {
-    title: "分镜意见",
-    fieldKey: "storyboardFeedback",
-    stageLabel: "分镜意见",
+  const storyboardConfirm = userConfirmNode("confirm-storyboard", { x: 1360, y: 300 }, {
+    title: "锁定分镜",
+    detail: "用户完成增删、重排和编辑后锁定当前分镜版本。",
+    sourceNodeId: "storyboard",
+    stageKey: "STORYBOARD_LOCK",
   })
-  const keyframe = fixedNode("keyframe", "image_model", { x: 1500, y: 280 }, {
-    title: "电影感关键帧",
-    detail: "根据剧本分镜生成关键帧图片。",
+  const characters = fixedNode("character-assets", "character_design", { x: 1700, y: 80 }, {
+    title: "角色三视图",
+    detail: "生成并版本化角色正面、侧面、背面参考图。",
     inputSlots: [
-      { name: "script", type: "json", label: "剧本分镜" },
-      { name: "form", type: "json", label: "表单参数" },
+      { name: "storyboard", type: "json", label: "已锁定分镜" },
+      { name: "approval", type: "json", label: "分镜锁定结果" },
     ],
-    outputSlots: [{ name: "keyframe", type: "image", label: "关键帧" }],
-    parameters: { modelConfigId: imageModelId, progressStep: "生成电影感关键帧" },
+    outputSlots: [{ name: "characters", type: "json", label: "角色参考资产" }],
+    parameters: {
+      modelConfigId: imageModelId,
+      handlerKey: "comic.character_reference",
+      progressStep: "生成角色三视图",
+    },
   })
-  const sceneFeedback = userInputNode("user-input-scene", { x: 1860, y: 60 }, {
-    title: "场景图意见",
-    fieldKey: "sceneFeedback",
-    stageLabel: "场景图意见",
-  })
-  const tts = fixedNode("tts", "tts_model", { x: 1860, y: 420 }, {
-    title: "角色配音",
-    detail: "根据对白生成 TTS 音频。",
-    inputSlots: [{ name: "script", type: "json", label: "剧本分镜" }],
-    outputSlots: [{ name: "audio", type: "audio", label: "配音音频" }],
-    parameters: { modelConfigId: ttsModelId, progressStep: "生成角色配音" },
-  })
-  const bgmFeedback = userInputNode("user-input-bgm", { x: 2220, y: 60 }, {
-    title: "BGM 意见",
-    fieldKey: "bgmFeedback",
-    stageLabel: "BGM 意见",
-  })
-  const clipVideo = fixedNode("clip-video", "video_model", { x: 2220, y: 420 }, {
-    title: "图生视频",
-    detail: "根据关键帧生成视频片段。",
+  const scenes = fixedNode("scene-assets", "scene_design", { x: 1700, y: 300 }, {
+    title: "场景锚点图",
+    detail: "生成并版本化主要场景的空间、光线和风格参考图。",
     inputSlots: [
-      { name: "keyframe", type: "image", label: "关键帧" },
-      { name: "script", type: "json", label: "剧本分镜" },
+      { name: "storyboard", type: "json", label: "已锁定分镜" },
+      { name: "approval", type: "json", label: "分镜锁定结果" },
     ],
-    outputSlots: [{ name: "clip", type: "video", label: "视频片段" }],
-    parameters: { modelConfigId: videoModelId, progressStep: "图生视频" },
+    outputSlots: [{ name: "scenes", type: "json", label: "场景参考资产" }],
+    parameters: {
+      modelConfigId: imageModelId,
+      handlerKey: "comic.scene_reference",
+      progressStep: "生成场景锚点图",
+    },
   })
-  const compose = fixedNode("compose", "subtitle", { x: 2580, y: 280 }, {
-    title: "字幕合成",
-    detail: "合并配音、视频片段并烧录字幕。",
+  const audio = fixedNode("shot-audio", "tts_model", { x: 1700, y: 520 }, {
+    title: "台词与旁白",
+    detail: "按角色和台词行生成独立配音，保留字幕时间信息。",
     inputSlots: [
-      { name: "clip", type: "video", label: "视频片段" },
-      { name: "audio", type: "audio", label: "配音音频" },
-      { name: "script", type: "json", label: "剧本分镜" },
+      { name: "storyboard", type: "json", label: "已锁定分镜" },
+      { name: "approval", type: "json", label: "分镜锁定结果" },
     ],
-    outputSlots: [{ name: "finalVideo", type: "video", label: "成片" }],
-    parameters: { progressStep: "字幕与音视频合成" },
+    outputSlots: [{ name: "audio", type: "json", label: "配音与字幕素材" }],
+    parameters: {
+      modelConfigId: ttsModelId,
+      handlerKey: "comic.shot_tts",
+      progressStep: "生成台词与旁白",
+    },
   })
-  const outputNode = fixedNode("output", "video_output", { x: 2940, y: 280 }, {
-    title: "成片输出",
-    detail: "用户侧播放最终漫剧视频。",
-    inputSlots: [{ name: "finalVideo", type: "video", label: "成片" }],
-    parameters: { displayMode: "video" },
+  const assetConfirm = userConfirmNode("confirm-assets", { x: 2040, y: 300 }, {
+    title: "确认参考素材与费用",
+    detail: "选定角色和场景版本，展示本批镜头的预计费用后再继续。",
+    sourceNodeId: "scene-assets",
+    stageKey: "ASSET_AND_COST_APPROVAL",
+  })
+  const shotBatch = fixedNode("shot-batch", "scene_loop", { x: 2380, y: 300 }, {
+    title: "镜头批次计划",
+    detail: "将已锁定分镜展开为独立任务，按系统和供应商上限受控并行。",
+    inputSlots: [
+      { name: "storyboard", type: "json", label: "已锁定分镜" },
+      { name: "assets", type: "json", label: "素材与费用确认" },
+      { name: "form", type: "json", label: "项目参数" },
+    ],
+    outputSlots: [{ name: "batch", type: "json", label: "镜头任务批次" }],
+    parameters: {
+      handlerKey: "comic.shot_batch",
+      durationField: "episodeDuration",
+      secondsPerScene: 5,
+      maxScenes: 18,
+      imageConcurrency: 4,
+      videoConcurrency: 2,
+    },
+  })
+  const keyframe = fixedNode("shot-keyframes", "keyframe_generator", { x: 2720, y: 180 }, {
+    title: "并行生成关键帧",
+    detail: "每个镜头独立生成，实际携带已选角色和场景参考图。",
+    inputSlots: [
+      { name: "batch", type: "json", label: "镜头任务批次" },
+      { name: "storyboard", type: "json", label: "已锁定分镜" },
+      { name: "characters", type: "json", label: "角色参考资产" },
+      { name: "scenes", type: "json", label: "场景参考资产" },
+    ],
+    outputSlots: [{ name: "keyframes", type: "json", label: "镜头关键帧版本" }],
+    parameters: {
+      modelConfigId: imageModelId,
+      handlerKey: "comic.shot_keyframe",
+      progressStep: "并行生成镜头关键帧",
+    },
+  })
+  const clipVideo = fixedNode("shot-videos", "image_to_video", { x: 3060, y: 180 }, {
+    title: "批量生成镜头视频",
+    detail: "按镜头独立调用视频模型，失败只重试对应镜头。",
+    inputSlots: [
+      { name: "keyframes", type: "json", label: "镜头关键帧版本" },
+      { name: "storyboard", type: "json", label: "已锁定分镜" },
+      { name: "characters", type: "json", label: "角色参考资产" },
+      { name: "scenes", type: "json", label: "场景参考资产" },
+    ],
+    outputSlots: [{ name: "clips", type: "json", label: "镜头视频版本" }],
+    parameters: {
+      modelConfigId: videoModelId,
+      handlerKey: "comic.shot_video",
+      progressStep: "批量生成镜头视频",
+    },
+  })
+  const compose = fixedNode("compose", "subtitle", { x: 3400, y: 300 }, {
+    title: "组装成片",
+    detail: "按锁定顺序拼接选定片段，混合配音、旁白、BGM、音效并生成字幕。",
+    inputSlots: [
+      { name: "clips", type: "json", label: "已选镜头视频" },
+      { name: "audio", type: "json", label: "配音与声音素材" },
+      { name: "storyboard", type: "json", label: "已锁定分镜" },
+    ],
+    outputSlots: [
+      { name: "finalVideo", type: "video", label: "最终成片" },
+      { name: "subtitle", type: "file", label: "SRT 字幕" },
+    ],
+    parameters: {
+      handlerKey: "comic.compose",
+      progressStep: "组装音视频与字幕",
+    },
+  })
+  const outputNode = fixedNode("output", "video_output", { x: 3740, y: 300 }, {
+    title: "交付成片",
+    detail: "输出可播放 MP4、SRT 字幕和项目素材版本。",
+    inputSlots: [
+      { name: "finalVideo", type: "video", label: "最终成片" },
+      { name: "subtitle", type: "file", label: "SRT 字幕" },
+    ],
+    parameters: {
+      displayMode: "video",
+      templateVersion: COMIC_WORKFLOW_TEMPLATE_VERSION,
+    },
   })
 
   const nodes = [
     start,
     input,
     scriptPlanner,
-    scriptFeedback,
-    storyboardFeedback,
+    storyboard,
+    storyboardConfirm,
+    characters,
+    scenes,
+    audio,
+    assetConfirm,
+    shotBatch,
     keyframe,
-    sceneFeedback,
-    tts,
-    bgmFeedback,
     clipVideo,
     compose,
     outputNode,
@@ -1031,19 +1162,32 @@ function buildComicDramaDefaultWorkflow(
     edges: compactEdges([
       connectNodes(start, input, { source: "context", target: "context" }),
       connectNodes(input, scriptPlanner, { source: "params", target: "form" }),
-      connectNodes(scriptPlanner, scriptFeedback, { source: "script", target: "upstream" }),
-      connectNodes(scriptPlanner, storyboardFeedback, { source: "script", target: "upstream" }),
-      connectNodes(storyboardFeedback, keyframe, { source: "storyboardFeedback", target: "script" }),
-      connectNodes(input, keyframe, { source: "params", target: "form" }),
-      connectNodes(keyframe, sceneFeedback, { source: "keyframe", target: "upstream" }),
-      connectNodes(scriptPlanner, tts, { source: "script", target: "script" }),
-      connectNodes(tts, bgmFeedback, { source: "audio", target: "upstream" }),
-      connectNodes(keyframe, clipVideo, { source: "keyframe", target: "keyframe" }),
-      connectNodes(scriptPlanner, clipVideo, { source: "script", target: "script" }),
-      connectNodes(clipVideo, compose, { source: "clip", target: "clip" }),
-      connectNodes(tts, compose, { source: "audio", target: "audio" }),
-      connectNodes(scriptPlanner, compose, { source: "script", target: "script" }),
+      connectNodes(scriptPlanner, storyboard, { source: "script", target: "script" }),
+      connectNodes(storyboard, storyboardConfirm, { source: "storyboard", target: "artifact" }),
+      connectNodes(storyboard, characters, { source: "storyboard", target: "storyboard" }),
+      connectNodes(storyboardConfirm, characters, { source: "confirmed", target: "approval" }),
+      connectNodes(storyboard, scenes, { source: "storyboard", target: "storyboard" }),
+      connectNodes(storyboardConfirm, scenes, { source: "confirmed", target: "approval" }),
+      connectNodes(storyboard, audio, { source: "storyboard", target: "storyboard" }),
+      connectNodes(storyboardConfirm, audio, { source: "confirmed", target: "approval" }),
+      connectNodes(characters, assetConfirm, { source: "characters", target: "artifact" }),
+      connectNodes(scenes, assetConfirm, { source: "scenes", target: "artifact" }),
+      connectNodes(storyboard, shotBatch, { source: "storyboard", target: "storyboard" }),
+      connectNodes(assetConfirm, shotBatch, { source: "confirmed", target: "assets" }),
+      connectNodes(input, shotBatch, { source: "params", target: "form" }),
+      connectNodes(shotBatch, keyframe, { source: "batch", target: "batch" }),
+      connectNodes(storyboard, keyframe, { source: "storyboard", target: "storyboard" }),
+      connectNodes(characters, keyframe, { source: "characters", target: "characters" }),
+      connectNodes(scenes, keyframe, { source: "scenes", target: "scenes" }),
+      connectNodes(keyframe, clipVideo, { source: "keyframes", target: "keyframes" }),
+      connectNodes(storyboard, clipVideo, { source: "storyboard", target: "storyboard" }),
+      connectNodes(characters, clipVideo, { source: "characters", target: "characters" }),
+      connectNodes(scenes, clipVideo, { source: "scenes", target: "scenes" }),
+      connectNodes(clipVideo, compose, { source: "clips", target: "clips" }),
+      connectNodes(audio, compose, { source: "audio", target: "audio" }),
+      connectNodes(storyboard, compose, { source: "storyboard", target: "storyboard" }),
       connectNodes(compose, outputNode, { source: "finalVideo", target: "finalVideo" }),
+      connectNodes(compose, outputNode, { source: "subtitle", target: "subtitle" }),
     ]),
   }
 }
@@ -1057,8 +1201,24 @@ function shouldReloadComicWorkflow(tool: ToolSummary | null | undefined, nodes: 
   if (!isComicDramaTool(tool)) return false
   if (nodes.length === 0) return true
   if (isLegacySimplifiedComicWorkflow(nodes)) return true
-  const opinionNodeIds = ["user-input-script", "user-input-storyboard", "user-input-scene", "user-input-bgm"]
-  return !opinionNodeIds.every((id) => nodes.some((node) => node.id === id))
+  const requiredNodeIds = [
+    "project-input",
+    "script-normalize",
+    "storyboard",
+    "confirm-storyboard",
+    "character-assets",
+    "scene-assets",
+    "confirm-assets",
+    "shot-batch",
+    "shot-keyframes",
+    "shot-videos",
+    "compose",
+    "output",
+  ]
+  const hasVersionMarker = nodes.some(
+    (node) => node.data.parameters?.templateVersion === COMIC_WORKFLOW_TEMPLATE_VERSION,
+  )
+  return !hasVersionMarker || !requiredNodeIds.every((id) => nodes.some((node) => node.id === id))
 }
 
 function normalizeComicFieldInputSlots(node: WFNode): WFNode {

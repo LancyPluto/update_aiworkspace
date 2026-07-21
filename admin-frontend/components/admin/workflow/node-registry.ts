@@ -16,6 +16,17 @@ import {
 } from "lucide-react"
 import type { AgentModelConfig } from "@/lib/api/types"
 
+export interface NodeParameterDefinition {
+  name: string
+  label: string
+  type: "string" | "number" | "boolean" | "select" | "model_selector"
+  default?: unknown
+  options?: Array<{ label: string; value: string }>
+  description?: string
+  min?: number
+  step?: number
+}
+
 export interface NodeTypeDefinition {
   type: string
   category: string
@@ -37,13 +48,7 @@ export interface NodeTypeDefinition {
   }>
   inputSlots: Array<{ name: string; type: string; label: string }>
   outputSlots: Array<{ name: string; type: string; label: string }>
-  parameters?: Array<{
-    name: string
-    label: string
-    type: "string" | "number" | "boolean" | "select" | "model_selector"
-    default?: unknown
-    options?: Array<{ label: string; value: string }>
-  }>
+  parameters?: NodeParameterDefinition[]
 }
 
 export const NODE_TYPES: NodeTypeDefinition[] = [
@@ -361,6 +366,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
     outputSlots: [{ name: "script", type: "json", label: "剧本/分集大纲" }],
     parameters: [
       { name: "modelConfigId", label: "使用模型", type: "model_selector", default: null },
+      { name: "handlerKey", label: "执行处理器", type: "string", default: "comic.script" },
       { name: "role", label: "节点角色", type: "string", default: "comic_script_planner" },
       { name: "progressStep", label: "进度文案", type: "string", default: "生成系列策划与剧本" },
     ],
@@ -380,6 +386,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
     outputSlots: [{ name: "storyboard", type: "json", label: "分镜表" }],
     parameters: [
       { name: "modelConfigId", label: "使用模型", type: "model_selector", default: null },
+      { name: "handlerKey", label: "执行处理器", type: "string", default: "comic.storyboard" },
       { name: "role", label: "节点角色", type: "string", default: "comic_storyboard" },
       { name: "progressStep", label: "进度文案", type: "string", default: "生成分镜表与镜头 Prompt" },
     ],
@@ -399,6 +406,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
     outputSlots: [{ name: "characters", type: "image", label: "角色定妆图" }],
     parameters: [
       { name: "modelConfigId", label: "使用模型", type: "model_selector", default: null },
+      { name: "handlerKey", label: "执行处理器", type: "string", default: "comic.character_reference" },
       { name: "progressStep", label: "进度文案", type: "string", default: "生成角色定妆图" },
     ],
   },
@@ -417,6 +425,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
     outputSlots: [{ name: "scenes", type: "image", label: "场景设定图" }],
     parameters: [
       { name: "modelConfigId", label: "使用模型", type: "model_selector", default: null },
+      { name: "handlerKey", label: "执行处理器", type: "string", default: "comic.scene_reference" },
       { name: "progressStep", label: "进度文案", type: "string", default: "生成场景设定图" },
     ],
   },
@@ -439,6 +448,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
     outputSlots: [{ name: "keyframe", type: "image", label: "首/尾关键帧" }],
     parameters: [
       { name: "modelConfigId", label: "使用模型", type: "model_selector", default: null },
+      { name: "handlerKey", label: "执行处理器", type: "string", default: "comic.shot_keyframe" },
       { name: "progressStep", label: "进度文案", type: "string", default: "生成每镜首/尾关键帧" },
     ],
   },
@@ -455,7 +465,10 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
     defaultData: { kind: "condition", iconName: "git-branch" },
     inputSlots: [{ name: "keyframe", type: "image", label: "关键帧" }],
     outputSlots: [{ name: "next", type: "any", label: "通过/重生" }],
-    parameters: [{ name: "revisionField", label: "重生字段", type: "string", default: "frameQcFeedback" }],
+    parameters: [
+      { name: "handlerKey", label: "执行处理器", type: "string", default: "comic.frame_qc" },
+      { name: "revisionField", label: "重生字段", type: "string", default: "frameQcFeedback" },
+    ],
   },
   {
     type: "image_to_video",
@@ -475,6 +488,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
     outputSlots: [{ name: "clip", type: "video", label: "视频片段" }],
     parameters: [
       { name: "modelConfigId", label: "使用模型", type: "model_selector", default: null },
+      { name: "handlerKey", label: "执行处理器", type: "string", default: "comic.shot_video" },
       { name: "progressStep", label: "进度文案", type: "string", default: "逐镜图生视频" },
     ],
   },
@@ -491,7 +505,10 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
     defaultData: { kind: "condition", iconName: "git-branch" },
     inputSlots: [{ name: "clip", type: "video", label: "视频片段" }],
     outputSlots: [{ name: "next", type: "any", label: "通过/重试" }],
-    parameters: [{ name: "revisionField", label: "重试字段", type: "string", default: "clipQcFeedback" }],
+    parameters: [
+      { name: "handlerKey", label: "执行处理器", type: "string", default: "comic.clip_qc" },
+      { name: "revisionField", label: "重试字段", type: "string", default: "clipQcFeedback" },
+    ],
   },
   {
     type: "music_sfx",
@@ -508,6 +525,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
     outputSlots: [{ name: "audio", type: "audio", label: "BGM/音效" }],
     parameters: [
       { name: "modelConfigId", label: "使用模型", type: "model_selector", default: null },
+      { name: "handlerKey", label: "执行处理器", type: "string", default: "comic.audio_plan" },
       { name: "progressStep", label: "进度文案", type: "string", default: "生成 BGM 与音效" },
     ],
   },

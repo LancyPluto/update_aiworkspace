@@ -12,6 +12,8 @@ public record PricingMarginUpsertRequest(
         Integer minCredits,
         Integer imageEstimateInputTokens,
         Integer imageEstimateOutputTokens,
+        Integer tokenEstimateInputTokens,
+        Integer tokenEstimateOutputTokens,
         Boolean enabled,
         String remark
 ) {

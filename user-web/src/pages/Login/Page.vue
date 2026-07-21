@@ -39,6 +39,20 @@
               <button type="button" class="code-btn" :disabled="codeSending" @click="handleSendCode('login')">{{ codeBtnText }}</button>
             </div>
           </div>
+          <div class="input-group invite-code-group">
+            <input
+              v-model="inviteCode"
+              type="text"
+              class="input-field pill-field"
+              placeholder="邀请码（可选）"
+              aria-label="邀请码（可选）"
+              maxlength="64"
+              autocomplete="off"
+              autocapitalize="characters"
+              spellcheck="false"
+            />
+            <p class="invite-code-hint">仅新用户注册时生效</p>
+          </div>
           <p class="agreement-text">
             注册登录即代表已阅读并同意我们的
             <RouterLink to="/legal/privacy">隐私政策</RouterLink>
@@ -84,6 +98,20 @@
               <input type="text" class="input-field" v-model="registerCode" placeholder="请输入验证码" aria-label="注册验证码" maxlength="6" inputmode="numeric" />
               <button type="button" class="code-btn" :disabled="codeSending" @click="handleSendCode('register')">{{ codeBtnText }}</button>
             </div>
+          </div>
+          <div class="input-group invite-code-group">
+            <input
+              v-model="inviteCode"
+              type="text"
+              class="input-field pill-field"
+              placeholder="邀请码（可选）"
+              aria-label="邀请码（可选）"
+              maxlength="64"
+              autocomplete="off"
+              autocapitalize="characters"
+              spellcheck="false"
+            />
+            <p class="invite-code-hint">仅新用户注册时生效</p>
           </div>
           <p class="agreement-text">
             注册即代表已阅读并同意我们的
@@ -208,10 +236,9 @@
   const codeCountdown = ref(0);
   let countdownTimer = null;
 
-  const inviteCode = computed(() => {
-    const raw = route.query.invite;
-    return typeof raw === 'string' && raw.trim() ? raw.trim() : undefined;
-  });
+  const rawInviteCode = route.query.invite;
+  const inviteCode = ref(typeof rawInviteCode === 'string' ? rawInviteCode.trim() : '');
+  const submittedInviteCode = computed(() => inviteCode.value.trim() || undefined);
 
   const loginTitle = computed(() => {
     if (currentMode.value === 'register') return '';
@@ -445,7 +472,7 @@
       if (currentMode.value === 'smsLogin') {
         const phoneNum = validatePhone(phone.value);
         if (!/^\d{6}$/.test(smsCode.value)) throw new Error('请输入 6 位短信验证码');
-        await auth.smsLogin({ phone: phoneNum, code: smsCode.value.trim(), inviteCode: inviteCode.value });
+        await auth.smsLogin({ phone: phoneNum, code: smsCode.value.trim(), inviteCode: submittedInviteCode.value });
         await enterAfterLogin();
         return;
       }
@@ -458,7 +485,7 @@
           phone: phoneNum,
           code: registerCode.value.trim(),
           password: registerPassword.value,
-          inviteCode: inviteCode.value,
+          inviteCode: submittedInviteCode.value,
         });
         await enterAfterLogin();
         return;
@@ -497,7 +524,7 @@
       router.replace(resolvePostLoginRedirect());
       return;
     }
-    if (inviteCode.value) {
+    if (submittedInviteCode.value) {
       loginModalVisible.value = true;
       currentMode.value = 'register';
     }
@@ -561,6 +588,8 @@
 .login-container {
   width: 100%;
   max-width: 400px;
+  max-height: calc(100vh - 2.5rem);
+  max-height: calc(100dvh - 2.5rem);
   margin: 1.25rem;
   background:
     radial-gradient(circle at 82% 0%, rgb(var(--brand-primary-rgb) / 0.14), transparent 42%),
@@ -571,7 +600,9 @@
     0 24px 80px rgb(0 0 0 / 0.55),
     0 0 0 1px rgb(255 255 255 / 0.04) inset,
     0 12px 40px var(--brand-glow);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   color: var(--foreground);
 }
 .login-container.compact-login .login-card {
@@ -711,6 +742,16 @@
 .code-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.invite-code-group .input-field {
+  min-width: 0;
+}
+.invite-code-hint {
+  margin: 0.45rem 1rem 0;
+  color: rgb(255 255 255 / 0.4);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 .agreement-text {
   margin: 0.25rem 0 1.375rem;

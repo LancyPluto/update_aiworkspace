@@ -8,6 +8,8 @@ public record PricingPolicySnapshot(
         int minCredits,
         int imageEstimateInputTokens,
         int imageEstimateOutputTokens,
+        int tokenEstimateInputTokens,
+        int tokenEstimateOutputTokens,
         List<PricingRuleSnapshot> rules
 ) {
 }

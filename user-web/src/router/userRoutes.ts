@@ -29,6 +29,12 @@ export const userRoutes = {
   workflowRun(taskId: string | number) {
     return { name: "WorkflowRun", params: { taskId: String(taskId) } }
   },
+  get comicProjects() {
+    return { name: "ComicProjects" }
+  },
+  comicProject(projectId: string | number) {
+    return { name: "ComicProjectWorkspace", params: { projectId: String(projectId) } }
+  },
   toolDetail(id: string) {
     return { name: "ToolDetail", params: { id } }
   },
@@ -57,7 +63,7 @@ export const userRoutes = {
     return { name: "Billing" }
   },
   get referral() {
-    return { name: "Referral" }
+    return { name: "Home", query: { dialog: "referral" } }
   },
   taskStatus(taskId: string) {
     return { name: "TaskStatus", params: { taskId } }

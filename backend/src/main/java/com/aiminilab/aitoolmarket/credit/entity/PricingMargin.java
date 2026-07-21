@@ -20,6 +20,8 @@ public class PricingMargin {
     private Integer minCredits;
     private Integer imageEstimateInputTokens;
     private Integer imageEstimateOutputTokens;
+    private Integer tokenEstimateInputTokens;
+    private Integer tokenEstimateOutputTokens;
     private Boolean enabled;
     private String remark;
     private LocalDateTime createdAt;
@@ -39,6 +41,10 @@ public class PricingMargin {
     public void setImageEstimateInputTokens(Integer imageEstimateInputTokens) { this.imageEstimateInputTokens = imageEstimateInputTokens; }
     public Integer getImageEstimateOutputTokens() { return imageEstimateOutputTokens; }
     public void setImageEstimateOutputTokens(Integer imageEstimateOutputTokens) { this.imageEstimateOutputTokens = imageEstimateOutputTokens; }
+    public Integer getTokenEstimateInputTokens() { return tokenEstimateInputTokens; }
+    public void setTokenEstimateInputTokens(Integer tokenEstimateInputTokens) { this.tokenEstimateInputTokens = tokenEstimateInputTokens; }
+    public Integer getTokenEstimateOutputTokens() { return tokenEstimateOutputTokens; }
+    public void setTokenEstimateOutputTokens(Integer tokenEstimateOutputTokens) { this.tokenEstimateOutputTokens = tokenEstimateOutputTokens; }
     public Boolean getEnabled() { return enabled; }
     public void setEnabled(Boolean enabled) { this.enabled = enabled; }
     public String getRemark() { return remark; }

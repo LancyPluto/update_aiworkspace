@@ -10,6 +10,14 @@ from urllib.parse import urlparse
 
 import requests
 
+from client.provider_error import (
+    DELIVERY_NOT_SENT,
+    RETRY_ACCOUNT,
+    ProviderCallError,
+    rejected_http_metadata,
+    request_was_not_sent,
+    response_provider_error_code,
+)
 from utils.outbound_http import OutboundRequestsClient
 from utils.input_image import InputImageError, decode_reference_image_data_url
 from volcengine_model import resolve_volcengine_images_paths
@@ -28,7 +36,7 @@ from requests.exceptions import (
 LOGGER = logging.getLogger(__name__)
 
 
-class OpenAIImagesError(RuntimeError):
+class OpenAIImagesError(ProviderCallError):
     pass
 
 
@@ -38,6 +46,14 @@ class OpenAIImagesTimeoutError(OpenAIImagesError):
 
 class OpenAIImagesRequestNotSentError(OpenAIImagesError):
     """The connection was not established, so the provider did not receive the request."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            message,
+            delivery_state=DELIVERY_NOT_SENT,
+            retry_scope=RETRY_ACCOUNT,
+            failure_stage="BEFORE_PROVIDER",
+        )
 
 
 class OpenAIImagesClient:
@@ -484,7 +500,8 @@ class OpenAIImagesClient:
                 OpenAI=OpenAI,
             )
         except APIConnectionError as exc:
-            raise OpenAIImagesError(
+            error_type = OpenAIImagesRequestNotSentError if request_was_not_sent(exc) else OpenAIImagesError
+            raise error_type(
                 "openai images SSL connection failed before an HTTP response was received. "
                 "Check gateway URL, proxy/VPN, and local TLS interception. "
                 f"detail={exc}"
@@ -545,7 +562,8 @@ class OpenAIImagesClient:
                 except APITimeoutError as exc:
                     raise OpenAIImagesTimeoutError(f"openai images edit timed out: {exc}") from exc
                 except APIConnectionError as exc:
-                    last_error = OpenAIImagesError(
+                    error_type = OpenAIImagesRequestNotSentError if request_was_not_sent(exc) else OpenAIImagesError
+                    last_error = error_type(
                         "openai images connection failed without a provider response; "
                         "not retrying this non-idempotent edit request. "
                         f"detail={exc}"
@@ -554,7 +572,8 @@ class OpenAIImagesClient:
                 except APIStatusError as exc:
                     body = exc.message or str(exc)
                     last_error = OpenAIImagesError(
-                        _format_openai_images_http_error(exc.status_code, body, model_name)
+                        _format_openai_images_http_error(exc.status_code, body, model_name),
+                        **rejected_http_metadata(exc.status_code),
                     )
                     if _is_missing_model_error(body) and index < len(candidates) - 1:
                         LOGGER.warning(
@@ -724,16 +743,32 @@ class OpenAIImagesClient:
                 f"connectTimeout={self.timeout[0]}s; readTimeout={self.timeout[1]}s; "
                 f"diagnostics={diagnostics}"
             ) from exc
-        except SSLError:
-            raise
+        except SSLError as exc:
+            raise OpenAIImagesRequestNotSentError(
+                "openai images TLS handshake failed before request was sent"
+            ) from exc
         except ProxyError as exc:
+            if request_was_not_sent(exc):
+                raise OpenAIImagesRequestNotSentError(
+                    "openai images proxy connection failed before request was sent"
+                ) from exc
             raise OpenAIImagesError(
                 "openai images proxy connection failed. "
                 "The request is using a configured proxy or extraAuthJson trustEnv=true; "
                 "disable trustEnv or configure proxyUrl explicitly. "
                 f"detail={exc}"
             ) from exc
-        except (RequestsConnectionError, ChunkedEncodingError) as exc:
+        except RequestsConnectionError as exc:
+            if request_was_not_sent(exc):
+                raise OpenAIImagesRequestNotSentError(
+                    "openai images connection failed before request was sent"
+                ) from exc
+            raise OpenAIImagesError(
+                "openai images connection failed after the request may have been sent; "
+                "not retrying this non-idempotent image request to avoid duplicate upstream billing. "
+                f"detail={exc}"
+            ) from exc
+        except ChunkedEncodingError as exc:
             raise OpenAIImagesError(
                 "openai images connection failed after the request may have been sent; "
                 "not retrying this non-idempotent image request to avoid duplicate upstream billing. "
@@ -745,12 +780,13 @@ class OpenAIImagesClient:
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
-            if 500 <= response.status_code < 600:
-                raise OpenAIImagesError(
-                    _format_openai_images_http_error(response.status_code, response.text, form_fields.get("model"))
-                ) from exc
             raise OpenAIImagesError(
-                _format_openai_images_http_error(response.status_code, response.text, form_fields.get("model"))
+                _format_openai_images_http_error(response.status_code, response.text, form_fields.get("model")),
+                **rejected_http_metadata(
+                    response.status_code,
+                    _retry_after_seconds(getattr(response, "headers", {}).get("Retry-After")),
+                    response_provider_error_code(response),
+                ),
             ) from exc
 
         try:
@@ -809,16 +845,32 @@ class OpenAIImagesClient:
                 f"connectTimeout={self.timeout[0]}s; readTimeout={self.timeout[1]}s; "
                 f"diagnostics={diagnostics}"
             ) from exc
-        except SSLError:
-            raise
+        except SSLError as exc:
+            raise OpenAIImagesRequestNotSentError(
+                "openai images TLS handshake failed before request was sent"
+            ) from exc
         except ProxyError as exc:
+            if request_was_not_sent(exc):
+                raise OpenAIImagesRequestNotSentError(
+                    "openai images proxy connection failed before request was sent"
+                ) from exc
             raise OpenAIImagesError(
                 "openai images proxy connection failed. "
                 "The request is using a configured proxy or extraAuthJson trustEnv=true; "
                 "disable trustEnv or configure proxyUrl explicitly. "
                 f"detail={exc}"
             ) from exc
-        except (RequestsConnectionError, ChunkedEncodingError) as exc:
+        except RequestsConnectionError as exc:
+            if request_was_not_sent(exc):
+                raise OpenAIImagesRequestNotSentError(
+                    "openai images connection failed before request was sent"
+                ) from exc
+            raise OpenAIImagesError(
+                "openai images connection failed after the request may have been sent; "
+                "not retrying this non-idempotent image request to avoid duplicate upstream billing. "
+                f"detail={exc}"
+            ) from exc
+        except ChunkedEncodingError as exc:
             raise OpenAIImagesError(
                 "openai images connection failed after the request may have been sent; "
                 "not retrying this non-idempotent image request to avoid duplicate upstream billing. "
@@ -830,12 +882,13 @@ class OpenAIImagesClient:
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
-            if 500 <= response.status_code < 600:
-                raise OpenAIImagesError(
-                    f"openai images request failed: status={response.status_code}, body={response.text}"
-                ) from exc
             raise OpenAIImagesError(
-                f"openai images request failed: status={response.status_code}, body={response.text}"
+                f"openai images request failed: status={response.status_code}, body={response.text}",
+                **rejected_http_metadata(
+                    response.status_code,
+                    _retry_after_seconds(getattr(response, "headers", {}).get("Retry-After")),
+                    response_provider_error_code(response),
+                ),
             ) from exc
 
         try:
@@ -1228,6 +1281,13 @@ def _timeout_kind(exc: Timeout) -> str:
     if isinstance(exc, ReadTimeout):
         return "read"
     return "timeout"
+
+
+def _retry_after_seconds(value: Any) -> int | None:
+    try:
+        return max(0, int(float(str(value).strip())))
+    except (TypeError, ValueError):
+        return None
 
 
 def _resolve_host_addresses(host: str, port: int) -> str:

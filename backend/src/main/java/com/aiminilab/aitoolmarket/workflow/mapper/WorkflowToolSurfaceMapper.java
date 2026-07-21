@@ -25,7 +25,6 @@ public interface WorkflowToolSurfaceMapper {
             FROM ai_tools t
             JOIN tool_workflows w
               ON w.tool_id = t.id
-             AND w.execution_enabled = 1
              AND w.published_version_id IS NOT NULL
             JOIN tool_workflow_versions v
               ON v.id = w.published_version_id
@@ -34,8 +33,6 @@ public interface WorkflowToolSurfaceMapper {
             WHERE t.status = 'ONLINE'
               AND COALESCE(t.is_deleted, 0) = 0
               AND t.execution_mode = 'WORKFLOW'
-              AND t.billing_mode = 'WORKFLOW_STEP'
-              AND t.agent_surface_enabled = 1
               AND w.id = (
                   SELECT cw.id
                   FROM tool_workflows cw
@@ -43,7 +40,6 @@ public interface WorkflowToolSurfaceMapper {
                     ON cv.id = cw.published_version_id
                    AND cv.workflow_id = cw.id
                   WHERE cw.tool_id = t.id
-                    AND cw.execution_enabled = 1
                     AND cw.published_version_id IS NOT NULL
                   ORDER BY CASE WHEN cw.workflow_name = 'default' THEN 0 ELSE 1 END, cw.id DESC
                   LIMIT 1
@@ -77,7 +73,6 @@ public interface WorkflowToolSurfaceMapper {
             FROM ai_tools t
             JOIN tool_workflows w
               ON w.tool_id = t.id
-             AND w.execution_enabled = 1
              AND w.published_version_id IS NOT NULL
             JOIN tool_workflow_versions v
               ON v.id = w.published_version_id
@@ -86,8 +81,6 @@ public interface WorkflowToolSurfaceMapper {
             WHERE t.status = 'ONLINE'
               AND COALESCE(t.is_deleted, 0) = 0
               AND t.execution_mode = 'WORKFLOW'
-              AND t.billing_mode = 'WORKFLOW_STEP'
-              AND t.agent_surface_enabled = 1
               AND w.id = (
                   SELECT cw.id
                   FROM tool_workflows cw
@@ -95,7 +88,6 @@ public interface WorkflowToolSurfaceMapper {
                     ON cv.id = cw.published_version_id
                    AND cv.workflow_id = cw.id
                   WHERE cw.tool_id = t.id
-                    AND cw.execution_enabled = 1
                     AND cw.published_version_id IS NOT NULL
                   ORDER BY CASE WHEN cw.workflow_name = 'default' THEN 0 ELSE 1 END, cw.id DESC
                   LIMIT 1
@@ -135,7 +127,6 @@ public interface WorkflowToolSurfaceMapper {
             FROM ai_tools t
             JOIN tool_workflows w
               ON w.tool_id = t.id
-             AND w.execution_enabled = 1
              AND w.published_version_id IS NOT NULL
             JOIN tool_workflow_versions v
               ON v.id = w.published_version_id
@@ -145,8 +136,6 @@ public interface WorkflowToolSurfaceMapper {
               AND t.status = 'ONLINE'
               AND COALESCE(t.is_deleted, 0) = 0
               AND t.execution_mode = 'WORKFLOW'
-              AND t.billing_mode = 'WORKFLOW_STEP'
-              AND t.agent_surface_enabled = 1
               AND w.id = (
                   SELECT cw.id
                   FROM tool_workflows cw
@@ -154,7 +143,6 @@ public interface WorkflowToolSurfaceMapper {
                     ON cv.id = cw.published_version_id
                    AND cv.workflow_id = cw.id
                   WHERE cw.tool_id = t.id
-                    AND cw.execution_enabled = 1
                     AND cw.published_version_id IS NOT NULL
                   ORDER BY CASE WHEN cw.workflow_name = 'default' THEN 0 ELSE 1 END, cw.id DESC
                   LIMIT 1

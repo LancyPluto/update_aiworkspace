@@ -1,18 +1,25 @@
 import json
-import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
 import requests
 from requests.exceptions import ConnectionError as RequestsConnectionError
-from requests.exceptions import SSLError
+from requests.exceptions import ConnectTimeout, ReadTimeout, SSLError
 
+from client.provider_error import (
+    DELIVERY_NOT_SENT,
+    RETRY_ACCOUNT,
+    ProviderCallError,
+    rejected_http_metadata,
+    request_was_not_sent,
+    response_provider_error_code,
+)
 from config import settings
 from volcengine_model import normalize_volcengine_openai_base_url, resolve_volcengine_model_name
 
 
-class ModelClientError(RuntimeError):
+class ModelClientError(ProviderCallError):
     pass
 
 
@@ -22,6 +29,16 @@ class ModelTimeoutError(ModelClientError):
 
 class ModelOutputEmptyError(ModelClientError):
     pass
+
+
+class ModelRequestNotSentError(ModelClientError):
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            message,
+            delivery_state=DELIVERY_NOT_SENT,
+            retry_scope=RETRY_ACCOUNT,
+            failure_stage="BEFORE_PROVIDER",
+        )
 
 
 @dataclass(frozen=True)
@@ -143,7 +160,12 @@ class ModelClient:
             response.raise_for_status()
         except requests.HTTPError as exc:
             raise ModelClientError(
-                f"model request failed: status={response.status_code}, body={response.text}"
+                f"model request failed: status={response.status_code}, body={response.text}",
+                **rejected_http_metadata(
+                    response.status_code,
+                    _retry_after_seconds(getattr(response, "headers", {}).get("Retry-After")),
+                    response_provider_error_code(response),
+                ),
             ) from exc
 
         try:
@@ -223,7 +245,12 @@ class ModelClient:
             response.raise_for_status()
         except requests.HTTPError as exc:
             raise ModelClientError(
-                f"model request failed: status={response.status_code}, body={response.text}"
+                f"model request failed: status={response.status_code}, body={response.text}",
+                **rejected_http_metadata(
+                    response.status_code,
+                    _retry_after_seconds(getattr(response, "headers", {}).get("Retry-After")),
+                    response_provider_error_code(response),
+                ),
             ) from exc
 
         for raw_line in response.iter_lines(decode_unicode=True):
@@ -275,7 +302,12 @@ class ModelClient:
             response.raise_for_status()
         except requests.HTTPError as exc:
             raise ModelClientError(
-                f"model request failed: status={response.status_code}, body={response.text}"
+                f"model request failed: status={response.status_code}, body={response.text}",
+                **rejected_http_metadata(
+                    response.status_code,
+                    _retry_after_seconds(getattr(response, "headers", {}).get("Retry-After")),
+                    response_provider_error_code(response),
+                ),
             ) from exc
 
         try:
@@ -303,30 +335,30 @@ class ModelClient:
         stream: bool = False,
     ) -> requests.Response:
         request_headers = {**headers, "Connection": "close"}
-        last_timeout: requests.Timeout | None = None
-        last_transient: Exception | None = None
-        max_attempts = 4
-        for attempt in range(max_attempts):
-            try:
-                return requests.post(
-                    url,
-                    headers=request_headers,
-                    json=payload,
-                    timeout=timeout,
-                    stream=stream,
-                )
-            except requests.Timeout as exc:
-                last_timeout = exc
-            except (SSLError, RequestsConnectionError) as exc:
-                last_transient = exc
-                if attempt < max_attempts - 1:
-                    time.sleep(0.5 * (attempt + 1))
-                    continue
-            except requests.RequestException as exc:
-                raise ModelClientError(f"model request failed: {exc}") from exc
-        if last_transient is not None:
-            raise ModelClientError(f"model request failed: {last_transient}") from last_transient
-        raise ModelTimeoutError("model request timed out") from last_timeout
+        try:
+            return requests.post(
+                url,
+                headers=request_headers,
+                json=payload,
+                timeout=timeout,
+                stream=stream,
+            )
+        except ConnectTimeout as exc:
+            raise ModelRequestNotSentError("model connect timed out before request was sent") from exc
+        except ReadTimeout as exc:
+            raise ModelTimeoutError("model response timed out after request may have been sent") from exc
+        except SSLError as exc:
+            raise ModelRequestNotSentError("model TLS handshake failed before request was sent") from exc
+        except RequestsConnectionError as exc:
+            if request_was_not_sent(exc):
+                raise ModelRequestNotSentError(f"model connection failed before request was sent: {exc}") from exc
+            raise ModelClientError(
+                f"model connection failed after request may have been sent: {exc}"
+            ) from exc
+        except requests.Timeout as exc:
+            raise ModelTimeoutError("model request timed out after delivery became unknown") from exc
+        except requests.RequestException as exc:
+            raise ModelClientError(f"model request failed after delivery became unknown: {exc}") from exc
 
     @staticmethod
     def _extract_content(payload: dict[str, Any]) -> str:
@@ -378,3 +410,8 @@ class ModelClient:
         if not text:
             return 0
         return max(1, len(text) // 4)
+def _retry_after_seconds(value: Any) -> int | None:
+    try:
+        return max(0, int(float(str(value).strip())))
+    except (TypeError, ValueError):
+        return None

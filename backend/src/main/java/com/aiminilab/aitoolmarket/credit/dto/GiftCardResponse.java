@@ -1,8 +1,10 @@
 package com.aiminilab.aitoolmarket.credit.dto;
 
 import com.aiminilab.aitoolmarket.credit.entity.GiftCard;
+import com.aiminilab.aitoolmarket.credit.support.MembershipTier;
 
 import java.time.LocalDateTime;
+import java.util.Locale;
 
 public record GiftCardResponse(
         Long id,
@@ -11,6 +13,8 @@ public record GiftCardResponse(
         Integer credits,
         String status,
         String cardTheme,
+        String cardType,
+        String requiredMemberTier,
         LocalDateTime createdAt,
         Long giftedFromUserId,
         LocalDateTime giftedAt,
@@ -24,6 +28,10 @@ public record GiftCardResponse(
                 card.getCredits(),
                 card.getStatus(),
                 cardTheme,
+                card.getCardType() == null || card.getCardType().isBlank()
+                        ? "CREDIT"
+                        : card.getCardType().trim().toUpperCase(Locale.ROOT),
+                MembershipTier.fromCode(card.getRequiredMemberTier()).map(MembershipTier::code).orElse(null),
                 card.getCreatedAt(),
                 card.getGiftedFromUserId(),
                 card.getGiftedAt(),

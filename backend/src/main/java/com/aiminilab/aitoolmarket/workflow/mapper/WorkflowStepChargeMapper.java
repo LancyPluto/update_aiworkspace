@@ -30,13 +30,23 @@ public interface WorkflowStepChargeMapper extends BaseMapper<WorkflowStepCharge>
 
     @Update("""
             UPDATE workflow_step_charges
+            SET status = 'AWAITING_FUNDS',
+                settlement_payload_json = #{settlementPayloadJson},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{chargeId} AND status = 'RESERVED'
+            """)
+    int markAwaitingFunds(@Param("chargeId") Long chargeId,
+                          @Param("settlementPayloadJson") String settlementPayloadJson);
+
+    @Update("""
+            UPDATE workflow_step_charges
             SET status = 'CAPTURED',
                 charged_credits = #{chargedCredits},
                 provider_cost = #{providerCost},
                 provider_cost_currency = #{providerCostCurrency},
                 billing_usage_id = #{billingUsageId},
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = #{chargeId} AND status = 'RESERVED'
+            WHERE id = #{chargeId} AND status IN ('RESERVED', 'AWAITING_FUNDS')
             """)
     int markCaptured(@Param("chargeId") Long chargeId,
                      @Param("chargedCredits") int chargedCredits,
@@ -72,7 +82,7 @@ public interface WorkflowStepChargeMapper extends BaseMapper<WorkflowStepCharge>
                 END,
                 billing_usage_id = #{billingUsageId},
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = #{chargeId} AND status = 'RESERVED'
+            WHERE id = #{chargeId} AND status IN ('RESERVED', 'AWAITING_FUNDS')
             """)
     int markReleased(@Param("chargeId") Long chargeId,
                      @Param("providerCost") java.math.BigDecimal providerCost,
@@ -137,7 +147,7 @@ public interface WorkflowStepChargeMapper extends BaseMapper<WorkflowStepCharge>
                 SELECT SUM(reserved_charge.reserved_credits)
                 FROM workflow_step_charges reserved_charge
                 WHERE reserved_charge.user_id = #{userId}
-                  AND reserved_charge.status = 'RESERVED'
+                  AND reserved_charge.status IN ('RESERVED', 'AWAITING_FUNDS')
               ), 0)
             """)
     long sumCommittedCreditsForUserBetween(@Param("userId") Long userId,
@@ -212,7 +222,7 @@ public interface WorkflowStepChargeMapper extends BaseMapper<WorkflowStepCharge>
     @Select("""
             SELECT COUNT(*)
             FROM workflow_step_charges
-            WHERE run_id = #{runId} AND status = 'RESERVED'
+            WHERE run_id = #{runId} AND status IN ('RESERVED', 'AWAITING_FUNDS')
             """)
     int countReserved(@Param("runId") Long runId);
 
@@ -239,10 +249,16 @@ public interface WorkflowStepChargeMapper extends BaseMapper<WorkflowStepCharge>
             LEFT JOIN workflow_step_attempts attempt_log ON attempt_log.id = charge_log.attempt_id
             WHERE charge_log.run_id = #{runId}
               AND (
-                (charge_log.status = 'RESERVED' AND (
+                (charge_log.status IN ('RESERVED', 'AWAITING_FUNDS') AND (
                   charge_log.billing_usage_id IS NOT NULL
                   OR charge_log.charged_credits <> 0
                   OR charge_log.provider_cost IS NOT NULL
+                  OR (charge_log.status = 'RESERVED' AND charge_log.settlement_payload_json IS NOT NULL)
+                  OR (charge_log.status = 'AWAITING_FUNDS' AND (
+                    charge_log.settlement_payload_json IS NULL
+                    OR TRIM(charge_log.settlement_payload_json) = ''
+                    OR COALESCE(attempt_log.status, '') <> 'SUCCESS'
+                  ))
                   OR EXISTS (
                     SELECT 1 FROM billing_usage_logs unexpected_usage
                     WHERE unexpected_usage.idempotency_key = CONCAT(charge_log.idempotency_key, ':usage')
@@ -304,12 +320,19 @@ public interface WorkflowStepChargeMapper extends BaseMapper<WorkflowStepCharge>
     int countInvalidUsageBindings(@Param("runId") Long runId);
 
     @Select("""
-            SELECT COALESCE(SUM(credit_log.amount), 0)
+            SELECT COALESCE(SUM(
+              COALESCE((
+                SELECT capture_log.amount
+                FROM credit_logs capture_log
+                WHERE capture_log.idempotency_key = CONCAT(charge_log.idempotency_key, ':capture')
+              ), 0)
+              + COALESCE((
+                SELECT shortfall_log.amount
+                FROM credit_logs shortfall_log
+                WHERE shortfall_log.idempotency_key = CONCAT(charge_log.idempotency_key, ':shortfall')
+              ), 0)
+            ), 0)
             FROM workflow_step_charges charge_log
-            JOIN credit_logs credit_log
-              ON credit_log.source_type = 'WORKFLOW_STEP'
-             AND credit_log.source_ref = charge_log.step_id
-             AND credit_log.idempotency_key = CONCAT(charge_log.idempotency_key, ':capture')
             WHERE charge_log.run_id = #{runId}
             """)
     int sumCreditDeductions(@Param("runId") Long runId);
@@ -337,11 +360,42 @@ public interface WorkflowStepChargeMapper extends BaseMapper<WorkflowStepCharge>
                     AND capture_log.source_type = 'WORKFLOW_STEP'
                     AND capture_log.source_ref = charge_log.step_id
                     AND capture_log.log_type = 'DEDUCT'
-                    AND capture_log.amount = charge_log.charged_credits
+                    AND capture_log.amount = LEAST(charge_log.charged_credits, charge_log.reserved_credits)
                     AND capture_log.frozen_amount = -charge_log.reserved_credits
                     AND capture_log.frozen_after - capture_log.frozen_before = -charge_log.reserved_credits
-                    AND capture_log.balance_before - capture_log.balance_after = charge_log.charged_credits
+                    AND capture_log.balance_before - capture_log.balance_after = LEAST(charge_log.charged_credits, charge_log.reserved_credits)
                 ))
+                OR (charge_log.status = 'CAPTURED'
+                    AND charge_log.charged_credits > charge_log.reserved_credits
+                    AND NOT EXISTS (
+                      SELECT 1 FROM credit_logs shortfall_log
+                      WHERE shortfall_log.idempotency_key = CONCAT(charge_log.idempotency_key, ':shortfall')
+                        AND shortfall_log.user_id = charge_log.user_id
+                        AND shortfall_log.source_type = 'WORKFLOW_STEP'
+                        AND shortfall_log.source_ref = charge_log.step_id
+                        AND shortfall_log.log_type = 'DEDUCT'
+                        AND shortfall_log.amount = charge_log.charged_credits - charge_log.reserved_credits
+                        AND shortfall_log.balance_before - shortfall_log.balance_after = shortfall_log.amount
+                        AND (
+                          (shortfall_log.frozen_amount = 0
+                           AND shortfall_log.frozen_before = shortfall_log.frozen_after)
+                          OR (
+                            shortfall_log.frozen_amount = -shortfall_log.amount
+                            AND shortfall_log.frozen_before - shortfall_log.frozen_after = shortfall_log.amount
+                            AND EXISTS (
+                              SELECT 1 FROM credit_logs shortfall_reserve_log
+                              WHERE shortfall_reserve_log.idempotency_key = CONCAT(charge_log.idempotency_key, ':shortfall-reserve')
+                                AND shortfall_reserve_log.user_id = charge_log.user_id
+                                AND shortfall_reserve_log.source_type = 'WORKFLOW_STEP'
+                                AND shortfall_reserve_log.source_ref = charge_log.step_id
+                                AND shortfall_reserve_log.log_type = 'FREEZE'
+                                AND shortfall_reserve_log.amount = 0
+                                AND shortfall_reserve_log.frozen_amount = shortfall_log.amount
+                                AND shortfall_reserve_log.frozen_after - shortfall_reserve_log.frozen_before = shortfall_log.amount
+                            )
+                          )
+                        )
+                    ))
                 OR (charge_log.status = 'RELEASED' AND NOT EXISTS (
                   SELECT 1 FROM credit_logs release_log
                   WHERE release_log.idempotency_key = CONCAT(charge_log.idempotency_key, ':release')
@@ -354,7 +408,7 @@ public interface WorkflowStepChargeMapper extends BaseMapper<WorkflowStepCharge>
                     AND release_log.frozen_after - release_log.frozen_before = -charge_log.reserved_credits
                     AND release_log.balance_before = release_log.balance_after
                 ))
-                OR charge_log.status NOT IN ('RESERVED', 'CAPTURED', 'RELEASED')
+                OR charge_log.status NOT IN ('RESERVED', 'AWAITING_FUNDS', 'CAPTURED', 'RELEASED')
               )
             """)
     int countInvalidCreditTransitions(@Param("runId") Long runId);

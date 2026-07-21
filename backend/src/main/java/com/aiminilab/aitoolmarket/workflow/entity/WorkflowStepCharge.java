@@ -24,6 +24,7 @@ public class WorkflowStepCharge {
     private String idempotencyKey;
     private Long creditLogId;
     private Long billingUsageId;
+    private String settlementPayloadJson;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -53,6 +54,8 @@ public class WorkflowStepCharge {
     public void setCreditLogId(Long creditLogId) { this.creditLogId = creditLogId; }
     public Long getBillingUsageId() { return billingUsageId; }
     public void setBillingUsageId(Long billingUsageId) { this.billingUsageId = billingUsageId; }
+    public String getSettlementPayloadJson() { return settlementPayloadJson; }
+    public void setSettlementPayloadJson(String settlementPayloadJson) { this.settlementPayloadJson = settlementPayloadJson; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

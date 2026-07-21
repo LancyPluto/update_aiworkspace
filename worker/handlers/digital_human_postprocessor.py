@@ -140,6 +140,26 @@ class DigitalHumanPostprocessor:
         self._validate_video_file(output)
         return output, self._publish_asset(output)
 
+    def concat_subtitles(
+        self,
+        *,
+        task_id: int,
+        video_paths: list[Path],
+        subtitle_texts: list[str],
+        output_name: str = "final-combined.srt",
+    ) -> tuple[Path, str]:
+        if not video_paths or len(video_paths) != len(subtitle_texts):
+            raise DigitalHumanPostprocessError("subtitle timeline does not match video segments")
+        timeline = [
+            (text, self._probe_duration(video_path) or 5.0)
+            for video_path, text in zip(video_paths, subtitle_texts, strict=True)
+        ]
+        task_dir = self.output_dir / "digital-human" / str(task_id)
+        task_dir.mkdir(parents=True, exist_ok=True)
+        output = task_dir / output_name
+        output.write_text(self._build_timeline_srt(timeline), encoding="utf-8")
+        return output, self._publish_asset(output)
+
     def _run_ffmpeg(
         self,
         ffmpeg_binary: str,
@@ -330,7 +350,8 @@ class DigitalHumanPostprocessor:
 
     @staticmethod
     def _validate_video_file(path: Path) -> None:
-        header = path.read_bytes()[:12]
+        with path.open("rb") as source:
+            header = source.read(12)
         if len(header) < 8 or header[4:8] != b"ftyp":
             raise DigitalHumanPostprocessError("downloaded file is not a valid mp4 video")
 
@@ -372,6 +393,39 @@ class DigitalHumanPostprocessor:
         return "\n".join(lines)
 
     @staticmethod
+    def _build_timeline_srt(segments: list[tuple[str, float]]) -> str:
+        lines: list[str] = []
+        timeline_offset = 0.0
+        cue_index = 1
+        for text, raw_duration in segments:
+            duration = max(float(raw_duration), 0.0)
+            clean_text = re.sub(r"\s+", " ", text or "").strip()
+            if clean_text:
+                chunks = DigitalHumanPostprocessor._chunk_text(clean_text)
+                weights = [max(len(re.sub(r"\s+", "", chunk)), 1) for chunk in chunks]
+                total_weight = max(sum(weights), 1)
+                local_cursor = 0.0
+                for chunk, weight in zip(chunks, weights, strict=True):
+                    start = local_cursor
+                    chunk_duration = duration * weight / total_weight
+                    end = min(duration, start + max(chunk_duration, 0.35))
+                    if end <= start:
+                        end = min(duration, start + 0.35)
+                    local_cursor = end
+                    lines.extend(
+                        [
+                            str(cue_index),
+                            f"{DigitalHumanPostprocessor._format_srt_time(timeline_offset + start)} --> "
+                            f"{DigitalHumanPostprocessor._format_srt_time(timeline_offset + end)}",
+                            chunk,
+                            "",
+                        ]
+                    )
+                    cue_index += 1
+            timeline_offset += duration
+        return "\n".join(lines)
+
+    @staticmethod
     def _chunk_text(text: str, max_chars: int = 28) -> list[str]:
         if len(text) <= max_chars:
             return [text]
@@ -402,5 +456,5 @@ class DigitalHumanPostprocessor:
         relative_key = file_path.relative_to(self.output_dir).as_posix()
         if asset_storage.is_oss:
             content_type = mimetypes.guess_type(file_path.name)[0]
-            return asset_storage.put_bytes(relative_key, file_path.read_bytes(), content_type)
+            return asset_storage.put_file(relative_key, file_path, content_type)
         return asset_storage.public_url(relative_key)

@@ -532,8 +532,16 @@ export interface ModelVendorAccount {
   balanceUpdatedAt?: string | null
   balanceErrorMessage?: string | null
   healthStatus: string
+  healthMessage?: string | null
+  healthCheckedAt?: string | null
   enabled: boolean
   modelCount: number
+  loadBalanceEnabled?: boolean | null
+  loadBalanceWeight?: number | null
+  inFlightCount?: number | null
+  circuitState?: string | null
+  circuitOpenUntil?: string | null
+  routingExclusionReason?: string | null
   proxyMode?: string | null
   proxyUrl?: string | null
   createdAt?: string | null
@@ -588,6 +596,11 @@ export interface ModelVendorAccountPayload {
   proxyUrl?: string
 }
 
+export interface ModelVendorAccountRoutingPayload {
+  loadBalanceEnabled: boolean
+  loadBalanceWeight: number
+}
+
 export interface ModelVendorPayload {
   vendorCode: string
   vendorLabel: string
@@ -632,6 +645,7 @@ export interface UnifiedApiModelItem {
   enabled: boolean
   agentEnabled?: boolean | null
   isDefault?: boolean | null
+  routingExclusionReason?: string | null
   healthStatus: string
 }
 
@@ -657,6 +671,8 @@ export interface UnifiedApiSummary {
   enabledModelCount: number
   lowBalanceCount: number
   unhealthyAccountCount: number
+  unhealthyModelCount?: number
+  warningAccountCount?: number
 }
 
 export interface UnifiedApiOverview {

@@ -14,6 +14,9 @@ public class AiTask {
     private Long userId;
     private Long toolId;
     private Long modelConfigId;
+    private Long selectedModelConfigId;
+    private Long selectedVendorAccountId;
+    private Long currentRouteAttemptId;
     @TableField(exist = false)
     private String modelConfigName;
     @TableField(exist = false)
@@ -90,6 +93,30 @@ public class AiTask {
 
     public void setModelConfigId(Long modelConfigId) {
         this.modelConfigId = modelConfigId;
+    }
+
+    public Long getSelectedModelConfigId() {
+        return selectedModelConfigId;
+    }
+
+    public void setSelectedModelConfigId(Long selectedModelConfigId) {
+        this.selectedModelConfigId = selectedModelConfigId;
+    }
+
+    public Long getSelectedVendorAccountId() {
+        return selectedVendorAccountId;
+    }
+
+    public void setSelectedVendorAccountId(Long selectedVendorAccountId) {
+        this.selectedVendorAccountId = selectedVendorAccountId;
+    }
+
+    public Long getCurrentRouteAttemptId() {
+        return currentRouteAttemptId;
+    }
+
+    public void setCurrentRouteAttemptId(Long currentRouteAttemptId) {
+        this.currentRouteAttemptId = currentRouteAttemptId;
     }
 
     public String getModelConfigName() {

@@ -26,6 +26,7 @@ public class PricingServiceImpl implements PricingService {
     private static final String BILLING_UNIT_PER_CALL = "PER_CALL";
     private static final String BILLING_UNIT_PER_SECOND = "PER_SECOND";
     private static final String BILLING_UNIT_IMAGE_TOKEN = "IMAGE_TOKEN";
+    private static final String BILLING_UNIT_TOKEN_PER_M = "TOKEN_PER_M";
 
     /** 1 credit = 0.01 CNY (single definition of the credit face value). */
     static final BigDecimal CREDIT_PRICE_CNY = new BigDecimal("0.01");
@@ -65,7 +66,8 @@ public class PricingServiceImpl implements PricingService {
                 .toList();
         return new PricingPolicySnapshot(
                 pricing.ratio, pricing.minCredits, pricing.imageEstimateInputTokens,
-                pricing.imageEstimateOutputTokens, rules
+                pricing.imageEstimateOutputTokens, pricing.tokenEstimateInputTokens,
+                pricing.tokenEstimateOutputTokens, rules
         );
     }
 
@@ -78,11 +80,13 @@ public class PricingServiceImpl implements PricingService {
         int fallback = Math.max(0, fallbackCredits);
         PricingPolicySnapshot effective = snapshot == null
                 ? new PricingPolicySnapshot(DEFAULT_MARKUP, 0,
-                IMAGE_INPUT_TOKEN_UPPER_ESTIMATE, IMAGE_OUTPUT_TOKEN_UPPER_ESTIMATE, List.of())
+                IMAGE_INPUT_TOKEN_UPPER_ESTIMATE, IMAGE_OUTPUT_TOKEN_UPPER_ESTIMATE,
+                0, 0, List.of())
                 : snapshot;
         ResolvedPricing pricing = new ResolvedPricing(
                 effective.markupRatio(), effective.minCredits(), effective.imageEstimateInputTokens(),
-                effective.imageEstimateOutputTokens()
+                effective.imageEstimateOutputTokens(), effective.tokenEstimateInputTokens(),
+                effective.tokenEstimateOutputTokens()
         );
         if (modelConfig == null) {
             return fallbackQuote(fallback, pricing);
@@ -218,7 +222,9 @@ public class PricingServiceImpl implements PricingService {
 
     private VendorCost computeVendorCost(AgentModelConfig modelConfig, JsonNode params, PricingUsage usage,
                                          ResolvedPricing pricing) {
-        String unit = modelConfig.getBillingUnit();
+        String unit = modelConfig.getBillingUnit() == null
+                ? ""
+                : modelConfig.getBillingUnit().trim().toUpperCase(java.util.Locale.ROOT);
         if ((BILLING_UNIT_PER_CALL.equals(unit) || BILLING_UNIT_PER_SECOND.equals(unit))
                 && modelConfig.getUnitPrice() != null) {
             int units = resolveUnits(unit, params, usage);
@@ -242,14 +248,28 @@ public class PricingServiceImpl implements PricingService {
                     ? VendorCost.derived(cost, "图片 token " + (usage.prompt() + usage.completion()))
                     : VendorCost.fallback();
         }
-        // TOKEN_PER_M and any other token-based unit.
-        if (usage != null && usage.hasTokens()) {
+        if (BILLING_UNIT_TOKEN_PER_M.equals(unit) && usage != null && usage.hasTokens()) {
             BigDecimal cost = tokenCost(modelConfig, usage.prompt(), usage.completion());
             return cost.compareTo(BigDecimal.ZERO) > 0
                     ? VendorCost.derived(cost, "token " + (usage.prompt() + usage.completion()))
                     : VendorCost.fallback();
         }
-        // Estimate with no usage for a token-priced model: fall back to the static tool estimate.
+        if (BILLING_UNIT_TOKEN_PER_M.equals(unit)
+                && usage == null
+                && pricing.tokenEstimateInputTokens > 0
+                && pricing.tokenEstimateOutputTokens > 0) {
+            BigDecimal cost = tokenCost(
+                    modelConfig,
+                    pricing.tokenEstimateInputTokens,
+                    pricing.tokenEstimateOutputTokens
+            );
+            String detail = "token pre-execution estimate "
+                    + pricing.tokenEstimateInputTokens + " input + "
+                    + pricing.tokenEstimateOutputTokens + " output";
+            return cost.compareTo(BigDecimal.ZERO) > 0
+                    ? VendorCost.derived(cost, detail)
+                    : VendorCost.fallback();
+        }
         return VendorCost.fallback();
     }
 
@@ -399,7 +419,8 @@ public class PricingServiceImpl implements PricingService {
         ResolvedPricing scoped = toPricing(firstNonNull(modelMargin, categoryMargin, globalMargin));
         if (scoped == null) {
             scoped = new ResolvedPricing(DEFAULT_MARKUP, 0,
-                    IMAGE_INPUT_TOKEN_UPPER_ESTIMATE, IMAGE_OUTPUT_TOKEN_UPPER_ESTIMATE);
+                    IMAGE_INPUT_TOKEN_UPPER_ESTIMATE, IMAGE_OUTPUT_TOKEN_UPPER_ESTIMATE,
+                    0, 0);
         }
         return new ResolvedPricing(
                 scoped.ratio,
@@ -413,7 +434,17 @@ public class PricingServiceImpl implements PricingService {
                         modelMargin == null ? null : modelMargin.getImageEstimateOutputTokens(),
                         categoryMargin == null ? null : categoryMargin.getImageEstimateOutputTokens(),
                         globalMargin == null ? null : globalMargin.getImageEstimateOutputTokens(),
-                        IMAGE_OUTPUT_TOKEN_UPPER_ESTIMATE)
+                        IMAGE_OUTPUT_TOKEN_UPPER_ESTIMATE),
+                firstPositive(
+                        modelMargin == null ? null : modelMargin.getTokenEstimateInputTokens(),
+                        categoryMargin == null ? null : categoryMargin.getTokenEstimateInputTokens(),
+                        globalMargin == null ? null : globalMargin.getTokenEstimateInputTokens(),
+                        0),
+                firstPositive(
+                        modelMargin == null ? null : modelMargin.getTokenEstimateOutputTokens(),
+                        categoryMargin == null ? null : categoryMargin.getTokenEstimateOutputTokens(),
+                        globalMargin == null ? null : globalMargin.getTokenEstimateOutputTokens(),
+                        0)
         );
     }
 
@@ -439,7 +470,9 @@ public class PricingServiceImpl implements PricingService {
                 ratio,
                 min,
                 positiveOrDefault(margin.getImageEstimateInputTokens(), IMAGE_INPUT_TOKEN_UPPER_ESTIMATE),
-                positiveOrDefault(margin.getImageEstimateOutputTokens(), IMAGE_OUTPUT_TOKEN_UPPER_ESTIMATE));
+                positiveOrDefault(margin.getImageEstimateOutputTokens(), IMAGE_OUTPUT_TOKEN_UPPER_ESTIMATE),
+                positiveOrDefault(margin.getTokenEstimateInputTokens(), 0),
+                positiveOrDefault(margin.getTokenEstimateOutputTokens(), 0));
     }
 
     private int firstPositive(Integer first, Integer second, Integer third, int fallback) {
@@ -508,7 +541,9 @@ public class PricingServiceImpl implements PricingService {
             BigDecimal ratio,
             int minCredits,
             int imageEstimateInputTokens,
-            int imageEstimateOutputTokens
+            int imageEstimateOutputTokens,
+            int tokenEstimateInputTokens,
+            int tokenEstimateOutputTokens
     ) {
     }
 

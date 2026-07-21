@@ -3,6 +3,7 @@ import type {
   ModelVendorAccount,
   ModelVendorAccountDiscoverModelsResult,
   ModelVendorAccountPayload,
+  ModelVendorAccountRoutingPayload,
   ModelVendorAccountTestResult,
 } from './types'
 
@@ -19,6 +20,10 @@ export function createModelVendorAccount(payload: ModelVendorAccountPayload) {
 
 export function updateModelVendorAccount(id: number, payload: ModelVendorAccountPayload) {
   return http.put<ModelVendorAccount>(`${BASE}/${id}`, payload)
+}
+
+export function updateModelVendorAccountRouting(id: number, payload: ModelVendorAccountRoutingPayload) {
+  return http.patch<ModelVendorAccount>(`${BASE}/${id}/routing`, payload)
 }
 
 export function deleteModelVendorAccount(id: number) {
@@ -54,17 +59,20 @@ export function normalizeVendorAccountTestResult(
     'id' in data.account
   ) {
     const wrapped = data as ModelVendorAccountTestResult
+    const healthStatus = (wrapped.account.healthStatus || '').trim().toUpperCase()
+    const credentialValid = healthStatus === 'OK' || healthStatus === 'WARNING'
     return {
       ...wrapped,
-      success: Boolean(wrapped.success),
-      message: wrapped.message || (wrapped.success ? '连接成功' : '连接失败'),
+      success: Boolean(wrapped.success) || credentialValid,
+      message: wrapped.message || wrapped.account.healthMessage || (credentialValid ? '连接成功' : '连接失败'),
     }
   }
   const account = data as ModelVendorAccount
-  const success = account.healthStatus === 'OK'
+  const healthStatus = (account.healthStatus || '').trim().toUpperCase()
+  const success = healthStatus === 'OK' || healthStatus === 'WARNING'
   return {
     success,
-    message: account.balanceErrorMessage || (success ? '连接成功' : '连接失败'),
+    message: account.healthMessage || account.balanceErrorMessage || (success ? '连接成功' : '连接失败'),
     latencyMs: null,
     provider: null,
     modelName: null,

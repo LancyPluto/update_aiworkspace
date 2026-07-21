@@ -21,6 +21,9 @@ public interface CreditService {
      */
     int deductAvailable(Long userId, CreditSourceType sourceType, Long sourceId, int amount);
 
+    int deductAvailable(Long userId, CreditSourceType sourceType, Long sourceId,
+                        int amount, String idempotencyKey);
+
     void release(Long userId, CreditSourceType sourceType, Long sourceId, int amount);
 
     boolean tryFreeze(Long userId, CreditSourceType sourceType, Long sourceId, int amount, String idempotencyKey);
@@ -67,7 +70,8 @@ public interface CreditService {
 
     CreditAccountResponse giftRedeemAdd(Long userId, Long giftCardId, int amount, String reason);
 
-    CreditAccountResponse referralBonusAdd(Long userId, Long rechargeOrderId, int amount, String reason);
+    CreditAccountResponse referralRegistrationBonusAdd(Long userId, Long referralId, String beneficiaryRole,
+                                                       int amount, String reason);
 
     PageResponse<CreditLogResponse> logs(Long userId, String logType, Integer pageNo, Integer pageSize);
 

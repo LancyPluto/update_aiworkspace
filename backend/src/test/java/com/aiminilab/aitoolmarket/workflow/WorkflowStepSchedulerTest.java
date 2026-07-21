@@ -118,6 +118,28 @@ class WorkflowStepSchedulerTest {
     }
 
     @Test
+    void dispatchPassesStableHandlerKeyAndOperationPayloadToChildTask() {
+        jdbcTemplate.update("""
+                UPDATE tool_workflow_versions
+                SET nodes_json = '[{"id":"worker","data":{"nodeDefType":"llm_text","title":"Worker","parameters":{"handlerKey":"comic.shot.video","maxCreditCost":1}}}]'
+                WHERE id = (SELECT workflow_version_id FROM workflow_runs WHERE id = ?)
+                """, runId);
+        jdbcTemplate.update(
+                "UPDATE workflow_run_steps SET input_json = ? WHERE id = ?",
+                "{\"operationInput\":{\"shot\":{\"id\":7}}}",
+                stepId
+        );
+
+        WorkflowStepAttempt attempt = scheduler.dispatch(stepId);
+        String paramsJson = jdbcTemplate.queryForObject(
+                "SELECT params_json FROM ai_tasks WHERE id = ?", String.class, attempt.getChildTaskId()
+        );
+
+        assertThat(paramsJson).contains("handlerKey").contains("comic.shot.video");
+        assertThat(paramsJson).contains("operation").contains("operationInput");
+    }
+
+    @Test
     void insufficientFundsPausesBeforeAttemptChildChargeOrOutbox() {
         configurePaidStep(20, 10);
 
@@ -184,6 +206,91 @@ class WorkflowStepSchedulerTest {
     }
 
     @Test
+    void importedComicScriptDispatchesWithoutCreditsOrReservation() {
+        configurePaidStep(20, 0);
+        setWorkerHandlerKey("comic.script");
+        jdbcTemplate.update(
+                "UPDATE workflow_run_steps SET input_json = ? WHERE id = ?",
+                "{\"operationInput\":{\"scriptText\":\"第一幕：雨夜中的完整导入剧本。\"}}",
+                stepId
+        );
+
+        WorkflowStepAttempt attempt = scheduler.dispatch(stepId);
+
+        assertThat(attempt).isNotNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workflow_step_charges WHERE step_id = ?", Integer.class, stepId
+        )).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT frozen FROM credit_accounts WHERE user_id = 1", Integer.class
+        )).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM workflow_runs WHERE id = ?", String.class, runId
+        )).isEqualTo("RUNNING");
+    }
+
+    @Test
+    void importedComicStoryboardDispatchesWithoutCreditsOrReservation() {
+        configurePaidStep(20, 0);
+        setWorkerHandlerKey("comic.storyboard");
+        jdbcTemplate.update(
+                "UPDATE workflow_run_steps SET input_json = ? WHERE id = ?",
+                "{\"operationInput\":{\"storyboard\":{\"shots\":[{\"shotId\":\"shot-1\",\"visualDescription\":\"雨夜街道\"}]}}}",
+                stepId
+        );
+
+        WorkflowStepAttempt attempt = scheduler.dispatch(stepId);
+
+        assertThat(attempt).isNotNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workflow_step_charges WHERE step_id = ?", Integer.class, stepId
+        )).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT frozen FROM credit_accounts WHERE user_id = 1", Integer.class
+        )).isZero();
+    }
+
+    @Test
+    void userBillingFlagsCannotBypassComicScriptReservation() {
+        configurePaidStep(20, 0);
+        setWorkerHandlerKey("comic.script");
+        jdbcTemplate.update(
+                "UPDATE workflow_run_steps SET input_json = ? WHERE id = ?",
+                "{\"operationInput\":{\"prompt\":\"请创作剧本\",\"providerCalled\":false,\"skipBilling\":true}}",
+                stepId
+        );
+
+        assertThat(scheduler.dispatch(stepId)).isNull();
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM workflow_runs WHERE id = ?", String.class, runId
+        )).isEqualTo("AWAITING_FUNDS");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workflow_step_attempts WHERE step_id = ?", Integer.class, stepId
+        )).isZero();
+    }
+
+    @Test
+    void scriptOnlyStoryboardInputStillRequiresModelReservation() {
+        configurePaidStep(20, 0);
+        setWorkerHandlerKey("comic.storyboard");
+        jdbcTemplate.update(
+                "UPDATE workflow_run_steps SET input_json = ? WHERE id = ?",
+                "{\"operationInput\":{\"sourceMode\":\"IMPORT\",\"scriptText\":\"等待 AI 拆分的完整剧本\",\"storyboard\":{\"shots\":[]},\"providerCalled\":false}}",
+                stepId
+        );
+
+        assertThat(scheduler.dispatch(stepId)).isNull();
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM workflow_runs WHERE id = ?", String.class, runId
+        )).isEqualTo("AWAITING_FUNDS");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workflow_step_attempts WHERE step_id = ?", Integer.class, stepId
+        )).isZero();
+    }
+
+    @Test
     void cancellingRunCannotDispatchOrCreateBillingAndExecutionRecords() {
         configurePaidStep(20, 100);
         jdbcTemplate.update(
@@ -241,7 +348,61 @@ class WorkflowStepSchedulerTest {
 
         assertThatThrownBy(() -> scheduler.dispatch(stepId))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("reservation cap");
+                .hasMessageContaining("automatic reservation estimate");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workflow_step_attempts WHERE step_id = ?", Integer.class, stepId
+        )).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workflow_step_charges WHERE step_id = ?", Integer.class, stepId
+        )).isZero();
+    }
+
+    @Test
+    void modelBillingUnitDriftFailsBeforeReservationOrProviderDispatch() {
+        jdbcTemplate.update("""
+                INSERT INTO agent_model_configs(
+                  display_name, config_code, provider, model_name, base_url, timeout_seconds,
+                  input_token_price_per_1m, output_token_price_per_1m,
+                  billing_unit, unit_price, capabilities,
+                  enabled, agent_enabled, is_default, is_deleted
+                ) VALUES ('Workflow drift model', 'workflow-drift-model', 'test', 'drift-model',
+                          'https://example.invalid/v1', 60, 2.0, 4.0,
+                          'TOKEN_PER_M', 0, '["TEXT_GENERATION"]', 1, 1, 0, 0)
+                """);
+        Long modelId = jdbcTemplate.queryForObject(
+                "SELECT id FROM agent_model_configs WHERE config_code = 'workflow-drift-model'",
+                Long.class
+        );
+        String nodes = """
+                [{"id":"worker","data":{"nodeDefType":"llm_text","title":"Worker",
+                  "parameters":{"modelConfigId":%d}}}]
+                """.formatted(modelId);
+        String billingPolicy = """
+                {"mode":"WORKFLOW_STEP","nodePolicies":{"worker":{
+                  "maxCreditCost":10,
+                  "fallbackChargeCredits":0,
+                  "pricingSource":"MODEL_PRICING",
+                  "staticParams":{},
+                  "modelPricingSnapshot":{
+                    "id":%d,
+                    "provider":"test",
+                    "modelName":"drift-model",
+                    "billingUnit":"PER_CALL",
+                    "unitPrice":0.10
+                  },
+                  "pricingPolicy":{"markupRatio":1.5,"minCredits":0,"rules":[]}
+                }}}
+                """.formatted(modelId);
+        jdbcTemplate.update("""
+                UPDATE tool_workflow_versions
+                SET nodes_json = ?, billing_policy_json = ?
+                WHERE id = (SELECT workflow_version_id FROM workflow_runs WHERE id = ?)
+                """, nodes, billingPolicy, runId);
+
+        assertThatThrownBy(() -> scheduler.dispatch(stepId))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("billing unit changed")
+                .hasMessageContaining("republish");
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM workflow_step_attempts WHERE step_id = ?", Integer.class, stepId
         )).isZero();
@@ -846,7 +1007,7 @@ class WorkflowStepSchedulerTest {
                   input_schema_snapshot_json, dependency_manifest_json, billing_policy_json,
                   risk_policy_json, source_draft_revision, published_at, published_by, created_at
                 ) VALUES (?, 1, ?, '[]', '{}', '{}', '1', 'p0', ?, '{}', '{}',
-                          '{"mode":"WORKFLOW_STEP","nodePolicies":{"worker":{"maxCreditCost":1,"maxProviderCostCny":0.10,"fallbackChargeCredits":1,"staticParams":{},"modelPricingSnapshot":null,"pricingPolicy":{"markupRatio":1.5,"minCredits":0,"imageEstimateInputTokens":8000,"imageEstimateOutputTokens":8000,"rules":[]}}}}',
+                          '{"mode":"WORKFLOW_STEP","nodePolicies":{"worker":{"pricingSource":"TOOL_FALLBACK","maxCreditCost":1,"maxProviderCostCny":0.10,"fallbackChargeCredits":1,"staticParams":{},"modelPricingSnapshot":null,"pricingPolicy":{"markupRatio":1.5,"minCredits":0,"imageEstimateInputTokens":8000,"imageEstimateOutputTokens":8000,"rules":[]}}}}',
                           '{}', 1, CURRENT_TIMESTAMP, 1, CURRENT_TIMESTAMP)
                 """, workflowId, nodes, "hash-" + toolCode);
         long versionId = jdbcTemplate.queryForObject(
@@ -895,10 +1056,14 @@ class WorkflowStepSchedulerTest {
 
     private void configurePaidStep(int maxCreditCost, int balance) {
         resetCredits(balance);
+        setVersionFallbackCap(maxCreditCost);
+    }
+
+    private void setWorkerHandlerKey(String handlerKey) {
         String nodes = """
                 [{"id":"worker","data":{"nodeDefType":"llm_text","title":"Worker",
-                  "parameters":{"maxCreditCost":%d}}}]
-                """.formatted(maxCreditCost);
+                  "parameters":{"handlerKey":"%s"}}}]
+                """.formatted(handlerKey);
         jdbcTemplate.update("""
                 UPDATE tool_workflow_versions
                 SET nodes_json = ?

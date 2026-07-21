@@ -5,6 +5,9 @@ import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayClient;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayRequest;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayResponse;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayTradeQueryResult;
+import com.aiminilab.aitoolmarket.credit.entity.ReferralRegistrationReward;
+import com.aiminilab.aitoolmarket.credit.mapper.ReferralRegistrationRewardMapper;
+import com.aiminilab.aitoolmarket.credit.service.ReferralService;
 import com.aiminilab.aitoolmarket.credit.wechat.NativePrepayRequest;
 import com.aiminilab.aitoolmarket.credit.wechat.NativePrepayResponse;
 import com.aiminilab.aitoolmarket.credit.wechat.WechatNativePayClient;
@@ -13,6 +16,7 @@ import com.aiminilab.aitoolmarket.credit.wechat.WechatPayNotification;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
@@ -21,11 +25,14 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -73,6 +80,12 @@ class CreditRechargeApiTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ReferralService referralService;
+
+    @SpyBean
+    private ReferralRegistrationRewardMapper referralRegistrationRewardMapper;
 
     @Test
     void membershipOrderRequiresClientRequestId() throws Exception {
@@ -546,11 +559,48 @@ class CreditRechargeApiTest {
     }
 
     @Test
-    void invitedUserRechargeGrantsReferralBonusOnce() throws Exception {
+    void validInviteCodeGrantsFixedRegistrationRewardsOnceWithoutRechargeCommission() throws Exception {
         when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
                 .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=referral"));
         RegisteredUser inviter = registerUser("referral_inviter");
-        RegisteredUser invitee = registerUser("referral_invitee", "WLCLOUD%05d".formatted(inviter.userId()));
+        String inviteCode = "WLCLOUD%05d".formatted(inviter.userId());
+        RegisteredUser invitee = registerUser("referral_invitee", inviteCode);
+
+        mockMvc.perform(get("/api/v1/credits/account")
+                        .header("Authorization", "Bearer " + inviter.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.balance").value(300))
+                .andExpect(jsonPath("$.data.totalGranted").value(300));
+        mockMvc.perform(get("/api/v1/credits/account")
+                        .header("Authorization", "Bearer " + invitee.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.balance").value(400))
+                .andExpect(jsonPath("$.data.totalGranted").value(400));
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM referral_registration_rewards WHERE referral_id = "
+                        + "(SELECT id FROM user_referrals WHERE invitee_user_id = ?)",
+                Integer.class, invitee.userId())).isEqualTo(2);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT reward_credits FROM referral_registration_rewards WHERE referral_id = "
+                        + "(SELECT id FROM user_referrals WHERE invitee_user_id = ?) AND beneficiary_role = 'INVITEE'",
+                Integer.class, invitee.userId())).isEqualTo(200);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT reward_credits FROM referral_registration_rewards WHERE referral_id = "
+                        + "(SELECT id FROM user_referrals WHERE invitee_user_id = ?) AND beneficiary_role = 'INVITER'",
+                Integer.class, invitee.userId())).isEqualTo(100);
+
+        referralService.bindInviteCode(invitee.userId(), inviteCode);
+
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT balance FROM credit_accounts WHERE user_id = ?", Integer.class, inviter.userId()))
+                .isEqualTo(300);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT balance FROM credit_accounts WHERE user_id = ?", Integer.class, invitee.userId()))
+                .isEqualTo(400);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM referral_registration_rewards WHERE referral_id = "
+                        + "(SELECT id FROM user_referrals WHERE invitee_user_id = ?)",
+                Integer.class, invitee.userId())).isEqualTo(2);
 
         String orderResponse = mockMvc.perform(post("/api/v1/credits/recharge-orders")
                         .header("Authorization", "Bearer " + invitee.token())
@@ -588,6 +638,11 @@ class CreditRechargeApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.balance").value(300))
                 .andExpect(jsonPath("$.data.totalGranted").value(300));
+        mockMvc.perform(get("/api/v1/credits/account")
+                        .header("Authorization", "Bearer " + invitee.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.balance").value(1400))
+                .andExpect(jsonPath("$.data.totalGranted").value(1400));
 
         mockMvc.perform(get("/api/v1/credits/logs")
                         .param("logType", "REFERRAL_BONUS")
@@ -595,7 +650,68 @@ class CreditRechargeApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1))
                 .andExpect(jsonPath("$.data.list[0].amount").value(100))
-                .andExpect(jsonPath("$.data.list[0].reason").value(org.hamcrest.Matchers.containsString(orderNo)));
+                .andExpect(jsonPath("$.data.list[0].reason").value(org.hamcrest.Matchers.containsString("邀请码")));
+        mockMvc.perform(get("/api/v1/credits/logs")
+                        .param("logType", "REFERRAL_BONUS")
+                        .header("Authorization", "Bearer " + invitee.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].amount").value(200))
+                .andExpect(jsonPath("$.data.list[0].reason").value(org.hamcrest.Matchers.containsString("邀请码")));
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM referral_rewards r JOIN credit_recharge_orders o "
+                        + "ON o.id = r.recharge_order_id WHERE o.order_no = ?",
+                Integer.class, orderNo)).isZero();
+    }
+
+    @Test
+    void referralRewardFailureRollsBackUserBindingAndFirstBenefit() throws Exception {
+        RegisteredUser inviter = registerUser("referral_tx_inviter");
+        String inviteCode = "WLCLOUD%05d".formatted(inviter.userId());
+        String failedUsername = "referral_tx_rollback_invitee";
+        int rewardCountBefore = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM referral_registration_rewards", Integer.class);
+        int registrationLogCountBefore = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM credit_logs WHERE idempotency_key LIKE 'REFERRAL_REGISTRATION:%'",
+                Integer.class);
+        int accountCountBefore = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM credit_accounts", Integer.class);
+        doThrow(new IllegalStateException("forced inviter reward failure"))
+                .when(referralRegistrationRewardMapper)
+                .insert(org.mockito.ArgumentMatchers.<ReferralRegistrationReward>argThat(
+                        reward -> "INVITER".equals(reward.getBeneficiaryRole())));
+
+        try {
+            mockMvc.perform(post("/api/v1/auth/register")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "username": "%s",
+                                      "password": "123456",
+                                      "nickname": "%s",
+                                      "inviteCode": "%s"
+                                    }
+                                    """.formatted(failedUsername, failedUsername, inviteCode)))
+                    .andExpect(status().is5xxServerError());
+        } finally {
+            reset(referralRegistrationRewardMapper);
+        }
+
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM users WHERE username = ?", Integer.class, failedUsername)).isZero();
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_referrals WHERE inviter_user_id = ? AND invite_code = ?",
+                Integer.class, inviter.userId(), inviteCode)).isZero();
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM referral_registration_rewards rr JOIN user_referrals r "
+                        + "ON r.id = rr.referral_id WHERE r.inviter_user_id = ? AND r.invite_code = ?",
+                Integer.class, inviter.userId(), inviteCode)).isZero();
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM referral_registration_rewards", Integer.class)).isEqualTo(rewardCountBefore);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM credit_logs WHERE idempotency_key LIKE 'REFERRAL_REGISTRATION:%'",
+                Integer.class)).isEqualTo(registrationLogCountBefore);
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM credit_accounts", Integer.class)).isEqualTo(accountCountBefore);
     }
 
     @Test
@@ -856,6 +972,217 @@ class CreditRechargeApiTest {
     }
 
     @Test
+    void memberGiftCardPurchaseEnforcesAllFourMembershipTiers() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=member-gift-matrix"));
+        String[] tiers = {"starter", "growth", "pro", "flagship"};
+
+        for (int buyerRank = 0; buyerRank < tiers.length; buyerRank++) {
+            RegisteredUser buyer = registerUser("member_gift_buy_" + tiers[buyerRank]);
+            activateMembership(buyer.userId(), tiers[buyerRank], LocalDateTime.now().plusDays(10));
+
+            for (int requiredRank = 0; requiredRank < tiers.length; requiredRank++) {
+                Long packageId = giftCardPackageId("member_gift_" + tiers[requiredRank]);
+                var result = mockMvc.perform(post("/api/v1/credits/recharge-orders")
+                        .header("Authorization", "Bearer " + buyer.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "orderType": "GIFT_CARD",
+                                  "giftCardPackageId": %d,
+                                  "quantity": 1,
+                                  "paymentChannel": "WECHAT_NATIVE",
+                                  "clientRequestId": "member-gift-buy-%s-%s"
+                                }
+                                """.formatted(packageId, tiers[buyerRank], tiers[requiredRank])));
+
+                if (buyerRank >= requiredRank) {
+                    result.andExpect(status().isOk())
+                            .andExpect(jsonPath("$.data.orderType").value("GIFT_CARD"));
+                } else {
+                    result.andExpect(status().isBadRequest())
+                            .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+                }
+            }
+        }
+    }
+
+    @Test
+    void memberGiftCardRedemptionEnforcesAllFourMembershipTiersWithoutConsumingRejectedCards() throws Exception {
+        String[] tiers = {"starter", "growth", "pro", "flagship"};
+
+        for (int memberRank = 0; memberRank < tiers.length; memberRank++) {
+            RegisteredUser recipient = registerUser("member_gift_redeem_" + tiers[memberRank]);
+            activateMembership(recipient.userId(), tiers[memberRank], LocalDateTime.now().plusDays(10));
+            int balanceBefore = giftBalance(recipient.userId());
+            int expectedAddedCredits = 0;
+
+            for (int requiredRank = 0; requiredRank < tiers.length; requiredRank++) {
+                String cardCode = "GC-MEMBER-MATRIX-" + memberRank + "-" + requiredRank;
+                int cardCredits = insertGiftCard(
+                        cardCode,
+                        "member_gift_" + tiers[requiredRank],
+                        recipient.userId() + 1_000_000L,
+                        "MEMBER_CREDIT",
+                        tiers[requiredRank]);
+
+                var result = mockMvc.perform(post("/api/v1/credits/gift-cards/redeem-by-code")
+                        .header("Authorization", "Bearer " + recipient.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "cardCode": "%s" }
+                                """.formatted(cardCode)));
+
+                if (memberRank >= requiredRank) {
+                    result.andExpect(status().isOk())
+                            .andExpect(jsonPath("$.data.status").value("USED"));
+                    expectedAddedCredits += cardCredits;
+                    assertGiftCardStatus(cardCode, "USED");
+                } else {
+                    result.andExpect(status().isBadRequest())
+                            .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+                    assertGiftCardStatus(cardCode, "UNUSED");
+                }
+            }
+
+            org.assertj.core.api.Assertions.assertThat(giftBalance(recipient.userId()))
+                    .isEqualTo(balanceBefore + expectedAddedCredits);
+        }
+    }
+
+    @Test
+    void memberGiftCardRejectsOriginalBuyerAndExpiredMembershipButOrdinaryCardStillRedeems() throws Exception {
+        RegisteredUser originalBuyer = registerUser("member_gift_self_redeem");
+        activateMembership(originalBuyer.userId(), "flagship", LocalDateTime.now().plusDays(10));
+        String selfCardCode = "GC-MEMBER-SELF-REDEEM";
+        insertGiftCard(selfCardCode, "member_gift_starter", originalBuyer.userId(), "MEMBER_CREDIT", "starter");
+
+        mockMvc.perform(post("/api/v1/credits/gift-cards/redeem-by-code")
+                        .header("Authorization", "Bearer " + originalBuyer.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "cardCode": "%s" }
+                                """.formatted(selfCardCode)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        assertGiftCardStatus(selfCardCode, "UNUSED");
+
+        RegisteredUser expiredMember = registerUser("member_gift_expired_redeem");
+        activateMembership(expiredMember.userId(), "flagship", LocalDateTime.now().minusDays(1));
+        String expiredCardCode = "GC-MEMBER-EXPIRED";
+        insertGiftCard(expiredCardCode, "member_gift_starter", expiredMember.userId() + 1_000_000L,
+                "MEMBER_CREDIT", "starter");
+
+        mockMvc.perform(post("/api/v1/credits/gift-cards/redeem-by-code")
+                        .header("Authorization", "Bearer " + expiredMember.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "cardCode": "%s" }
+                                """.formatted(expiredCardCode)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        assertGiftCardStatus(expiredCardCode, "UNUSED");
+
+        RegisteredUser ordinaryRecipient = registerUser("ordinary_gift_no_membership");
+        int ordinaryBalanceBefore = giftBalance(ordinaryRecipient.userId());
+        String ordinaryCardCode = "GC-ORDINARY-NO-MEMBER";
+        int ordinaryCredits = insertGiftCard(
+                ordinaryCardCode,
+                "gift_200",
+                ordinaryRecipient.userId(),
+                "CREDIT",
+                null);
+
+        mockMvc.perform(post("/api/v1/credits/gift-cards/redeem-by-code")
+                        .header("Authorization", "Bearer " + ordinaryRecipient.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "cardCode": "%s" }
+                                """.formatted(ordinaryCardCode)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("USED"))
+                .andExpect(jsonPath("$.data.cardType").value("CREDIT"));
+        org.assertj.core.api.Assertions.assertThat(giftBalance(ordinaryRecipient.userId()))
+                .isEqualTo(ordinaryBalanceBefore + ordinaryCredits);
+    }
+
+    @Test
+    void memberGiftCardIssuanceUsesCheckoutSnapshotAfterPackageRuleChanges() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=member-gift-snapshot"));
+        RegisteredUser buyer = registerUser("member_gift_snapshot_buyer");
+        activateMembership(buyer.userId(), "starter", LocalDateTime.now().plusDays(10));
+        Long packageId = giftCardPackageId("member_gift_starter");
+
+        String orderResponse = mockMvc.perform(post("/api/v1/credits/recharge-orders")
+                        .header("Authorization", "Bearer " + buyer.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "orderType": "GIFT_CARD",
+                                  "giftCardPackageId": %d,
+                                  "quantity": 1,
+                                  "paymentChannel": "WECHAT_NATIVE",
+                                  "clientRequestId": "member-gift-snapshot-order"
+                                }
+                                """.formatted(packageId)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long orderId = extractOrderId(orderResponse);
+        String orderNo = extractOrderNo(orderResponse);
+
+        Map<String, Object> itemSnapshot = jdbcTemplate.queryForMap("""
+                SELECT card_type_snapshot, required_member_tier_snapshot
+                FROM credit_recharge_order_items
+                WHERE order_id = ?
+                """, orderId);
+        org.assertj.core.api.Assertions.assertThat(itemSnapshot.get("card_type_snapshot"))
+                .isEqualTo("MEMBER_CREDIT");
+        org.assertj.core.api.Assertions.assertThat(itemSnapshot.get("required_member_tier_snapshot"))
+                .isEqualTo("starter");
+
+        jdbcTemplate.update("""
+                UPDATE gift_card_packages
+                SET card_type = 'CREDIT', required_member_tier = 'flagship'
+                WHERE id = ?
+                """, packageId);
+        try {
+            when(wechatNativePayClient.parseNotification(any(WechatPayCallbackHeaders.class), anyString()))
+                    .thenReturn(new WechatPayNotification(
+                            "wx-test",
+                            "mch-test",
+                            orderNo,
+                            "4200000000000000778",
+                            "NATIVE",
+                            "SUCCESS",
+                            6900,
+                            "CNY"
+                    ));
+            postWechatNotify();
+
+            Map<String, Object> issuedCard = jdbcTemplate.queryForMap("""
+                    SELECT card_type, required_member_tier, credits
+                    FROM gift_cards
+                    WHERE recharge_order_id = ?
+                    """, orderId);
+            org.assertj.core.api.Assertions.assertThat(issuedCard.get("card_type"))
+                    .isEqualTo("MEMBER_CREDIT");
+            org.assertj.core.api.Assertions.assertThat(issuedCard.get("required_member_tier"))
+                    .isEqualTo("starter");
+            org.assertj.core.api.Assertions.assertThat(((Number) issuedCard.get("credits")).intValue())
+                    .isEqualTo(4_000);
+        } finally {
+            jdbcTemplate.update("""
+                    UPDATE gift_card_packages
+                    SET card_type = 'MEMBER_CREDIT', required_member_tier = 'starter'
+                    WHERE id = ?
+                    """, packageId);
+        }
+    }
+
+    @Test
     void rechargePaymentOptionsExposeConfiguredChannels() throws Exception {
         String userToken = register("payment_options_user");
 
@@ -962,6 +1289,62 @@ class CreditRechargeApiTest {
         } catch (Exception exception) {
             throw new IllegalStateException(exception);
         }
+    }
+
+    private Long giftCardPackageId(String packageCode) {
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM gift_card_packages WHERE package_code = ?",
+                Long.class,
+                packageCode);
+    }
+
+    private void activateMembership(Long userId, String tier, LocalDateTime expiresAt) {
+        String packageCode = "monthly_" + tier;
+        Long packageId = jdbcTemplate.queryForObject(
+                "SELECT id FROM credit_recharge_packages WHERE package_code = ?",
+                Long.class,
+                packageCode);
+        jdbcTemplate.update("DELETE FROM user_memberships WHERE user_id = ?", userId);
+        jdbcTemplate.update("""
+                INSERT INTO user_memberships(
+                    user_id, status, package_id, package_code, started_at, expires_at, created_at, updated_at
+                ) VALUES (?, 'ACTIVE', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, userId, packageId, packageCode, LocalDateTime.now().minusDays(1), expiresAt);
+    }
+
+    private int insertGiftCard(String cardCode,
+                               String packageCode,
+                               Long originalUserId,
+                               String cardType,
+                               String requiredMemberTier) {
+        Map<String, Object> giftPackage = jdbcTemplate.queryForMap("""
+                SELECT id, credits
+                FROM gift_card_packages
+                WHERE package_code = ?
+                """, packageCode);
+        int credits = ((Number) giftPackage.get("credits")).intValue();
+        jdbcTemplate.update("""
+                INSERT INTO gift_cards(
+                    card_code, package_id, owner_user_id, original_user_id, credits,
+                    card_type, required_member_tier, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'UNUSED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, cardCode, giftPackage.get("id"), originalUserId, originalUserId, credits,
+                cardType, requiredMemberTier);
+        return credits;
+    }
+
+    private int giftBalance(Long userId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COALESCE((SELECT gift_balance FROM credit_accounts WHERE user_id = ?), 0)",
+                Integer.class,
+                userId);
+    }
+
+    private void assertGiftCardStatus(String cardCode, String expectedStatus) {
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM gift_cards WHERE card_code = ?",
+                String.class,
+                cardCode)).isEqualTo(expectedStatus);
     }
 
     private Long extractOrderId(String response) {

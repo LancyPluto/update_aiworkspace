@@ -636,6 +636,11 @@ export interface CreditInsufficientDetail {
   toolCode?: string | null
 }
 
+export type MemberTierCode = "starter" | "growth" | "pro" | "flagship"
+export type MemberTierValue = MemberTierCode | Uppercase<MemberTierCode>
+export type MembershipBillingCycle = "monthly" | "quarterly" | "yearly"
+export type GiftCardType = "CREDIT" | "MEMBER_CREDIT"
+
 export interface RechargePackage {
   id: number
   packageCode: string
@@ -646,6 +651,11 @@ export interface RechargePackage {
   validityDays: number
   benefits: string[]
   recommended: boolean
+  tierCode?: MemberTierCode | null
+  billingCycle?: MembershipBillingCycle | null
+  listPriceAmount?: number | null
+  discountRate?: number | null
+  cycleDiscountRate?: number | null
 }
 
 export type RechargeOrderStatus = "WAITING_PAYMENT" | "PAID" | "CREDITED" | "CLOSED" | "FAILED"
@@ -681,6 +691,10 @@ export interface GiftCardPackage {
   priceAmount: number
   currency: string
   cardTheme: string
+  cardType?: GiftCardType | null
+  requiredMemberTier?: MemberTierValue | null
+  listPriceAmount?: number | null
+  discountRate?: number | null
 }
 
 export type GiftCardStatus = "UNUSED" | "USED" | "EXPIRED"
@@ -692,6 +706,8 @@ export interface GiftCard {
   credits: number
   status: GiftCardStatus
   cardTheme: string
+  cardType?: GiftCardType | null
+  requiredMemberTier?: MemberTierValue | null
   createdAt: string
   giftedFromUserId?: number | null
   giftedAt?: string | null

@@ -46,6 +46,7 @@ export {
   updateAgentToolPreference,
 } from "./agentApi"
 export { createTask, fetchTasks, fetchTaskStatus, fetchTaskById, regenerateTask, cancelTask } from "./taskApi"
+export * from "./comicProjectApi"
 export {
   createRechargeOrder,
   fetchCreditAccount,

@@ -10,6 +10,9 @@ class FakeBucket:
     def put_object(self, key, data, headers=None):
         self.calls.append((key, data, headers))
 
+    def put_object_from_file(self, key, filename, headers=None):
+        self.calls.append((key, filename, headers))
+
 
 def test_local_put_bytes_returns_generated_url(tmp_path):
     storage = AssetStorage(
@@ -55,6 +58,38 @@ def test_oss_worker_assets_always_use_private_proxy_url(tmp_path):
     assert storage.public_url("images/71/image-1.png") == "/api/v1/assets/private/images/71/image-1.png"
     assert storage.public_url("audio/71/voice.mp3") == "/api/v1/assets/private/audio/71/voice.mp3"
     assert storage.public_url("video/71/video-1.mp4") == "/api/v1/assets/private/video/71/video-1.mp4"
+
+
+def test_oss_put_file_passes_path_to_streaming_sdk_api(tmp_path):
+    source = tmp_path / "comic-final.mp4"
+    source.write_bytes(b"\x00\x00\x00\x18ftypisom")
+    storage = AssetStorage(
+        provider="oss",
+        local_root=tmp_path.resolve(),
+        public_base_url="https://cdn.wlcloudai.com",
+        private_base_url="/api/v1/assets/private",
+        image_transform_options="",
+        public_cache_control="public,max-age=31536000,immutable",
+        private_cache_control="private,max-age=3600",
+        legacy_cache_control="public,max-age=300,must-revalidate",
+        oss_endpoint="oss-cn-guangzhou.aliyuncs.com",
+        oss_bucket_name="private",
+        oss_public_bucket_name="public",
+        oss_access_key_id="test-ak",
+        oss_access_key_secret="test-sk",
+        oss_key_prefix="",
+    )
+    bucket = FakeBucket()
+    storage._bucket_client = bucket
+
+    url = storage.put_file("digital-human/71/comic-final.mp4", source, "video/mp4")
+
+    assert url == "/api/v1/assets/private/digital-human/71/comic-final.mp4"
+    assert bucket.calls == [(
+        "digital-human/71/comic-final.mp4",
+        str(source.resolve()),
+        {"Cache-Control": "private,max-age=3600", "Content-Type": "video/mp4"},
+    )]
 
 
 def test_local_put_bytes_public_uses_hash_filename(tmp_path):

@@ -14,11 +14,10 @@ public class WorkflowRuntimeGate {
     }
 
     public Decision evaluateNewRun(Long userId,
-                                   boolean toolExecutionEnabled,
                                    boolean paidRun,
                                    long estimatedRunCredits,
                                    long userDailyCredits) {
-        Decision baseDecision = evaluateBaseNewRun(userId, toolExecutionEnabled);
+        Decision baseDecision = evaluateBaseNewRun(userId);
         if (!baseDecision.allowed()) {
             return baseDecision;
         }
@@ -46,15 +45,12 @@ public class WorkflowRuntimeGate {
         return Decision.allowedDecision();
     }
 
-    public Decision evaluateBaseNewRun(Long userId, boolean toolExecutionEnabled) {
+    public Decision evaluateBaseNewRun(Long userId) {
         if (!properties.isEnabled()) {
             return Decision.denied("runtime_disabled");
         }
         if (!properties.isExecutionEnabled()) {
             return Decision.denied("execution_disabled");
-        }
-        if (!toolExecutionEnabled) {
-            return Decision.denied("tool_execution_disabled");
         }
         if (!reconciliationHealthy) {
             return Decision.denied("reconciliation_not_healthy");

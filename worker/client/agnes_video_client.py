@@ -7,8 +7,22 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 import requests
+from requests.exceptions import (
+    ConnectionError as RequestsConnectionError,
+    ConnectTimeout,
+    ReadTimeout,
+    SSLError,
+)
 from urllib3.util import Timeout as Urllib3Timeout
 
+from client.provider_error import (
+    DELIVERY_NOT_SENT,
+    RETRY_ACCOUNT,
+    ProviderCallError,
+    rejected_http_metadata,
+    request_was_not_sent,
+    response_provider_error_code,
+)
 from config import settings
 
 
@@ -18,12 +32,22 @@ FAILED_STATUSES = {"failed", "fail", "failure", "error", "cancelled", "canceled"
 POLL_REQUEST_ATTEMPTS = 3
 
 
-class AgnesVideoError(RuntimeError):
+class AgnesVideoError(ProviderCallError):
     pass
 
 
 class AgnesVideoTimeoutError(AgnesVideoError):
     pass
+
+
+class AgnesVideoRequestNotSentError(AgnesVideoError):
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            message,
+            delivery_state=DELIVERY_NOT_SENT,
+            retry_scope=RETRY_ACCOUNT,
+            failure_stage="BEFORE_PROVIDER",
+        )
 
 
 class AgnesVideoClient:
@@ -463,6 +487,18 @@ class AgnesVideoClient:
                 headers=self._headers(),
                 timeout=request_timeout if request_timeout is not None else self.request_timeout,
             )
+        except ConnectTimeout as exc:
+            raise AgnesVideoRequestNotSentError("Agnes video connect timed out before request was sent") from exc
+        except ReadTimeout as exc:
+            raise AgnesVideoTimeoutError("Agnes video request timed out") from exc
+        except SSLError as exc:
+            raise AgnesVideoRequestNotSentError("Agnes video TLS handshake failed before request was sent") from exc
+        except RequestsConnectionError as exc:
+            if request_was_not_sent(exc):
+                raise AgnesVideoRequestNotSentError(
+                    "Agnes video connection failed before request was sent"
+                ) from exc
+            raise AgnesVideoError("Agnes video connection failed after delivery became unknown") from exc
         except requests.Timeout as exc:
             raise AgnesVideoTimeoutError("Agnes video request timed out") from exc
         except requests.RequestException as exc:
@@ -472,7 +508,12 @@ class AgnesVideoClient:
             response.raise_for_status()
         except requests.HTTPError as exc:
             raise AgnesVideoError(
-                f"Agnes video request failed: status={response.status_code}, body={response.text}"
+                f"Agnes video request failed: status={response.status_code}, body={response.text}",
+                **rejected_http_metadata(
+                    response.status_code,
+                    _retry_after_seconds(getattr(response, "headers", {}).get("Retry-After")),
+                    response_provider_error_code(response),
+                ),
             ) from exc
 
         try:
@@ -714,6 +755,13 @@ def _as_float(value: Any, fallback: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return fallback
+
+
+def _retry_after_seconds(value: Any) -> int | None:
+    try:
+        return max(0, int(float(str(value).strip())))
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalized_option(value: Any) -> str:

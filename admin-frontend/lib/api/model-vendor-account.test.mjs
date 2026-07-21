@@ -40,3 +40,45 @@ test("discoverModelVendorAccountModels posts to the account discovery endpoint",
   })
   assert.deepEqual(result, { importedCount: 3, updatedCount: 2 })
 })
+
+test("updateModelVendorAccountRouting patches only routing settings", async () => {
+  let captured
+  const updatedAccount = {
+    id: 25,
+    vendorCode: "agnes",
+    loadBalanceEnabled: true,
+    loadBalanceWeight: 60,
+  }
+  const api = await importAccountApi({
+    patch: async (path, body) => {
+      captured = { path, body }
+      return updatedAccount
+    },
+  })
+
+  const result = await api.updateModelVendorAccountRouting(25, {
+    loadBalanceEnabled: true,
+    loadBalanceWeight: 60,
+  })
+
+  assert.deepEqual(captured, {
+    path: "/api/admin/v1/model-vendor-accounts/25/routing",
+    body: { loadBalanceEnabled: true, loadBalanceWeight: 60 },
+  })
+  assert.equal(result, updatedAccount)
+})
+
+test("WARNING connectivity result keeps the account credential valid", async () => {
+  const api = await importAccountApi({})
+  const account = {
+    id: 25,
+    vendorCode: "agnes",
+    healthStatus: "WARNING",
+    balanceErrorMessage: "quota is low",
+  }
+
+  const result = api.normalizeVendorAccountTestResult(account)
+
+  assert.equal(result.success, true)
+  assert.equal(result.account, account)
+})

@@ -30,6 +30,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Locale;
 import java.util.UUID;
 
 @Service
@@ -102,13 +103,14 @@ public class WorkflowStepScheduler {
 
         ToolWorkflowVersion version = loadVersion(run);
         WorkflowNodeDef node = parseVersion(version).requireNode(step.getNodeId());
+        AgentModelConfig modelConfig = resolveModelConfig(version, node);
         int attemptNo = value(step.getAttemptCount()) + 1;
         int maxAttempts = Math.max(1, value(step.getMaxAttempts()));
         if (attemptNo > maxAttempts) {
             throw new BusinessException(ErrorCode.TASK_STATUS_INVALID, "Workflow step attempts exhausted");
         }
         String stableKey = "workflow:%d:step:%d:attempt:%d".formatted(run.getId(), step.getId(), attemptNo);
-        int reservedCredits = maxCreditCost(version, node);
+        int reservedCredits = reservationCredits(version, node, step);
         WorkflowReservationResult reservation = billingService.reserve(
                 run, step, stableKey, reservedCredits
         );
@@ -130,7 +132,7 @@ public class WorkflowStepScheduler {
             billingService.bindAttempt(stableKey, attempt.getId());
         }
 
-        AiTask child = createChildTask(run, step, node, stableKey);
+        AiTask child = createChildTask(run, step, node, stableKey, modelConfig);
         Long childTaskId = taskMapper.insertTask(child);
         LocalDateTime leaseExpiresAt = LocalDateTime.now().plusMinutes(leaseMinutes());
         if (attemptMapper.markDispatched(attempt.getId(), childTaskId, leaseExpiresAt) != 1) {
@@ -178,13 +180,23 @@ public class WorkflowStepScheduler {
     private AiTask createChildTask(WorkflowRun run,
                                    WorkflowRunStep step,
                                    WorkflowNodeDef node,
-                                   String stableKey) {
+                                   String stableKey,
+                                   AgentModelConfig modelConfig) {
         ObjectNode params = objectMapper.createObjectNode();
         params.put("workflowRunId", run.getId());
         params.put("workflowStepId", step.getId());
         params.put("parentTaskId", run.getRootTaskId());
         params.put("nodeId", step.getNodeId());
         params.put("nodeDefType", node.type().name());
+        params.set("nodeParameters", node.parameters());
+        String handlerKey = text(node.parameters(), "handlerKey");
+        if (handlerKey == null) {
+            handlerKey = text(node.parameters(), "operation");
+        }
+        if (handlerKey != null) {
+            params.put("handlerKey", handlerKey);
+            params.put("operation", handlerKey);
+        }
         params.set("workflowInputs", readJson(step.getInputJson()));
         params.put("workflowStep", true);
 
@@ -196,12 +208,7 @@ public class WorkflowStepScheduler {
         child.setEstimatedCreditCost(0);
         child.setIdempotencyKey(stableKey);
 
-        Long modelConfigId = resolveModelConfigId(node);
-        if (modelConfigId != null) {
-            AgentModelConfig modelConfig = modelConfigMapper.findActiveById(modelConfigId);
-            if (modelConfig == null) {
-                throw new BusinessException(ErrorCode.PARAM_ERROR, "Model configuration does not exist: " + modelConfigId);
-            }
+        if (modelConfig != null) {
             ModelExecutionSnapshot snapshot = snapshotService.create(modelConfig);
             child.setModelSnapshotJson(snapshotService.serialize(snapshot));
         }
@@ -234,24 +241,204 @@ public class WorkflowStepScheduler {
     }
 
     private int maxCreditCost(ToolWorkflowVersion version, WorkflowNodeDef node) {
-        if (node.parameters() != null && node.parameters().hasNonNull("maxCreditCost")) {
-            int explicit = node.parameters().get("maxCreditCost").asInt();
-            if (explicit > 0) {
-                return explicit;
-            }
-        }
-        int fallback = readJson(version.getBillingPolicyJson())
+        JsonNode nodePolicy = readJson(version.getBillingPolicyJson())
                 .path("nodePolicies")
-                .path(node.id())
-                .path("maxCreditCost")
-                .asInt(0);
-        if (fallback <= 0) {
+                .path(node.id());
+        JsonNode reservation = nodePolicy.get("maxCreditCost");
+        if (reservation == null
+                || !reservation.isIntegralNumber()
+                || !reservation.canConvertToInt()
+                || reservation.intValue() < 0
+                || (reservation.intValue() == 0
+                    && !"LOCAL_ZERO_COST".equals(nodePolicy.path("pricingSource").asText()))) {
             throw new BusinessException(
                     ErrorCode.PARAM_ERROR,
-                    "Paid workflow worker step has no reservation cap: " + node.id()
+                    "Workflow worker step has no valid automatic reservation estimate: " + node.id()
             );
         }
-        return fallback;
+        return reservation.intValue();
+    }
+
+    private int reservationCredits(ToolWorkflowVersion version,
+                                   WorkflowNodeDef node,
+                                   WorkflowRunStep step) {
+        int publishedEstimate = maxCreditCost(version, node);
+        String handlerKey = text(node.parameters(), "handlerKey");
+        JsonNode operationInput = readJson(step.getInputJson()).path("operationInput");
+        if ("comic.script".equals(handlerKey) && hasDirectScript(operationInput)) {
+            return 0;
+        }
+        if ("comic.storyboard".equals(handlerKey) && hasDirectStoryboard(operationInput)) {
+            return 0;
+        }
+        return publishedEstimate;
+    }
+
+    private boolean hasDirectScript(JsonNode operationInput) {
+        if (!operationInput.isObject()) {
+            return false;
+        }
+        JsonNode nested = findNamedObject(operationInput, "script", "scriptVersion");
+        if (nested != null) {
+            return hasNonBlankText(nested, "screenplay", "text", "scriptText", "rawText", "content");
+        }
+        return hasNonBlankText(operationInput, "scriptText", "screenplay", "rawText");
+    }
+
+    private boolean hasDirectStoryboard(JsonNode operationInput) {
+        if (!operationInput.isObject()) {
+            return false;
+        }
+        JsonNode nested = findNamedValue(operationInput, "storyboard", "storyboardVersion");
+        if (nested != null && nested.isObject()
+                && selectedShots(nested).isArray()
+                && pythonTruthy(selectedShots(nested))) {
+            return true;
+        }
+        JsonNode shots = selectedShots(operationInput);
+        return shots.isArray() && pythonTruthy(shots);
+    }
+
+    private JsonNode selectedShots(JsonNode value) {
+        JsonNode shots = value.get("shots");
+        return pythonTruthy(shots) ? shots : value.path("scenes");
+    }
+
+    private JsonNode findNamedObject(JsonNode value, String... names) {
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (value.isObject()) {
+            for (String name : names) {
+                JsonNode direct = value.get(name);
+                if (direct != null && direct.isObject()) {
+                    return direct;
+                }
+            }
+            var children = value.elements();
+            while (children.hasNext()) {
+                JsonNode found = findNamedObject(children.next(), names);
+                if (found != null) {
+                    return found;
+                }
+            }
+        } else if (value.isArray()) {
+            for (JsonNode child : value) {
+                JsonNode found = findNamedObject(child, names);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    private AgentModelConfig resolveModelConfig(ToolWorkflowVersion version, WorkflowNodeDef node) {
+        Long modelConfigId = resolveModelConfigId(node);
+        if (modelConfigId == null) {
+            return null;
+        }
+        AgentModelConfig modelConfig = modelConfigMapper.findActiveById(modelConfigId);
+        if (modelConfig == null) {
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "Model configuration does not exist: " + modelConfigId
+            );
+        }
+
+        JsonNode nodePolicy = readJson(version.getBillingPolicyJson())
+                .path("nodePolicies")
+                .path(node.id());
+        JsonNode pricingSnapshot = nodePolicy.get("modelPricingSnapshot");
+        if (!"MODEL_PRICING".equals(nodePolicy.path("pricingSource").asText())
+                || pricingSnapshot == null
+                || !pricingSnapshot.isObject()) {
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "Workflow model pricing snapshot is unavailable; republish the workflow: " + node.id()
+            );
+        }
+        if (pricingSnapshot.path("id").asLong(-1L) != modelConfigId) {
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "Workflow model pricing snapshot does not match the configured model; republish the workflow: "
+                            + node.id()
+            );
+        }
+        String publishedUnit = normalizeBillingUnit(pricingSnapshot.path("billingUnit").asText(null));
+        String currentUnit = normalizeBillingUnit(modelConfig.getBillingUnit());
+        if (publishedUnit == null || !publishedUnit.equals(currentUnit)) {
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "Model billing unit changed after workflow publication; republish the workflow: " + node.id()
+            );
+        }
+        return modelConfig;
+    }
+
+    private String normalizeBillingUnit(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private JsonNode findNamedValue(JsonNode value, String... names) {
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (value.isObject()) {
+            for (String name : names) {
+                JsonNode direct = value.get(name);
+                if (direct != null && !direct.isNull()) {
+                    return direct;
+                }
+            }
+            var children = value.elements();
+            while (children.hasNext()) {
+                JsonNode found = findNamedValue(children.next(), names);
+                if (found != null) {
+                    return found;
+                }
+            }
+        } else if (value.isArray()) {
+            for (JsonNode child : value) {
+                JsonNode found = findNamedValue(child, names);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean hasNonBlankText(JsonNode value, String... fields) {
+        if (value == null || !value.isObject()) {
+            return false;
+        }
+        for (String field : fields) {
+            JsonNode text = value.get(field);
+            if (text != null && text.isTextual() && !text.asText().trim().isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean pythonTruthy(JsonNode value) {
+        if (value == null || value.isNull() || value.isMissingNode()) {
+            return false;
+        }
+        if (value.isBoolean()) {
+            return value.booleanValue();
+        }
+        if (value.isNumber()) {
+            return value.decimalValue().signum() != 0;
+        }
+        if (value.isTextual()) {
+            return !value.textValue().isEmpty();
+        }
+        return value.size() > 0;
     }
 
     private WorkflowRunStep requireStepForUpdate(Long stepId) {
@@ -287,6 +474,14 @@ public class WorkflowStepScheduler {
 
     private int value(Integer value) {
         return value == null ? 0 : value;
+    }
+
+    private String text(JsonNode node, String field) {
+        if (node == null || node.isMissingNode() || !node.hasNonNull(field)) {
+            return null;
+        }
+        String value = node.get(field).asText().trim();
+        return value.isBlank() ? null : value;
     }
 
     private long revision(WorkflowRunStep step) {

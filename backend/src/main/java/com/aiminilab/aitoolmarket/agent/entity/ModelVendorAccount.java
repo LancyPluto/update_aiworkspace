@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.agent.entity;
 
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.math.BigDecimal;
@@ -27,10 +28,20 @@ public class ModelVendorAccount {
     private LocalDateTime balanceUpdatedAt;
     private String balanceErrorMessage;
     private String healthStatus;
+    private String healthMessage;
+    private LocalDateTime healthCheckedAt;
+    private Boolean loadBalanceEnabled;
+    private Integer loadBalanceWeight;
     private Boolean enabled;
     private Boolean deleted;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    @TableField(exist = false)
+    private Integer routingInFlightCount;
+    @TableField(exist = false)
+    private String routingCircuitStatus;
+    @TableField(exist = false)
+    private LocalDateTime routingCooldownUntil;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -68,6 +79,14 @@ public class ModelVendorAccount {
     public void setBalanceErrorMessage(String balanceErrorMessage) { this.balanceErrorMessage = balanceErrorMessage; }
     public String getHealthStatus() { return healthStatus; }
     public void setHealthStatus(String healthStatus) { this.healthStatus = healthStatus; }
+    public String getHealthMessage() { return healthMessage; }
+    public void setHealthMessage(String healthMessage) { this.healthMessage = healthMessage; }
+    public LocalDateTime getHealthCheckedAt() { return healthCheckedAt; }
+    public void setHealthCheckedAt(LocalDateTime healthCheckedAt) { this.healthCheckedAt = healthCheckedAt; }
+    public Boolean getLoadBalanceEnabled() { return loadBalanceEnabled; }
+    public void setLoadBalanceEnabled(Boolean loadBalanceEnabled) { this.loadBalanceEnabled = loadBalanceEnabled; }
+    public Integer getLoadBalanceWeight() { return loadBalanceWeight; }
+    public void setLoadBalanceWeight(Integer loadBalanceWeight) { this.loadBalanceWeight = loadBalanceWeight; }
     public Boolean getEnabled() { return enabled; }
     public void setEnabled(Boolean enabled) { this.enabled = enabled; }
     public Boolean getDeleted() { return deleted; }
@@ -76,4 +95,10 @@ public class ModelVendorAccount {
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    public Integer getRoutingInFlightCount() { return routingInFlightCount; }
+    public void setRoutingInFlightCount(Integer routingInFlightCount) { this.routingInFlightCount = routingInFlightCount; }
+    public String getRoutingCircuitStatus() { return routingCircuitStatus; }
+    public void setRoutingCircuitStatus(String routingCircuitStatus) { this.routingCircuitStatus = routingCircuitStatus; }
+    public LocalDateTime getRoutingCooldownUntil() { return routingCooldownUntil; }
+    public void setRoutingCooldownUntil(LocalDateTime routingCooldownUntil) { this.routingCooldownUntil = routingCooldownUntil; }
 }

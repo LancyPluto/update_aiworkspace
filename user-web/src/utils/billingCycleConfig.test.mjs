@@ -16,34 +16,24 @@ async function importTsModule(path) {
 
 const pricing = await importTsModule("./billingCycleConfig.ts")
 
-test("subscription margin stays positive at markup 1.50", () => {
-  const monthly = [
-    [4000, 59],
-    [10000, 149],
-    [20000, 299],
-    [40000, 599],
-  ]
-  for (const [credits, price] of monthly) {
-    assert.ok(pricing.subscriptionMarginPercent(credits, price) >= 45, `monthly ${credits}/${price}`)
+test("new membership prices preserve margin and improve with tier", () => {
+  const cycles = {
+    monthly: [[4000, 59], [10500, 149], [22000, 299], [45000, 599]],
+    quarterly: [[12000, 169], [31500, 425], [66000, 849], [135000, 1699]],
+    yearly: [[48000, 639], [126000, 1609], [264000, 3229], [540000, 6469]],
   }
 
-  const quarterly = [
-    [12000, 159],
-    [30000, 399],
-    [60000, 799],
-    [120000, 1599],
-  ]
-  for (const [credits, price] of quarterly) {
-    assert.ok(pricing.subscriptionMarginPercent(credits, price) >= 45, `quarterly ${credits}/${price}`)
+  for (const [cycle, packages] of Object.entries(cycles)) {
+    const unitPrices = packages.map(([credits, price]) => price / credits)
+    for (const [credits, price] of packages) {
+      assert.ok(pricing.subscriptionMarginPercent(credits, price) >= 30, `${cycle} ${credits}/${price}`)
+    }
+    for (let i = 1; i < unitPrices.length; i++) {
+      assert.ok(unitPrices[i] < unitPrices[i - 1], `${cycle} tier ${i} must be cheaper per credit`)
+    }
   }
+})
 
-  const yearly = [
-    [52000, 446],
-    [130000, 1128],
-    [260000, 2264],
-    [520000, 4528],
-  ]
-  for (const [credits, price] of yearly) {
-    assert.ok(pricing.subscriptionMarginPercent(credits, price) >= 20, `yearly ${credits}/${price}`)
-  }
+test("yearly credits equal twelve monthly grants", () => {
+  assert.deepEqual([48000, 126000, 264000, 540000], [4000, 10500, 22000, 45000].map((credits) => credits * 12))
 })

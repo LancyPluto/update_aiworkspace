@@ -6,6 +6,7 @@ public enum WorkflowStepStatus {
     QUEUED,
     RUNNING,
     AWAITING_USER,
+    AWAITING_FUNDS,
     SUCCESS,
     FAILED,
     CANCELLED

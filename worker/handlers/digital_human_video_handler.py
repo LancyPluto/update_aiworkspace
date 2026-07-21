@@ -90,6 +90,8 @@ class DigitalHumanVideoHandler:
                         voice=voice,
                     ),
                     "billableUnits": 1,
+                    "providerRequestId": result.get("requestId"),
+                    "providerCalled": True,
                 }
                 self.backend_client.mark_success(task_id, success_payload)
                 LOGGER.info("digital human InfiniteTalk task %s completed successfully", task_id)
@@ -118,6 +120,8 @@ class DigitalHumanVideoHandler:
                     presenter_gender=presenter_gender,
                     voice=voice,
                 ),
+                "providerRequestId": result.get("requestId"),
+                "providerCalled": True,
             }
             self.backend_client.mark_success(task_id, success_payload)
             LOGGER.info("digital human video task %s completed successfully", task_id)

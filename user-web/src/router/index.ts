@@ -15,7 +15,6 @@ const ToolListPage = () => import("@/pages/ToolList/Page.vue")
 const MyTasksPage = () => import("@/pages/MyTasks/Page.vue")
 const MaterialLibraryPage = () => import("@/pages/MaterialLibrary/Page.vue")
 const BillingPage = () => import("@/pages/Billing/Page.vue")
-const ReferralPage = () => import("@/pages/Referral/Page.vue")
 const ProfilePage = () => import("@/pages/Profile/Page.vue")
 const PublicProfilePage = () => import("@/pages/PublicProfile/Page.vue")
 const CommunityDiscoverPage = () => import("@/pages/CommunityDiscover/Page.vue")
@@ -88,6 +87,19 @@ const router = createRouter({
           props: true,
         },
         {
+          path: "agents/comic-projects",
+          name: "ComicProjects",
+          meta: { requiresAuth: true },
+          component: () => import("@/pages/ComicProjects/Page.vue"),
+        },
+        {
+          path: "agents/comic-projects/:projectId",
+          name: "ComicProjectWorkspace",
+          meta: { requiresAuth: true },
+          component: () => import("@/pages/ComicProjectWorkspace/Page.vue"),
+          props: true,
+        },
+        {
           path: "tools/:id",
           name: "ToolDetail",
           meta: { requiresAuth: false },
@@ -147,7 +159,10 @@ const router = createRouter({
           path: "referral",
           name: "Referral",
           meta: { requiresAuth: true },
-          component: ReferralPage,
+          redirect: (to) => ({
+            name: "Home",
+            query: { ...to.query, dialog: "referral" },
+          }),
         },
         {
           path: "tasks/:taskId/status",

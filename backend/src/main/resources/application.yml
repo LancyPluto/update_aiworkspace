@@ -98,6 +98,10 @@ app:
     publisher-confirm-timeout-ms: ${RABBITMQ_PUBLISHER_CONFIRM_TIMEOUT_MS:5000}
   task-execution:
     lease-minutes: ${TASK_EXECUTION_LEASE_MINUTES:30}
+  model-routing:
+    enabled: ${APP_MODEL_ROUTING_ENABLED:false}
+    max-failovers: ${APP_MODEL_ROUTING_MAX_FAILOVERS:2}
+    reconcile-interval-ms: ${APP_MODEL_ROUTING_RECONCILE_INTERVAL_MS:60000}
   auth:
     security-audit:
       enabled: ${AUTH_SECURITY_AUDIT_ENABLED:true}

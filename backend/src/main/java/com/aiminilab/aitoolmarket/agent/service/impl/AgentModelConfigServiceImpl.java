@@ -24,6 +24,7 @@ import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
 import com.aiminilab.aitoolmarket.agent.support.VolcengineEndpointSupport;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.task.routing.mapper.AccountModelRouteStateMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -61,6 +62,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     private final OutboundProxyPolicyResolver outboundProxyPolicyResolver;
     private final VendorCodeResolver vendorCodeResolver;
     private final ObjectMapper objectMapper;
+    private final AccountModelRouteStateMapper routeStateMapper;
 
     public AgentModelConfigServiceImpl(AgentModelConfigMapper agentModelConfigMapper,
                                        ModelVendorAccountMapper vendorAccountMapper,
@@ -71,9 +73,10 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                                        ModelCapabilitiesCodec capabilitiesCodec,
                                        ModelConfigCredentialResolver credentialResolver,
                                        ModelRoutePreviewResolver routePreviewResolver,
-                                       OutboundProxyPolicyResolver outboundProxyPolicyResolver,
-                                       VendorCodeResolver vendorCodeResolver,
-                                       ObjectMapper objectMapper) {
+                                        OutboundProxyPolicyResolver outboundProxyPolicyResolver,
+                                        VendorCodeResolver vendorCodeResolver,
+                                        ObjectMapper objectMapper,
+                                        AccountModelRouteStateMapper routeStateMapper) {
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.vendorAccountMapper = vendorAccountMapper;
         this.agentServiceClient = agentServiceClient;
@@ -86,6 +89,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         this.outboundProxyPolicyResolver = outboundProxyPolicyResolver;
         this.vendorCodeResolver = vendorCodeResolver;
         this.objectMapper = objectMapper;
+        this.routeStateMapper = routeStateMapper;
     }
 
     @Override
@@ -309,6 +313,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         config.setLastTestAt(LocalDateTime.now());
         config.setUpdatedAt(LocalDateTime.now());
         agentModelConfigMapper.updateConnectivityTest(config);
+        if (Boolean.TRUE.equals(response.success()) && config.getId() != null) {
+            routeStateMapper.recoverByModelConfigId(config.getId());
+        }
     }
 
     @Override

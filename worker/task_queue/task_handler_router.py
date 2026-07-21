@@ -4,7 +4,13 @@ import uuid
 from contextlib import nullcontext
 from typing import Any
 
-from client.backend_client import BackendClient, BackendClientError, backend_claim_context
+from client.backend_client import (
+    BackendClient,
+    BackendClientError,
+    RouteFailoverRequested,
+    backend_claim_context,
+    backend_route_context,
+)
 from config import settings
 from handlers.digital_human_video_handler import DigitalHumanVideoHandler
 from handlers.image_generation_handler import ImageGenerationHandler
@@ -104,34 +110,64 @@ class TaskHandlerRouter:
             else nullcontext()
         )
         with backend_claim_context(active_claim_token), lease_context, task_timer(context):
-            params = context.get("params") or {}
-            if params.get("workflowStep"):
-                return self.workflow_step_handler.handle(routed_message)
-            handler = str(context.get("executionHandler") or "").upper()
-            if handler == "DIGITAL_HUMAN":
-                return self.digital_human_handler.handle(routed_message)
-            if handler == "IMAGE_GENERATION":
-                return self.image_generation_handler.handle(routed_message)
-            if handler == "MUSIC_GENERATION":
-                return self.music_generation_handler.handle(routed_message)
-            if handler == "TEXT_TO_SPEECH":
-                return self.text_to_speech_handler.handle(routed_message)
-            if handler == "VIDEO_GENERATION":
-                return self.video_generation_handler.handle(routed_message)
-            if context.get("toolCode") == "digital_human_agent":
-                return self.digital_human_handler.handle(routed_message)
-            tool_code = str(context.get("toolCode") or "").strip().lower()
-            if tool_code in {"suno", "suno_music"}:
-                return self.music_generation_handler.handle(routed_message)
-            if str(context.get("toolType") or "").upper() == "IMAGE_GENERATION":
-                return self.image_generation_handler.handle(routed_message)
-            if str(context.get("toolType") or "").upper() == "MUSIC_GENERATION":
-                return self.music_generation_handler.handle(routed_message)
-            if str(context.get("toolType") or "").upper() == "TEXT_TO_SPEECH":
-                return self.text_to_speech_handler.handle(routed_message)
-            if str(context.get("toolType") or "").upper() == "VIDEO_GENERATION":
-                return self.video_generation_handler.handle(routed_message)
-            return self.text_handler.handle(routed_message)
+            failover_count = 0
+            while True:
+                try:
+                    route_attempt_id = context.get("routeAttemptId")
+                    with backend_route_context(
+                        int(route_attempt_id) if route_attempt_id is not None else None
+                    ):
+                        return self._dispatch(routed_message, context)
+                except RouteFailoverRequested as failover:
+                    failover_count += 1
+                    if failover_count > 2:
+                        raise BackendClientError("backend exceeded the worker route failover limit") from failover
+                    context = failover.execution_context
+                    routed_message = {
+                        **message,
+                        "__executionContext": context,
+                        "__claimToken": active_claim_token,
+                    }
+                    LOGGER.warning(
+                        "retrying task with replacement provider account taskId=%s routeAttemptId=%s failoverCount=%s",
+                        task_id,
+                        failover.route_attempt_id,
+                        failover_count,
+                    )
+
+    def _dispatch(
+        self,
+        routed_message: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        params = context.get("params") or {}
+        if params.get("workflowStep"):
+            return self.workflow_step_handler.handle(routed_message)
+        handler = str(context.get("executionHandler") or "").upper()
+        if handler == "DIGITAL_HUMAN":
+            return self.digital_human_handler.handle(routed_message)
+        if handler == "IMAGE_GENERATION":
+            return self.image_generation_handler.handle(routed_message)
+        if handler == "MUSIC_GENERATION":
+            return self.music_generation_handler.handle(routed_message)
+        if handler == "TEXT_TO_SPEECH":
+            return self.text_to_speech_handler.handle(routed_message)
+        if handler == "VIDEO_GENERATION":
+            return self.video_generation_handler.handle(routed_message)
+        if context.get("toolCode") == "digital_human_agent":
+            return self.digital_human_handler.handle(routed_message)
+        tool_code = str(context.get("toolCode") or "").strip().lower()
+        if tool_code in {"suno", "suno_music"}:
+            return self.music_generation_handler.handle(routed_message)
+        if str(context.get("toolType") or "").upper() == "IMAGE_GENERATION":
+            return self.image_generation_handler.handle(routed_message)
+        if str(context.get("toolType") or "").upper() == "MUSIC_GENERATION":
+            return self.music_generation_handler.handle(routed_message)
+        if str(context.get("toolType") or "").upper() == "TEXT_TO_SPEECH":
+            return self.text_to_speech_handler.handle(routed_message)
+        if str(context.get("toolType") or "").upper() == "VIDEO_GENERATION":
+            return self.video_generation_handler.handle(routed_message)
+        return self.text_handler.handle(routed_message)
 
     def _claim_task(self, task_id: int, claim_token: str, trace_id: str | None) -> dict[str, Any]:
         claim_fn = getattr(self.backend_client, "claim_task", None)

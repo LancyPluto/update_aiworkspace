@@ -16,6 +16,8 @@ public class GiftCardPackage {
     private BigDecimal priceAmount;
     private String currency;
     private String cardTheme;
+    private String cardType;
+    private String requiredMemberTier;
     private String status;
     private Integer sortOrder;
     private LocalDateTime createdAt;
@@ -35,6 +37,10 @@ public class GiftCardPackage {
     public void setCurrency(String currency) { this.currency = currency; }
     public String getCardTheme() { return cardTheme; }
     public void setCardTheme(String cardTheme) { this.cardTheme = cardTheme; }
+    public String getCardType() { return cardType; }
+    public void setCardType(String cardType) { this.cardType = cardType; }
+    public String getRequiredMemberTier() { return requiredMemberTier; }
+    public void setRequiredMemberTier(String requiredMemberTier) { this.requiredMemberTier = requiredMemberTier; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public Integer getSortOrder() { return sortOrder; }

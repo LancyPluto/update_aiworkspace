@@ -8,6 +8,7 @@ import {
   getTool,
   type WorkflowToolDetail,
 } from "@/api/workflowApi"
+import { comicProjectApi } from "@/api/comicProjectApi"
 import type { ToolField } from "@/api/types"
 import DynamicForm from "@/components/DynamicForm/DynamicForm.vue"
 import { userRoutes } from "@/router/userRoutes"
@@ -126,6 +127,15 @@ async function startRun() {
       clientRequestId,
     }, { token: auth.token })
     clearClientRequestId()
+    if (tool.value.toolCode === "ai_comic_drama_agent") {
+      try {
+        const binding = await comicProjectApi.getWorkspaceByRun(created.taskId, { token: auth.token })
+        await router.push(binding.workspacePath)
+        return
+      } catch {
+        // The generic run page remains a safe fallback if workspace lookup is temporarily unavailable.
+      }
+    }
     await router.push(userRoutes.workflowRun(created.taskId))
   } catch (createError) {
     if (createError instanceof ApiBusinessError && ["CREDIT_NOT_ENOUGH", "AGENT_CREDIT_NOT_ENOUGH"].includes(createError.code)) {

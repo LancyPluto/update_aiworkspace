@@ -20,6 +20,7 @@ public record ExecutionContextResponse(
         String inputModality,
         String outputModality,
         String status,
+        Long routeAttemptId,
         String traceId,
         JsonNode params,
         ExecutionModelConfigResponse modelConfig,
@@ -63,6 +64,7 @@ public record ExecutionContextResponse(
                 defaultValue(task.getInputModality(), "TEXT"),
                 defaultValue(task.getOutputModality(), "TEXT"),
                 task.getStatus(),
+                task.getCurrentRouteAttemptId(),
                 MDC.get("traceId"),
                 params,
                 modelConfig,
@@ -80,7 +82,7 @@ public record ExecutionContextResponse(
     public ExecutionContextResponse withProviderCheckpoint(JsonNode checkpoint) {
         return new ExecutionContextResponse(
                 taskId, taskNo, userId, toolId, toolCode, toolName, toolType, executionHandler,
-                inputModality, outputModality, status, traceId, params, modelConfig, modelSnapshot,
+                inputModality, outputModality, status, routeAttemptId, traceId, params, modelConfig, modelSnapshot,
                 modelProviderCode, modelName, systemPrompt, userPromptTemplate, fields,
                 checkpoint, providerCheckpointVersion
         );

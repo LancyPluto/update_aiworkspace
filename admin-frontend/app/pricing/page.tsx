@@ -122,6 +122,8 @@ export default function PricingConfigPage() {
       minCredits: 0,
       imageEstimateInputTokens: null,
       imageEstimateOutputTokens: null,
+      tokenEstimateInputTokens: null,
+      tokenEstimateOutputTokens: null,
       enabled: true,
       remark: "",
     })
@@ -221,12 +223,12 @@ export default function PricingConfigPage() {
           <CardHeader>
             <CardTitle>全平台默认利润率</CardTitle>
             <CardDescription>
-              所有工具结算时的默认加价倍率。优先级：模型配置 &gt; 分类 &gt; 全平台默认。倍率 1.20 = 在厂商成本上加价 20%。图片 Token 预估量用于 GPT-image2 这类 IMAGE_TOKEN 模型的下单前预估。
+              所有工具结算时的默认加价倍率。优先级：模型配置 &gt; 分类 &gt; 全平台默认。图片 Token 预估用于 IMAGE_TOKEN；文本 Token 预估用于工作流调用前预冻结，成功后按真实用量结算。
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {globalMargin ? (
-              <div className="grid gap-4 md:grid-cols-6">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div className="space-y-2">
                   <Label>加价倍率</Label>
                   <Input
@@ -303,6 +305,44 @@ export default function PricingConfigPage() {
                   <p className="text-xs text-muted-foreground">IMAGE_TOKEN 预估输出量</p>
                 </div>
                 <div className="space-y-2">
+                  <Label>文本预估输入 Token</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    placeholder="未配置则禁止发布"
+                    value={globalMargin.tokenEstimateInputTokens ?? ""}
+                    onChange={(e) =>
+                      setMargins((rows) =>
+                        rows.map((row) =>
+                          row.id === globalMargin.id
+                            ? { ...row, tokenEstimateInputTokens: e.target.value ? Number(e.target.value) : null }
+                            : row,
+                        ),
+                      )
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">TOKEN_PER_M 调用前预冻结估算</p>
+                </div>
+                <div className="space-y-2">
+                  <Label>文本预估输出 Token</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    placeholder="未配置则禁止发布"
+                    value={globalMargin.tokenEstimateOutputTokens ?? ""}
+                    onChange={(e) =>
+                      setMargins((rows) =>
+                        rows.map((row) =>
+                          row.id === globalMargin.id
+                            ? { ...row, tokenEstimateOutputTokens: e.target.value ? Number(e.target.value) : null }
+                            : row,
+                        ),
+                      )
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">成功后仍按供应商真实 Token 结算</p>
+                </div>
+                <div className="space-y-2">
                   <Label>状态</Label>
                   <Select
                     value={globalMargin.enabled ? "1" : "0"}
@@ -335,7 +375,7 @@ export default function PricingConfigPage() {
                     }
                   />
                 </div>
-                <div className="md:col-span-6">
+                <div className="md:col-span-2 xl:col-span-4">
                   <Button onClick={submitGlobalMargin}>保存全平台默认</Button>
                 </div>
               </div>
@@ -362,7 +402,7 @@ export default function PricingConfigPage() {
               )}
             </div>
             {marginForm && (
-            <div className="grid gap-3 md:grid-cols-9">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <div className="space-y-1">
                 <Label>作用域</Label>
                 <Select
@@ -430,6 +470,32 @@ export default function PricingConfigPage() {
                 />
               </div>
               <div className="space-y-1">
+                <Label>文本输入 Token</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  placeholder="继承；无上级配置则禁止发布"
+                  value={marginForm.tokenEstimateInputTokens ?? ""}
+                  onChange={(e) => setMarginForm({
+                    ...marginForm,
+                    tokenEstimateInputTokens: e.target.value ? Number(e.target.value) : null,
+                  })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>文本输出 Token</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  placeholder="继承；无上级配置则禁止发布"
+                  value={marginForm.tokenEstimateOutputTokens ?? ""}
+                  onChange={(e) => setMarginForm({
+                    ...marginForm,
+                    tokenEstimateOutputTokens: e.target.value ? Number(e.target.value) : null,
+                  })}
+                />
+              </div>
+              <div className="space-y-1">
                 <Label>状态</Label>
                 <Select
                   value={marginForm.enabled ? "1" : "0"}
@@ -464,6 +530,7 @@ export default function PricingConfigPage() {
                   <TableHead>加价倍率</TableHead>
                   <TableHead>保底</TableHead>
                   <TableHead>图片预估 Token</TableHead>
+                  <TableHead>文本预估 Token</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead>备注</TableHead>
                   <TableHead>操作</TableHead>
@@ -481,6 +548,11 @@ export default function PricingConfigPage() {
                         ? `${m.imageEstimateInputTokens ?? "继承"} / ${m.imageEstimateOutputTokens ?? "继承"}`
                         : "继承"}
                     </TableCell>
+                    <TableCell>
+                      {m.tokenEstimateInputTokens || m.tokenEstimateOutputTokens
+                        ? `${m.tokenEstimateInputTokens ?? "继承"} / ${m.tokenEstimateOutputTokens ?? "继承"}`
+                        : "继承"}
+                    </TableCell>
                     <TableCell>{m.enabled ? "启用" : "停用"}</TableCell>
                     <TableCell>{m.remark}</TableCell>
                     <TableCell className="space-x-2">
@@ -491,7 +563,7 @@ export default function PricingConfigPage() {
                 ))}
                 {scopedMargins.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center text-muted-foreground">
+                    <TableCell colSpan={9} className="text-center text-muted-foreground">
                       {loading ? "加载中…" : "暂无分类/模型覆盖，使用全平台默认即可"}
                     </TableCell>
                   </TableRow>

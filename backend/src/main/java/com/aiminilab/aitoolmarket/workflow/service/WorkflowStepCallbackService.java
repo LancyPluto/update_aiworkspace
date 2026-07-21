@@ -78,6 +78,13 @@ public class WorkflowStepCallbackService {
         WorkflowRun run = lockRun(step);
         String providerRequestId = providerRequestId(request.providerRequestId());
         attachProviderRequestId(attempt.getId(), providerRequestId);
+        if (isDeferredSettlement(run, step, attempt)) {
+            if (!sameOutput(attempt.getOutputJson(), outputJson(request))) {
+                throw new IllegalStateException("Deferred workflow success output conflicts with persisted output");
+            }
+            billingService.validateDeferredSettlement(attempt.getId(), request);
+            return true;
+        }
         WorkflowMetrics.LateCallbackResult rejection = rejection(run, step, attempt, true);
         if (rejection != null) {
             metrics.recordLateCallback(rejection);
@@ -91,6 +98,22 @@ public class WorkflowStepCallbackService {
         ) != 1) {
             return false;
         }
+        WorkflowBillingService.SettlementResult settlement = billingService.capture(
+                attempt.getId(), childTaskId, request
+        );
+        if (settlement == WorkflowBillingService.SettlementResult.AWAITING_FUNDS) {
+            if (stepMapper.markActiveAttemptAwaitingFunds(
+                    step.getId(),
+                    revision(step),
+                    attempt.getId(),
+                    outputJson,
+                    "Provider succeeded; recharge to settle actual usage"
+            ) != 1) {
+                throw new IllegalStateException("Active workflow step awaiting-funds compare-and-set failed");
+            }
+            billingService.pauseForSettlementFunds(run, step);
+            return true;
+        }
         if (stepMapper.completeActiveAttempt(
                 step.getId(),
                 revision(step),
@@ -100,8 +123,51 @@ public class WorkflowStepCallbackService {
         ) != 1) {
             throw new IllegalStateException("Active workflow step success compare-and-set failed");
         }
-        billingService.capture(attempt.getId(), childTaskId, request);
         executionService.onStepAttemptSucceeded(step.getId(), childTaskId, request);
+        return true;
+    }
+
+    @Transactional
+    public boolean resumeSettlement(WorkflowRun run, WorkflowRunStep requestedStep) {
+        if (run == null
+                || requestedStep == null
+                || !"AWAITING_FUNDS".equals(run.getStatus())
+                || !requestedStep.getId().equals(run.getCurrentStepId())) {
+            throw new IllegalStateException("Workflow run is not awaiting settlement funds for this step");
+        }
+        WorkflowRunStep step = stepMapper.selectByIdForUpdate(requestedStep.getId());
+        if (step == null
+                || !run.getId().equals(step.getRunId())
+                || !WorkflowStepStatus.AWAITING_FUNDS.name().equals(step.getStatus())
+                || step.getCurrentAttemptId() == null) {
+            throw new IllegalStateException("Workflow settlement step is no longer recoverable");
+        }
+        WorkflowStepAttempt attempt = attemptMapper.selectByIdForUpdate(step.getCurrentAttemptId());
+        if (attempt == null
+                || !step.getId().equals(attempt.getStepId())
+                || !WorkflowAttemptStatus.SUCCESS.name().equals(attempt.getStatus())
+                || attempt.getChildTaskId() == null) {
+            throw new IllegalStateException("Workflow settlement attempt has no persisted provider success");
+        }
+        WorkerSuccessRequest request = billingService.deferredSettlementRequest(
+                attempt.getId(),
+                step.getOutputJson()
+        );
+        if (billingService.capture(attempt.getId(), attempt.getChildTaskId(), request)
+                == WorkflowBillingService.SettlementResult.AWAITING_FUNDS) {
+            return false;
+        }
+        if (stepMapper.completeActiveAttempt(
+                step.getId(),
+                revision(step),
+                attempt.getId(),
+                step.getOutputJson(),
+                List.of(WorkflowStepStatus.AWAITING_FUNDS.name())
+        ) != 1) {
+            throw new IllegalStateException("Workflow settlement step completion compare-and-set failed");
+        }
+        billingService.resumeAfterSettlement(run, step);
+        executionService.onStepAttemptSucceeded(step.getId(), attempt.getChildTaskId(), request);
         return true;
     }
 
@@ -217,6 +283,30 @@ public class WorkflowStepCallbackService {
         return step != null
                 && step.getCurrentAttemptId() != null
                 && step.getCurrentAttemptId().equals(attempt.getId());
+    }
+
+    private boolean isDeferredSettlement(WorkflowRun run,
+                                         WorkflowRunStep step,
+                                         WorkflowStepAttempt attempt) {
+        return run != null
+                && "AWAITING_FUNDS".equals(run.getStatus())
+                && run.getCurrentStepId() != null
+                && step != null
+                && run.getCurrentStepId().equals(step.getId())
+                && WorkflowStepStatus.AWAITING_FUNDS.name().equals(step.getStatus())
+                && isCurrent(step, attempt)
+                && WorkflowAttemptStatus.SUCCESS.name().equals(attempt.getStatus());
+    }
+
+    private boolean sameOutput(String persisted, String received) {
+        if (persisted == null || received == null) {
+            return persisted == null && received == null;
+        }
+        try {
+            return objectMapper.readTree(persisted).equals(objectMapper.readTree(received));
+        } catch (Exception ignored) {
+            return persisted.equals(received);
+        }
     }
 
     private boolean isRunningCurrent(WorkflowRunStep step, WorkflowStepAttempt attempt) {

@@ -13,6 +13,7 @@ public record WorkerSuccessRequest(
         BigDecimal providerCostAmount,
         String providerCostCurrency,
         String providerRequestId,
+        Boolean providerCalled,
         String claimToken
 ) {
     public WorkerSuccessRequest(String resourceType,
@@ -22,6 +23,19 @@ public record WorkerSuccessRequest(
                                 Integer billableUnits,
                                 String claimToken) {
         this(resourceType, contentText, promptTokens, completionTokens, billableUnits,
-                null, null, null, claimToken);
+                null, null, null, null, claimToken);
+    }
+
+    public WorkerSuccessRequest(String resourceType,
+                                String contentText,
+                                Integer promptTokens,
+                                Integer completionTokens,
+                                Integer billableUnits,
+                                BigDecimal providerCostAmount,
+                                String providerCostCurrency,
+                                String providerRequestId,
+                                String claimToken) {
+        this(resourceType, contentText, promptTokens, completionTokens, billableUnits,
+                providerCostAmount, providerCostCurrency, providerRequestId, null, claimToken);
     }
 }

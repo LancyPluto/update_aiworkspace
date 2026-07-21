@@ -3,8 +3,6 @@ import time
 from typing import Any
 
 from client.backend_client import BackendClient, BackendClientError
-from handlers.error_classifier import classify_model_error
-from config import settings
 from client.model_client import (
     ModelClient,
     ModelClientError,
@@ -12,7 +10,9 @@ from client.model_client import (
     ModelOutputEmptyError,
     ModelTimeoutError,
 )
+from client.provider_error import structured_failure_payload
 from config import settings
+from handlers.error_classifier import classify_model_error
 from prompt.renderer import PromptRenderError, render_prompt
 from tools import ToolResultBuildError, build_success_payload
 from tools.output_policy import apply_output_discipline
@@ -147,6 +147,7 @@ class TextTaskHandler:
             self._report_progress(context, task_id, 86, trace_id=trace_id)
             success_payload = build_success_payload(context, model_result.content)
             self._attach_token_usage(success_payload, model_result)
+            success_payload["providerCalled"] = True
             self._report_progress(context, task_id, 94, trace_id=trace_id)
             self.backend_client.mark_success(task_id, success_payload, trace_id=trace_id)
             LOGGER.info("task %s completed successfully traceId=%s", task_id, trace_id or "-")
@@ -164,6 +165,7 @@ class TextTaskHandler:
                 error_code="MODEL_TIMEOUT",
                 error_message=str(exc),
                 trace_id=trace_id,
+                failure_metadata=structured_failure_payload(exc),
             )
         except ModelOutputEmptyError as exc:
             return self._mark_failed(
@@ -185,6 +187,7 @@ class TextTaskHandler:
                 error_code=classify_model_error(str(exc)),
                 error_message=str(exc),
                 trace_id=trace_id,
+                failure_metadata=structured_failure_payload(exc),
             )
         except BackendClientError:
             raise
@@ -380,13 +383,22 @@ class TextTaskHandler:
         if result.completion_tokens > 0:
             payload["completionTokens"] = result.completion_tokens
 
-    def _mark_failed(self, task_id: int, *, error_code: str, error_message: str, trace_id: str | None = None) -> dict[str, Any]:
+    def _mark_failed(
+        self,
+        task_id: int,
+        *,
+        error_code: str,
+        error_message: str,
+        trace_id: str | None = None,
+        failure_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         LOGGER.exception("task %s failed traceId=%s errorCode=%s: %s", task_id, trace_id or "-", error_code, error_message)
         self.backend_client.mark_failed(
             task_id,
             {
                 "errorCode": error_code,
                 "errorMessage": error_message,
+                **(failure_metadata or {}),
             },
             trace_id=trace_id,
         )

@@ -9,6 +9,8 @@ import com.aiminilab.aitoolmarket.agent.service.AgentToolDescriptorService;
 import com.aiminilab.aitoolmarket.agent.service.AgentWorkflowDelegationService;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.comic.dto.ComicDtos;
+import com.aiminilab.aitoolmarket.comic.service.ComicProjectApplicationService;
 import com.aiminilab.aitoolmarket.workflow.dto.CreateWorkflowRunCommand;
 import com.aiminilab.aitoolmarket.workflow.dto.WorkflowRunCreated;
 import com.aiminilab.aitoolmarket.workflow.entity.WorkflowRun;
@@ -45,6 +47,7 @@ class AgentWorkflowDelegationServiceTest {
     private WorkflowRunApplicationService workflowService;
     private WorkflowRunMapper workflowRunMapper;
     private ToolMapper toolMapper;
+    private ComicProjectApplicationService comicProjectApplicationService;
     private AgentWorkflowDelegationService service;
 
     @BeforeEach
@@ -55,6 +58,7 @@ class AgentWorkflowDelegationServiceTest {
         workflowService = mock(WorkflowRunApplicationService.class);
         workflowRunMapper = mock(WorkflowRunMapper.class);
         toolMapper = mock(ToolMapper.class);
+        comicProjectApplicationService = mock(ComicProjectApplicationService.class);
         AiTool workflowTool = new AiTool();
         workflowTool.setId(19L);
         workflowTool.setToolCode("comic_workflow");
@@ -66,7 +70,8 @@ class AgentWorkflowDelegationServiceTest {
                 workflowService,
                 workflowRunMapper,
                 toolMapper,
-                new ObjectMapper()
+                new ObjectMapper(),
+                comicProjectApplicationService
         );
     }
 
@@ -119,6 +124,27 @@ class AgentWorkflowDelegationServiceTest {
         assertThat(response.taskId()).isEqualTo(501L);
         assertThat(response.runId()).isEqualTo(601L);
         verify(workflowService, never()).createInCurrentTransaction(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void comicDelegationReturnsProjectWorkspaceUrl() {
+        AgentToolCall call = runningCall("{\"prompt\":\"city night\"}");
+        call.setToolCode("ai_comic_drama_agent");
+        AgentRun run = runningRun(7L);
+        when(toolCallMapper.findByIdForUpdate(91L)).thenReturn(Optional.of(call));
+        when(runMapper.findById(88L)).thenReturn(Optional.of(run));
+        when(descriptorService.getToolForAgent(7L, "ai_comic_drama_agent")).thenReturn(workflowDescriptor());
+        when(workflowService.createInCurrentTransaction(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new WorkflowRunCreated(501L, 601L, 701L, "RUNNING"));
+        when(comicProjectApplicationService.workspaceByRootTaskIdInternal(501L))
+                .thenReturn(new ComicDtos.WorkspaceBinding(
+                        71L, 81L, null, 501L, 601L, "AGENT_CHAT",
+                        "/agents/comic-projects/71?episode=81"
+                ));
+
+        var response = service.delegate(91L);
+
+        assertThat(response.runUrl()).isEqualTo("/agents/comic-projects/71?episode=81");
     }
 
     @ParameterizedTest

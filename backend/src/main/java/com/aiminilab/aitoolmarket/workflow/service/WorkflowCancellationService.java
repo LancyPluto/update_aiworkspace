@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.agent.service.AgentDelegatedToolCallLifecycleS
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.comic.service.ComicWorkflowResultProjector;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import com.aiminilab.aitoolmarket.workflow.entity.WorkflowRun;
@@ -31,7 +32,7 @@ public class WorkflowCancellationService {
             "SUCCESS", "FAILED", "TIMEOUT", "CANCELLED"
     );
     private static final Set<String> RELEASABLE_ATTEMPT_STATUSES = Set.of(
-            "CREATED", "DISPATCHED", "QUEUED", "RUNNING"
+            "CREATED", "DISPATCHED", "QUEUED", "RUNNING", "SUCCESS"
     );
 
     private final WorkflowRunMapper runMapper;
@@ -42,6 +43,7 @@ public class WorkflowCancellationService {
     private final WorkflowBillingService billingService;
     private final TaskMapper taskMapper;
     private final AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService;
+    private final ComicWorkflowResultProjector comicWorkflowResultProjector;
 
     public WorkflowCancellationService(WorkflowRunMapper runMapper,
                                        WorkflowRunStepMapper stepMapper,
@@ -50,7 +52,8 @@ public class WorkflowCancellationService {
                                        WorkflowConfirmationMapper confirmationMapper,
                                        WorkflowBillingService billingService,
                                        TaskMapper taskMapper,
-                                       AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService) {
+                                       AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService,
+                                       ComicWorkflowResultProjector comicWorkflowResultProjector) {
         this.runMapper = runMapper;
         this.stepMapper = stepMapper;
         this.attemptMapper = attemptMapper;
@@ -59,6 +62,7 @@ public class WorkflowCancellationService {
         this.billingService = billingService;
         this.taskMapper = taskMapper;
         this.delegatedToolCallLifecycleService = delegatedToolCallLifecycleService;
+        this.comicWorkflowResultProjector = comicWorkflowResultProjector;
     }
 
     @Transactional
@@ -116,7 +120,11 @@ public class WorkflowCancellationService {
             if (!RELEASABLE_ATTEMPT_STATUSES.contains(attempt.getStatus())) {
                 continue;
             }
-            billingService.release(attempt.getId());
+            if ("SUCCESS".equals(attempt.getStatus())) {
+                billingService.releaseDeferredSuccess(attempt.getId(), attempt.getChildTaskId());
+            } else {
+                billingService.release(attempt.getId());
+            }
             attemptMapper.cancelIfActive(attempt.getId(), normalizedReason);
         }
         confirmationMapper.cancelPendingByRunId(run.getId());
@@ -141,6 +149,7 @@ public class WorkflowCancellationService {
         if (runMapper.finishCancellation(run.getId(), revision(run)) != 1) {
             throw conflict("工作流取消收敛失败");
         }
+        comicWorkflowResultProjector.projectFailed(run.getId());
         delegatedToolCallLifecycleService.finishForWorkflow(
                 run.getRootTaskId(),
                 run.getId(),

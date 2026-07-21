@@ -848,6 +848,12 @@ class AdminAgentApiTest {
                 .getResponse()
                 .getContentAsString();
         Long configId = Long.parseLong(configResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+        jdbcTemplate.update("""
+                INSERT INTO account_model_route_state(
+                    vendor_account_id, model_config_id, circuit_status,
+                    consecutive_failures, cooldown_until
+                ) VALUES (?, ?, 'OPEN', 2, DATEADD('MINUTE', 5, CURRENT_TIMESTAMP))
+                """, accountId, configId);
 
         Mockito.when(agentServiceClient.testModelConfig(any()))
                 .thenAnswer(invocation -> {
@@ -863,6 +869,17 @@ class AdminAgentApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.success").value(true))
                 .andExpect(jsonPath("$.data.modelName").value("gpt-relay"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT circuit_status FROM account_model_route_state WHERE model_config_id = ?",
+                String.class,
+                configId
+        )).isEqualTo("CLOSED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT consecutive_failures FROM account_model_route_state WHERE model_config_id = ?",
+                Integer.class,
+                configId
+        )).isZero();
     }
 
     @Test

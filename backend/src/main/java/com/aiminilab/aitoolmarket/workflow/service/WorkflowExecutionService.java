@@ -5,6 +5,7 @@ import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
+import com.aiminilab.aitoolmarket.comic.service.ComicWorkflowResultProjector;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.task.dto.WorkerFailedRequest;
 import com.aiminilab.aitoolmarket.task.dto.WorkerSuccessRequest;
@@ -35,6 +36,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -81,6 +83,7 @@ public class WorkflowExecutionService {
     private final WorkflowRootTaskFinalizer workflowRootTaskFinalizer;
     private final WorkflowConfirmationTokenService confirmationTokenService;
     private final AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService;
+    private final ComicWorkflowResultProjector comicWorkflowResultProjector;
 
     public WorkflowExecutionService(WorkflowDslService workflowDslService,
                                     WorkflowRunMapper workflowRunMapper,
@@ -93,7 +96,8 @@ public class WorkflowExecutionService {
                                     ObjectMapper objectMapper,
                                     @Lazy WorkflowRootTaskFinalizer workflowRootTaskFinalizer,
                                     WorkflowConfirmationTokenService confirmationTokenService,
-                                    AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService) {
+                                    AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService,
+                                    ComicWorkflowResultProjector comicWorkflowResultProjector) {
         this.workflowDslService = workflowDslService;
         this.workflowRunMapper = workflowRunMapper;
         this.workflowRunStepMapper = workflowRunStepMapper;
@@ -106,6 +110,7 @@ public class WorkflowExecutionService {
         this.workflowRootTaskFinalizer = workflowRootTaskFinalizer;
         this.confirmationTokenService = confirmationTokenService;
         this.delegatedToolCallLifecycleService = delegatedToolCallLifecycleService;
+        this.comicWorkflowResultProjector = comicWorkflowResultProjector;
     }
 
     @Transactional
@@ -286,16 +291,21 @@ public class WorkflowExecutionService {
         WorkflowDsl dsl = loadDsl(run);
         Map<String, WorkflowRunStep> steps = stepMap(runId);
         ObjectNode context = readContext(run);
+        Set<String> operationHandlerKeys = operationHandlerKeys(readInput(run));
+        boolean operationScoped = !operationHandlerKeys.isEmpty();
 
         for (String nodeId : dsl.executionOrder()) {
             WorkflowRunStep step = steps.get(nodeId);
             if (step == null || !STEP_PENDING.equals(step.getStatus())) {
                 continue;
             }
-            if (!dependenciesSucceeded(dsl, steps, nodeId)) {
+            WorkflowNodeDef node = dsl.requireNode(nodeId);
+            if (operationScoped && !operationHandlerKeys.contains(handlerKey(node))) {
+                throw new IllegalStateException("Operation-scoped run contains a mismatched step: " + nodeId);
+            }
+            if (!dependenciesSucceeded(dsl, steps, nodeId, operationScoped)) {
                 continue;
             }
-            WorkflowNodeDef node = dsl.requireNode(nodeId);
             if (node.type().isInline()) {
                 executeInlineStep(run, dsl, step, node, context);
                 run = requireRun(runId);
@@ -356,6 +366,7 @@ public class WorkflowExecutionService {
         saveContext(run, context, node.id());
         if (node.type() == WorkflowNodeDefType.VIDEO_OUTPUT) {
             if (markRunSuccess(run)) {
+                comicWorkflowResultProjector.projectSucceeded(run.getId(), context);
                 finalizeRootTask(run, context);
             }
             return;
@@ -437,6 +448,7 @@ public class WorkflowExecutionService {
         }
         ObjectNode context = readContext(run);
         if (markRunSuccess(run)) {
+            comicWorkflowResultProjector.projectSucceeded(run.getId(), context);
             finalizeRootTask(run, context);
         }
     }
@@ -453,6 +465,7 @@ public class WorkflowExecutionService {
         run.setErrorMessage(limit(errorMessage, 1900));
         run.setFinishedAt(LocalDateTime.now());
         persistRunState(run, expectedStatus, RUN_FAILED);
+        comicWorkflowResultProjector.projectFailed(run.getId());
         AiTask rootTask = taskMapper.findById(run.getRootTaskId())
                 .orElseThrow(() -> new IllegalStateException("Workflow root task not found: " + run.getRootTaskId()));
         creditService.release(
@@ -501,8 +514,15 @@ public class WorkflowExecutionService {
     }
 
     private ObjectNode buildNodeInputs(WorkflowDsl dsl, WorkflowNodeDef node, ObjectNode context, JsonNode formInput) {
+        JsonNode workerFormInput = workerVisibleInput(formInput);
         ObjectNode inputs = objectMapper.createObjectNode();
-        inputs.set("form", formInput);
+        inputs.set("form", workerFormInput);
+        ObjectNode operationInput = workerFormInput != null && workerFormInput.isObject()
+                ? ((ObjectNode) workerFormInput).deepCopy()
+                : objectMapper.createObjectNode();
+        if (workerFormInput != null && !workerFormInput.isNull() && !workerFormInput.isObject()) {
+            operationInput.set("value", workerFormInput);
+        }
         for (WorkflowEdgeDef edge : dsl.edges()) {
             if (!node.id().equals(edge.target())) {
                 continue;
@@ -510,26 +530,85 @@ public class WorkflowExecutionService {
             JsonNode upstream = context.get(edge.source());
             if (upstream != null && !upstream.isMissingNode()) {
                 inputs.set(edge.source(), upstream);
+                operationInput.set(edge.source(), upstream);
             }
         }
+        // Stable handlers receive the project item plus outputs from selected upstream operations.
+        inputs.set("operationInput", operationInput);
         if (node.parameters() != null && !node.parameters().isMissingNode()) {
             inputs.set("parameters", node.parameters());
         }
+        removeInternalRequestIdentity(inputs);
         return inputs;
     }
 
-    private boolean dependenciesSucceeded(WorkflowDsl dsl, Map<String, WorkflowRunStep> steps, String nodeId) {
+    private JsonNode workerVisibleInput(JsonNode input) {
+        if (input == null || !input.isObject()) {
+            return input;
+        }
+        ObjectNode visible = ((ObjectNode) input).deepCopy();
+        visible.remove("__workflowRequestIdentity");
+        return visible;
+    }
+
+    private void removeInternalRequestIdentity(JsonNode value) {
+        if (value == null || value.isNull()) {
+            return;
+        }
+        if (value.isObject()) {
+            ObjectNode object = (ObjectNode) value;
+            object.remove("__workflowRequestIdentity");
+            object.elements().forEachRemaining(this::removeInternalRequestIdentity);
+            return;
+        }
+        if (value.isArray()) {
+            value.elements().forEachRemaining(this::removeInternalRequestIdentity);
+        }
+    }
+
+    private boolean dependenciesSucceeded(WorkflowDsl dsl,
+                                          Map<String, WorkflowRunStep> steps,
+                                          String nodeId,
+                                          boolean operationScoped) {
         List<WorkflowEdgeDef> incoming = dsl.edges().stream().filter(edge -> nodeId.equals(edge.target())).toList();
         if (incoming.isEmpty()) {
             return true;
         }
         for (WorkflowEdgeDef edge : incoming) {
             WorkflowRunStep upstream = steps.get(edge.source());
+            if (upstream == null && operationScoped) {
+                continue;
+            }
             if (upstream == null || !STEP_SUCCESS.equals(upstream.getStatus())) {
                 return false;
             }
         }
         return true;
+    }
+
+    private Set<String> operationHandlerKeys(JsonNode input) {
+        if (input == null || input.isNull()) {
+            return Set.of();
+        }
+        LinkedHashSet<String> keys = new LinkedHashSet<>();
+        JsonNode array = input.get("operationHandlerKeys");
+        if (array != null && array.isArray()) {
+            array.forEach(value -> {
+                if (value.isTextual() && !value.asText().isBlank()) {
+                    keys.add(value.asText().trim());
+                }
+            });
+        }
+        String single = text(input, "operationHandlerKey");
+        if (single != null) {
+            keys.add(single);
+        }
+        return Set.copyOf(keys);
+    }
+
+    private String handlerKey(WorkflowNodeDef node) {
+        String key = text(node.parameters(), "handlerKey");
+        return key == null ? text(node.parameters(), "operation") : key;
     }
 
     private Map<String, WorkflowRunStep> stepMap(Long runId) {
@@ -586,7 +665,10 @@ public class WorkflowExecutionService {
 
     private JsonNode readInput(WorkflowRun run) {
         try {
-            return objectMapper.readTree(run.getInputJson());
+            JsonNode parsed = objectMapper.readTree(run.getInputJson());
+            return parsed != null && parsed.isTextual()
+                    ? objectMapper.readTree(parsed.asText())
+                    : parsed;
         } catch (Exception exception) {
             return objectMapper.createObjectNode();
         }

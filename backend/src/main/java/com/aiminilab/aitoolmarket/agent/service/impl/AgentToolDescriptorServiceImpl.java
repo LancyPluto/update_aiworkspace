@@ -86,11 +86,11 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
         List<AiTool> tools = toolMapper.findTools(true, null, null, null, AGENT_AVAILABLE_TOOL_LIMIT, 0);
         Map<String, AgentToolDescriptorExtension> extensions = findExtensionsByToolCode(tools);
         Set<String> disabledToolCodes = disabledToolCodes(userId);
-        Set<Long> executableWorkflowToolIds = executableWorkflowToolIds(tools);
+        Set<Long> publishedWorkflowToolIds = publishedWorkflowToolIds(tools);
         return tools.stream()
                 .filter(tool -> {
                     AgentToolDescriptorExtension ext = extensions.get(tool.getToolCode());
-                    return isToolAgentReadable(tool, ext, executableWorkflowToolIds)
+                    return isToolAgentReadable(tool, ext, publishedWorkflowToolIds)
                             && !disabledToolCodes.contains(tool.getToolCode());
                 })
                 .map(tool -> toDescriptor(tool, extensions.get(tool.getToolCode())))
@@ -102,11 +102,11 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
         List<AiTool> tools = toolMapper.findTools(true, null, null, null, AGENT_AVAILABLE_TOOL_LIMIT, 0);
         Map<String, AgentToolDescriptorExtension> extensions = findExtensionsByToolCode(tools);
         Map<String, AgentToolPreference> preferences = preferencesByToolCode(userId);
-        Set<Long> executableWorkflowToolIds = executableWorkflowToolIds(tools);
+        Set<Long> publishedWorkflowToolIds = publishedWorkflowToolIds(tools);
         return tools.stream()
                 .filter(tool -> {
                     AgentToolDescriptorExtension ext = extensions.get(tool.getToolCode());
-                    return isToolAgentReadable(tool, ext, executableWorkflowToolIds);
+                    return isToolAgentReadable(tool, ext, publishedWorkflowToolIds);
                 })
                 .map(tool -> {
                     AgentToolPreference preference = preferences.get(tool.getToolCode());
@@ -285,7 +285,7 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
         if (!"WORKFLOW".equals(normalizeExecutionMode(tool.getExecutionMode()))) {
             return null;
         }
-        ToolWorkflow workflow = workflowMapper.selectExecutableCanonicalByToolId(tool.getId());
+        ToolWorkflow workflow = workflowMapper.selectCanonicalPublishedSnapshotByToolId(tool.getId());
         if (workflow == null || workflow.getPublishedVersionId() == null) {
             return objectMapper.createObjectNode();
         }
@@ -447,25 +447,23 @@ public class AgentToolDescriptorServiceImpl implements AgentToolDescriptorServic
 
     private boolean isToolAgentReadable(AiTool tool,
                                         AgentToolDescriptorExtension ext,
-                                        Set<Long> executableWorkflowToolIds) {
+                                        Set<Long> publishedWorkflowToolIds) {
         if (!"WORKFLOW".equals(normalizeExecutionMode(tool.getExecutionMode()))) {
             return ext == null || isAgentReadable(ext);
         }
-        return Boolean.TRUE.equals(tool.getAgentSurfaceEnabled())
-                && "WORKFLOW_STEP".equals(normalizeBillingMode(tool.getBillingMode(), "WORKFLOW"))
-                && (executableWorkflowToolIds == null
-                    ? workflowMapper.selectExecutableCanonicalByToolId(tool.getId()) != null
-                    : executableWorkflowToolIds.contains(tool.getId()));
+        return publishedWorkflowToolIds == null
+                ? workflowMapper.selectCanonicalPublishedSnapshotByToolId(tool.getId()) != null
+                : publishedWorkflowToolIds.contains(tool.getId());
     }
 
-    private Set<Long> executableWorkflowToolIds(List<AiTool> tools) {
+    private Set<Long> publishedWorkflowToolIds(List<AiTool> tools) {
         List<Long> toolIds = tools.stream()
                 .filter(tool -> "WORKFLOW".equals(normalizeExecutionMode(tool.getExecutionMode())))
                 .map(AiTool::getId)
                 .filter(Objects::nonNull)
                 .distinct()
                 .toList();
-        return toolIds.isEmpty() ? Set.of() : Set.copyOf(workflowMapper.selectExecutableToolIds(toolIds));
+        return toolIds.isEmpty() ? Set.of() : Set.copyOf(workflowMapper.selectPublishedSnapshotToolIds(toolIds));
     }
 
     private String normalizeHealthStatus(String healthStatus) {
