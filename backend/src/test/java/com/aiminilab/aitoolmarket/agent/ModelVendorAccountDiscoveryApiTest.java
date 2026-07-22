@@ -207,11 +207,24 @@ class ModelVendorAccountDiscoveryApiTest {
                     .andExpect(jsonPath("$.data.models[?(@.modelName=='gpt-image-2')].capabilities[0]").value("IMAGE_GENERATION"))
                     .andExpect(jsonPath("$.data.models[?(@.modelName=='kling-v2-6')].capabilities[0]").value("VIDEO_GENERATION"));
 
+            jdbcTemplate.update("""
+                    UPDATE agent_model_configs
+                    SET enabled = 0
+                    WHERE vendor_account_id = ? AND model_name = 'gpt-4o-mini'
+                    """, accountId);
+
             mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/discover-models", accountId)
                             .header("Authorization", "Bearer " + adminToken))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.imported").value(0))
                     .andExpect(jsonPath("$.data.updated").value(3));
+
+            Boolean rediscoveredEnabled = jdbcTemplate.queryForObject(
+                    "SELECT enabled FROM agent_model_configs WHERE vendor_account_id = ? AND model_name = 'gpt-4o-mini'",
+                    Boolean.class,
+                    accountId
+            );
+            assertThat(rediscoveredEnabled).isTrue();
 
             String list = mockMvc.perform(get("/api/admin/v1/agent/model-config/list")
                             .header("Authorization", "Bearer " + adminToken))

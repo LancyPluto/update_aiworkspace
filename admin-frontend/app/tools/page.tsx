@@ -1099,7 +1099,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
     if (form.modelConfigId) {
       const selectedModel = modelConfigs.find((config) => String(config.id) === form.modelConfigId)
       if (!selectedModel) {
-        reportSaveValidationError("所选模型已停用或不存在，请重新选择。")
+        reportSaveValidationError("所选模型不可用或不存在，请重新选择。")
         return
       }
       if (!modelConfigSupportsToolRequirements(

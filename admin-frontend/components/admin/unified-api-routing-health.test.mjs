@@ -6,7 +6,9 @@ const source = await readFile(new URL("./unified-api-settings.tsx", import.meta.
 
 test("model health presentation is independent from account health", () => {
   assert.match(source, /function modelRowTone\(model: UnifiedApiModelItem\)[\s\S]*?const health = model\.healthStatus/)
-  assert.match(source, /function canEnableAgentForModel\(model: UnifiedApiModelItem\) \{\s*return model\.enabled\s*\}/)
+  assert.doesNotMatch(source, /function canEnableAgentForModel/)
+  assert.doesNotMatch(source, /toggleModelEnabled|patchModelEnabled|togglingModelId/)
+  assert.doesNotMatch(source, /模型已停用|enabledModelCount|enabledRate|MODEL_DISABLED/)
   assert.doesNotMatch(source, /function modelAccountHealth/)
   assert.doesNotMatch(source, /function accountProbePassed/)
 })

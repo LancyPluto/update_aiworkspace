@@ -234,23 +234,15 @@ function isCredentialValidStatus(value?: string | null) {
   return status === "OK" || status === "WARNING"
 }
 
-function canEnableAgentForModel(model: UnifiedApiModelItem) {
-  return model.enabled
-}
-
 function modelRowTone(model: UnifiedApiModelItem) {
   const health = model.healthStatus
-  const disabledTone = model.enabled ? "" : " opacity-75"
-  if (isHealthyStatus(health)) return `bg-emerald-50/70 hover:bg-emerald-50${disabledTone}`
-  if (isWarningStatus(health)) return `bg-amber-50/75 hover:bg-amber-50${disabledTone}`
-  if (isErrorStatus(health)) return `bg-rose-50/75 hover:bg-rose-50${disabledTone}`
-  return disabledTone.trim()
+  if (isHealthyStatus(health)) return "bg-emerald-50/70 hover:bg-emerald-50"
+  if (isWarningStatus(health)) return "bg-amber-50/75 hover:bg-amber-50"
+  if (isErrorStatus(health)) return "bg-rose-50/75 hover:bg-rose-50"
+  return ""
 }
 
 function modelHealthBadge(model: UnifiedApiModelItem) {
-  if (normalizeHealthStatus(model.healthStatus) === "DISABLED") {
-    return <Badge variant="outline" className="text-[10px]">模型已停用</Badge>
-  }
   if (isHealthyStatus(model.healthStatus)) {
     return <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700">模型正常</Badge>
   }
@@ -322,7 +314,6 @@ function routingExclusionReasonLabel(value?: string | null) {
     ACCOUNT_DISABLED: "账户已停用",
     ACCOUNT_UNBOUND: "模型未绑定账户",
     LOAD_BALANCING_DISABLED: "未开启负载均衡",
-    MODEL_DISABLED: "模型已停用",
     NO_MATCHING_ACCOUNT: "没有其他账户配置同名模型",
     PRICE_MISMATCH: "同名模型价格配置不一致",
     ROUTE_CONFIG_MISMATCH: "同名模型执行协议或能力配置不一致",
@@ -685,7 +676,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
   const [vendorSaving, setVendorSaving] = useState(false)
 
   const [openVendors, setOpenVendors] = useState<Record<string, boolean>>({})
-  const [togglingModelId, setTogglingModelId] = useState<number | null>(null)
   const [togglingAgentModelId, setTogglingAgentModelId] = useState<number | null>(null)
   const [togglingAccountId, setTogglingAccountId] = useState<number | null>(null)
   const [routingAccountId, setRoutingAccountId] = useState<number | null>(null)
@@ -795,31 +785,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       setLoading(false)
     }
   }, [fetchOverviewData])
-
-  const patchModelEnabled = useCallback((modelId: number, enabled: boolean) => {
-    setOverview((prev) => {
-      if (!prev) return prev
-      let enabledDelta = 0
-      const vendors = prev.vendors.map((vendor) => ({
-        ...vendor,
-        models: vendor.models.map((item) => {
-          if (item.id !== modelId) return item
-          if (item.enabled !== enabled) {
-            enabledDelta = enabled ? 1 : -1
-          }
-          return { ...item, enabled }
-        }),
-      }))
-      return {
-        ...prev,
-        summary: {
-          ...prev.summary,
-          enabledModelCount: Math.max(0, prev.summary.enabledModelCount + enabledDelta),
-        },
-        vendors,
-      }
-    })
-  }, [])
 
   const patchModelAgentEnabled = useCallback((modelId: number, agentEnabled: boolean) => {
     setOverview((prev) => {
@@ -1038,58 +1003,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     }
   }, [refreshOverviewSilently])
 
-  const toggleModelEnabled = useCallback(
-    async (model: UnifiedApiModelItem, enabled: boolean) => {
-      const previous = model.enabled
-      const previousAgentEnabled = model.agentEnabled ?? true
-      patchModelEnabled(model.id, enabled)
-      if (!enabled) {
-        patchModelAgentEnabled(model.id, false)
-      }
-      setTogglingModelId(model.id)
-      setError(null)
-      try {
-        await updateAgentModelConfig(model.id, {
-          vendorAccountId: model.vendorAccountId ?? undefined,
-          routingPoolId: model.routingPoolId ?? null,
-          displayName: model.displayName || "",
-          configCode: model.configCode || "",
-          provider: model.provider,
-          modelName: model.modelName,
-          baseUrl: model.baseUrl || undefined,
-          minimaxGroupId: model.minimaxGroupId || undefined,
-          consoleUrl: model.consoleUrl || undefined,
-          balanceUrl: model.balanceUrl || undefined,
-          docsUrl: model.docsUrl || undefined,
-          enabled,
-          agentEnabled: enabled ? model.agentEnabled ?? true : false,
-          isDefault: model.isDefault ?? false,
-          capabilities: model.capabilities ? [...model.capabilities] : [],
-          timeoutSeconds: model.timeoutSeconds ?? 60,
-          connectTimeoutSeconds: model.connectTimeoutSeconds ?? undefined,
-          readTimeoutSeconds: model.readTimeoutSeconds ?? undefined,
-          inputTokenPricePer1m: model.inputTokenPricePer1m ?? 0,
-          outputTokenPricePer1m: model.outputTokenPricePer1m ?? 0,
-          billingUnit: (model.billingUnit as AgentModelConfigPayload["billingUnit"]) || "TOKEN_PER_M",
-          unitPrice: model.unitPrice ?? 0,
-        })
-      } catch (err) {
-        patchModelEnabled(model.id, previous)
-        patchModelAgentEnabled(model.id, previousAgentEnabled)
-        setError(err instanceof ApiError ? err.message : "更新失败")
-      } finally {
-        setTogglingModelId(null)
-      }
-    },
-    [patchModelEnabled, patchModelAgentEnabled],
-  )
-
   const toggleModelAgentEnabled = useCallback(
     async (model: UnifiedApiModelItem, agentEnabled: boolean) => {
-      if (agentEnabled && !model.enabled) {
-        setError("请先启用模型，再开启用户端可选")
-        return
-      }
       const previous = model.agentEnabled ?? true
       patchModelAgentEnabled(model.id, agentEnabled)
       setTogglingAgentModelId(model.id)
@@ -1107,7 +1022,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
           consoleUrl: model.consoleUrl || undefined,
           balanceUrl: model.balanceUrl || undefined,
           docsUrl: model.docsUrl || undefined,
-          enabled: model.enabled,
+          enabled: true,
           agentEnabled,
           isDefault: model.isDefault ?? false,
           capabilities: model.capabilities ? [...model.capabilities] : [],
@@ -1303,10 +1218,8 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
   }, [overview])
 
   const gatewayHealth = useMemo(() => {
-    if (!overview) return { enabledRate: 0, issueCount: 0 }
-    const total = Math.max(1, overview.summary.modelCount)
+    if (!overview) return { issueCount: 0 }
     return {
-      enabledRate: Math.round((overview.summary.enabledModelCount / total) * 100),
       issueCount:
         overview.summary.lowBalanceCount
         + healthSummary.unhealthyAccountCount
@@ -1441,7 +1354,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       docsUrl: model.docsUrl || "",
       executionTask: model.executionTask || "",
       executionOptionsJson: "",
-      enabled: model.enabled,
+      enabled: true,
       agentEnabled: model.agentEnabled ?? true,
       isDefault: model.isDefault ?? false,
       capabilities: normalizeModelCapabilities(capabilitiesForModelProvider(model.capabilities, meta)),
@@ -1530,6 +1443,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       const payload: AgentModelConfigPayload = {
         ...modelPayload,
         apiKey: "",
+        enabled: true,
         inputTokenPricePer1m: priceToCny(modelForm.inputTokenPricePer1m, modelPricingCurrency),
         outputTokenPricePer1m: priceToCny(modelForm.outputTokenPricePer1m, modelPricingCurrency),
         unitPrice: priceToCny(modelForm.unitPrice, modelPricingCurrency),
@@ -1870,7 +1784,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                     <TableHead className="w-[120px] text-center">文档</TableHead>
                     <TableHead className="w-[150px] text-center">成本</TableHead>
                     <TableHead className="w-[112px] text-center">用户端可选</TableHead>
-                    <TableHead className="w-[112px] text-center">启用</TableHead>
                     <TableHead className="w-[180px] text-center">操作</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -2010,20 +1923,9 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                       <TableCell className="align-middle">
                         <EmbeddedOnOffSwitch
                           checked={model.agentEnabled !== false}
-                          disabled={
-                            togglingAgentModelId === model.id
-                            || (model.agentEnabled === false && !canEnableAgentForModel(model))
-                          }
+                          disabled={togglingAgentModelId === model.id}
                           label={`用户端可选 ${model.displayName || model.modelName}`}
                           onCheckedChange={(agentEnabled) => toggleModelAgentEnabled(model, agentEnabled)}
-                        />
-                      </TableCell>
-                      <TableCell className="align-middle">
-                        <EmbeddedOnOffSwitch
-                          checked={model.enabled}
-                          disabled={togglingModelId === model.id}
-                          label={`启用 ${model.displayName || model.modelName}`}
-                          onCheckedChange={(enabled) => toggleModelEnabled(model, enabled)}
                         />
                       </TableCell>
                       <TableCell className="align-middle text-center">
@@ -2105,7 +2007,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
             <CardDescription className="flex items-center gap-2"><ServerCog className="h-4 w-4" />模型池</CardDescription>
             <CardTitle className="text-2xl">{overview?.summary.modelCount ?? "--"}</CardTitle>
           </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">启用 {overview?.summary.enabledModelCount ?? "--"} 个，启用率 {gatewayHealth.enabledRate}%</CardContent>
+          <CardContent className="text-xs text-muted-foreground">按厂商、账户与能力组织</CardContent>
         </Card>
         <Card>
           <CardHeader className="space-y-0 pb-2">
@@ -2552,7 +2454,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                       </p>
                     ) : account && isWarningStatus(account.healthStatus) ? (
                       <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        该账户凭据有效，但当前存在额度或频率告警；模型启用状态仍由模型自身探活决定。
+                        该账户凭据有效，但当前存在额度或频率告警；模型健康状态仍由模型自身探活决定。
                       </p>
                     ) : null}
                   </div>
@@ -2832,7 +2734,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                     provider: modelForm.provider,
                     modelName: modelForm.modelName,
                     capabilities: modelForm.capabilities,
-                    enabled: modelForm.enabled !== false,
+                    enabled: true,
                     agentEnabled: modelForm.agentEnabled,
                     healthStatus: "OK",
                   },

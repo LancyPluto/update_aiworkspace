@@ -131,9 +131,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     @Override
     @Transactional
     public AgentModelConfigResponse adminCreate(AgentModelConfigRequest request) {
-        ModelVendorAccount lockedVendorAccount = validateForAdminWrite(request);
+        validateForAdminWrite(request);
         ensureConfigCodeAvailable(request.configCode(), null);
-        validateEnabledModelAccount(request, lockedVendorAccount);
         LocalDateTime now = LocalDateTime.now();
         AgentModelConfig config = applyRequest(new AgentModelConfig(), request, null, now);
         config.setCreatedAt(now);
@@ -147,10 +146,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     @Override
     @Transactional
     public AgentModelConfigResponse adminUpdate(Long id, AgentModelConfigRequest request) {
-        ModelVendorAccount lockedVendorAccount = validateForAdminWrite(request);
+        validateForAdminWrite(request);
         AgentModelConfig existing = findActiveOrThrow(id);
         ensureConfigCodeAvailable(request.configCode(), existing.getId());
-        validateEnabledModelAccount(request, lockedVendorAccount);
         AgentModelConfig config = applyRequest(existing, request, existing, LocalDateTime.now());
         agentModelConfigMapper.updateConfig(config);
         if (Boolean.TRUE.equals(config.getDefault())) {
@@ -248,9 +246,8 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             capabilities = modelCapabilityService.normalizeCapabilities(providerTrimmed, List.of());
         }
         config.setCapabilities(capabilitiesCodec.serialize(capabilities));
-        boolean enabled = request.enabled() == null || request.enabled();
-        config.setEnabled(enabled);
-        config.setAgentEnabled(enabled && (request.agentEnabled() == null ? Boolean.TRUE : request.agentEnabled()));
+        config.setEnabled(true);
+        config.setAgentEnabled(request.agentEnabled() == null ? Boolean.TRUE : request.agentEnabled());
         config.setDefault(request.isDefault() != null && request.isDefault());
         config.setUpdatedAt(now);
         return config;
@@ -996,54 +993,6 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 request.displayName(),
                 request.modelName()
         ));
-    }
-
-    private void validateEnabledModelAccount(AgentModelConfigRequest request, ModelVendorAccount account) {
-        boolean enabled = request.enabled() == null || request.enabled();
-        boolean agentEnabled = request.agentEnabled() == null || request.agentEnabled();
-        if (!enabled && !agentEnabled) {
-            return;
-        }
-        if (request.vendorAccountId() == null) {
-            return;
-        }
-        if (account != null) {
-            validateAccountReadyForEnabledModel(account);
-        }
-    }
-
-    private void validateAccountReadyForEnabledModel(ModelVendorAccount account) {
-        if (Boolean.FALSE.equals(account.getEnabled())) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account must be enabled before enabling this model");
-        }
-        if (!hasAccountExecutableCredential(account)) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account credential must be configured before enabling this model");
-        }
-    }
-
-    private boolean hasAccountExecutableCredential(ModelVendorAccount account) {
-        if (account == null) {
-            return false;
-        }
-        if (hasExecutableSecret(account.getApiKey())) {
-            return true;
-        }
-        if (!hasExecutableSecret(account.getExtraAuthJson())) {
-            return false;
-        }
-        try {
-            JsonNode parsed = objectMapper.readTree(account.getExtraAuthJson());
-            String apiKey = textValue(parsed.get("apiKey"), parsed.get("api_key"));
-            if (apiKey == null) {
-                apiKey = textValue(parsed.get("token"), parsed.get("accessToken"));
-            }
-            if (apiKey == null) {
-                apiKey = textValue(parsed.get("access_token"), parsed.get("key"));
-            }
-            return apiKey != null || hasKlingAccessSecretPair(account.getExtraAuthJson());
-        } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
-            return false;
-        }
     }
 
     private void ensureConfigCodeAvailable(String configCode, Long excludeId) {

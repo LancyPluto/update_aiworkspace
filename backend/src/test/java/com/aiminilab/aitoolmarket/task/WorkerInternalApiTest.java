@@ -768,30 +768,21 @@ class WorkerInternalApiTest {
     @Test
     void adminRejectsToolBindingToDisabledImageModelBeforeWorkerDispatch() throws Exception {
         String adminToken = login("/api/admin/v1/auth/login", "admin");
-        String modelResponse = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/admin/v1/agent/model-config")
-                        .header("Authorization", "Bearer " + adminToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "displayName": "Disabled GPT Image",
-                                  "configCode": "disabled_gpt_image",
-                                  "provider": "openai_images_gateway",
-                                  "modelName": "gpt-image-2",
-                                  "baseUrl": "https://shiyunapi.com/v1",
-                                  "apiKey": "",
-                                  "timeoutSeconds": 60,
-                                  "billingUnit": "IMAGE_TOKEN",
-                                  "unitPrice": 0.01,
-                                  "enabled": false,
-                                  "agentEnabled": false,
-                                  "capabilities": ["IMAGE_GENERATION"]
-                                }
-                                """))
-                .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-        Long modelConfigId = objectMapper.readTree(modelResponse).path("data").path("id").asLong();
+        jdbcTemplate.update("""
+                INSERT INTO agent_model_configs(
+                    display_name, config_code, provider, model_name, base_url, api_key,
+                    timeout_seconds, billing_unit, unit_price, capabilities,
+                    enabled, agent_enabled, is_default, is_deleted
+                ) VALUES (
+                    'Disabled GPT Image', 'disabled_gpt_image', 'openai_images_gateway', 'gpt-image-2',
+                    'https://shiyunapi.com/v1', '', 60, 'IMAGE_TOKEN', 0.01, '["IMAGE_GENERATION"]',
+                    0, 0, 0, 0
+                )
+                """);
+        Long modelConfigId = jdbcTemplate.queryForObject(
+                "SELECT id FROM agent_model_configs WHERE config_code = 'disabled_gpt_image'",
+                Long.class
+        );
 
         mockMvc.perform(post("/api/admin/v1/tools")
                         .header("Authorization", "Bearer " + adminToken)
