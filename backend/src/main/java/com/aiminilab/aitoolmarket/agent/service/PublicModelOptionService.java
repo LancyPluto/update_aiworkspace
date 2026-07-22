@@ -55,6 +55,9 @@ public class PublicModelOptionService {
                 continue;
             }
             String vendorCode = resolveVendorCode(config, accountById);
+            if ("infinitetalk".equals(vendorCode) || "infinite_talk".equals(vendorCode)) {
+                continue;
+            }
             String vendorName = vendorCodeResolver.vendorLabel(vendorCode);
             grouped.computeIfAbsent(vendorCode, key -> new ArrayList<>())
                     .add(ModelOptionItemResponse.from(

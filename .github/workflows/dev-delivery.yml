@@ -203,7 +203,7 @@ jobs:
       - name: Validate deploy scripts
         run: |
           bash -n deploy/scripts/*.sh
-          python -m unittest deploy/scripts/test_deploy_contracts.py
+          python3 -m unittest deploy/scripts/test_deploy_contracts.py
       - name: Validate nginx configuration
         run: |
           cert_dir="$(mktemp -d)"

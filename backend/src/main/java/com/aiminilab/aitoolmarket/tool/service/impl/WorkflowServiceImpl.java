@@ -432,20 +432,20 @@ public class WorkflowServiceImpl implements WorkflowService {
                 : modelConfig.getProvider().trim().toLowerCase(Locale.ROOT);
         ModelProviderResponse provider = modelProviderMetadataService.get(providerCode);
         String requiredCapability = requiredModelCapability(node, rawNodeType);
-        if (requiredCapability != null
-                && modelCapabilityService.resolveCapabilities(modelConfig).stream()
-                .noneMatch(capability -> capability.equalsIgnoreCase(requiredCapability))) {
-            throw new BusinessException(
-                    ErrorCode.PARAM_ERROR,
-                    "工作流节点 " + node.id() + " 需要模型能力 " + requiredCapability
-            );
-        }
         if (requiredCapability != null && provider.capabilities().stream()
                 .noneMatch(capability -> capability.equalsIgnoreCase(requiredCapability))) {
             throw new BusinessException(
                     ErrorCode.PARAM_ERROR,
                     "工作流节点 " + node.id() + " 的供应商 " + providerCode
                             + " 未声明能力 " + requiredCapability
+            );
+        }
+        if (requiredCapability != null
+                && modelCapabilityService.resolveCapabilities(modelConfig).stream()
+                .noneMatch(capability -> capability.equalsIgnoreCase(requiredCapability))) {
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "工作流节点 " + node.id() + " 需要模型能力 " + requiredCapability
             );
         }
         if (!provider.workerReady()) {
