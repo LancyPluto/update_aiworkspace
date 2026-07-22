@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue"
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue"
 import { Globe2, Loader2, X } from "lucide-vue-next"
 import type { AssetPreviewItem } from "@/types/assetPreview"
 import { buildSafeCommunityTitle } from "@/utils/communityDisplay"
@@ -16,6 +16,8 @@ const emit = defineEmits<{
 }>()
 
 const customTitle = ref("")
+const modalRoot = ref<HTMLElement | null>(null)
+let previouslyFocusedElement: HTMLElement | null = null
 
 const fallbackTitle = computed(() => {
   if (!props.asset) return ""
@@ -36,6 +38,60 @@ watch(
   },
 )
 
+watch(
+  () => props.open && Boolean(props.asset),
+  async (open) => {
+    if (!open) {
+      restoreDialogFocus()
+      return
+    }
+
+    previouslyFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    await nextTick()
+    modalRoot.value?.focus({ preventScroll: true })
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(restoreDialogFocus)
+
+function trapDialogFocus(event: KeyboardEvent) {
+  const root = modalRoot.value
+  if (!root) return
+
+  const focusableElements = Array.from(
+    root.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((element) => element.getClientRects().length > 0)
+
+  if (!focusableElements.length) {
+    event.preventDefault()
+    root.focus({ preventScroll: true })
+    return
+  }
+
+  const first = focusableElements[0]
+  const last = focusableElements[focusableElements.length - 1]
+  const activeElement = document.activeElement
+
+  if (event.shiftKey && (activeElement === first || activeElement === root)) {
+    event.preventDefault()
+    last.focus({ preventScroll: true })
+  } else if (!event.shiftKey && activeElement === last) {
+    event.preventDefault()
+    first.focus({ preventScroll: true })
+  }
+}
+
+function restoreDialogFocus() {
+  const focusTarget = previouslyFocusedElement
+  previouslyFocusedElement = null
+  if (focusTarget?.isConnected) {
+    void nextTick(() => focusTarget.focus({ preventScroll: true }))
+  }
+}
+
 function close() {
   if (props.submitting) return
   emit("close")
@@ -51,8 +107,15 @@ function submit() {
   <Teleport to="body">
     <div
       v-if="open && asset"
+      ref="modalRoot"
       class="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label="发布作品"
+      tabindex="-1"
       @click.self="close"
+      @keydown.esc.stop="close"
+      @keydown.tab="trapDialogFocus"
     >
       <div class="w-full max-w-md overflow-hidden rounded-[28px] border border-white/10 bg-[#12131a] shadow-[0_30px_80px_rgb(0_0_0_/_0.45)]">
         <div class="flex items-start justify-between gap-4 border-b border-white/8 px-6 py-5">
@@ -62,6 +125,7 @@ function submit() {
           </div>
           <button
             type="button"
+            aria-label="关闭发布弹窗"
             class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-white/60 transition hover:bg-white/10 hover:text-white"
             :disabled="submitting"
             @click="close"
