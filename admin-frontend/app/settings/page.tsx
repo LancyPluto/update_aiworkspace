@@ -47,8 +47,8 @@ const defaults: SettingsForm = {
   creditDeductEnabled: true,
   maintenanceMode: false,
   customerServiceEnabled: true,
-  customerServiceTitle: "联系客服",
-  customerServiceDescription: "扫码添加客服，获取使用支持",
+  customerServiceTitle: "联系老师",
+  customerServiceDescription: "扫码添加老师，获取课程学习支持",
   customerServiceQrCodeUrl: "",
   jwtHours: "24",
   allowedCors: "http://127.0.0.1:5173\nhttp://127.0.0.1:5174",
@@ -130,10 +130,10 @@ export default function SettingsPage() {
     try {
       const uploaded = await uploadCustomerServiceQr(file)
       updateForm("customerServiceQrCodeUrl", uploaded.url)
-      setNotice("客服二维码已上传")
+      setNotice("联系老师二维码已上传")
       setTimeout(() => setNotice(null), 2000)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "客服二维码上传失败")
+      setError(err instanceof ApiError ? err.message : "联系老师二维码上传失败")
     } finally {
       setQrUploading(false)
     }
@@ -289,7 +289,7 @@ export default function SettingsPage() {
             </TabsTrigger>
             <TabsTrigger value="customer-service" className="gap-2">
               <Headphones className="h-4 w-4" />
-              客服设置
+              联系老师
             </TabsTrigger>
             <TabsTrigger value="security" className="gap-2">
               <Shield className="h-4 w-4" />
@@ -362,8 +362,8 @@ export default function SettingsPage() {
             <section className="rounded-lg border border-border bg-card p-5">
               <div className="flex items-center justify-between rounded-md bg-secondary p-4">
                 <div>
-                  <p className="font-medium">启用用户端联系客服</p>
-                  <p className="text-sm text-muted-foreground">开启后，用户端右上角会展示“联系客服”入口。</p>
+                  <p className="font-medium">启用学习中心“联系老师”</p>
+                  <p className="text-sm text-muted-foreground">开启后，学习中心标题区会展示“联系老师”入口。</p>
                 </div>
                 <Switch
                   checked={form.customerServiceEnabled}
@@ -377,7 +377,7 @@ export default function SettingsPage() {
                   <Input
                     value={form.customerServiceTitle}
                     onChange={(event) => updateForm("customerServiceTitle", event.target.value)}
-                    placeholder="联系客服"
+                    placeholder="联系老师"
                   />
                 </div>
                 <div className="space-y-2">
@@ -385,14 +385,14 @@ export default function SettingsPage() {
                   <Textarea
                     value={form.customerServiceDescription}
                     onChange={(event) => updateForm("customerServiceDescription", event.target.value)}
-                    placeholder="扫码添加客服，获取使用支持"
+                    placeholder="扫码添加老师，获取课程学习支持"
                     className="min-h-[88px]"
                   />
                 </div>
               </div>
 
               <div className="mt-5 space-y-3">
-                <Label>客服二维码</Label>
+                <Label>老师企业微信二维码</Label>
                 <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_200px]">
                   <label
                     className={cn(
@@ -425,7 +425,7 @@ export default function SettingsPage() {
                     {form.customerServiceQrCodeUrl ? (
                       <img
                         src={resolveMediaUrl(form.customerServiceQrCodeUrl)}
-                        alt="客服二维码预览"
+                        alt="联系老师二维码预览"
                         className="aspect-square w-full rounded-md bg-white object-contain p-2"
                       />
                     ) : (
@@ -447,10 +447,10 @@ export default function SettingsPage() {
                         updateForm("customerServiceQrCodeUrl", "")
                         try {
                           await updateSettings({ "customerService.qrCodeUrl": "" })
-                          setNotice("已清除客服二维码")
+                          setNotice("已清除联系老师二维码")
                           setTimeout(() => setNotice(null), 2000)
                         } catch (err) {
-                          setError(err instanceof ApiError ? err.message : "清除客服二维码失败")
+                          setError(err instanceof ApiError ? err.message : "清除联系老师二维码失败")
                         }
                       }}
                     >

@@ -19,6 +19,7 @@ const ProfilePage = () => import("@/pages/Profile/Page.vue")
 const PublicProfilePage = () => import("@/pages/PublicProfile/Page.vue")
 const CommunityDiscoverPage = () => import("@/pages/CommunityDiscover/Page.vue")
 const InspirationCollectionsPage = () => import("@/pages/InspirationCollections/Page.vue")
+const LearningCenterPage = () => import("@/pages/LearningCenter/Page.vue")
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -148,6 +149,12 @@ const router = createRouter({
           name: "InspirationCollections",
           meta: { requiresAuth: true },
           component: InspirationCollectionsPage,
+        },
+        {
+          path: "learning-center",
+          name: "LearningCenter",
+          meta: { requiresAuth: true },
+          component: LearningCenterPage,
         },
         {
           path: "billing",

@@ -1646,3 +1646,28 @@ CREATE TABLE auth_security_events (
   longitude DECIMAL(10,6),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE learning_categories (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  name VARCHAR(80) NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_learning_categories_visible ON learning_categories(enabled, sort_order, id);
+
+CREATE TABLE learning_tutorials (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  category_id BIGINT NOT NULL,
+  title VARCHAR(120) NOT NULL,
+  summary VARCHAR(500) NOT NULL DEFAULT '',
+  cover_image_url VARCHAR(1024) NOT NULL DEFAULT '',
+  video_url VARCHAR(2048) NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_learning_tutorial_category FOREIGN KEY (category_id) REFERENCES learning_categories(id)
+);
+CREATE INDEX idx_learning_tutorials_visible ON learning_tutorials(category_id, enabled, sort_order, id);

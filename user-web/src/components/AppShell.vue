@@ -22,8 +22,6 @@ import {
   Search,
   Plus,
   Bell,
-  Headphones,
-  X,
   Menu,
   Loader2,
   Palette,
@@ -31,13 +29,12 @@ import {
   Gift,
   Zap,
   Clapperboard,
+  BookOpen,
 } from "lucide-vue-next"
 import { ref, onMounted, onUnmounted, computed, watch } from "vue"
 import { useGlobalSearch, type GlobalSearchResultItem, type GlobalSearchScope } from "@/composables/useGlobalSearch"
 import { BRAND_LOGO_URL } from "@/config/brand"
 import { fetchCreditAccount, getCreditEventsUrl } from "@/api/creditApi"
-import { fetchCustomerServiceSettings } from "@/api/settingsApi"
-import type { CustomerServiceSettings } from "@/api/settingsApi"
 import type { CreditAccount } from "@/api/types"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
@@ -108,22 +105,8 @@ const SIDEBAR_OPEN_KEY = "ai_tool_market_sidebar_open"
 
 const credit = ref<CreditAccount | null>(null)
 const sidebarOpen = ref(true)
-const customerServiceOpen = ref(false)
 const referralDialogOpen = ref(false)
 let referralDialogOpenedFromQuery = false
-const DEFAULT_CUSTOMER_SERVICE_QR = "https://cdn.wlcloudai.com/static/kf.jpg"
-
-const customerService = ref<CustomerServiceSettings>({
-  enabled: true,
-  title: "联系客服",
-  description: "扫码添加客服，获取使用支持",
-  qrCodeUrl: DEFAULT_CUSTOMER_SERVICE_QR,
-})
-
-const customerServiceQrSrc = computed(() => {
-  const url = customerService.value.qrCodeUrl?.trim()
-  return url || DEFAULT_CUSTOMER_SERVICE_QR
-})
 
 const mainNav: NavLink[] = [
   {
@@ -144,6 +127,12 @@ const mainNav: NavLink[] = [
     href: "/agent",
     label: "Agent",
     icon: Bot,
+  },
+  {
+    type: "link",
+    href: "/learning-center",
+    label: "学习中心",
+    icon: BookOpen,
   },
 ]
 
@@ -308,12 +297,6 @@ const creditRealtime = createCreditRealtime({
   refresh: loadCreditAccount,
 })
 
-const customerServiceQrBroken = ref(false)
-
-function onCustomerServiceQrError() {
-  customerServiceQrBroken.value = true
-}
-
 function toggleSearchScopeMenu() {
   scopeMenuOpen.value = !scopeMenuOpen.value
 }
@@ -362,24 +345,6 @@ function onDocumentPointerDown(event: MouseEvent) {
   const accentRoot = brandAccentRootRef.value
   if (!accentRoot || !accentRoot.contains(target)) {
     brandAccentMenuOpen.value = false
-  }
-}
-
-watch(customerServiceQrSrc, () => {
-  customerServiceQrBroken.value = false
-})
-
-async function loadCustomerServiceSettings() {
-  try {
-    customerService.value = await fetchCustomerServiceSettings({ token: auth.token })
-    customerServiceQrBroken.value = false
-  } catch {
-    customerService.value = {
-      enabled: true,
-      title: "联系客服",
-      description: "扫码添加客服，获取使用支持",
-      qrCodeUrl: DEFAULT_CUSTOMER_SERVICE_QR,
-    }
   }
 }
 
@@ -435,7 +400,7 @@ onMounted(async () => {
 
   window.addEventListener("credits:updated", handleCreditsUpdated)
   document.addEventListener("mousedown", onDocumentPointerDown)
-  await Promise.all([loadCreditAccount(), loadCustomerServiceSettings()])
+  await loadCreditAccount()
   if (auth.isLoggedIn) creditRealtime.start()
 })
 
@@ -777,15 +742,6 @@ watch(
           >
             <Bell class="h-5 w-5" />
           </button>
-          <button
-            v-if="customerService.enabled"
-            type="button"
-            class="hidden h-10 shrink-0 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 text-sm font-medium text-white/70 transition-colors hover:bg-white/10 hover:text-white md:inline-flex"
-            @click="customerServiceOpen = true"
-          >
-            <Headphones class="h-4 w-4" aria-hidden="true" />
-            联系客服
-          </button>
           <div class="flex items-center gap-3">
             <template v-if="auth.isLoggedIn">
               <RouterLink
@@ -825,46 +781,6 @@ watch(
 
     <ReferralDialog :open="referralDialogOpen" @close="closeReferralDialog" />
 
-    <div
-      v-if="customerServiceOpen"
-      class="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm"
-      @click.self="customerServiceOpen = false"
-    >
-      <section class="relative w-full max-w-sm rounded-[28px] border border-white/10 bg-[#1d1d22] p-6 text-center shadow-[0_24px_80px_rgb(0_0_0_/_0.55)]">
-        <button
-          type="button"
-          class="absolute right-4 top-4 inline-flex h-8 w-8 items-center justify-center rounded-full text-white/45 hover:bg-white/10 hover:text-white"
-          aria-label="关闭联系客服"
-          @click="customerServiceOpen = false"
-        >
-          <X class="h-4 w-4" aria-hidden="true" />
-        </button>
-
-        <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/15 text-primary ring-1 ring-primary/25">
-          <Headphones class="h-6 w-6" aria-hidden="true" />
-        </div>
-        <h2 class="mt-4 text-xl font-semibold text-white">{{ customerService.title || "联系客服" }}</h2>
-        <p class="mt-2 text-sm leading-6 text-white/55">
-          {{ customerService.description || "扫码添加客服，获取使用支持" }}
-        </p>
-
-        <div class="mx-auto mt-5 flex aspect-square w-56 max-w-full items-center justify-center rounded-3xl bg-white p-3">
-          <img
-            v-if="!customerServiceQrBroken"
-            :src="customerServiceQrSrc"
-            :alt="customerService.title || '客服二维码'"
-            class="h-full w-full rounded-2xl object-contain"
-            @error="onCustomerServiceQrError"
-          />
-          <img
-            v-else
-            :src="DEFAULT_CUSTOMER_SERVICE_QR"
-            :alt="customerService.title || '客服二维码'"
-            class="h-full w-full rounded-2xl object-contain"
-          />
-        </div>
-      </section>
-    </div>
   </div>
 </template>
 
