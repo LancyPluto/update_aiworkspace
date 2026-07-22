@@ -12,7 +12,42 @@ DEPLOY_PR_NUMBER="${DEPLOY_PR_NUMBER:-}"
 GITHUB_SHA="${GITHUB_SHA:-$DEPLOY_GIT_REF}"
 GITHUB_RUN_ID="${GITHUB_RUN_ID:-}"
 GITHUB_ACTOR="${GITHUB_ACTOR:-}"
+GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+if [[ "${GITHUB_TOKEN_STDIN:-0}" == "1" ]]; then
+  if ! IFS= read -r GITHUB_TOKEN || [[ -z "$GITHUB_TOKEN" ]]; then
+    echo "GitHub job token was not received on stdin" >&2
+    exit 1
+  fi
+fi
 GIT_DEPTH="${GIT_DEPTH:-100}"
+
+GIT_ASKPASS_FILE=""
+cleanup_git_auth() {
+  if [[ -n "$GIT_ASKPASS_FILE" ]]; then
+    rm -f -- "$GIT_ASKPASS_FILE"
+  fi
+  if [[ -d "$REMOTE_DIR/.git" ]]; then
+    git -C "$REMOTE_DIR" remote set-url origin "$GIT_REPO_URL" 2>/dev/null || true
+  fi
+  unset GITHUB_TOKEN GITHUB_TOKEN_STDIN GIT_ASKPASS GIT_TERMINAL_PROMPT
+}
+trap cleanup_git_auth EXIT HUP INT TERM
+
+if [[ -n "$GITHUB_TOKEN" ]]; then
+  export GITHUB_TOKEN
+  GIT_ASKPASS_FILE="$(mktemp /tmp/ai-tool-market-git-askpass.XXXXXX)"
+  cat > "$GIT_ASKPASS_FILE" <<'EOF'
+#!/bin/sh
+case "$1" in
+  *Username*) printf '%s\n' 'x-access-token' ;;
+  *Password*) printf '%s\n' "$GITHUB_TOKEN" ;;
+  *) exit 1 ;;
+esac
+EOF
+  chmod 700 "$GIT_ASKPASS_FILE"
+  export GIT_ASKPASS="$GIT_ASKPASS_FILE"
+  export GIT_TERMINAL_PROMPT=0
+fi
 
 PRESERVE_PATHS=(
   ".env"
@@ -53,7 +88,7 @@ if [[ ! -d "$REMOTE_DIR/.git" ]]; then
   if [[ -d "$REMOTE_DIR" ]] && [[ -n "$(ls -A "$REMOTE_DIR" 2>/dev/null || true)" ]]; then
     STAGING="/tmp/ai_tool_market_git_bootstrap.$$"
     rm -rf "$STAGING"
-    git clone --branch "$DEPLOY_GIT_BRANCH" --depth "$GIT_DEPTH" "$GIT_REPO_URL" "$STAGING"
+    git -c credential.helper= clone --branch "$DEPLOY_GIT_BRANCH" --depth "$GIT_DEPTH" "$GIT_REPO_URL" "$STAGING"
     rsync -a --delete \
       --exclude '.env' \
       --exclude 'data/' \
@@ -65,7 +100,7 @@ if [[ ! -d "$REMOTE_DIR/.git" ]]; then
     rm -rf "$STAGING"
   else
     mkdir -p "$REMOTE_DIR"
-    git clone --branch "$DEPLOY_GIT_BRANCH" --depth "$GIT_DEPTH" "$GIT_REPO_URL" "$REMOTE_DIR"
+    git -c credential.helper= clone --branch "$DEPLOY_GIT_BRANCH" --depth "$GIT_DEPTH" "$GIT_REPO_URL" "$REMOTE_DIR"
   fi
 
   for rel in "${PRESERVE_PATHS[@]}"; do
@@ -82,8 +117,8 @@ git config user.name "Production Deploy"
 git remote set-url origin "$GIT_REPO_URL"
 
 echo "Fetching $DEPLOY_GIT_REF (event=$DEPLOY_EVENT branch=$DEPLOY_GIT_BRANCH)"
-git fetch origin "$DEPLOY_GIT_REF" --depth "$GIT_DEPTH"
-git fetch origin "$DEPLOY_GIT_BRANCH" --depth "$GIT_DEPTH" 2>/dev/null || true
+git -c credential.helper= fetch origin "$DEPLOY_GIT_REF" --depth "$GIT_DEPTH"
+git -c credential.helper= fetch origin "$DEPLOY_GIT_BRANCH" --depth "$GIT_DEPTH" 2>/dev/null || true
 
 # The worktree HEAD may belong to a cancelled deployment. Only a revision that
 # completed the release health gate is authoritative as the next diff base.
@@ -96,7 +131,7 @@ if [[ -s "$DEPLOY_REVISION_FILE" ]]; then
   LAST_SUCCESSFUL_SHA="${LAST_SUCCESSFUL_SHA//$'\r'/}"
   if [[ "$LAST_SUCCESSFUL_SHA" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
     if ! git cat-file -e "${LAST_SUCCESSFUL_SHA}^{commit}" 2>/dev/null; then
-      git fetch origin "$LAST_SUCCESSFUL_SHA" --depth 1 2>/dev/null || true
+      git -c credential.helper= fetch origin "$LAST_SUCCESSFUL_SHA" --depth 1 2>/dev/null || true
     fi
     if git cat-file -e "${LAST_SUCCESSFUL_SHA}^{commit}" 2>/dev/null; then
       DIFF_BASE_SHA="$(git rev-parse "${LAST_SUCCESSFUL_SHA}^{commit}")"
@@ -112,6 +147,9 @@ if [[ -s "$DEPLOY_REVISION_FILE" ]]; then
 else
   echo "WARN: no successful deploy revision is recorded; forcing a full deployment" >&2
 fi
+
+cleanup_git_auth
+trap - EXIT HUP INT TERM
 
 if [[ "$DEPLOY_EVENT" == "pull_request" && -n "$DEPLOY_PR_NUMBER" ]]; then
   TRACK_BRANCH="deploy/pr-${DEPLOY_PR_NUMBER}"

@@ -1,14 +1,17 @@
 # CI/CD 说明
 
-主仓库通过 GitHub Actions 实现 **dev 分支持续集成 + 轻量持续交付**。
+主仓库通过 GitHub Actions 编排、由当前 Windows 主机内两个隔离的 WSL2 self-hosted Runner 执行 **dev 分支持续集成 + 轻量持续交付**：
+
+- `ci-isolated` 仅运行 CI，无生产凭据，并阻断生产地址与本地 LAN。
+- `production-deploy` 仅运行生产 CD，生产连接凭据只保存在该 WSL 的本地文件中。
 
 ## 工作流
 
 | 文件 | 触发 | 行为 |
 |------|------|------|
-| `.github/workflows/dev-delivery.yml` | PR → `dev` | 仅跑 CI（测试 + 前端构建），**不部署生产** |
+| `.github/workflows/dev-delivery.yml` | 同仓库 PR → `dev` | 仅跑 CI（测试 + 前端构建），**不部署生产**；fork PR 明确拒绝 |
 | 同上 | `push` → `dev`（含 PR merge 后的 push） | CI 通过后 **git 同步 + Docker 重建** |
-| 同上 | `workflow_dispatch` | 手动触发部署，可选 `git` / `rsync` |
+| 同上 | `workflow_dispatch`（仅 `dev` ref） | 手动触发 `git` 模式部署；其他 ref 不进入 CD Runner |
 
 ## 链路（轻量 CD，默认 git）
 
@@ -28,7 +31,7 @@ export DEPLOY_HOST=8.134.93.203 DEPLOY_USER=root DEPLOY_PASSWORD='...'
 bash deploy/scripts/bootstrap_production_git.sh
 ```
 
-之后 GitHub Actions 使用 `GITHUB_TOKEN` 通过 HTTPS 拉取私有仓库，无需在服务器长期保存 PAT。
+之后 GitHub Actions 使用单次任务的 `GITHUB_TOKEN` 和临时 `GIT_ASKPASS` 通过 HTTPS 拉取私有仓库；生产 `.git/config` 始终保留无凭据 URL，无需在服务器长期保存 PAT。
 
 ### 三种同步方式对比
 
@@ -38,15 +41,23 @@ bash deploy/scripts/bootstrap_production_git.sh
 | **rsync 增量** | `DEPLOY_SYNC_MODE=rsync` | 只传变更文件 | 服务器无法访问 GitHub 时的兜底 |
 | **全量 tar**（旧） | `ci_remote_deploy.sh` | 慢，删整目录 | 兜底 / 首次初始化 |
 
-## 必需 GitHub Secrets
+## CD Runner 本地凭据
 
-在 **Settings → Environments → `production`**（或 Repository secrets）中配置：
+不使用 GitHub Secrets 保存生产 SSH 账号。在 `production-deploy` WSL 中创建 `/home/runner/.config/ai-tool-market/deploy.env`：
 
-| Secret | 示例值 | 说明 |
+```dotenv
+DEPLOY_HOST=8.134.93.203
+DEPLOY_USER=root
+DEPLOY_PASSWORD=replace-with-production-password
+```
+
+文件必须由 `runner` 用户拥有且权限为 `0600`；工作流会在建立 SSH 连接前强制检查。`/home/runner/.ssh/known_hosts` 必须预先固定并核对生产主机密钥。
+
+| 字段 | 示例值 | 说明 |
 |--------|--------|------|
 | `DEPLOY_HOST` | `8.134.93.203` | 生产服务器 IP |
 | `DEPLOY_USER` | `root` | SSH 用户 |
-| `DEPLOY_PASSWORD` | *(仅保存在 GitHub)* | SSH 密码 |
+| `DEPLOY_PASSWORD` | *(仅保存在 CD WSL)* | SSH 密码 |
 
 `git` 模式额外使用 Actions 内置 `GITHUB_TOKEN` 拉取私有仓库，无需单独配置。
 
@@ -121,11 +132,13 @@ CI 绿灯 **不等于** 浏览器立刻看到与本地 Vite 完全一致的效�
 
 ## 安全说明
 
-- 密码只存在于 GitHub Secrets 与服务器，不出现在 workflow 日志中。
+- 密码只存在于 CD WSL 的 `0600` 本地 `.env` 与生产服务器，不进入仓库或 workflow 日志。
+- `production-deploy` Runner 应放入仅允许本工作流 `dev` ref 的组织级 Runner Group；仅靠自定义标签不是权限边界。
+- SSH 必须使用固定的 `known_hosts` 和 `StrictHostKeyChecking=yes`。
 - 部署 **保留** 服务器 `/root/ai_tool_market/.env`。
 - 建议限制 SSH 来源 IP；长期可改为 SSH 密钥。
 - 商业上线前执行 [商业上线 P0 发布门禁](../docs/商业上线P0发布门禁-2026-06-30.md)：敏感文件不得被 `git ls-files .env WXcert _remote.py _fix_remote.py` 返回，生产必须使用 `APP_PRODUCTION_MODE=true` 或 `APP_ENV=production`，并保持 `TASK_QUEUE_BACKEND=rabbitmq`。
-- 生产环境会拒绝默认内部 token、默认模型 key、mock provider 和 Redis 任务队列；如部署失败，优先检查服务器 `.env` 与 GitHub Secrets。
+- 生产环境会拒绝默认内部 token、默认模型 key、mock provider 和 Redis 任务队列；如部署失败，优先检查服务器 `.env` 与 CD Runner 本地 `deploy.env`。
 
 ## 可交付程度
 

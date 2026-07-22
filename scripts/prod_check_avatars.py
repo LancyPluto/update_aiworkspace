@@ -1,8 +1,15 @@
+import os
+
 import paramiko
 
+password = os.environ.get("DEPLOY_PASSWORD")
+if not password:
+    raise RuntimeError("DEPLOY_PASSWORD is required")
+
 client = paramiko.SSHClient()
-client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-client.connect('8.134.93.203', username='root', password='KeChuangDianAi17728033019', timeout=10)
+client.load_system_host_keys()
+client.set_missing_host_key_policy(paramiko.RejectPolicy())
+client.connect('8.134.93.203', username='root', password=password, timeout=10)
 
 def run_sql(label, sql):
     write_cmd = f"cat > /tmp/q.sql << 'EOSQL'\n{sql}\nEOSQL"

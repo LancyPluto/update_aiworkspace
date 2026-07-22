@@ -14,12 +14,16 @@ SCRIPT = ROOT / "deploy" / "scripts" / "migrate_assets_to_prod_bucket.py"
 
 
 def main() -> int:
-    password = os.environ.get("DEPLOY_PASSWORD", "KeChuangDianAi17728033019")
+    password = os.environ.get("DEPLOY_PASSWORD")
     host = os.environ.get("DEPLOY_HOST", "8.134.93.203")
+    if not password:
+        print("DEPLOY_PASSWORD is required", file=sys.stderr)
+        return 2
     dry_run = "--dry-run" in sys.argv
 
     ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.load_system_host_keys()
+    ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
     ssh.connect(host, username="root", password=password, timeout=30)
     sftp = ssh.open_sftp()
 

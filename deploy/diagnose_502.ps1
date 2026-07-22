@@ -3,7 +3,10 @@
 
 $server = "8.134.93.203"
 $user = "root"
-$password = "KeChuangDianAi17728033019"
+$password = $env:DEPLOY_PASSWORD
+if ([string]::IsNullOrWhiteSpace($password)) {
+    throw "DEPLOY_PASSWORD is required"
+}
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "502 Error Diagnosis Script" -ForegroundColor Cyan

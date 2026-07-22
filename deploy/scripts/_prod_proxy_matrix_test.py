@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import os, paramiko, base64
-PASSWORD = os.environ.get("DEPLOY_PASSWORD", "KeChuangDianAi17728033019")
+PASSWORD = os.environ.get("DEPLOY_PASSWORD")
+if not PASSWORD:
+    raise RuntimeError("DEPLOY_PASSWORD is required")
 test_py = r'''import requests, time
 for proxy in [
     "http://host.docker.internal:7890",
@@ -28,7 +30,8 @@ for proxy in [
         print(proxy, "POST FAIL", round(time.time()-t0, 2), type(e).__name__, str(e)[:160])
 '''
 ssh = paramiko.SSHClient()
-ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+ssh.load_system_host_keys()
+ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
 ssh.connect("8.134.93.203", username="root", password=PASSWORD, timeout=30)
 sftp = ssh.open_sftp()
 with sftp.open("/tmp/proxy_test.py", "w") as f:

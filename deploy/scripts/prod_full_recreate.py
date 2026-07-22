@@ -2,11 +2,15 @@
 """Force-recreate all app containers on production."""
 from __future__ import annotations
 
+import os
+
 import paramiko
 
 HOST = "8.134.93.203"
 USER = "root"
-PASSWORD = "KeChuangDianAi17728033019"
+PASSWORD = os.environ.get("DEPLOY_PASSWORD")
+if not PASSWORD:
+    raise RuntimeError("DEPLOY_PASSWORD is required")
 REMOTE_CMD = r"""
 set -euo pipefail
 cd /root/ai_tool_market/deploy
@@ -27,7 +31,8 @@ curl -sf http://127.0.0.1/api/health; echo
 
 def main() -> None:
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client.load_system_host_keys()
+    client.set_missing_host_key_policy(paramiko.RejectPolicy())
     client.connect(HOST, username=USER, password=PASSWORD, timeout=20)
     stdin, stdout, stderr = client.exec_command(REMOTE_CMD, timeout=600)
     out = stdout.read().decode("utf-8", errors="replace")
