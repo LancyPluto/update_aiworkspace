@@ -71,7 +71,7 @@ class ModelOptionsApiTest {
                 .andExpect(jsonPath("$.data[0].vendorCode").value("siliconflow"))
                 .andReturn()
                 .getResponse()
-                .getContentAsString();
+                .getContentAsString(StandardCharsets.UTF_8);
 
         JsonNode group = objectMapper.readTree(response).path("data").get(0);
         Set<String> groupFields = new HashSet<>();
