@@ -53,7 +53,10 @@ public class UserUploadController {
 
     @PostMapping("/tool-upload")
     @Transactional
-    public ApiResponse<FileUploadResponse> upload(@RequestParam("file") MultipartFile file) {
+    public ApiResponse<FileUploadResponse> upload(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "retainHistory", defaultValue = "true") boolean retainHistory
+    ) {
         Long userId = AuthContext.get().userId();
         if (file == null || file.isEmpty()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "请选择要上传的文件");
@@ -95,6 +98,7 @@ public class UserUploadController {
         asset.setFileSize(file.getSize());
         asset.setUrl(url);
         asset.setStoragePath(stored.storagePath());
+        asset.setHistoryVisible(retainHistory);
         asset.setStatus("ACTIVE");
         asset.setCreatedAt(LocalDateTime.now());
         asset.setUpdatedAt(asset.getCreatedAt());
@@ -108,7 +112,8 @@ public class UserUploadController {
                 displayUrl,
                 originalName,
                 file.getContentType() == null ? "" : file.getContentType(),
-                file.getSize()
+                file.getSize(),
+                retainHistory
         ));
     }
 

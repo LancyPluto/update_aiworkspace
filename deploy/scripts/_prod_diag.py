@@ -2,9 +2,12 @@
 import os
 import paramiko
 
-password = os.environ.get("DEPLOY_PASSWORD", "KeChuangDianAi17728033019")
+password = os.environ.get("DEPLOY_PASSWORD")
+if not password:
+    raise RuntimeError("DEPLOY_PASSWORD is required")
 ssh = paramiko.SSHClient()
-ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+ssh.load_system_host_keys()
+ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
 ssh.connect("8.134.93.203", username="root", password=password, timeout=30)
 
 cmds = [

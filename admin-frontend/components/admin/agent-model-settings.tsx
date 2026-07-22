@@ -62,7 +62,6 @@ interface ModelForm {
   outputTokenPricePer1m: string
   billingUnit: "TOKEN_PER_M" | "PER_CALL" | "IMAGE_TOKEN" | "PER_SECOND" | "PER_CHARACTER"
   unitPrice: string
-  enabled: boolean
   agentEnabled: boolean
   isDefault: boolean
   capabilities: string[]
@@ -287,7 +286,6 @@ const emptyForm: ModelForm = {
   outputTokenPricePer1m: "0",
   billingUnit: "TOKEN_PER_M",
   unitPrice: "0",
-  enabled: true,
   agentEnabled: true,
   isDefault: false,
   capabilities: ["TEXT_GENERATION"],
@@ -331,7 +329,6 @@ function toForm(config: AgentModelConfig, catalog: ModelProviderDescriptor[]): M
           ? "IMAGE_TOKEN"
           : "TOKEN_PER_M",
     unitPrice: String(config.unitPrice ?? 0),
-    enabled: config.enabled !== false,
     agentEnabled: config.agentEnabled !== false,
     isDefault: Boolean(config.isDefault),
     capabilities: caps,
@@ -361,7 +358,7 @@ function toPayload(form: ModelForm): AgentModelConfigPayload {
     outputTokenPricePer1m: Number(form.outputTokenPricePer1m) || 0,
     billingUnit: form.billingUnit,
     unitPrice: Number(form.unitPrice) || 0,
-    enabled: form.enabled,
+    enabled: true,
     agentEnabled: form.agentEnabled,
     isDefault: form.isDefault,
     capabilities: form.capabilities,
@@ -510,7 +507,6 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
   const [testResult, setTestResult] = useState<AgentModelConfigTestResult | null>(null)
   const [modalityFilter, setModalityFilter] = useState<ModalityFilter>("ALL")
   const [modelPageNo, setModelPageNo] = useState(1)
-  const [togglingEnabledId, setTogglingEnabledId] = useState<number | null>(null)
 
   const catalogResolved = providerCatalog.length > 0 ? providerCatalog : [FALLBACK_PROVIDER]
 
@@ -739,27 +735,6 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
     }
   }
 
-  async function toggleConfigEnabled(config: AgentModelConfig, enabled: boolean) {
-    if (!config.id) return
-    setTogglingEnabledId(config.id)
-    setError(null)
-    const previousConfigs = configs
-    setConfigs((list) => list.map((item) => (item.id === config.id ? { ...item, enabled } : item)))
-    try {
-      const payload = toPayload({ ...toForm(config, catalogResolved), enabled })
-      const updated = await updateAgentModelConfig(config.id, payload)
-      setConfigs((list) => list.map((item) => (item.id === updated.id ? updated : item)))
-      if (dialogOpen && form.id === config.id) {
-        setForm((current) => ({ ...current, enabled }))
-      }
-    } catch (err) {
-      setConfigs(previousConfigs)
-      setError(err instanceof ApiError ? err.message : "更新启用状态失败")
-    } finally {
-      setTogglingEnabledId(null)
-    }
-  }
-
   async function deleteConfig() {
     if (!form.id) return
     if (typeof window !== "undefined") {
@@ -826,7 +801,7 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
             <CardDescription>
               共 {configs.length} 个模型 API
               {modalityFilter === "ALL" ? "" : `，当前筛选 ${filteredConfigs.length} 个`}
-              {filteredConfigs.length > MODEL_PAGE_SIZE ? `，每页最多 ${MODEL_PAGE_SIZE} 个` : ""}；列表可直接切换启用，点击卡片编辑详情。
+              {filteredConfigs.length > MODEL_PAGE_SIZE ? `，每页最多 ${MODEL_PAGE_SIZE} 个` : ""}；点击卡片编辑详情。
             </CardDescription>
           </div>
           <Button className="gap-2" onClick={createConfig}>
@@ -897,30 +872,13 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
                             <p className="truncate text-base font-semibold">{config.displayName || config.modelName}</p>
                             <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{config.modelName}</p>
                           </div>
-                          <div
-                            className="flex shrink-0 flex-col items-end gap-2"
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            {config.isDefault ? <Badge>默认</Badge> : null}
-                            <div className="flex items-center gap-2 rounded-md border bg-background/80 px-2 py-1">
-                              <Label htmlFor={`model-enabled-${config.id}`} className="text-xs text-muted-foreground">
-                                启用
-                              </Label>
-                              <Switch
-                                id={`model-enabled-${config.id}`}
-                                checked={config.enabled !== false}
-                                disabled={togglingEnabledId === config.id}
-                                onCheckedChange={(value) => void toggleConfigEnabled(config, value)}
-                              />
-                            </div>
-                          </div>
+                          {config.isDefault ? <Badge className="shrink-0">默认</Badge> : null}
                         </div>
                         <div className="mt-3 flex flex-wrap items-center gap-2">
                           <Badge variant="outline">{vendor.shortName}</Badge>
                           <Badge variant="secondary">{pickMeta(catalogResolved, config.provider).label}</Badge>
                           <Badge variant="outline">{capabilityModalityLabel(capabilities)}</Badge>
                           {config.agentEnabled !== false ? <Badge variant="outline">前台可选</Badge> : null}
-                          {config.enabled === false ? <Badge variant="secondary">已停用</Badge> : null}
                           {testStatusBadge(config)}
                         </div>
                         {!config.isDefault ? (
@@ -1259,20 +1217,11 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
 
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-md bg-secondary p-4">
               <div>
-                <p className="font-medium">启用</p>
-                <p className="text-sm text-muted-foreground">停用后不会被默认模型调用使用。</p>
-              </div>
-              <Switch checked={form.enabled} onCheckedChange={(value) => updateForm("enabled", value)} />
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-4 rounded-md bg-secondary p-4">
-              <div>
                 <p className="font-medium">前台可选</p>
                 <p className="text-sm text-muted-foreground">勾选后会出现在用户端模型选择器中。</p>
               </div>
               <Switch
                 checked={form.agentEnabled}
-                disabled={!form.enabled}
                 onCheckedChange={(value) => updateForm("agentEnabled", value)}
               />
             </div>

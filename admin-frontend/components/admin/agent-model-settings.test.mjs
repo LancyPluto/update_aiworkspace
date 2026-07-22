@@ -15,3 +15,10 @@ test("legacy digital-human capability is not treated as a model modality", async
 
   assert.doesNotMatch(source, /capability\.includes\("DIGITAL_HUMAN"\)/)
 })
+
+test("model enablement is implicit while frontend selection remains independent", async () => {
+  const source = await readFile(new URL("./agent-model-settings.tsx", import.meta.url), "utf8")
+
+  assert.match(source, /function toPayload[\s\S]*enabled:\s*true/)
+  assert.doesNotMatch(source, /toggleConfigEnabled|togglingEnabledId|model-enabled-|form\.enabled|config\.enabled === false/)
+})

@@ -28,7 +28,6 @@ import {
   Check,
   Gift,
   Zap,
-  Clapperboard,
   BookOpen,
 } from "lucide-vue-next"
 import { ref, onMounted, onUnmounted, computed, watch } from "vue"
@@ -147,7 +146,6 @@ const navSections: NavSection[] = [
         icon: Wrench,
         active: (path) => path === "/marketplace" || path.startsWith("/chat/"),
       },
-      { type: "link", href: "/agents/comic-projects", label: "漫剧项目", icon: Clapperboard },
       { type: "link", href: "/library", label: "资产", icon: Package },
       { type: "link", href: "/community", label: "社区", icon: Compass },
       { type: "link", href: "/community/inspirations", label: "灵感收藏", icon: Lightbulb },
@@ -231,11 +229,11 @@ const creditPercent = computed(() => {
 })
 const creditProgressWidth = computed(() => `${Math.max(3, creditPercent.value)}%`)
 const creditWarning = computed(() => remainingCredits.value != null && creditPercent.value <= 20)
-const remainingCredits = computed(() => credit.value?.available ?? credit.value?.balance ?? null)
+const remainingCredits = computed(() => credit.value?.balance ?? null)
 const creditQuota = computed(() => {
   if (!credit.value) return null
   if (credit.value.totalGranted > 0) return credit.value.totalGranted
-  return (credit.value.available ?? credit.value.balance) + Math.max(credit.value.totalConsumed ?? 0, 0)
+  return credit.value.balance + Math.max(credit.value.totalConsumed ?? 0, 0)
 })
 
 // 套餐代码到会员版本的映射

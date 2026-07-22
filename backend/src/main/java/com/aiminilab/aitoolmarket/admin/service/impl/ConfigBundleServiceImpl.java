@@ -897,13 +897,12 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                             return false;
                         }
                     }
-                    boolean forceDisabled = shouldDisableImportedModel(config, vendorAccountId, secretsRedacted, warnings);
+                    warnIfImportedModelIsNotReady(config, vendorAccountId, secretsRedacted, warnings);
                     AgentModelConfigRequest request = modelConfigRequest(
                             config,
                             vendorAccountId,
                             routingPoolId,
-                            secretsRedacted,
-                            forceDisabled
+                            secretsRedacted
                     );
                     if (existing == null) {
                         AgentModelConfigResponse created = agentModelConfigService.adminCreate(request);
@@ -935,8 +934,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     private AgentModelConfigRequest modelConfigRequest(ConfigBundleDto.ModelConfig config,
                                                        Long vendorAccountId,
                                                        Long routingPoolId,
-                                                       boolean secretsRedacted,
-                                                       boolean forceDisabled) {
+                                                       boolean secretsRedacted) {
         return new AgentModelConfigRequest(
                 vendorAccountId,
                 routingPoolId,
@@ -963,8 +961,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 config.outputTokenPricePer1m(),
                 config.billingUnit(),
                 config.unitPrice(),
-                forceDisabled ? false : config.enabled(),
-                forceDisabled ? Boolean.FALSE : config.agentEnabled(),
+                Boolean.TRUE,
+                config.agentEnabled(),
                 config.isDefault(),
                 config.capabilities(),
                 null,
@@ -1058,32 +1056,25 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         return routingPoolId;
     }
 
-    private boolean shouldDisableImportedModel(ConfigBundleDto.ModelConfig config,
+    private void warnIfImportedModelIsNotReady(ConfigBundleDto.ModelConfig config,
                                                Long vendorAccountId,
                                                boolean secretsRedacted,
                                                List<String> warnings) {
-        boolean requestedEnabled = config.enabled() == null || config.enabled()
-                || config.agentEnabled() == null || config.agentEnabled();
-        if (!requestedEnabled) {
-            return false;
-        }
         if (vendorAccountId == null) {
             boolean hasInlineCredential = !secretsRedacted && (hasSecret(config.apiKey()) || hasSecret(config.extraAuthJson()));
             if (!hasInlineCredential && !"mock".equalsIgnoreCase(config.provider())) {
                 warnings.add("Imported model config " + config.configCode()
-                        + " as disabled: credential is not configured");
-                return true;
+                        + " is enabled but credential is not configured");
             }
-            return false;
+            return;
         }
         ModelVendorAccount account = vendorAccountMapper.findActiveById(vendorAccountId);
         if (account == null) {
-            return false;
+            return;
         }
         if (Boolean.FALSE.equals(account.getEnabled())) {
             warnings.add("Imported model config " + config.configCode()
-                    + " as disabled: vendor account is disabled");
-            return true;
+                    + " is enabled but vendor account is disabled");
         }
         boolean acceptOnly = modelProviderRegistry.findByCode(config.provider())
                 .map(provider -> "accept_only".equalsIgnoreCase(provider.testStrategy()))
@@ -1092,17 +1083,15 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             boolean hasCredential = hasSecret(account.getApiKey()) || hasSecret(account.getExtraAuthJson());
             if (!hasCredential) {
                 warnings.add("Imported model config " + config.configCode()
-                        + " as disabled: vendor account credential is not configured");
+                        + " is enabled but vendor account credential is not configured");
             }
-            return !hasCredential;
+            return;
         }
         String health = account.getHealthStatus() == null ? "" : account.getHealthStatus().trim();
         if (!"OK".equalsIgnoreCase(health)) {
             warnings.add("Imported model config " + config.configCode()
-                    + " as disabled: vendor account connectivity is not OK yet; run account test in admin");
-            return true;
+                    + " is enabled but vendor account connectivity is not OK yet; run account test in admin");
         }
-        return false;
     }
 
     private boolean hasSecret(String value) {

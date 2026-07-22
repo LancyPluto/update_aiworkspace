@@ -18,8 +18,6 @@ import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.dto.ApplyToolTemplateRequest;
 import com.aiminilab.aitoolmarket.tool.dto.WorkflowResponse;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
-import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationRegistry;
-import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationResolver;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolCategoryMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldSchemaMapper;
@@ -92,8 +90,6 @@ class ToolServiceImplCapabilityTest {
                 mock(TaskCreditEstimateService.class),
                 mock(AssetStorageService.class),
                 mock(GeneratedMediaPathSupport.class),
-                mock(ToolIntegrationResolver.class),
-                mock(ToolIntegrationRegistry.class),
                 mock(BypassCacheService.class),
                 mock(WorkflowExecutionService.class),
                 workflowService

@@ -159,7 +159,7 @@ export function InspectorPanel({
     if (!modelIssue || !requiredModelCapability) return null
     const capability = capabilityLabel(requiredModelCapability)
     if (modelIssue === "MISSING") return `请选择${capability}模型后再发布。`
-    if (modelIssue === "DISABLED") return `当前绑定模型已停用，请重新选择${capability}模型。`
+    if (modelIssue === "DISABLED") return `当前绑定模型不可用，请重新选择${capability}模型。`
     return `当前绑定模型不具备${capability}能力，请重新选择。`
   }, [modelIssue, requiredModelCapability])
 

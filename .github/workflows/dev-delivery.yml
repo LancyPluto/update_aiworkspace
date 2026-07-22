@@ -4,6 +4,9 @@ name: Dev Branch CI/CD
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+permissions:
+  contents: read
+
 # push / PR → dev: CI; push to dev (含 PR merge) 或手动 dispatch → 生产 git 同步 + Docker 重建。
 on:
   push:
@@ -23,13 +26,25 @@ on:
 
 concurrency:
   group: dev-delivery-ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  fork-pr-policy:
+    name: Reject Fork PR On Self-Hosted CI
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: [self-hosted, linux, x64, ci-isolated]
+    permissions: {}
+    steps:
+      - name: Reject untrusted fork code
+        run: |
+          echo "::error::Fork pull requests cannot run on this repository's persistent self-hosted runner."
+          exit 1
+
   # ── Detect changed paths (skip modules on PR when untouched) ────
   changes:
     name: Detect Changes
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64, ci-isolated]
     permissions:
       contents: read
       pull-requests: read
@@ -43,6 +58,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -68,13 +84,16 @@ jobs:
   backend-test:
     name: Backend (Maven)
     needs: changes
-    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.shared == 'true'
-    runs-on: ubuntu-latest
+    if: |
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (needs.changes.outputs.backend == 'true' || needs.changes.outputs.shared == 'true')
+    runs-on: [self-hosted, linux, x64, ci-isolated]
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -88,13 +107,16 @@ jobs:
   agent-service-test:
     name: Agent Service (pytest)
     needs: changes
-    if: needs.changes.outputs.agent == 'true' || needs.changes.outputs.shared == 'true'
-    runs-on: ubuntu-latest
+    if: |
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (needs.changes.outputs.agent == 'true' || needs.changes.outputs.shared == 'true')
+    runs-on: [self-hosted, linux, x64, ci-isolated]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -109,13 +131,16 @@ jobs:
   worker-test:
     name: Worker (pytest)
     needs: changes
-    if: needs.changes.outputs.worker == 'true' || needs.changes.outputs.shared == 'true'
-    runs-on: ubuntu-latest
+    if: |
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (needs.changes.outputs.worker == 'true' || needs.changes.outputs.shared == 'true')
+    runs-on: [self-hosted, linux, x64, ci-isolated]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -130,13 +155,16 @@ jobs:
   frontend-build:
     name: Frontends (quality gates)
     needs: changes
-    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.shared == 'true'
-    runs-on: ubuntu-latest
+    if: |
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (needs.changes.outputs.frontend == 'true' || needs.changes.outputs.shared == 'true')
+    runs-on: [self-hosted, linux, x64, ci-isolated]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
@@ -162,17 +190,20 @@ jobs:
   deploy-contract-test:
     name: Deploy Contracts
     needs: changes
-    if: needs.changes.outputs.shared == 'true'
-    runs-on: ubuntu-latest
+    if: |
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      needs.changes.outputs.shared == 'true'
+    runs-on: [self-hosted, linux, x64, ci-isolated]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 1
+          persist-credentials: false
       - name: Validate deploy scripts
         run: |
           bash -n deploy/scripts/*.sh
-          python -m unittest deploy/scripts/test_deploy_contracts.py
+          python3 -m unittest deploy/scripts/test_deploy_contracts.py
       - name: Validate nginx configuration
         run: |
           cert_dir="$(mktemp -d)"
@@ -187,24 +218,26 @@ jobs:
             --mount type=bind,source="$PWD/deploy/nginx/default.conf",target=/etc/nginx/conf.d/default.conf,readonly \
             --mount type=bind,source="$PWD/deploy/nginx/snippets",target=/etc/nginx/conf.d/snippets,readonly \
             --mount type=bind,source="$cert_dir",target=/etc/nginx/certs,readonly \
-            nginx:1.27-alpine nginx -t
+            docker.io/library/nginx:1.30.4-alpine nginx -t
 
   # ── Python import/syntax validation ─────────────────────────────
   python-import-check:
     name: Python Import Validation
     needs: [changes, backend-test, agent-service-test, worker-test]
     if: |
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
       always() &&
       !cancelled() &&
       (needs.changes.outputs.agent == 'true' || needs.changes.outputs.worker == 'true' || needs.changes.outputs.shared == 'true') &&
       (needs.backend-test.result == 'success' || needs.backend-test.result == 'skipped') &&
       (needs.agent-service-test.result == 'success' || needs.agent-service-test.result == 'skipped') &&
       (needs.worker-test.result == 'success' || needs.worker-test.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, ci-isolated]
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -227,6 +260,7 @@ jobs:
     name: Dependency Security Audit
     needs: [changes, backend-test, agent-service-test, worker-test]
     if: |
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
       always() &&
       !cancelled() &&
       (needs.changes.outputs.agent == 'true' || needs.changes.outputs.worker == 'true' || needs.changes.outputs.shared == 'true') &&
@@ -234,11 +268,12 @@ jobs:
       (needs.agent-service-test.result == 'success' || needs.agent-service-test.result == 'skipped') &&
       (needs.worker-test.result == 'success' || needs.worker-test.result == 'skipped')
     continue-on-error: true
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, ci-isolated]
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -259,6 +294,7 @@ jobs:
     # 至少一个模块有变更，且事件为 push 到 dev 或手动触发时才部署
     if: |
       always() &&
+      !cancelled() &&
       (needs.backend-test.result == 'success' || needs.backend-test.result == 'skipped') &&
       (needs.agent-service-test.result == 'success' || needs.agent-service-test.result == 'skipped') &&
       (needs.worker-test.result == 'success' || needs.worker-test.result == 'skipped') &&
@@ -266,8 +302,8 @@ jobs:
       (needs.deploy-contract-test.result == 'success' || needs.deploy-contract-test.result == 'skipped') &&
       (needs.python-import-check.result == 'success' || needs.python-import-check.result == 'skipped') &&
       (needs.changes.outputs.backend == 'true' || needs.changes.outputs.agent == 'true' || needs.changes.outputs.worker == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.shared == 'true') &&
-      ((github.event_name == 'push' && github.ref == 'refs/heads/dev') || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-latest
+      ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/dev')
+    runs-on: [self-hosted, linux, x64, production-deploy]
     timeout-minutes: 45
     concurrency:
       group: production-deploy
@@ -275,34 +311,15 @@ jobs:
     environment:
       name: production
       url: http://wlcloudai.com
+    env:
+      CD_CREDENTIALS_FILE: /home/runner/.config/ai-tool-market/deploy.env
+      DEPLOY_KNOWN_HOSTS_FILE: /home/runner/.ssh/known_hosts
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-
-      - name: Validate deploy secrets
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
-        run: |
-          if [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_USER" ] || [ -z "$DEPLOY_PASSWORD" ]; then
-            echo "::error::Missing GitHub Actions secrets. Configure DEPLOY_HOST, DEPLOY_USER, DEPLOY_PASSWORD."
-            exit 1
-          fi
-
-      - name: Install sshpass
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
-
-      - name: Generate ephemeral MySQL preflight account
-        shell: bash
-        run: |
-          username="ci_pf_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
-          password="$(openssl rand -hex 24)"
-          echo "::add-mask::$password"
-          echo "PRODUCTION_PREFLIGHT_MYSQL_USER=$username" >> "$GITHUB_ENV"
-          echo "PRODUCTION_PREFLIGHT_MYSQL_PASSWORD=$password" >> "$GITHUB_ENV"
+          persist-credentials: false
+          ref: ${{ github.sha }}
 
       - name: Detect changed services
         id: changes
@@ -326,16 +343,51 @@ jobs:
       - name: Deploy via SSH (git sync)
         id: deploy
         env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
           DEPLOY_SYNC_MODE: ${{ github.event.inputs.deploy_sync_mode || 'git' }}
           DEPLOY_SERVICES: ${{ steps.changes.outputs.services }}
           DEPLOY_GIT_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           DEPLOY_EVENT: ${{ github.event_name }}
           DEPLOY_PR_NUMBER: ${{ github.event.pull_request.number || '' }}
           GITHUB_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_ACTOR: ${{ github.actor }}
-        run: bash deploy/scripts/ci_remote_deploy_light.sh
+        shell: bash
+        run: |
+          mask_value() {
+            local escaped="$1"
+            escaped="${escaped//'%'/'%25'}"
+            escaped="${escaped//$'\r'/'%0D'}"
+            escaped="${escaped//$'\n'/'%0A'}"
+            printf '::add-mask::%s\n' "$escaped"
+          }
+
+          if [ ! -f "$CD_CREDENTIALS_FILE" ] || [ -L "$CD_CREDENTIALS_FILE" ]; then
+            echo "::error::Missing regular local credential file: $CD_CREDENTIALS_FILE"
+            exit 1
+          fi
+          if [ "$(stat -c '%a' "$CD_CREDENTIALS_FILE")" != "600" ] || [ "$(stat -c '%u' "$CD_CREDENTIALS_FILE")" != "$(id -u)" ]; then
+            echo "::error::Local credential file must be owned by the runner user with mode 600."
+            exit 1
+          fi
+
+          set -a
+          source "$CD_CREDENTIALS_FILE"
+          set +a
+          for variable in DEPLOY_HOST DEPLOY_USER DEPLOY_PASSWORD; do
+            value="${!variable:-}"
+            if [ -z "$value" ]; then
+              echo "::error::Missing $variable in $CD_CREDENTIALS_FILE"
+              exit 1
+            fi
+            if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+              echo "::error::$variable must be a single-line value"
+              exit 1
+            fi
+            mask_value "$value"
+          done
+
+          export PRODUCTION_PREFLIGHT_MYSQL_USER="ci_pf_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          export PRODUCTION_PREFLIGHT_MYSQL_PASSWORD="$(openssl rand -hex 24)"
+          mask_value "$PRODUCTION_PREFLIGHT_MYSQL_PASSWORD"
+          bash deploy/scripts/ci_remote_deploy_light.sh

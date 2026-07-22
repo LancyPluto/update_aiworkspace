@@ -74,6 +74,9 @@ class UnifiedApiOverviewServiceImplTest {
         when(modelConfigMapper.findAllActive()).thenReturn(List.of(model));
         when(accountMapper.countActiveModelsByAccountId(anyLong())).thenReturn(1);
         when(vendorCodeResolver.resolveVendorCode(anyString(), any(), any(), any())).thenReturn("volcengine");
+        when(vendorCodeResolver.resolveEffectiveVendorCode(account)).thenReturn("volcengine");
+        when(vendorCodeResolver.canonicalVendorCode(anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
         when(vendorCodeResolver.vendorLabel("volcengine")).thenReturn("Volcengine");
         when(vendorCodeResolver.vendorIconAsset("volcengine")).thenReturn("volcengine");
         when(vendorCodeResolver.vendorCatalog()).thenReturn(Map.of("volcengine", "Volcengine"));
@@ -91,7 +94,7 @@ class UnifiedApiOverviewServiceImplTest {
     }
 
     @Test
-    void unconfiguredInfiniteTalkVendorExposesItsVideoProvider() {
+    void unconfiguredInfiniteTalkVendorIsExcluded() {
         ModelVendorAccountMigrationService migrationService = mock(ModelVendorAccountMigrationService.class);
         ModelVendorAccountMapper accountMapper = mock(ModelVendorAccountMapper.class);
         AgentModelConfigMapper modelConfigMapper = mock(AgentModelConfigMapper.class);
@@ -123,10 +126,7 @@ class UnifiedApiOverviewServiceImplTest {
 
         UnifiedApiOverviewResponse response = service.overview();
 
-        assertThat(response.unconfiguredVendors()).singleElement().satisfies(vendor -> {
-            assertThat(vendor.vendorCode()).isEqualTo("infinitetalk");
-            assertThat(vendor.supportedProviders()).containsExactly("infinitetalk");
-        });
+        assertThat(response.unconfiguredVendors()).isEmpty();
     }
 
     @Test

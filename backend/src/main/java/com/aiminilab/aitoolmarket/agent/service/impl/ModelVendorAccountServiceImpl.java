@@ -435,7 +435,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         config.setBillingUnit(providerRegistry.defaultBillingUnit(provider));
         config.setUnitPrice(config.getUnitPrice() == null ? BigDecimal.ZERO : config.getUnitPrice());
         config.setCapabilities(capabilitiesCodec.serialize(capabilities));
-        config.setEnabled(config.getEnabled() == null || config.getEnabled());
+        config.setEnabled(true);
         config.setAgentEnabled(config.getAgentEnabled() == null || config.getAgentEnabled());
         config.setDefault(Boolean.TRUE.equals(config.getDefault()));
         config.setUpdatedAt(now);

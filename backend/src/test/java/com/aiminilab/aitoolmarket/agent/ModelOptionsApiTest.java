@@ -62,8 +62,6 @@ class ModelOptionsApiTest {
                 """);
         long unnamedModelId = createModelConfig(adminToken, "public_image_unnamed", "", "siliconflow_images",
                 "private-internal-model-route", true, true, "");
-        createModelConfig(adminToken, "public_image_disabled", "Public Image Disabled", "siliconflow_images",
-                "disabled-image-model", false, true, "");
         createModelConfig(adminToken, "public_image_agent_disabled", "Public Image Agent Disabled", "siliconflow_images",
                 "agent-disabled-image-model", true, false, "");
 
@@ -71,18 +69,9 @@ class ModelOptionsApiTest {
                         .param("mode", "image"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].vendorCode").value("siliconflow"))
-                .andExpect(jsonPath("$.data[0].models[0].capabilities[0]").value("IMAGE_GENERATION"))
-                .andExpect(jsonPath("$.data[0].models[0].imageParameters.sizes[0].label").value("方图 1024"))
-                .andExpect(jsonPath("$.data[0].models[0].imageParameters.sizes[0].value").value("1024x1024"))
-                .andExpect(jsonPath("$.data[0].models[0].imageParameters.sizes[1].label").value("1536x1024"))
-                .andExpect(jsonPath("$.data[0].models[0].imageParameters.defaultSize").value("1536x1024"))
-                .andExpect(jsonPath("$.data[0].models[0].imageParameters.counts[1]").value(2))
-                .andExpect(jsonPath("$.data[0].models[0].imageParameters.defaultCount").value(2))
-                .andExpect(jsonPath("$.data[0].models[0].imageParameters.qualities[1].value").value("high"))
-                .andExpect(jsonPath("$.data[0].models[0].imageParameters.defaultQuality").value("high"))
                 .andReturn()
                 .getResponse()
-                .getContentAsString();
+                .getContentAsString(StandardCharsets.UTF_8);
 
         JsonNode group = objectMapper.readTree(response).path("data").get(0);
         Set<String> groupFields = new HashSet<>();
@@ -96,6 +85,17 @@ class ModelOptionsApiTest {
                 "id", "displayName", "capabilities", "imageParameters", "isDefault"
         );
         assertThat(enabledModel.path("displayName").asText()).isEqualTo("Public Image Enabled");
+        assertThat(enabledModel.path("capabilities").path(0).asText()).isEqualTo("IMAGE_GENERATION");
+
+        JsonNode imageParameters = enabledModel.path("imageParameters");
+        assertThat(imageParameters.path("sizes").path(0).path("label").asText()).isEqualTo("方图 1024");
+        assertThat(imageParameters.path("sizes").path(0).path("value").asText()).isEqualTo("1024x1024");
+        assertThat(imageParameters.path("sizes").path(1).path("label").asText()).isEqualTo("1536x1024");
+        assertThat(imageParameters.path("defaultSize").asText()).isEqualTo("1536x1024");
+        assertThat(imageParameters.path("counts").path(1).asInt()).isEqualTo(2);
+        assertThat(imageParameters.path("defaultCount").asInt()).isEqualTo(2);
+        assertThat(imageParameters.path("qualities").path(1).path("value").asText()).isEqualTo("high");
+        assertThat(imageParameters.path("defaultQuality").asText()).isEqualTo("high");
 
         JsonNode unnamedModel = findModel(group.path("models"), unnamedModelId);
         assertThat(unnamedModel.path("displayName").asText())
@@ -105,9 +105,7 @@ class ModelOptionsApiTest {
         assertThat(response)
                 .contains("Public Image Enabled")
                 .doesNotContain("public_image_enabled")
-                .doesNotContain("public_image_disabled")
                 .doesNotContain("public_image_agent_disabled")
-                .doesNotContain("Public Image Disabled")
                 .doesNotContain("Public Image Agent Disabled")
                 .doesNotContain("Tongyi-MAI/Z-Image-Turbo")
                 .doesNotContain("private-internal-model-route")

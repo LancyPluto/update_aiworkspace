@@ -41,7 +41,7 @@ import {
   type KlingOmniVideoReference,
 } from "@/utils/klingOmniVideoList"
 import KlingOmniVideoListField from "@/components/DynamicForm/KlingOmniVideoListField.vue"
-import { BookOpen, Check, ChevronDown, Clock, FileAudio, FileVideo, Film, ImageIcon, ImageUp, Loader2, Mic, Plus, SlidersHorizontal, UploadCloud, X } from "lucide-vue-next"
+import { BookOpen, Check, ChevronDown, Clock, FileAudio, FileVideo, ImageIcon, ImageUp, Loader2, Mic, Plus, SlidersHorizontal, UploadCloud, X } from "lucide-vue-next"
 
 export interface PendingAttachment {
   localId: string
@@ -118,6 +118,11 @@ export interface ComposerMediaSlot {
   maxCount: number
 }
 
+export interface ComposerMediaUploadResult {
+  uploaded: number
+  rejected: Array<{ name: string; reason: string }>
+}
+
 const props = defineProps<{
   capabilities: Capability[]
   fields?: ToolField[]
@@ -127,6 +132,7 @@ const props = defineProps<{
   layout?: "default" | "composer"
   outputModality?: string | null
   inputModality?: string | null
+  retainUploadHistory?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -152,9 +158,7 @@ const pickerSelectedUrls = ref<string[]>([])
 const advancedOpen = ref(false)
 const quickParamsOpen = ref(false)
 const paramsPillRef = ref<HTMLElement | null>(null)
-const advancedButtonRef = ref<HTMLElement | null>(null)
 const quickPopoverStyle = ref<Record<string, string>>({})
-const advancedPopoverStyle = ref<Record<string, string>>({})
 
 const isComposerLayout = computed(() => props.layout === "composer")
 const referenceUploadScrollRootRef = ref<HTMLElement | null>(null)
@@ -313,7 +317,10 @@ function isReferenceComposerField(field: ToolField): boolean {
 }
 
 function isComposerImageReferenceField(field: ToolField): boolean {
-  return field.fieldType === "image" || field.fieldType === "image_upload" || field.fieldType === "multi_image"
+  return field.fieldType === "image"
+    || field.fieldType === "image_upload"
+    || field.fieldType === "multi_image"
+    || (field.fieldType === "file" && materialKindForField(field) === "image")
 }
 
 function shouldShowComposerReferenceUpload(field: ToolField): boolean {
@@ -372,6 +379,8 @@ function shouldShowComposerMediaSlot(field: ToolField): boolean {
   if (presentation === "frame_card") return true
   if (presentation === "media_card") {
     if (field.fieldType === "video_upload") return true
+    if (field.fieldType === "multi_video") return true
+    if (field.fieldType === "file" && (kind === "video" || kind === "audio")) return true
     const role = (parseFieldMeta(field).uiRole || "").toLowerCase()
     if (role === "motion_video") return true
     if (field.required || field.executionRequired || field.userRequired) return true
@@ -407,7 +416,7 @@ function buildComposerMediaSlot(field: ToolField): ComposerMediaSlot {
   const kind = materialKindForField(field)
   const presentation = resolveComposerSlotPresentation(field, kind)!
   const upload = uploadState(field.fieldKey)
-  const isMulti = presentation === "image_thumb" && isMultiImageField(field)
+  const isMulti = isMultiImageField(field)
   const values = isMulti ? multiImageValues(field) : strField(field.fieldKey) ? [strField(field.fieldKey)] : []
   const previewUrls = values
     .map((url) => normalizeMediaUrl(url))
@@ -602,10 +611,10 @@ function buildDefaultState(): CapabilityState {
   }
   if (webSearchCapability.value) next.webSearch = webSearchCapability.value.config.defaultEnabled === true
   if (codeCapability.value) next.language = codeLanguages.value[0] || "python"
-  const initialFields = [...configuredFields.value]
-  if (primaryReferenceField.value && !initialFields.some((field) => field.fieldKey === primaryReferenceField.value?.fieldKey)) {
-    initialFields.push(primaryReferenceField.value)
-  }
+  const initialFields = (props.fields || [])
+    .filter((field) => !(field.fieldKey === props.coreFieldKey || parseFieldMeta(field).core))
+    .filter((field) => !isAspectRatioField(field))
+    .filter((field) => !isTransportFormatField(field))
   for (const field of initialFields) {
     const initial = props.initialParams?.[field.fieldKey]
     if (initial !== undefined && initial !== null) {
@@ -628,7 +637,8 @@ function buildDefaultState(): CapabilityState {
 function resetState() {
   state.value = buildDefaultState()
   const customMode = state.value.fields.customMode ?? state.value.fields.custom_mode
-  advancedOpen.value = customMode === true || String(customMode ?? "").toLowerCase() === "true"
+  advancedOpen.value = !isComposerLayout.value
+    && (customMode === true || String(customMode ?? "").toLowerCase() === "true")
   fieldUploads.value = {}
 }
 
@@ -755,11 +765,25 @@ function imagePreviewUrl(field: ToolField): string {
 function materialKindForField(field: ToolField): MaterialKind {
   if (field.fieldType === "video_upload" || field.fieldType === "multi_video" || field.fieldType === "omni_video_list") return "video"
   if (field.fieldType === "image" || field.fieldType === "image_upload" || field.fieldType === "multi_image") return "image"
+  const acceptedKinds = materialKindsFromAccept(parseFieldMeta(field).accept)
+  if (acceptedKinds.size === 1) return [...acceptedKinds][0]!
   const text = `${field.fieldKey} ${field.fieldName} ${field.placeholder || ""}`.toLowerCase()
   if (/image|img|picture|photo|frame|cover|avatar|poster|图片|图像|照片|帧|封面|首图/.test(text)) return "image"
   if (/audio|voice|sound|speech|music|音频|语音|声音|音乐/.test(text)) return "audio"
   if (/video|clip|movie|视频|短片|影片/.test(text)) return "video"
   return "file"
+}
+
+function materialKindsFromAccept(accept?: string): Set<MaterialKind> {
+  const kinds = new Set<MaterialKind>()
+  for (const rawToken of String(accept || "").toLowerCase().split(",")) {
+    const token = rawToken.trim()
+    if (!token) continue
+    if (token.startsWith("image/") || /^\.(png|jpe?g|webp|gif|bmp|avif|heic|heif)$/.test(token)) kinds.add("image")
+    if (token.startsWith("video/") || /^\.(mp4|mov|webm|m4v|mkv)$/.test(token)) kinds.add("video")
+    if (token.startsWith("audio/") || /^\.(mp3|wav|m4a|flac|ogg|aac)$/.test(token)) kinds.add("audio")
+  }
+  return kinds
 }
 
 function materialKindFromValue(value?: string | null): MaterialKind {
@@ -798,14 +822,13 @@ function isAdvancedOnlyField(field: ToolField): boolean {
 const displayFields = computed(() => configuredFields.value.filter((field) => field !== customModeField.value))
 const normalFields = computed(() => displayFields.value.filter((field) => !isAdvancedOnlyField(field)))
 const advancedFields = computed(() => displayFields.value.filter(isAdvancedOnlyField))
-const requestFields = computed(() => {
-  const fields = [...configuredFields.value]
-  const primary = primaryReferenceField.value
-  if (primary && isFieldVisible(primary, state.value.fields) && !fields.some((field) => field.fieldKey === primary.fieldKey)) {
-    fields.push(primary)
-  }
-  return fields
-})
+const requestFields = computed(() =>
+  (props.fields || [])
+    .filter((field) => !(field.fieldKey === props.coreFieldKey || parseFieldMeta(field).core))
+    .filter((field) => !isAspectRatioField(field))
+    .filter((field) => !isTransportFormatField(field))
+    .filter((field) => isFieldVisible(field, state.value.fields)),
+)
 const fieldSections = computed(() => {
   const normalGroups = groupVisibleFields(normalFields.value).map((group) => ({
     key: group.key,
@@ -891,53 +914,38 @@ function setCustomModeValue(value: string) {
   const enabled = value === "true" || value === "1"
   if (field.fieldType === "checkbox") setField(field.fieldKey, enabled)
   else setField(field.fieldKey, value)
-  advancedOpen.value = enabled
+  if (!isComposerLayout.value) advancedOpen.value = enabled
 }
 
 function updatePopoverPosition(anchor: HTMLElement | null, target: typeof quickPopoverStyle) {
   if (!anchor) return
   const rect = anchor.getBoundingClientRect()
+  const viewportWidth = window.visualViewport?.width || window.innerWidth
+  const popoverWidth = Math.min(480, viewportWidth - 24)
   target.value = {
     position: "fixed",
-    left: `${Math.max(12, Math.min(rect.left, window.innerWidth - 320))}px`,
+    left: `${Math.max(12, Math.min(rect.left, viewportWidth - popoverWidth - 12))}px`,
     bottom: `${window.innerHeight - rect.top + 10}px`,
     zIndex: "140",
-    width: "min(360px, calc(100vw - 24px))",
+    width: `${popoverWidth}px`,
   }
 }
 
 function refreshComposerPopoverPositions() {
   if (!isComposerLayout.value) return
   if (quickParamsOpen.value) updatePopoverPosition(paramsPillRef.value, quickPopoverStyle)
-  if (advancedOpen.value) updatePopoverPosition(advancedButtonRef.value, advancedPopoverStyle)
 }
 
 function toggleQuickParams() {
   quickParamsOpen.value = !quickParamsOpen.value
   if (quickParamsOpen.value) {
-    advancedOpen.value = false
     nextTick(() => refreshComposerPopoverPositions())
   }
 }
 
 function toggleAdvancedOpen() {
-  if (isComposerLayout.value) {
-    advancedOpen.value = !advancedOpen.value
-    if (advancedOpen.value) {
-      quickParamsOpen.value = false
-      nextTick(() => refreshComposerPopoverPositions())
-    }
-    return
-  }
   advancedOpen.value = !advancedOpen.value
   syncCustomModeField(advancedOpen.value)
-}
-
-function fieldSummaryIcon(field: ToolField): "clock" | "film" | undefined {
-  const key = `${field.fieldKey} ${field.fieldName}`.toLowerCase()
-  if (/duration|时长|second|秒/.test(key)) return "clock"
-  if (/count|num|number|数量|条数|片段|clip|batch/.test(key)) return "film"
-  return undefined
 }
 
 function fieldToolbarSummary(field: ToolField): string {
@@ -973,26 +981,6 @@ const quickComposerFields = computed(() =>
   }),
 )
 
-const composerSummaryParts = computed(() => {
-  const parts: Array<{ key: string; label: string; icon?: "clock" | "film" }> = []
-  for (const field of quickComposerFields.value) {
-    const label = fieldToolbarSummary(field)
-    if (label) parts.push({ key: field.fieldKey, label, icon: fieldSummaryIcon(field) })
-  }
-  if (hasAspectRatioControl.value && state.value.imageRatio) {
-    parts.push({ key: "__aspect_ratio__", label: aspectRatioLabel(state.value.imageRatio) })
-  }
-  return parts
-})
-
-const showQuickParamsButton = computed(
-  () => quickComposerFields.value.length > 0 || hasAspectRatioControl.value,
-)
-
-const showAdvancedButton = computed(
-  () => composerAdvancedFields.value.length > 0 || Boolean(customModeField.value),
-)
-
 const composerAdvancedFields = computed(() => {
   const extraNormal = normalFields.value.filter((field) => {
     if (!isFieldVisible(field, state.value.fields)) return false
@@ -1002,6 +990,45 @@ const composerAdvancedFields = computed(() => {
   })
   return [...extraNormal, ...advancedFields.value]
 })
+
+const composerParameterFields = computed(() => {
+  const seen = new Set<string>()
+  return [...quickComposerFields.value, ...composerAdvancedFields.value].filter((field) => {
+    if (seen.has(field.fieldKey)) return false
+    seen.add(field.fieldKey)
+    return true
+  })
+})
+
+const composerSummaryParts = computed(() => {
+  const parts: Array<{ key: string; label: string }> = []
+  const seenLabels = new Set<string>()
+  const appendPart = (key: string, label: string) => {
+    const normalized = label.trim()
+    if (!normalized || seenLabels.has(normalized)) return
+    seenLabels.add(normalized)
+    parts.push({ key, label: normalized })
+  }
+
+  if (hasAspectRatioControl.value && state.value.imageRatio) {
+    appendPart("__aspect_ratio__", aspectRatioLabel(state.value.imageRatio))
+  }
+  for (const field of composerParameterFields.value) {
+    const label = fieldToolbarSummary(field)
+    if (label) appendPart(field.fieldKey, label)
+  }
+  if (customModeField.value) {
+    const label = fieldToolbarSummary(customModeField.value)
+    if (label) appendPart(customModeField.value.fieldKey, label)
+  }
+  return parts
+})
+
+const composerSummaryText = computed(() => composerSummaryParts.value.map((part) => part.label).join(" | "))
+
+const showQuickParamsButton = computed(
+  () => composerParameterFields.value.length > 0 || hasAspectRatioControl.value || Boolean(customModeField.value),
+)
 
 function closeComposerPopovers() {
   quickParamsOpen.value = false
@@ -1013,7 +1040,6 @@ function handleComposerOutsideClick(event: MouseEvent) {
   const target = event.target as Node | null
   if (!target) return
   if (paramsPillRef.value?.contains(target)) return
-  if (advancedButtonRef.value?.contains(target)) return
   const popover = document.querySelector("[data-capability-composer-popover]")
   if (popover?.contains(target)) return
   closeComposerPopovers()
@@ -1080,18 +1106,23 @@ async function materialAssetToFile(asset: MaterialAsset): Promise<File> {
 
 async function uploadMaterialAssetImage(field: ToolField, asset: MaterialAsset, startedAt: string) {
   const file = await materialAssetToFile(asset)
-  const result = await uploadToolFile(file, { token: auth.token })
-  rememberUploadHistoryItem(field, {
-    id: result.fileId || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    assetId: result.assetId,
-    kind: "image",
-    url: result.url,
-    name: result.name || file.name,
-    size: result.size ?? file.size,
-    type: result.contentType || file.type,
-    uploadedAt: startedAt,
-    toolId: props.toolId,
+  const result = await uploadToolFile(file, {
+    token: auth.token,
+    retainHistory: props.retainUploadHistory !== false,
   })
+  if (props.retainUploadHistory !== false) {
+    rememberUploadHistoryItem(field, {
+      id: result.fileId || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      assetId: result.assetId,
+      kind: "image",
+      url: result.url,
+      name: result.name || file.name,
+      size: result.size ?? file.size,
+      type: result.contentType || file.type,
+      uploadedAt: startedAt,
+      toolId: props.toolId,
+    })
+  }
   return result.url
 }
 
@@ -1169,11 +1200,33 @@ async function deleteUploadHistoryItem(item: UploadHistoryItem) {
 }
 
 function uploadAccept(field: ToolField): string | undefined {
+  const configured = parseFieldMeta(field).accept?.trim()
+  if (configured) return configured
   const kind = materialKindForField(field)
   if (kind === "image") return "image/*"
   if (kind === "video") return "video/*"
   if (kind === "audio") return "audio/*"
   return undefined
+}
+
+function fileMatchesAccept(file: File, accept?: string): boolean {
+  const tokens = String(accept || "")
+    .toLowerCase()
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+  if (tokens.length === 0 || tokens.includes("*/*")) return true
+  const fileName = file.name.toLowerCase()
+  const contentType = file.type.toLowerCase()
+  const nameKind = materialKindFromValue(fileName)
+  return tokens.some((token) => {
+    if (token.startsWith(".")) return fileName.endsWith(token)
+    if (token.endsWith("/*")) {
+      const kind = token.slice(0, -2)
+      return contentType.startsWith(`${kind}/`) || nameKind === kind
+    }
+    return Boolean(contentType) && contentType === token
+  })
 }
 
 function formatTaskTime(value?: string | null): string {
@@ -1340,7 +1393,11 @@ async function confirmPickerSelection() {
   if (referencePickerOpen.value) closeReferenceMaterialPicker()
 }
 
-async function uploadFieldFile(field: ToolField, file: File, options: { closeHistoryAfterUpload?: boolean } = {}) {
+async function uploadFieldFile(
+  field: ToolField,
+  file: File,
+  options: { closeHistoryAfterUpload?: boolean } = {},
+): Promise<{ url?: string; error?: string }> {
   if (uploadHistoryOpen.value && uploadHistoryField.value?.fieldKey === field.fieldKey) {
     uploadHistoryUploading.value = true
   }
@@ -1352,7 +1409,10 @@ async function uploadFieldFile(field: ToolField, file: File, options: { closeHis
     [field.fieldKey]: { uploading: true, fileName: file.name },
   }
   try {
-    const result = await uploadToolFile(file, { token: auth.token })
+    const result = await uploadToolFile(file, {
+      token: auth.token,
+      retainHistory: props.retainUploadHistory !== false,
+    })
     if (isMultiImageField(field)) {
       addMultiImageUrls(field, [result.url])
       if ((uploadHistoryOpen.value || referencePickerOpen.value) && uploadHistoryField.value?.fieldKey === field.fieldKey) {
@@ -1361,17 +1421,19 @@ async function uploadFieldFile(field: ToolField, file: File, options: { closeHis
     } else {
       setField(field.fieldKey, result.url)
     }
-    rememberUploadHistoryItem(field, {
-      id: result.fileId || fallbackId,
-      assetId: result.assetId,
-      kind,
-      url: result.url,
-      name: result.name || file.name,
-      size: result.size ?? file.size,
-      type: result.contentType || file.type,
-      uploadedAt: startedAt,
-      toolId: props.toolId,
-    })
+    if (props.retainUploadHistory !== false) {
+      rememberUploadHistoryItem(field, {
+        id: result.fileId || fallbackId,
+        assetId: result.assetId,
+        kind,
+        url: result.url,
+        name: result.name || file.name,
+        size: result.size ?? file.size,
+        type: result.contentType || file.type,
+        uploadedAt: startedAt,
+        toolId: props.toolId,
+      })
+    }
     fieldUploads.value = {
       ...fieldUploads.value,
       [field.fieldKey]: { uploading: false, fileName: file.name },
@@ -1380,18 +1442,111 @@ async function uploadFieldFile(field: ToolField, file: File, options: { closeHis
       if (referencePickerOpen.value) closeReferenceMaterialPicker()
       else closeUploadHistoryPicker()
     }
+    return { url: result.url }
   } catch (err) {
+    const message = (err as Error).message || "上传失败"
     fieldUploads.value = {
       ...fieldUploads.value,
       [field.fieldKey]: {
         uploading: false,
         fileName: file.name,
-        error: (err as Error).message || "上传失败",
+        error: message,
       },
     }
+    return { error: message }
   } finally {
     uploadHistoryUploading.value = false
   }
+}
+
+function composerMediaFileKind(file: File): "image" | "video" | null {
+  const byType = materialKindFromValue(file.type)
+  if (byType === "image" || byType === "video") return byType
+  const byName = materialKindFromValue(file.name)
+  return byName === "image" || byName === "video" ? byName : null
+}
+
+function composerUploadSlots(kind?: "image" | "video", availableOnly = false): ComposerMediaSlot[] {
+  return composerMediaSlots.value.filter((slot) => {
+    if (slot.kind !== "image" && slot.kind !== "video") return false
+    if (kind && slot.kind !== kind) return false
+    return !availableOnly || (slot.canAdd && !slot.uploading)
+  })
+}
+
+function getComposerMediaUploadAccept(preferredFieldKey?: string): string {
+  const slots = preferredFieldKey
+    ? composerUploadSlots(undefined, true).filter((slot) => slot.fieldKey === preferredFieldKey)
+    : composerUploadSlots(undefined, true)
+  const accepts = new Set(
+    slots
+      .map((slot) => (props.fields || []).find((field) => field.fieldKey === slot.fieldKey))
+      .filter((field): field is ToolField => Boolean(field))
+      .flatMap((field) => String(uploadAccept(field) || "").split(","))
+      .map((item) => item.trim())
+      .filter(Boolean),
+  )
+  return [...accepts]
+    .filter(Boolean)
+    .join(",")
+}
+
+async function uploadComposerMediaFiles(
+  files: FileList | File[],
+  preferredFieldKey?: string,
+): Promise<ComposerMediaUploadResult> {
+  const result: ComposerMediaUploadResult = { uploaded: 0, rejected: [] }
+  let preferredKey = preferredFieldKey
+  for (const file of Array.from(files || [])) {
+    const kind = composerMediaFileKind(file)
+    if (!kind) {
+      result.rejected.push({ name: file.name, reason: "当前仅支持上传图片或视频" })
+      continue
+    }
+
+    const availableSlots = composerUploadSlots(kind, true)
+    const preferredSlot = preferredKey ? availableSlots.find((slot) => slot.fieldKey === preferredKey) : undefined
+    const targetSlot = preferredSlot || (!preferredKey
+      ? availableSlots.find((slot) => {
+          const field = (props.fields || []).find((item) => item.fieldKey === slot.fieldKey)
+          return Boolean(field && fileMatchesAccept(file, uploadAccept(field)))
+        })
+      : undefined)
+    if (!targetSlot) {
+      const preferredTarget = preferredKey
+        ? composerMediaSlots.value.find((slot) => slot.fieldKey === preferredKey)
+        : undefined
+      const supported = composerUploadSlots(kind).length > 0
+      const formatRejected = !preferredKey && availableSlots.length > 0
+      result.rejected.push({
+        name: file.name,
+        reason: preferredTarget && preferredTarget.kind !== kind
+          ? `该输入位仅支持${preferredTarget.kind === "image" ? "图片" : "视频"}`
+          : formatRejected
+          ? "文件格式不符合当前模型字段要求"
+          : supported
+          ? `${kind === "image" ? "图片" : "视频"}输入数量已满`
+          : `当前模型不支持${kind === "image" ? "图片" : "视频"}输入`,
+      })
+      continue
+    }
+    preferredKey = undefined
+
+    const field = (props.fields || []).find((item) => item.fieldKey === targetSlot.fieldKey)
+    if (!field) {
+      result.rejected.push({ name: file.name, reason: "未找到对应的模型输入字段" })
+      continue
+    }
+    if (!fileMatchesAccept(file, uploadAccept(field))) {
+      result.rejected.push({ name: file.name, reason: `文件格式不符合“${field.fieldName}”要求` })
+      continue
+    }
+
+    const uploaded = await uploadFieldFile(field, file)
+    if (uploaded.url) result.uploaded += 1
+    else result.rejected.push({ name: file.name, reason: uploaded.error || "上传失败" })
+  }
+  return result
 }
 
 async function handleFieldUpload(field: ToolField, files: FileList | File[] | null) {
@@ -1557,6 +1712,7 @@ function getRequestParams(): Record<string, unknown> {
   if (codeCapability.value && state.value.language) params.language = state.value.language
 
   for (const field of requestFields.value) {
+    if (parseFieldMeta(field).submitPolicy === "ui_only") continue
     const value = state.value.fields[field.fieldKey]
     if (field.fieldType === "checkbox") {
       params[field.fieldKey] = Boolean(value)
@@ -1616,7 +1772,7 @@ function hasOpenOverlay(): boolean {
     uploadHistoryOpen.value ||
     materialPickerOpen.value ||
     quickParamsOpen.value ||
-    advancedOpen.value ||
+    (!isComposerLayout.value && advancedOpen.value) ||
     openSelectKey.value !== null
   )
 }
@@ -1637,6 +1793,8 @@ defineExpose({
   clearComposerSlot,
   removePrimaryReferenceMaterialAt,
   removeComposerSlotAt,
+  getComposerMediaUploadAccept,
+  uploadComposerMediaFiles,
   primaryReferenceInfo,
   composerMediaSlots,
 })
@@ -1649,30 +1807,19 @@ defineExpose({
         v-if="showQuickParamsButton"
         ref="paramsPillRef"
         type="button"
-        class="inline-flex h-10 max-w-[min(280px,42vw)] items-center gap-1.5 overflow-hidden rounded-xl bg-white/[0.06] px-3 text-sm text-white/72 ring-1 ring-white/8 transition hover:bg-white/[0.1] hover:text-white"
+        class="composer-params-pill inline-flex h-10 min-w-0 max-w-[min(520px,calc(100vw-24px))] items-center gap-2 overflow-hidden rounded-xl bg-white/[0.06] px-3 text-sm text-white/72 ring-1 ring-white/8 transition hover:bg-white/[0.1] hover:text-white"
+        :title="composerSummaryText || '生成参数'"
         @click.stop="toggleQuickParams"
       >
-        <template v-for="(part, index) in composerSummaryParts" :key="part.key">
-          <span v-if="index > 0" class="text-white/22">|</span>
-          <Clock v-if="part.icon === 'clock'" class="h-3.5 w-3.5 shrink-0 text-white/42" />
-          <Film v-else-if="part.icon === 'film'" class="h-3.5 w-3.5 shrink-0 text-white/42" />
-          <span class="truncate">{{ part.label }}</span>
-        </template>
-        <span v-if="composerSummaryParts.length === 0" class="text-white/45">参数</span>
+        <SlidersHorizontal class="h-4 w-4 shrink-0 text-white/52" />
+        <span v-if="composerSummaryParts.length > 0" class="flex min-w-0 items-center gap-1.5 overflow-hidden">
+          <template v-for="(part, index) in composerSummaryParts" :key="part.key">
+            <span v-if="index > 0" class="shrink-0 text-white/22">|</span>
+            <span class="shrink-0 whitespace-nowrap">{{ part.label }}</span>
+          </template>
+        </span>
+        <span v-else class="min-w-0 truncate text-white/45">参数</span>
         <ChevronDown class="ml-auto h-3.5 w-3.5 shrink-0 text-white/35" />
-      </button>
-
-      <button
-        v-if="showAdvancedButton"
-        ref="advancedButtonRef"
-        type="button"
-        class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] text-white/62 ring-1 ring-white/8 transition hover:bg-white/[0.1] hover:text-white"
-        :class="advancedOpen ? 'bg-white/[0.12] text-white ring-white/16' : ''"
-        aria-label="高级配置"
-        title="高级配置"
-        @click.stop="toggleAdvancedOpen"
-      >
-        <SlidersHorizontal class="h-4 w-4" />
       </button>
     </div>
 
@@ -2066,7 +2213,7 @@ defineExpose({
             <X class="h-4 w-4" />
           </button>
         </div>
-        <div class="max-h-[min(52vh,420px)] space-y-4 overflow-y-auto pr-1">
+        <div class="max-h-[min(62dvh,520px)] space-y-4 overflow-y-auto pr-1">
           <div v-if="hasAspectRatioControl" class="space-y-2">
             <p class="text-xs font-medium text-white/45">比例</p>
             <div
@@ -2090,8 +2237,30 @@ defineExpose({
             </div>
           </div>
 
-          <div v-for="field in quickComposerFields" :key="field.fieldKey" class="space-y-2">
-            <p class="text-xs font-medium text-white/45">{{ field.fieldName }}</p>
+          <div v-if="customModeField" class="space-y-2">
+            <p class="text-xs font-medium text-white/45">{{ customModeField.fieldName || "创作模式" }}</p>
+            <div class="inline-flex max-w-full flex-wrap rounded-xl border border-white/10 bg-white/[0.04] p-0.5">
+              <button
+                v-for="option in customModeOptions"
+                :key="optionValue(option)"
+                type="button"
+                class="h-8 rounded-lg px-3 text-xs font-medium transition"
+                :class="
+                  customModeValue === optionValue(option).toLowerCase()
+                    ? 'bg-purple-500/20 text-purple-200'
+                    : 'text-white/42 hover:bg-white/[0.06] hover:text-white/78'
+                "
+                @click="setCustomModeValue(optionValue(option))"
+              >
+                {{ optionLabel(option) }}
+              </button>
+            </div>
+          </div>
+
+          <div v-for="field in composerParameterFields" :key="field.fieldKey" class="space-y-2">
+            <p class="text-xs font-medium text-white/45">
+              {{ field.fieldName }}<span v-if="field.required" class="text-red-300"> *</span>
+            </p>
             <div v-if="isSegmentedOptionField(field)" class="flex flex-wrap gap-2">
               <button
                 v-for="option in fieldOptions(field)"
@@ -2166,98 +2335,6 @@ defineExpose({
               class="h-9 w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 text-xs text-white/78"
               @input="onNumberInput(field.fieldKey, $event)"
             />
-          </div>
-        </div>
-      </div>
-
-      <div
-        v-if="advancedOpen"
-        data-capability-composer-popover
-        class="overflow-hidden rounded-2xl border border-white/10 bg-[#17181d]/98 p-4 shadow-[0_24px_80px_rgb(0_0_0_/_0.55)] backdrop-blur-xl"
-        :style="advancedPopoverStyle"
-        @click.stop
-      >
-        <div class="mb-3 flex items-center justify-between gap-3">
-          <h4 class="text-sm font-semibold text-white">高级配置</h4>
-          <button type="button" class="text-white/40 transition hover:text-white" @click="closeComposerPopovers">
-            <X class="h-4 w-4" />
-          </button>
-        </div>
-        <div v-if="customModeField" class="mb-4 flex flex-wrap items-center gap-2">
-          <span class="text-xs font-medium text-white/45">{{ customModeField.fieldName || "创作模式" }}</span>
-          <div class="inline-flex rounded-full border border-white/10 bg-white/[0.04] p-0.5">
-            <button
-              v-for="option in customModeOptions"
-              :key="optionValue(option)"
-              type="button"
-              class="h-7 rounded-full px-3 text-xs font-medium transition"
-              :class="
-                customModeValue === optionValue(option).toLowerCase()
-                  ? 'bg-purple-500/20 text-purple-200'
-                  : 'text-white/42 hover:bg-white/[0.06] hover:text-white/78'
-              "
-              @click="setCustomModeValue(optionValue(option))"
-            >
-              {{ optionLabel(option) }}
-            </button>
-          </div>
-        </div>
-        <div class="max-h-[min(58vh,480px)] space-y-4 overflow-y-auto pr-1">
-          <div v-for="field in composerAdvancedFields" :key="field.fieldKey" class="space-y-2">
-            <p class="text-xs font-medium text-white/45">
-              {{ field.fieldName }}<span v-if="field.required" class="text-red-300"> *</span>
-            </p>
-            <div v-if="isSegmentedOptionField(field)" class="flex flex-wrap gap-2">
-              <button
-                v-for="option in fieldOptions(field)"
-                :key="optionValue(option)"
-                type="button"
-                class="min-h-8 rounded-full border px-3 py-1 text-xs font-medium transition"
-                :class="
-                  strField(field.fieldKey) === optionValue(option)
-                    ? 'border-purple-500/30 bg-purple-500/10 text-purple-200'
-                    : 'border-transparent bg-white/[0.04] text-white/42 hover:bg-white/[0.06] hover:text-white/78'
-                "
-                @click="setField(field.fieldKey, optionValue(option))"
-              >
-                {{ optionLabel(option) }}
-              </button>
-            </div>
-            <div v-else-if="isSelectOptionField(field)" data-capability-select class="relative">
-              <button
-                type="button"
-                class="flex h-9 w-full items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-3 text-xs text-white/78"
-                @click.stop="toggleSelectDropdown(field.fieldKey)"
-              >
-                <span class="truncate">{{ selectedOptionLabel(field) }}</span>
-                <ChevronDown class="h-3.5 w-3.5 shrink-0 text-white/40" />
-              </button>
-              <div
-                v-if="openSelectKey === field.fieldKey"
-                class="absolute left-0 right-0 top-[calc(100%+6px)] z-30 overflow-hidden rounded-xl border border-white/10 bg-[#111217]/98 p-1 shadow-2xl"
-              >
-                <button
-                  v-for="option in fieldOptions(field)"
-                  :key="optionValue(option)"
-                  type="button"
-                  class="flex w-full items-center rounded-lg px-3 py-2 text-left text-xs text-white/72 hover:bg-white/[0.06]"
-                  @click="selectDropdownOption(field.fieldKey, optionValue(option))"
-                >
-                  {{ optionLabel(option) }}
-                </button>
-              </div>
-            </div>
-            <div v-else-if="field.fieldType === 'slider'" class="space-y-1">
-              <input
-                type="range"
-                :min="sliderConfig(field).min"
-                :max="sliderConfig(field).max"
-                :step="sliderConfig(field).step"
-                :value="Number(state.fields[field.fieldKey] ?? sliderConfig(field).min)"
-                class="capability-slider w-full"
-                @input="onSliderInput(field, $event)"
-              />
-            </div>
             <textarea
               v-else-if="field.fieldType === 'textarea'"
               :value="strField(field.fieldKey)"
@@ -2275,7 +2352,9 @@ defineExpose({
               @input="setField(field.fieldKey, ($event.target as HTMLInputElement).value)"
             />
           </div>
-          <p v-if="composerAdvancedFields.length === 0 && !customModeField" class="text-sm text-white/40">暂无高级配置项</p>
+          <p v-if="composerParameterFields.length === 0 && !hasAspectRatioControl && !customModeField" class="text-sm text-white/40">
+            暂无生成参数
+          </p>
         </div>
       </div>
     </Teleport>
@@ -2736,6 +2815,15 @@ defineExpose({
 </template>
 
 <style scoped>
+.capability-controls--composer {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.composer-params-pill {
+  width: max-content;
+}
+
 .capability-slider {
   height: 12px;
   appearance: none;
@@ -2772,5 +2860,18 @@ defineExpose({
   border-radius: 999px;
   background: #fff;
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.35);
+}
+
+@media (max-width: 640px) {
+  .capability-controls--composer {
+    width: 100%;
+  }
+
+  .composer-params-pill {
+    width: 100%;
+    max-width: 100%;
+    height: 36px;
+    font-size: 12px;
+  }
 }
 </style>

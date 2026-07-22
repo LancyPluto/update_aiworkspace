@@ -12,6 +12,7 @@ public record UserUploadAssetResponse(
         String contentType,
         Long size,
         String url,
+        boolean historyVisible,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -24,12 +25,13 @@ public record UserUploadAssetResponse(
                 asset.getContentType(),
                 asset.getFileSize(),
                 asset.getUrl(),
+                Boolean.TRUE.equals(asset.getHistoryVisible()),
                 asset.getCreatedAt(),
                 asset.getUpdatedAt()
         );
     }
 
     public UserUploadAssetResponse withRewrittenUrl(String rewrittenUrl) {
-        return new UserUploadAssetResponse(id, fileId, kind, name, contentType, size, rewrittenUrl, createdAt, updatedAt);
+        return new UserUploadAssetResponse(id, fileId, kind, name, contentType, size, rewrittenUrl, historyVisible, createdAt, updatedAt);
     }
 }

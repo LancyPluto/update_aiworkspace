@@ -1,5 +1,7 @@
+import ast
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -30,6 +32,185 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("column_default IS NULL", script)
         self.assertNotIn("Duplicate column name.*success", script)
         self.assertNotIn("Duplicate key name.*success", script)
+
+    def test_model_capability_migration_normalizes_provider_join_collation(self) -> None:
+        migration = self.read("sql/111_ai_tool_required_model_capabilities.sql")
+        self.assertIn("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;", migration)
+        self.assertRegex(
+            migration,
+            r"ON metadata\.provider_code COLLATE utf8mb4_unicode_ci\s*"
+            r"= model\.provider COLLATE utf8mb4_unicode_ci",
+        )
+
+    def test_backend_build_uses_strict_persistent_maven_cache(self) -> None:
+        dockerfile = self.read("backend/Dockerfile")
+        cache_mount = (
+            "RUN --mount=type=cache,target=/root/.m2/repository,sharing=locked"
+        )
+        self.assertTrue(dockerfile.startswith("# syntax=docker/dockerfile:1.7\n"))
+        self.assertEqual(2, dockerfile.count(cache_mount))
+        self.assertIn("mvn -B dependency:go-offline -DskipTests", dockerfile)
+        self.assertNotRegex(
+            dockerfile,
+            r"dependency:go-offline[^\n]*\|\|\s*true",
+        )
+
+    def test_workflow_routes_ci_and_cd_to_isolated_self_hosted_runners(self) -> None:
+        workflow = self.read(".github/workflows/dev-delivery.yml")
+        fork_guard = (
+            "github.event_name != 'pull_request' || "
+            "github.event.pull_request.head.repo.full_name == github.repository"
+        )
+
+        def job_body(job_name: str) -> str:
+            match = re.search(
+                rf"^  {re.escape(job_name)}:\n(?P<body>.*?)(?=^  [a-zA-Z0-9_-]+:\n|\Z)",
+                workflow,
+                re.MULTILINE | re.DOTALL,
+            )
+            self.assertIsNotNone(match, f"workflow job {job_name} is missing")
+            return match.group("body")
+
+        for job_name in (
+            "changes",
+            "backend-test",
+            "agent-service-test",
+            "worker-test",
+            "frontend-build",
+            "deploy-contract-test",
+            "python-import-check",
+            "security-audit",
+        ):
+            body = job_body(job_name)
+            self.assertIn(
+                "runs-on: [self-hosted, linux, x64, ci-isolated]",
+                body,
+            )
+            self.assertIn(fork_guard, body)
+
+        deploy_body = job_body("deploy-production")
+        self.assertIn(
+            "runs-on: [self-hosted, linux, x64, production-deploy]",
+            deploy_body,
+        )
+        self.assertNotIn("ci-isolated", deploy_body)
+
+    def test_self_hosted_workflow_enforces_trusted_execution_boundaries(self) -> None:
+        workflow = self.read(".github/workflows/dev-delivery.yml")
+        self.assertIn("permissions:\n  contents: read", workflow)
+        self.assertIn(
+            "cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+            workflow,
+        )
+        self.assertIn("fork-pr-policy:", workflow)
+        self.assertIn("Reject Fork PR On Self-Hosted CI", workflow)
+        self.assertIn(
+            "(github.event_name == 'push' || github.event_name == 'workflow_dispatch') "
+            "&& github.ref == 'refs/heads/dev'",
+            workflow,
+        )
+        self.assertRegex(
+            workflow,
+            r"(?s)deploy-production:.*?always\(\)\s*&&\s*!cancelled\(\)",
+        )
+        self.assertEqual(
+            workflow.count("uses: actions/checkout@v6"),
+            workflow.count("persist-credentials: false"),
+        )
+
+        self.assertIn(
+            "CD_CREDENTIALS_FILE: /home/runner/.config/ai-tool-market/deploy.env",
+            workflow,
+        )
+        self.assertIn("Local credential file must be owned", workflow)
+        self.assertNotIn("secrets.DEPLOY_", workflow)
+        self.assertNotIn("sudo apt-get install", workflow)
+        self.assertNotIn('>> "$GITHUB_ENV"', workflow)
+        self.assertIn("escaped=\"${escaped//'%'/'%25'}\"", workflow)
+
+    def test_deploy_transport_keeps_credentials_out_of_process_arguments_and_git_config(self) -> None:
+        deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
+        sync = self.read("deploy/scripts/remote_production_git_sync.sh")
+        migration = self.read("deploy/scripts/run_prod_asset_migration.py")
+
+        self.assertIn("StrictHostKeyChecking=yes", deploy)
+        self.assertIn('UserKnownHostsFile="$DEPLOY_KNOWN_HOSTS_FILE"', deploy)
+        self.assertNotIn("UserKnownHostsFile=/dev/null", deploy)
+        self.assertIn('[ -L "$DEPLOY_KNOWN_HOSTS_FILE" ]', deploy)
+        self.assertIn("8#$known_hosts_mode & 022", deploy)
+        self.assertIn("sshpass -e ssh", deploy)
+        self.assertIn("sshpass -e scp", deploy)
+        self.assertNotIn('sshpass -p "$DEPLOY_PASSWORD"', deploy)
+        self.assertNotIn("x-access-token:${GITHUB_TOKEN}@github.com", deploy)
+        self.assertIn("GITHUB_TOKEN_STDIN=1", deploy)
+        self.assertNotIn('GITHUB_TOKEN="${GITHUB_TOKEN:-}" \\', deploy)
+
+        self.assertIn("GIT_ASKPASS_FILE", sync)
+        self.assertIn("GitHub job token was not received on stdin", sync)
+        self.assertIn('remote set-url origin "$GIT_REPO_URL"', sync)
+        self.assertIn("cleanup_git_auth", sync)
+        self.assertIn("git -c credential.helper= clone", sync)
+        self.assertIn("git -c credential.helper= fetch", sync)
+        self.assertNotRegex(
+            migration,
+            r'os\.environ\.get\("DEPLOY_PASSWORD",\s*"',
+        )
+
+    def test_production_ssh_passwords_are_never_hardcoded(self) -> None:
+        candidates = list((ROOT / "deploy" / "scripts").glob("*.py"))
+        candidates.extend((ROOT / "scripts").glob("prod*.py"))
+        violations: list[str] = []
+
+        for path in candidates:
+            source = path.read_text(encoding="utf-8-sig")
+            if "paramiko" not in source and "DEPLOY_PASSWORD" not in source:
+                continue
+            tree = ast.parse(source, filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and len(node.args) >= 2:
+                    key, default = node.args[:2]
+                    if (
+                        isinstance(key, ast.Constant)
+                        and key.value == "DEPLOY_PASSWORD"
+                        and isinstance(default, ast.Constant)
+                        and isinstance(default.value, str)
+                        and default.value
+                    ):
+                        violations.append(f"{path.relative_to(ROOT)}:{node.lineno}:env-default")
+
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                    if node.func.attr == "connect":
+                        password = next(
+                            (keyword.value for keyword in node.keywords if keyword.arg == "password"),
+                            None,
+                        )
+                        if (
+                            isinstance(password, ast.Constant)
+                            and isinstance(password.value, str)
+                            and password.value
+                        ):
+                            violations.append(f"{path.relative_to(ROOT)}:{node.lineno}:connect")
+
+                if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                    value = node.value
+                    if (
+                        isinstance(value, ast.Constant)
+                        and isinstance(value.value, str)
+                        and value.value
+                        and any(
+                            isinstance(target, ast.Name)
+                            and target.id.lower() in {"password", "deploy_password"}
+                            for target in targets
+                        )
+                    ):
+                        violations.append(f"{path.relative_to(ROOT)}:{node.lineno}:assignment")
+
+        powershell = self.read("deploy/diagnose_502.ps1")
+        if re.search(r'(?im)^\s*\$password\s*=\s*["\'][^"\']+["\']', powershell):
+            violations.append("deploy/diagnose_502.ps1:password-assignment")
+
+        self.assertEqual([], violations, "Hardcoded production SSH credentials: " + ", ".join(violations))
 
     def test_workflow_schema_deployment_does_not_switch_existing_tool(self) -> None:
         migration = self.read("sql/093_workflow_rollout_safety.sql")
@@ -578,7 +759,7 @@ class DeployContractTests(unittest.TestCase):
     def test_external_smoke_check_fails_on_non_success_responses(self) -> None:
         workflow = self.read(".github/workflows/dev-delivery.yml")
         deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
-        self.assertIn("run: bash deploy/scripts/ci_remote_deploy_light.sh", workflow)
+        self.assertIn("bash deploy/scripts/ci_remote_deploy_light.sh", workflow)
         self.assertIn("curl --silent --show-error --location", deploy)
         self.assertIn('[[ ! "$code" =~ ^2[0-9]{2}$ ]]', deploy)
         self.assertIn("Public release gate failed", deploy)
@@ -661,11 +842,39 @@ class DeployContractTests(unittest.TestCase):
     def test_rollback_does_not_recreate_application_dependencies(self) -> None:
         rollback = self.read("deploy/scripts/rollback_release.sh")
         self.assertIn(
-            'up -d --force-recreate --no-deps "${app_services[@]}"',
+            'up -d --force-recreate --no-deps --no-build --pull never "${restorable_app_services[@]}"',
             rollback,
         )
         self.assertIn("--env-file ../.env", rollback)
         self.assertIn("mihomo|mihomo-init)", rollback)
+
+    def test_deploy_snapshots_old_images_and_rollback_never_rebuilds(self) -> None:
+        capture = self.read("deploy/scripts/capture_rollback_images.sh")
+        rollback = self.read("deploy/scripts/rollback_release.sh")
+        linux_deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
+        windows_deploy = self.read("deploy/scripts/remote_deploy_production.py")
+
+        self.assertIn("last-deploy.images.tsv", capture)
+        self.assertIn("{{.Image}}", capture)
+        self.assertIn("{{.Config.Image}}", capture)
+        self.assertIn("ai-tool-market-rollback-${service}:previous", capture)
+        self.assertIn("capture_rollback_images.sh", linux_deploy)
+        self.assertIn("capture_rollback_images.sh", windows_deploy)
+        self.assertLess(
+            linux_deploy.index("capture_rollback_images.sh"),
+            linux_deploy.index("apply_sql_migrations.sh"),
+        )
+        self.assertLess(
+            windows_deploy.index("capture_rollback_images.sh"),
+            windows_deploy.index("apply_sql_migrations.sh"),
+        )
+        self.assertIn('docker image tag "$rollback_ref" "$image_ref"', rollback)
+        self.assertIn("preserved rollback image changed", rollback)
+        self.assertIn("last-deploy.images.tsv", rollback)
+        self.assertNotIn(
+            'docker compose "${compose_args[@]}" build',
+            rollback,
+        )
 
     def test_release_gate_requires_fresh_monitoring_metrics(self) -> None:
         health = self.read("deploy/scripts/verify_release_health.sh")

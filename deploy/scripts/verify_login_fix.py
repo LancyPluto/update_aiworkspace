@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 import json
+import os
 import ssl
 import urllib.error
 import urllib.request
 
 import paramiko
 
-password = "KeChuangDianAi17728033019"
+password = os.environ.get("DEPLOY_PASSWORD")
+if not password:
+    raise RuntimeError("DEPLOY_PASSWORD is required")
 
 
 def post(url: str) -> tuple[int, str]:
@@ -53,7 +56,8 @@ for label, url in [
             print(f"{label}: {e.code} Location={e.headers.get('Location')}")
 
 ssh = paramiko.SSHClient()
-ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+ssh.load_system_host_keys()
+ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
 ssh.connect("8.134.93.203", username="root", password=password, timeout=30, allow_agent=False, look_for_keys=False)
 _, o, _ = ssh.exec_command(
     "grep CORS_ALLOWED /root/ai_tool_market/.env; "

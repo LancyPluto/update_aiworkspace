@@ -52,6 +52,62 @@ class AdminConfigurationApiTest {
     }
 
     @Test
+    void modelEnabledIsAlwaysTrueWhileAgentEnabledRemainsIndependent() throws Exception {
+        String adminToken = loginAdmin();
+        jdbcTemplate.update("""
+                INSERT INTO model_vendor_accounts(
+                    vendor_code, account_name, base_url, api_key, extra_auth_json, enabled, is_deleted
+                ) VALUES ('mock', 'disabled-account-for-model-invariant', 'https://mock.invalid/v1', '', '', 0, 0)
+                """);
+        Long accountId = jdbcTemplate.queryForObject(
+                "SELECT id FROM model_vendor_accounts WHERE account_name = 'disabled-account-for-model-invariant'",
+                Long.class
+        );
+
+        String created = mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "vendorAccountId": %d,
+                                  "displayName": "Always Enabled Model",
+                                  "configCode": "always_enabled_model",
+                                  "provider": "mock",
+                                  "modelName": "mock",
+                                  "enabled": false,
+                                  "agentEnabled": false,
+                                  "capabilities": ["TEXT_GENERATION"]
+                                }
+                                """.formatted(accountId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.enabled").value(true))
+                .andExpect(jsonPath("$.data.agentEnabled").value(false))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long modelId = objectMapper.readTree(created).path("data").path("id").asLong();
+
+        mockMvc.perform(put("/api/admin/v1/agent/model-config/{id}", modelId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "vendorAccountId": %d,
+                                  "displayName": "Always Enabled Model",
+                                  "configCode": "always_enabled_model",
+                                  "provider": "mock",
+                                  "modelName": "mock",
+                                  "enabled": false,
+                                  "agentEnabled": true,
+                                  "capabilities": ["TEXT_GENERATION"]
+                                }
+                                """.formatted(accountId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.enabled").value(true))
+                .andExpect(jsonPath("$.data.agentEnabled").value(true));
+    }
+
+    @Test
     void adminCanCreateUpdateDisableCategoriesAndPersistSettings() throws Exception {
         String adminToken = loginAdmin();
 

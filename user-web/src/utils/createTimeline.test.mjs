@@ -78,7 +78,7 @@ test("create timeline exposes brand, type, model, prompt, and input materials", 
       status: "ONLINE",
       estimatedCreditCost: 1,
       outputModality: "IMAGE",
-      modelConfigName: "Workspace Image 2.0",
+      modelDisplayName: "Workspace Image 2.0",
     },
   ])
 
@@ -120,8 +120,7 @@ test("create timeline prefers the task selected model over the tool default mode
       status: "ONLINE",
       estimatedCreditCost: 1,
       outputModality: "IMAGE",
-      modelConfigName: "gpt-image-2-2k",
-      modelName: "gpt-image-2-2k",
+      modelDisplayName: "gpt-image-2-2k",
     },
   ])
 

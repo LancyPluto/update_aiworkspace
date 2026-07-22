@@ -16,7 +16,17 @@ if [ "$DEPLOY_SYNC_MODE" != "git" ]; then
 fi
 REMOTE_DIR="/root/ai_tool_market"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=30 -o ServerAliveCountMax=120 -o TCPKeepAlive=yes)
+DEPLOY_KNOWN_HOSTS_FILE="${DEPLOY_KNOWN_HOSTS_FILE:-$HOME/.ssh/known_hosts}"
+if [ ! -f "$DEPLOY_KNOWN_HOSTS_FILE" ] || [ -L "$DEPLOY_KNOWN_HOSTS_FILE" ] || [ ! -r "$DEPLOY_KNOWN_HOSTS_FILE" ]; then
+  echo "Pinned SSH host keys are required: $DEPLOY_KNOWN_HOSTS_FILE" >&2
+  exit 1
+fi
+known_hosts_mode="$(stat -c '%a' "$DEPLOY_KNOWN_HOSTS_FILE")"
+if [ "$(stat -c '%u' "$DEPLOY_KNOWN_HOSTS_FILE")" != "$(id -u)" ] || (( (8#$known_hosts_mode & 022) != 0 )); then
+  echo "Pinned SSH host keys must be owned by the deploy user and not group/other writable" >&2
+  exit 1
+fi
+SSH_OPTS=(-o StrictHostKeyChecking=yes -o UserKnownHostsFile="$DEPLOY_KNOWN_HOSTS_FILE" -o ServerAliveInterval=30 -o ServerAliveCountMax=120 -o TCPKeepAlive=yes)
 GIT_REPO="${DEPLOY_GIT_REPO:-https://github.com/AI-miniLab/ai-tool-market.git}"
 GIT_BRANCH="${DEPLOY_GIT_BRANCH:-dev}"
 DEPLOY_GIT_REF="${DEPLOY_GIT_REF:-${GITHUB_SHA:-dev}}"
@@ -24,11 +34,11 @@ DEPLOY_EVENT="${DEPLOY_EVENT:-${GITHUB_EVENT_NAME:-push}}"
 DEPLOY_PR_NUMBER="${DEPLOY_PR_NUMBER:-}"
 
 ssh_cmd() {
-  sshpass -p "$DEPLOY_PASSWORD" ssh "${SSH_OPTS[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" "$@"
+  SSHPASS="$DEPLOY_PASSWORD" sshpass -e ssh "${SSH_OPTS[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" "$@"
 }
 
 scp_cmd() {
-  sshpass -p "$DEPLOY_PASSWORD" scp "${SSH_OPTS[@]}" "$@"
+  SSHPASS="$DEPLOY_PASSWORD" sshpass -e scp "${SSH_OPTS[@]}" "$@"
 }
 
 run_remote_script() {
@@ -49,15 +59,12 @@ fi
 echo "Deploy mode=$DEPLOY_SYNC_MODE services=$DEPLOY_SERVICES ref=$DEPLOY_GIT_REF event=$DEPLOY_EVENT"
 echo "$DEPLOY_SERVICES" > /tmp/ai_tool_market_deploy_services.txt
 
-CLONE_URL="$GIT_REPO"
-if [ -n "${GITHUB_TOKEN:-}" ]; then
-  CLONE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/AI-miniLab/ai-tool-market.git"
-fi
 scp_cmd "$SCRIPT_DIR/remote_production_git_sync.sh" "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/production_git_sync.sh"
 ssh_cmd "chmod +x /tmp/production_git_sync.sh"
-ssh_cmd env \
+printf '%s\n' "${GITHUB_TOKEN:-}" | ssh_cmd env \
   REMOTE_DIR="$REMOTE_DIR" \
-  GIT_REPO_URL="$CLONE_URL" \
+  GIT_REPO_URL="$GIT_REPO" \
+  GITHUB_TOKEN_STDIN=1 \
   DEPLOY_GIT_REF="$DEPLOY_GIT_REF" \
   DEPLOY_EVENT="$DEPLOY_EVENT" \
   DEPLOY_GIT_BRANCH="$GIT_BRANCH" \
@@ -118,6 +125,10 @@ if [ "\$GITHUB_SHA" != "unknown" ] && [ "\$RELEASE_SHA" != "\$GITHUB_SHA" ]; the
   echo "::error::Checked-out release SHA mismatch: expected \$GITHUB_SHA, got \$RELEASE_SHA" >&2
   exit 1
 fi
+echo "Capturing current application images for rollback ..."
+REMOTE_DIR="\$REMOTE_DIR" \
+  DEPLOY_SERVICES="backend worker agent-service admin-frontend user-web banana-slides" \
+  bash "\$REMOTE_DIR/deploy/scripts/capture_rollback_images.sh"
 
 read_env_value() {
   python3 - "\$1" <<'PY'

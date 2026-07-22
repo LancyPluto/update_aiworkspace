@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import { RouterLink, useRoute, useRouter } from "vue-router"
 import {
+  AtSign,
   ArrowRight,
   Bot,
   ChevronDown,
@@ -101,6 +102,7 @@ const modelPickerOpen = ref(false)
 const modelSearch = ref("")
 const selectedChatTool = ref<AITool | null>(null)
 const selectedToolDetailLoading = ref(false)
+let selectedToolDetailRequestVersion = 0
 const capabilityRef = ref<InstanceType<typeof CapabilityControls> | null>(null)
 const capabilityParams = ref<Record<string, unknown>>({})
 const primaryReferenceInfo = ref<PrimaryReferenceMaterialInfo>({
@@ -113,6 +115,17 @@ const primaryReferenceInfo = ref<PrimaryReferenceMaterialInfo>({
   uploading: false,
 })
 const composerMediaSlots = ref<ComposerMediaSlot[]>([])
+const composerMediaUploadInputRef = ref<HTMLInputElement | null>(null)
+const composerMediaUploadTargetFieldKey = ref<string | undefined>(undefined)
+const composerMediaUploading = ref(false)
+type ComposerMediaPreview = {
+  kind: "image" | "video"
+  url: string
+  label: string
+}
+const composerMediaPreview = ref<ComposerMediaPreview | null>(null)
+const composerMediaPreviewDialogRef = ref<HTMLElement | null>(null)
+let composerMediaPreviewTrigger: HTMLElement | null = null
 const composerRootRef = ref<HTMLElement | null>(null)
 const promptTextareaRef = ref<HTMLTextAreaElement | null>(null)
 const composerOpen = ref(false)
@@ -258,6 +271,41 @@ const canAddPrimaryReference = computed(
 )
 
 const hasComposerMediaSlots = computed(() => composerMediaSlots.value.length > 0)
+
+const composerMediaUploadAccept = computed(() => {
+  const kinds = new Set(
+    composerMediaSlots.value
+      .filter((slot) => slot.canAdd && !slot.uploading && (slot.kind === "image" || slot.kind === "video"))
+      .map((slot) => slot.kind),
+  )
+  return [kinds.has("image") ? "image/*" : "", kinds.has("video") ? "video/*" : ""]
+    .filter(Boolean)
+    .join(",")
+})
+
+const canUploadComposerMedia = computed(() => Boolean(composerMediaUploadAccept.value) && !composerMediaUploading.value)
+
+const composerMediaNames = computed(() => {
+  const counters = new Map<ComposerMediaSlot["kind"], number>()
+  const names = new Map<string, string>()
+  const prefixes: Record<ComposerMediaSlot["kind"], string> = {
+    image: "图片",
+    video: "视频",
+    audio: "音频",
+    file: "文件",
+  }
+
+  for (const slot of composerMediaSlots.value) {
+    const itemCount = slot.previewUrls.length || (slot.hasValue ? 1 : 0)
+    for (let index = 0; index < itemCount; index += 1) {
+      const next = (counters.get(slot.kind) || 0) + 1
+      counters.set(slot.kind, next)
+      names.set(composerMediaItemKey(slot.fieldKey, index), `${prefixes[slot.kind]}${next}`)
+    }
+  }
+
+  return names
+})
 
 const estimateInput = computed<UseTaskEstimateInput | null>(() => {
   const tool = selectedTool.value
@@ -517,7 +565,7 @@ watch(
   selectedToolCode,
   (code) => {
     if (code) void loadSelectedToolDetail(code)
-    else selectedChatTool.value = null
+    else clearSelectedToolDetail()
   },
   { immediate: false },
 )
@@ -672,13 +720,97 @@ function updateComposerMediaSlots(slots: ComposerMediaSlot[]) {
   composerMediaSlots.value = slots
 }
 
+function composerMediaItemKey(fieldKey: string, index: number) {
+  return `${fieldKey}:${index}`
+}
+
+function composerMediaLabel(slot: ComposerMediaSlot, index = 0) {
+  return composerMediaNames.value.get(composerMediaItemKey(slot.fieldKey, index)) || slot.label || slot.fieldName
+}
+
+function primaryReferenceMediaLabel(index: number) {
+  const prefix = primaryReferenceInfo.value.kind === "video" ? "视频" : "图片"
+  return `${prefix}${index + 1}`
+}
+
+function isPreviewableComposerMediaKind(kind: ComposerMediaSlot["kind"]): kind is "image" | "video" {
+  return kind === "image" || kind === "video"
+}
+
+function openComposerMediaPreview(
+  kind: ComposerMediaSlot["kind"],
+  url: string,
+  label: string,
+  event?: MouseEvent,
+) {
+  if (!url || !isPreviewableComposerMediaKind(kind)) return
+  composerMediaPreviewTrigger = event?.currentTarget instanceof HTMLElement ? event.currentTarget : null
+  composerMediaPreview.value = { kind, url, label }
+  void nextTick(() => composerMediaPreviewDialogRef.value?.focus({ preventScroll: true }))
+}
+
+function closeComposerMediaPreview() {
+  composerMediaPreview.value = null
+  const focusTarget = composerMediaPreviewTrigger
+  composerMediaPreviewTrigger = null
+  if (focusTarget?.isConnected) void nextTick(() => focusTarget.focus({ preventScroll: true }))
+}
+
 function onCapabilityParamsChange(params: Record<string, unknown>) {
   capabilityParams.value = params
 }
 
-function openComposerSlotPicker(fieldKey: string) {
-  capabilityRef.value?.openComposerSlotPicker(fieldKey)
+function openComposerMediaUpload(fieldKey?: string) {
+  const input = composerMediaUploadInputRef.value
+  if (!input || !capabilityRef.value) return
+  const accept = capabilityRef.value.getComposerMediaUploadAccept(fieldKey)
+  if (!accept) {
+    submitError.value = fieldKey ? "该输入位已满或不支持图片、视频" : "当前模型没有可用的图片或视频输入位"
+    return
+  }
+  submitError.value = ""
+  composerMediaUploadTargetFieldKey.value = fieldKey
+  input.accept = accept
+  input.value = ""
+  input.click()
   expandComposer()
+}
+
+function openComposerSlotPicker(fieldKey: string) {
+  const slot = composerMediaSlots.value.find((item) => item.fieldKey === fieldKey)
+  if (slot && slot.kind !== "image" && slot.kind !== "video") {
+    capabilityRef.value?.openComposerSlotPicker(fieldKey)
+    expandComposer()
+    return
+  }
+  openComposerMediaUpload(fieldKey)
+}
+
+async function handleComposerMediaUpload(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  if (files.length === 0 || !capabilityRef.value) return
+  const preferredFieldKey = composerMediaUploadTargetFieldKey.value
+  composerMediaUploading.value = true
+  submitError.value = ""
+  try {
+    const result = await capabilityRef.value.uploadComposerMediaFiles(files, preferredFieldKey)
+    if (result.rejected.length > 0) {
+      submitError.value = result.rejected
+        .slice(0, 2)
+        .map((item) => `${item.name}：${item.reason}`)
+        .join("；")
+    }
+    await nextTick()
+    resizePromptTextarea()
+    updateComposerDockInset()
+  } catch (error) {
+    submitError.value = (error as Error).message || "媒体上传失败"
+  } finally {
+    composerMediaUploading.value = false
+    composerMediaUploadTargetFieldKey.value = undefined
+    input.value = ""
+  }
 }
 
 function removeComposerSlot(fieldKey: string, index = 0) {
@@ -686,8 +818,7 @@ function removeComposerSlot(fieldKey: string, index = 0) {
 }
 
 function openPrimaryReferencePicker() {
-  capabilityRef.value?.openReferenceMaterialPicker("upload")
-  expandComposer()
+  openComposerMediaUpload()
 }
 
 function removePrimaryReferenceAt(index: number, event: MouseEvent) {
@@ -739,7 +870,7 @@ async function createWithSelectedTool() {
     submitError.value = "工具配置加载中，请稍候"
     return
   }
-  if (!selectedChatTool.value) {
+  if (!selectedChatTool.value || selectedChatTool.value.id !== tool.toolCode) {
     submitError.value = "工具配置加载失败，请重新选择模型"
     return
   }
@@ -1722,20 +1853,45 @@ function looksLikeStoredMediaUrl(value: string): boolean {
   return false
 }
 
+function resetSelectedToolPresentation() {
+  selectedChatTool.value = null
+  composerMediaSlots.value = []
+  capabilityParams.value = {}
+  primaryReferenceInfo.value = {
+    available: false,
+    fieldName: "",
+    kind: "file",
+    count: 0,
+    maxCount: 1,
+    previewUrls: [],
+    uploading: false,
+  }
+}
+
+function clearSelectedToolDetail() {
+  selectedToolDetailRequestVersion += 1
+  selectedToolDetailLoading.value = false
+  resetSelectedToolPresentation()
+}
+
 async function loadSelectedToolDetail(toolCode: string) {
+  const requestVersion = ++selectedToolDetailRequestVersion
   selectedToolDetailLoading.value = true
+  resetSelectedToolPresentation()
   try {
-    selectedChatTool.value = await fetchAIToolById(toolCode, { token: auth.token })
-    const subjectReplay = buildSubjectReplayParams(selectedChatTool.value.fields || [])
+    const detail = await fetchAIToolById(toolCode, { token: auth.token })
+    if (requestVersion !== selectedToolDetailRequestVersion || selectedToolCode.value !== toolCode) return
+    selectedChatTool.value = detail
+    const subjectReplay = buildSubjectReplayParams(detail.fields || [])
     if (subjectReplay) {
       replayParams.value = subjectReplay
       expandComposer()
     } else if (pendingAssetReplay.value) {
-      replayParams.value = buildAssetReplayParams(selectedChatTool.value.fields || [], pendingAssetReplay.value)
+      replayParams.value = buildAssetReplayParams(detail.fields || [], pendingAssetReplay.value)
       if (pendingAssetReplay.value.prompt) promptText.value = pendingAssetReplay.value.prompt
     }
   } finally {
-    selectedToolDetailLoading.value = false
+    if (requestVersion === selectedToolDetailRequestVersion) selectedToolDetailLoading.value = false
   }
 }
 
@@ -2780,7 +2936,7 @@ onUnmounted(() => {
 
         <div
           ref="composerRootRef"
-          class="pointer-events-none fixed bottom-6 left-[calc(var(--app-sidebar-width,268px)+(100vw-var(--app-sidebar-width,268px))/2)] z-50 grid w-[min(980px,calc(100vw-2rem))] -translate-x-1/2 transition-[left]"
+          class="dashboard-composer-dock pointer-events-none fixed bottom-6 left-[calc(var(--app-sidebar-width,268px)+(100vw-var(--app-sidebar-width,268px))/2)] z-50 grid w-[min(980px,calc(100vw-2rem))] -translate-x-1/2 transition-[left]"
         >
           <div
             v-show="!composerOpen"
@@ -2874,19 +3030,27 @@ onUnmounted(() => {
                         v-for="(url, index) in slot.previewUrls"
                         :key="`${slot.fieldKey}-${url}-${index}`"
                         class="dashboard-pollo-upload-slot dashboard-pollo-upload-slot--filled group"
-                        :title="slot.fieldName"
+                        :title="`预览${composerMediaLabel(slot, index)}`"
                       >
-                        <img
-                          :src="url"
-                          alt="参考图片"
-                          class="dashboard-pollo-upload-slot__media"
-                          @error="removeComposerSlot(slot.fieldKey, index)"
-                        />
+                        <button
+                          type="button"
+                          class="dashboard-pollo-upload-slot__preview"
+                          :aria-label="`预览${composerMediaLabel(slot, index)}`"
+                          @click="openComposerMediaPreview(slot.kind, url, composerMediaLabel(slot, index), $event)"
+                        >
+                          <img
+                            :src="url"
+                            :alt="composerMediaLabel(slot, index)"
+                            class="dashboard-pollo-upload-slot__media"
+                            @error="removeComposerSlot(slot.fieldKey, index)"
+                          />
+                          <span class="dashboard-pollo-upload-slot__label">@{{ composerMediaLabel(slot, index) }}</span>
+                        </button>
                         <button
                           type="button"
                           class="dashboard-pollo-upload-slot__remove"
-                          aria-label="移除参考图"
-                          @click="removeComposerSlot(slot.fieldKey, index)"
+                          :aria-label="`移除${composerMediaLabel(slot, index)}`"
+                          @click.stop="removeComposerSlot(slot.fieldKey, index)"
                         >
                           <X class="h-3 w-3" />
                         </button>
@@ -2903,15 +3067,56 @@ onUnmounted(() => {
                       </button>
                     </template>
 
-                    <div
-                      v-else
-                      class="dashboard-pollo-media-slot"
-                      :title="slot.fieldName"
-                    >
+                    <template v-else>
+                      <div
+                        v-for="(url, index) in slot.previewUrls"
+                        :key="`${slot.fieldKey}-${url}-${index}`"
+                        class="dashboard-pollo-media-slot"
+                        :title="`预览${composerMediaLabel(slot, index)}`"
+                      >
+                        <div class="dashboard-pollo-media-slot__box dashboard-pollo-media-slot__box--filled group">
+                          <button
+                            v-if="isPreviewableComposerMediaKind(slot.kind)"
+                            type="button"
+                            class="dashboard-pollo-upload-slot__preview"
+                            :aria-label="`预览${composerMediaLabel(slot, index)}`"
+                            @click="openComposerMediaPreview(slot.kind, url, composerMediaLabel(slot, index), $event)"
+                          >
+                            <video
+                              v-if="slot.kind === 'video'"
+                              :src="url"
+                              class="dashboard-pollo-media-slot__media"
+                              muted
+                              playsinline
+                              preload="metadata"
+                            />
+                            <img
+                              v-else
+                              :src="url"
+                              :alt="composerMediaLabel(slot, index)"
+                              class="dashboard-pollo-media-slot__media"
+                            />
+                            <span class="dashboard-pollo-upload-slot__label">@{{ composerMediaLabel(slot, index) }}</span>
+                          </button>
+                          <div v-else class="dashboard-pollo-upload-slot__preview">
+                            <Music class="h-5 w-5 text-white/70" />
+                            <span class="dashboard-pollo-upload-slot__label">@{{ composerMediaLabel(slot, index) }}</span>
+                          </div>
+                          <button
+                            type="button"
+                            class="dashboard-pollo-upload-slot__remove"
+                            :aria-label="`移除${composerMediaLabel(slot, index)}`"
+                            @click.stop="removeComposerSlot(slot.fieldKey, index)"
+                          >
+                            <X class="h-3 w-3" />
+                          </button>
+                        </div>
+                      </div>
                       <button
-                        v-if="!slot.hasValue"
+                        v-if="slot.canAdd"
                         type="button"
                         class="dashboard-pollo-media-slot__box"
+                        :title="slot.fieldName"
                         @click="openComposerSlotPicker(slot.fieldKey)"
                       >
                         <Loader2 v-if="slot.uploading" class="h-5 w-5 animate-spin text-primary" />
@@ -2919,36 +3124,7 @@ onUnmounted(() => {
                         <Music v-else-if="slot.kind === 'audio'" class="h-5 w-5" />
                         <Plus v-else class="h-5 w-5" />
                       </button>
-                      <div
-                        v-else
-                        class="dashboard-pollo-media-slot__box dashboard-pollo-media-slot__box--filled group"
-                      >
-                        <video
-                          v-if="slot.kind === 'video'"
-                          :src="slot.previewUrl"
-                          class="dashboard-pollo-media-slot__media"
-                          muted
-                          playsinline
-                          preload="metadata"
-                        />
-                        <img
-                          v-else-if="slot.kind === 'image'"
-                          :src="slot.previewUrl"
-                          alt=""
-                          class="dashboard-pollo-media-slot__media"
-                        />
-                        <Music v-else class="h-5 w-5 text-white/70" />
-                        <button
-                          type="button"
-                          class="dashboard-pollo-upload-slot__remove"
-                          :aria-label="`移除${slot.label || slot.fieldName}`"
-                          @click="removeComposerSlot(slot.fieldKey)"
-                        >
-                          <X class="h-3 w-3" />
-                        </button>
-                      </div>
-                      <span v-if="slot.label" class="dashboard-pollo-media-slot__label">{{ slot.label }}</span>
-                    </div>
+                    </template>
                   </template>
                 </div>
 
@@ -2961,18 +3137,37 @@ onUnmounted(() => {
                     v-for="(url, index) in primaryReferenceInfo.previewUrls"
                     :key="`${url}-${index}`"
                     class="dashboard-pollo-upload-slot dashboard-pollo-upload-slot--filled group"
+                    :title="`预览${primaryReferenceMediaLabel(index)}`"
                   >
-                    <img
-                      :src="url"
-                      alt="参考素材"
-                      class="dashboard-pollo-upload-slot__media"
-                      @error="handlePrimaryReferenceImageError(index, $event)"
-                    />
+                    <button
+                      type="button"
+                      class="dashboard-pollo-upload-slot__preview"
+                      :aria-label="`预览${primaryReferenceMediaLabel(index)}`"
+                      @click="openComposerMediaPreview(primaryReferenceInfo.kind, url, primaryReferenceMediaLabel(index), $event)"
+                    >
+                      <video
+                        v-if="primaryReferenceInfo.kind === 'video'"
+                        :src="url"
+                        class="dashboard-pollo-upload-slot__media"
+                        muted
+                        playsinline
+                        preload="metadata"
+                        @error="handlePrimaryReferenceImageError(index, $event)"
+                      />
+                      <img
+                        v-else
+                        :src="url"
+                        :alt="primaryReferenceMediaLabel(index)"
+                        class="dashboard-pollo-upload-slot__media"
+                        @error="handlePrimaryReferenceImageError(index, $event)"
+                      />
+                      <span class="dashboard-pollo-upload-slot__label">@{{ primaryReferenceMediaLabel(index) }}</span>
+                    </button>
                     <button
                       type="button"
                       class="dashboard-pollo-upload-slot__remove"
-                      aria-label="移除参考图"
-                      @click="removePrimaryReferenceAt(index, $event)"
+                      :aria-label="`移除${primaryReferenceMediaLabel(index)}`"
+                      @click.stop="removePrimaryReferenceAt(index, $event)"
                     >
                       <X class="h-3 w-3" />
                     </button>
@@ -3137,7 +3332,8 @@ onUnmounted(() => {
                 </div>
 
                 <CapabilityControls
-                  v-if="selectedChatTool"
+                  v-if="selectedChatTool && selectedChatTool.id === selectedToolCode"
+                  :key="selectedChatTool.id"
                   ref="capabilityRef"
                   layout="composer"
                   :capabilities="selectedChatTool.capabilities || []"
@@ -3147,11 +3343,32 @@ onUnmounted(() => {
                   :input-modality="selectedTool?.inputModality"
                   :tool-id="selectedChatTool.id"
                   :initial-params="replayParams"
+                  :retain-upload-history="false"
                   class="min-w-0 shrink"
                   @primary-reference-change="updatePrimaryReferenceInfo"
                   @composer-media-slots-change="updateComposerMediaSlots"
                   @params-change="onCapabilityParamsChange"
                 />
+
+                <input
+                  ref="composerMediaUploadInputRef"
+                  type="file"
+                  class="sr-only"
+                  :accept="composerMediaUploadAccept"
+                  multiple
+                  @change="handleComposerMediaUpload"
+                />
+                <button
+                  type="button"
+                  class="dashboard-pollo-at-button shrink-0"
+                  :disabled="!canUploadComposerMedia"
+                  :aria-label="canUploadComposerMedia ? '上传图片或视频' : '当前模型没有可用的图片或视频输入位'"
+                  :title="canUploadComposerMedia ? '上传图片或视频' : '当前模型没有可用的图片或视频输入位'"
+                  @click.stop="openComposerMediaUpload()"
+                >
+                  <Loader2 v-if="composerMediaUploading" class="h-4 w-4 animate-spin" />
+                  <AtSign v-else class="h-4 w-4" />
+                </button>
 
                 <button
                   type="button"
@@ -3190,6 +3407,45 @@ onUnmounted(() => {
         @publish="publishPreviewAsset"
         @unpublish="unpublishPreviewAsset"
       />
+      <Teleport to="body">
+        <div
+          v-if="composerMediaPreview"
+          ref="composerMediaPreviewDialogRef"
+          class="dashboard-composer-media-preview"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="`预览${composerMediaPreview.label}`"
+          tabindex="-1"
+          @click.self="closeComposerMediaPreview"
+          @keydown.esc.stop.prevent="closeComposerMediaPreview"
+        >
+          <button
+            type="button"
+            class="dashboard-composer-media-preview__close"
+            aria-label="关闭媒体预览"
+            @click="closeComposerMediaPreview"
+          >
+            <X class="h-5 w-5" />
+          </button>
+          <figure class="dashboard-composer-media-preview__stage">
+            <img
+              v-if="composerMediaPreview.kind === 'image'"
+              :src="composerMediaPreview.url"
+              :alt="composerMediaPreview.label"
+              class="dashboard-composer-media-preview__asset"
+            />
+            <video
+              v-else
+              :src="composerMediaPreview.url"
+              controls
+              playsinline
+              preload="metadata"
+              class="dashboard-composer-media-preview__asset dashboard-composer-media-preview__asset--video"
+            />
+            <figcaption class="dashboard-composer-media-preview__caption">{{ composerMediaPreview.label }}</figcaption>
+          </figure>
+        </div>
+      </Teleport>
     </div>
 </template>
 
@@ -3964,19 +4220,18 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  gap: 10px;
+  gap: 8px;
 }
 
 .dashboard-pollo-upload-slot {
   position: relative;
   display: flex;
-  width: 56px;
-  height: 74px;
-  shrink: 0;
+  width: 60px;
+  height: 60px;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
-  overflow: hidden;
+  flex-shrink: 0;
+  border-radius: 9px;
   transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
 }
 
@@ -3993,8 +4248,32 @@ onUnmounted(() => {
 }
 
 .dashboard-pollo-upload-slot--filled {
+  background: transparent;
+}
+
+.dashboard-pollo-upload-slot__preview {
+  position: relative;
+  display: flex;
+  height: 100%;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
   border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 9px;
   background: rgb(255 255 255 / 0.04);
+  color: rgb(255 255 255 / 0.72);
+  cursor: zoom-in;
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+}
+
+.dashboard-pollo-upload-slot__preview:hover {
+  border-color: rgb(255 255 255 / 0.34);
+  background: rgb(255 255 255 / 0.08);
+}
+
+.dashboard-pollo-upload-slot__preview:active {
+  transform: scale(0.98);
 }
 
 .dashboard-pollo-upload-slot__media {
@@ -4003,27 +4282,55 @@ onUnmounted(() => {
   object-fit: cover;
 }
 
+.dashboard-pollo-upload-slot__label {
+  position: absolute;
+  bottom: 3px;
+  left: 3px;
+  z-index: 1;
+  max-width: calc(100% - 6px);
+  overflow: hidden;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 0.68);
+  padding: 2px 5px;
+  color: rgb(255 255 255 / 0.94);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .dashboard-pollo-upload-slot__remove {
   position: absolute;
-  right: -4px;
-  top: -4px;
+  right: -6px;
+  top: -6px;
+  z-index: 3;
   display: flex;
-  height: 16px;
-  width: 16px;
+  height: 18px;
+  width: 18px;
   align-items: center;
   justify-content: center;
+  border: 1px solid rgb(255 255 255 / 0.24);
   border-radius: 999px;
-  background: rgb(0 0 0 / 0.82);
+  background: rgb(15 16 20 / 0.94);
   font-size: 10px;
   line-height: 1;
   color: white;
-  opacity: 0;
+  opacity: 1;
+  touch-action: manipulation;
   transition: opacity 160ms ease, background-color 160ms ease;
 }
 
-.dashboard-pollo-upload-slot--filled:hover .dashboard-pollo-upload-slot__remove,
-.dashboard-pollo-upload-slot__remove:focus-visible {
-  opacity: 1;
+@media (hover: hover) and (pointer: fine) {
+  .dashboard-pollo-upload-slot__remove {
+    opacity: 0;
+  }
+
+  .dashboard-pollo-upload-slot--filled:hover .dashboard-pollo-upload-slot__remove,
+  .dashboard-pollo-media-slot__box--filled:hover .dashboard-pollo-upload-slot__remove,
+  .dashboard-pollo-upload-slot__remove:focus-visible {
+    opacity: 1;
+  }
 }
 
 .dashboard-pollo-upload-slot__remove:hover {
@@ -4034,17 +4341,16 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
   flex-shrink: 0;
 }
 
 .dashboard-pollo-media-slot__box {
   display: flex;
-  width: 56px;
-  height: 74px;
+  width: 60px;
+  height: 60px;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
+  border-radius: 9px;
   border: 1px dashed rgb(255 255 255 / 0.22);
   background: rgb(255 255 255 / 0.03);
   color: rgb(255 255 255 / 0.42);
@@ -4059,10 +4365,8 @@ onUnmounted(() => {
 
 .dashboard-pollo-media-slot__box--filled {
   position: relative;
-  overflow: hidden;
-  border-style: solid;
-  border-color: rgb(255 255 255 / 0.16);
-  background: rgb(255 255 255 / 0.04);
+  border: 0;
+  background: transparent;
 }
 
 .dashboard-pollo-media-slot__media {
@@ -4071,10 +4375,78 @@ onUnmounted(() => {
   object-fit: cover;
 }
 
-.dashboard-pollo-media-slot__label {
-  font-size: 10px;
+.dashboard-composer-media-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  background: rgb(0 0 0 / 0.88);
+  padding: 28px;
+  color: white;
+  backdrop-filter: blur(8px);
+}
+
+.dashboard-composer-media-preview__close {
+  position: fixed;
+  right: max(18px, env(safe-area-inset-right));
+  top: max(18px, env(safe-area-inset-top));
+  z-index: 2;
+  display: grid;
+  height: 44px;
+  width: 44px;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 999px;
+  background: rgb(20 21 26 / 0.88);
+  color: rgb(255 255 255 / 0.78);
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.dashboard-composer-media-preview__close:hover {
+  background: rgb(255 255 255 / 0.14);
+  color: white;
+}
+
+.dashboard-composer-media-preview__stage {
+  position: relative;
+  display: flex;
+  max-height: calc(100dvh - 56px);
+  max-width: min(1120px, calc(100vw - 56px));
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+}
+
+.dashboard-composer-media-preview__asset {
+  display: block;
+  height: auto;
+  width: auto;
+  max-height: calc(100dvh - 56px);
+  max-width: 100%;
+  border-radius: 8px;
+  object-fit: contain;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.58);
+}
+
+.dashboard-composer-media-preview__asset--video {
+  background: black;
+}
+
+.dashboard-composer-media-preview__caption {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  max-width: calc(100% - 20px);
+  overflow: hidden;
+  border-radius: 5px;
+  background: rgb(0 0 0 / 0.68);
+  padding: 5px 8px;
+  font-size: 12px;
   line-height: 1.2;
-  color: rgb(255 255 255 / 0.42);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dashboard-pollo-textarea {
@@ -4125,6 +4497,37 @@ onUnmounted(() => {
 .dashboard-pollo-chip:hover {
   background: rgb(255 255 255 / 0.1);
   color: white;
+}
+
+@media (max-width: 1023px) {
+  .dashboard-composer-dock {
+    left: 50%;
+  }
+}
+
+.dashboard-pollo-at-button {
+  display: inline-flex;
+  height: 40px;
+  width: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 0.055);
+  color: rgb(255 255 255 / 0.72);
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.dashboard-pollo-at-button:hover:not(:disabled) {
+  border-color: rgb(255 255 255 / 0.24);
+  background: rgb(255 255 255 / 0.1);
+  color: white;
+}
+
+.dashboard-pollo-at-button:disabled {
+  cursor: not-allowed;
+  color: rgb(255 255 255 / 0.24);
+  opacity: 0.72;
 }
 
 .dashboard-pollo-generate {
@@ -4184,6 +4587,25 @@ onUnmounted(() => {
 }
 
 @media (max-width: 640px) {
+  .dashboard-pollo-upload-slot,
+  .dashboard-pollo-media-slot__box {
+    width: 56px;
+    height: 56px;
+  }
+
+  .dashboard-composer-media-preview {
+    padding: 16px;
+  }
+
+  .dashboard-composer-media-preview__stage {
+    max-height: calc(100dvh - 32px);
+    max-width: calc(100vw - 32px);
+  }
+
+  .dashboard-composer-media-preview__asset {
+    max-height: calc(100dvh - 32px);
+  }
+
   .dashboard-pollo-composer__toolbar {
     gap: 6px;
   }
@@ -4191,6 +4613,11 @@ onUnmounted(() => {
   .dashboard-pollo-chip {
     height: 36px;
     font-size: 12px;
+  }
+
+  .dashboard-pollo-at-button {
+    height: 36px;
+    width: 36px;
   }
 
   .dashboard-pollo-generate {

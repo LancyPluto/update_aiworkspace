@@ -17,7 +17,7 @@ import static org.mockito.Mockito.when;
 class PublicModelOptionServiceTest {
 
     @Test
-    void list_digitalHumanModeOnlyReturnsImplementedVideoProviders() {
+    void list_digitalHumanModeExcludesUnusedAndUnsupportedProviders() {
         AgentModelConfigMapper modelMapper = mock(AgentModelConfigMapper.class);
         ModelVendorAccountMapper accountMapper = mock(ModelVendorAccountMapper.class);
         VendorCodeResolver vendorCodeResolver = mock(VendorCodeResolver.class);
@@ -75,10 +75,10 @@ class PublicModelOptionServiceTest {
 
         List<ModelOptionGroupResponse> result = service.list("digital_human");
 
-        assertThat(result).hasSize(2);
+        assertThat(result).hasSize(1);
         assertThat(result).flatExtracting(ModelOptionGroupResponse::models)
-                .extracting("configCode")
-                .containsExactlyInAnyOrder("seedance", "infinitetalk");
+                .extracting(model -> model.displayName())
+                .containsExactly("seedance");
         assertThat(result).flatExtracting(ModelOptionGroupResponse::models)
                 .allSatisfy(model -> assertThat(model.capabilities()).containsExactly("VIDEO_GENERATION"));
     }
