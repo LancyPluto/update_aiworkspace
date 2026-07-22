@@ -16,6 +16,7 @@ public interface ToolMapper extends BaseMapper<AiTool> {
             <script>
             SELECT t.*, c.category_name, c.category_code,
                    COALESCE(m.display_name, m.model_name) AS model_config_name,
+                   m.display_name AS model_display_name,
                    m.model_name
             FROM ai_tools t
             LEFT JOIN tool_categories c ON c.id = t.category_id
@@ -80,6 +81,7 @@ public interface ToolMapper extends BaseMapper<AiTool> {
     @Select("""
             SELECT t.*, c.category_name, c.category_code,
                    COALESCE(m.display_name, m.model_name) AS model_config_name,
+                   m.display_name AS model_display_name,
                    m.model_name
             FROM ai_tools t
             LEFT JOIN tool_categories c ON c.id = t.category_id
@@ -103,6 +105,7 @@ public interface ToolMapper extends BaseMapper<AiTool> {
     @Select("""
             SELECT t.*, c.category_name, c.category_code,
                    COALESCE(m.display_name, m.model_name) AS model_config_name,
+                   m.display_name AS model_display_name,
                    m.model_name
             FROM ai_tools t
             LEFT JOIN tool_categories c ON c.id = t.category_id
@@ -119,6 +122,7 @@ public interface ToolMapper extends BaseMapper<AiTool> {
     @Select("""
             SELECT t.*, c.category_name, c.category_code,
                    COALESCE(m.display_name, m.model_name) AS model_config_name,
+                   m.display_name AS model_display_name,
                    m.model_name
             FROM ai_tools t
             JOIN tool_categories c ON c.id = t.category_id

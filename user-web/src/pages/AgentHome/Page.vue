@@ -164,7 +164,7 @@
   }
 
   function modelLabel(model: AgentModelConfig) {
-    return model.displayName || model.modelName || model.configCode || `Model ${model.id}`
+    return model.displayName || `Model ${model.id}`
   }
 
   function selectAgentModel(rawId: string) {
@@ -194,8 +194,7 @@
     if (!(await ensureAgentAuth())) return
     modelsLoading.value = true
     try {
-      const list = (await fetchAgentModelConfigs({ token: auth.token }))
-        .filter((model) => model.enabled !== false && model.agentEnabled !== false)
+      const list = await fetchAgentModelConfigs({ token: auth.token })
       agentModels.value = list
       if (!list.length) {
         selectedModelConfigId.value = null

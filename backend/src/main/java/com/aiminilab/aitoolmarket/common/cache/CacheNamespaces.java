@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.common.cache;
 public final class CacheNamespaces {
 
     public static final String PREFIX = "cache:";
+    private static final String PUBLIC_TOOL_CONTRACT_VERSION = "v2";
 
     public static final String TOOL_LIST_VERSION = PREFIX + "meta:tool-list-ver";
     public static final String TOOL_CATEGORIES = PREFIX + "tool:categories:active";
@@ -14,11 +15,11 @@ public final class CacheNamespaces {
     }
 
     public static String toolList(long version, String queryHash) {
-        return PREFIX + "tool:list:v" + version + ":" + queryHash;
+        return PREFIX + "tool:list:" + PUBLIC_TOOL_CONTRACT_VERSION + ":v" + version + ":" + queryHash;
     }
 
     public static String toolDetail(String toolCode) {
-        return PREFIX + "tool:detail:" + normalizeToolCode(toolCode);
+        return PREFIX + "tool:detail:" + PUBLIC_TOOL_CONTRACT_VERSION + ":" + normalizeToolCode(toolCode);
     }
 
     private static String normalizeToolCode(String toolCode) {

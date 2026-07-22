@@ -48,6 +48,13 @@ class VendorCodeResolverTest {
         )).isEqualTo("moonshot");
 
         assertThat(resolver.resolveVendorCode(
+                "moonshot_compatible",
+                null,
+                "Kimi K3",
+                "kimi-k3"
+        )).isEqualTo("moonshot");
+
+        assertThat(resolver.resolveVendorCode(
                 "anthropic_compatible",
                 "https://api.anthropic.com",
                 "Claude Sonnet 4.6",
@@ -109,6 +116,17 @@ class VendorCodeResolverTest {
 
         assertThat(resolver.vendorLabel("qwen")).isEqualTo("阿里云百炼");
     }
+
+    @Test
+    void dashscopeQwenTtsUsesQwenVendorAccountGroup() {
+        assertThat(resolver.resolveVendorCode(
+                "dashscope_qwen_tts",
+                "https://dashscope.aliyuncs.com",
+                "Qwen3 TTS",
+                "qwen3-tts-flash"
+        )).isEqualTo("qwen");
+    }
+
     @Test
     void agnesProvidersAreGroupedAsAgnesVendor() {
         assertThat(resolver.resolveVendorCode("agnes_chat", "https://apihub.agnes-ai.com/v1", "Agnes 2.0", "agnes-2.0-flash"))

@@ -39,38 +39,29 @@ export interface FieldUiMeta {
   unit?: string
 }
 
-function normalizeOptionRow(item: unknown): { label: string; value: string; promptPrefix?: string } | null {
+function normalizeOptionRow(item: unknown): { label: string; value: string } | null {
   if (typeof item === "string") {
     const value = item.trim()
     return value ? { label: value, value } : null
   }
   if (item && typeof item === "object") {
-    const row = item as { label?: string; value?: string; promptPrefix?: string }
+    const row = item as { label?: string; value?: string }
     const value = String(row.value ?? row.label ?? "").trim()
     const label = String(row.label ?? row.value ?? "").trim()
     if (!value && !label) return null
     return {
       label: label || value,
       value: value || label,
-      promptPrefix: row.promptPrefix ? String(row.promptPrefix).trim() : undefined,
     }
   }
   return null
 }
 
-export function parseFieldMeta(field: Pick<ToolField, "options" | "optionsJson">): FieldUiMeta {
+export function parseFieldMeta(field: Pick<ToolField, "options">): FieldUiMeta {
   if (field.options && typeof field.options === "object" && !Array.isArray(field.options)) {
     return parseMetaObject(field.options as Record<string, unknown>)
   }
-  if (!field.optionsJson?.trim()) return {}
-  try {
-    const parsed = JSON.parse(field.optionsJson) as unknown
-    if (Array.isArray(parsed)) return {}
-    if (!parsed || typeof parsed !== "object") return {}
-    return parseMetaObject(parsed as Record<string, unknown>)
-  } catch {
-    return {}
-  }
+  return {}
 }
 
 function parseMetaObject(obj: Record<string, unknown>): FieldUiMeta {
@@ -134,22 +125,15 @@ function parseMetaObject(obj: Record<string, unknown>): FieldUiMeta {
   return meta
 }
 
-export function fieldOptionsFromMeta(field: ToolField): Array<string | { label: string; value: string; promptPrefix?: string }> {
-  if (Array.isArray(field.options) && field.options.length > 0) return field.options
-  if (!field.optionsJson?.trim()) return []
-  try {
-    const parsed = JSON.parse(field.optionsJson) as unknown
-    const rows = Array.isArray(parsed)
-      ? parsed
-      : parsed && typeof parsed === "object" && Array.isArray((parsed as { options?: unknown }).options)
-        ? (parsed as { options: unknown[] }).options
-        : []
-    return rows
-      .map(normalizeOptionRow)
-      .filter(Boolean) as Array<{ label: string; value: string; promptPrefix?: string }>
-  } catch {
-    return []
-  }
+export function fieldOptionsFromMeta(field: ToolField): Array<string | { label: string; value: string }> {
+  const rows = Array.isArray(field.options)
+    ? field.options
+    : field.options && Array.isArray(field.options.options)
+      ? field.options.options
+      : []
+  return rows
+    .map(normalizeOptionRow)
+    .filter(Boolean) as Array<{ label: string; value: string }>
 }
 
 function normalizeFieldValue(value: unknown): string {
@@ -262,6 +246,6 @@ export function defaultFieldValue(field: ToolField): unknown {
   return ""
 }
 
-export function isCoreField(field: Pick<ToolField, "options" | "optionsJson">): boolean {
+export function isCoreField(field: Pick<ToolField, "options">): boolean {
   return parseFieldMeta(field).core === true
 }

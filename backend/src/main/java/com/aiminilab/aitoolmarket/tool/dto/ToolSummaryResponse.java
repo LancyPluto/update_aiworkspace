@@ -85,49 +85,6 @@ public record ToolSummaryResponse(
         );
     }
 
-    public static ToolSummaryResponse publicFrom(AiTool tool, Integer estimatedCreditCost, ObjectMapper objectMapper) {
-        return publicFrom(tool, estimatedCreditCost, false, objectMapper);
-    }
-
-    public static ToolSummaryResponse publicFrom(
-            AiTool tool,
-            Integer estimatedCreditCost,
-            boolean variableCreditPricing,
-            ObjectMapper objectMapper
-    ) {
-        return new ToolSummaryResponse(
-                tool.getId(),
-                tool.getToolCode(),
-                tool.getToolName(),
-                tool.getCategoryId(),
-                tool.getCategoryCode(),
-                tool.getCategoryName(),
-                tool.getDescription(),
-                tool.getCoverUrl(),
-                tool.getToolType(),
-                tool.getInputModality(),
-                tool.getOutputModality(),
-                ToolKindSupport.resolve(tool),
-                null,
-                tool.getStatus(),
-                variableCreditPricing ? null : estimatedCreditCost,
-                variableCreditPricing,
-                tool.getModelConfigId(),
-                tool.getModelConfigName(),
-                tool.getModelName(),
-                tool.getExecutionHandler(),
-                ToolModelCapabilitySupport.resolve(tool, objectMapper),
-                tool.getExecutionMode(),
-                tool.getBillingMode(),
-                tool.getAgentSurfaceEnabled(),
-                null,
-                null,
-                null,
-                null,
-                ToolFrontendStyleConfig.fromConfigNote(tool.getConfigNote(), objectMapper)
-        );
-    }
-
     public ToolSummaryResponse withWorkflowState(
             boolean workflowConfigured,
             Boolean workflowExecutionEnabled,

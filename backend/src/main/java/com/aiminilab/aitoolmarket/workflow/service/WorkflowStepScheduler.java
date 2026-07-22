@@ -111,6 +111,7 @@ public class WorkflowStepScheduler {
         }
         String stableKey = "workflow:%d:step:%d:attempt:%d".formatted(run.getId(), step.getId(), attemptNo);
         int reservedCredits = reservationCredits(version, node, step);
+        reservedCredits = billingService.perCharacterReservationCredits(version, step, reservedCredits);
         WorkflowReservationResult reservation = billingService.reserve(
                 run, step, stableKey, reservedCredits
         );

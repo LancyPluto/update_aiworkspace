@@ -407,6 +407,15 @@ function renderModelCost(model: UnifiedApiModelItem) {
       </>
     )
   }
+  if (billingUnit === "PER_CHARACTER") {
+    const price = model.unitPrice
+    return (
+      <>
+        <div>按字符计费</div>
+        <div className="font-medium text-foreground">{price != null ? `¥${price}` : "¥—"}/字符</div>
+      </>
+    )
+  }
   if (billingUnit === "TOKEN_PER_M") {
     const input = model.inputTokenPricePer1m
     const output = model.outputTokenPricePer1m
@@ -537,6 +546,7 @@ const billingUnitOptions: Array<{ value: NonNullable<AgentModelConfigPayload["bi
   { value: "TOKEN_PER_M", label: "按量计费", description: "按输入/输出 Token 百万单位填写成本" },
   { value: "PER_CALL", label: "按次计费", description: "每次调用固定成本，适合图片、语音等任务" },
   { value: "PER_SECOND", label: "按秒计费", description: "视频等任务按生成秒数填写成本" },
+  { value: "PER_CHARACTER", label: "按字符计费", description: "语音等任务按实际文本字符数填写成本" },
   { value: "IMAGE_TOKEN", label: "图片 Token", description: "同时记录图片基础价和 Token 成本" },
 ]
 
@@ -2729,9 +2739,16 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 ) : null}
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                {modelForm.billingUnit === "PER_CALL" || modelForm.billingUnit === "PER_SECOND" ? (
+                {modelForm.billingUnit === "PER_CALL" || modelForm.billingUnit === "PER_SECOND" || modelForm.billingUnit === "PER_CHARACTER" ? (
                   <div className="space-y-2 sm:col-span-2">
-                    <Label>{modelForm.billingUnit === "PER_SECOND" ? "每秒成本" : "单次调用成本"}（{modelPricingSymbol}）</Label>
+                    <Label>
+                      {modelForm.billingUnit === "PER_SECOND"
+                        ? "每秒成本"
+                        : modelForm.billingUnit === "PER_CHARACTER"
+                          ? "每字符成本"
+                          : "单次调用成本"}
+                      （{modelPricingSymbol}）
+                    </Label>
                     <Input
                       type="number"
                       min="0"

@@ -8,7 +8,7 @@ import type {
   ChatSession,
   FileUploadResult,
 } from "./aiToolTypes"
-import type { PageResult, ToolDetail, ToolFrontendStyle, ToolSummary } from "./types"
+import type { PageResult, ToolDetail, ToolSummary } from "./types"
 import { compressImage } from "@/utils/imageCompressor"
 import {
   isMarketplaceMockToolId,
@@ -54,39 +54,6 @@ async function withSessionMockFallback<T>(
   return request()
 }
 
-const FRONTEND_STYLE_PATTERN = /<!-- ai-tool-ui:(.*?) -->/s
-
-function parseFrontendStyle(
-  configNote?: string | null,
-): ToolFrontendStyle {
-  const match = (configNote || "").match(FRONTEND_STYLE_PATTERN)
-  if (!match) return {}
-
-  try {
-    const parsed = JSON.parse(match[1]) as Record<string, unknown>
-    const stringList = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : undefined
-    return {
-      primaryColor: typeof parsed.primaryColor === "string" ? parsed.primaryColor : undefined,
-      welcomeMessage: typeof parsed.welcomeMessage === "string" ? parsed.welcomeMessage : undefined,
-      mediaDisplayMode: parsed.mediaDisplayMode === "comparison" ? "comparison" : parsed.mediaDisplayMode === "effect" ? "effect" : "icon",
-      modelIconUrl: typeof parsed.modelIconUrl === "string" ? parsed.modelIconUrl : undefined,
-      comparisonOriginalUrl: typeof parsed.comparisonOriginalUrl === "string" ? parsed.comparisonOriginalUrl : undefined,
-      comparisonEffectUrl: typeof parsed.comparisonEffectUrl === "string" ? parsed.comparisonEffectUrl : undefined,
-      audioPreviewUrl: typeof parsed.audioPreviewUrl === "string" ? parsed.audioPreviewUrl : undefined,
-      heroTitle: typeof parsed.heroTitle === "string" ? parsed.heroTitle : undefined,
-      heroSubtitle: typeof parsed.heroSubtitle === "string" ? parsed.heroSubtitle : undefined,
-      demoThumbnails: stringList(parsed.demoThumbnails),
-      useCases: stringList(parsed.useCases),
-      steps: stringList(parsed.steps),
-      recommendedToolCodes: stringList(parsed.recommendedToolCodes),
-      beforeVideoUrl: typeof parsed.beforeVideoUrl === "string" ? parsed.beforeVideoUrl : undefined,
-      afterVideoUrl: typeof parsed.afterVideoUrl === "string" ? parsed.afterVideoUrl : undefined,
-    }
-  } catch {
-    return {}
-  }
-}
-
 function capabilitiesFromTool(tool: ToolSummary): Capability[] {
   const capabilities: Capability[] = []
   const input = (tool.inputModality || "").toUpperCase()
@@ -109,8 +76,8 @@ function capabilitiesFromTool(tool: ToolSummary): Capability[] {
   return capabilities
 }
 
-function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail): AITool {
-  const style = tool.frontendStyle || parseFrontendStyle(tool.configNote)
+function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail, order = 0): AITool {
+  const style = tool.frontendStyle || {}
   const outputModality = (tool.outputModality || "").trim().toUpperCase()
   const rawMediaDisplayMode = style.mediaDisplayMode ?? (outputModality === "VIDEO" ? "effect" : "icon")
   const mediaDisplayMode =
@@ -120,8 +87,8 @@ function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail): AITool {
     name: tool.toolName,
     iconUrl: tool.coverUrl || "",
     description: tool.description || "",
-    enabled: (tool.status || "").toUpperCase() === "ONLINE",
-    order: tool.id,
+    enabled: true,
+    order,
     primaryColor: style.primaryColor ?? undefined,
     welcomeMessage: style.welcomeMessage ?? undefined,
     mediaDisplayMode,
@@ -143,10 +110,9 @@ function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail): AITool {
     outputModality: tool.outputModality,
     toolKind: tool.toolKind,
     fields: "fields" in tool ? tool.fields : undefined,
-    estimatedCreditCost: tool.estimatedCreditCost,
+    estimatedCreditCost: tool.estimatedCreditCost ?? undefined,
     variableCreditPricing: "variableCreditPricing" in tool ? tool.variableCreditPricing : undefined,
-    modelConfigName: tool.modelConfigName,
-    modelName: tool.modelName,
+    modelConfigName: tool.modelDisplayName,
   }
 }
 
@@ -158,10 +124,7 @@ export async function fetchEnabledAITools(options?: { token?: string | null }): 
         token: options?.token,
         query: { pageNo: 1, pageSize: 100 },
       })
-      return page.list
-        .filter((tool) => (tool.status || "").toUpperCase() === "ONLINE")
-        .map(mapToolSummaryToAITool)
-        .sort((a, b) => a.order - b.order)
+      return [...page.list].reverse().map((tool, index) => mapToolSummaryToAITool(tool, index))
     },
     mockFetchEnabledAITools,
   )

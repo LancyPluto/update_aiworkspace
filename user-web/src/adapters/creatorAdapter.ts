@@ -1,4 +1,4 @@
-import type { ImageGenerationParameters, ModelOptionGroup, ModelOptionsResponse, ToolDetail, ToolField, ToolSummary } from "@/api/types"
+import type { ImageGenerationParameters, ModelOptionGroup, ModelOptionItem, ModelOptionsResponse, ToolDetail, ToolField, ToolFieldOption, ToolSummary } from "@/api/types"
 
 export type CreatorMode = "video" | "image" | "agent" | "digitalHuman" | "audio"
 
@@ -22,7 +22,6 @@ export interface ComposerModelOption {
   label: string
   toolCode?: string
   modelConfigId?: number | null
-  modelName?: string | null
   description?: string | null
   iconUrl?: string | null
   badges?: string[]
@@ -91,8 +90,7 @@ function searchableToolText(tool: Partial<ToolSummary>): string {
     tool.toolType,
     tool.toolName,
     tool.description,
-    tool.modelName,
-    tool.modelConfigName,
+    tool.modelDisplayName,
   ]
     .map((value) => normalize(value))
     .filter(Boolean)
@@ -107,22 +105,16 @@ function includesAny(value: string, keywords: string[]): boolean {
   return keywords.some((keyword) => value.includes(keyword))
 }
 
-function isOnlineTool(tool: Pick<ToolSummary, "status">): boolean {
-  return normalize(tool.status) === "online"
-}
-
 function isVideoTool(tool: Partial<ToolSummary>): boolean {
   const output = modalityText(tool.outputModality)
-  const handler = normalize(tool.executionHandler)
-  if (output.includes("video") || handler.includes("video_generation")) return true
+  if (output.includes("video") || normalize(tool.toolKind) === "video") return true
   if (output && !output.includes("video")) return false
   return includesAny(searchableToolText(tool), ["video", "movie", "clip", "视频", "影片", "短片", "动效", "动画"])
 }
 
 function isImageTool(tool: Partial<ToolSummary>): boolean {
   const output = modalityText(tool.outputModality)
-  const handler = normalize(tool.executionHandler)
-  if (output.includes("image") || handler.includes("image_generation")) return true
+  if (output.includes("image") || normalize(tool.toolKind) === "image") return true
   if (output && !output.includes("image")) return false
   return includesAny(searchableToolText(tool), ["image", "img", "picture", "photo", "图片", "图像", "照片", "海报", "封面"])
 }
@@ -210,14 +202,11 @@ function multiUploadField(fields: ToolField[], handled: Set<string>): ToolField 
 }
 
 function mediaListMaxCount(field: ToolField, fallback = 14): number {
-  try {
-    const parsed = field.optionsJson ? JSON.parse(field.optionsJson) : null
-    const raw = parsed?.maxCount ?? parsed?.maxItems
-    const value = Number(raw)
-    return Number.isFinite(value) && value > 0 ? value : fallback
-  } catch {
-    return fallback
-  }
+  const meta = field.options && typeof field.options === "object" && !Array.isArray(field.options)
+    ? field.options
+    : {}
+  const value = Number(meta.maxCount ?? meta.maxItems)
+  return Number.isFinite(value) && value > 0 ? value : fallback
 }
 
 function compactLabel(value?: string | null): string {
@@ -298,70 +287,39 @@ function inferImageParametersFromText(text: string): ImageGenerationParameters |
   return null
 }
 
-function inferImageParametersForModel(
-  model: Partial<ModelOptionGroup["models"][number]>,
-  group: Partial<ModelOptionGroup>,
-): ImageGenerationParameters | null {
-  return inferImageParametersFromText([
-    group.vendorCode,
-    group.vendorName,
-    group.provider,
-    group.providerName,
-    model.provider,
-    model.providerName,
-    model.vendorCode,
-    model.vendorName,
-    model.displayName,
-    model.name,
-    model.modelConfigName,
-    model.modelName,
-    model.configCode,
-    model.toolCode,
-    model.toolName,
-  ].map((value) => compactLabel(value)).filter(Boolean).join(" "))
-}
-
 function isRealModelBoundTool(tool: Partial<ToolSummary>): boolean {
-  if (!tool.modelConfigId && !compactLabel(tool.modelConfigName) && !compactLabel(tool.modelName)) return false
+  if (!compactLabel(tool.modelDisplayName)) return false
   const text = searchableToolText(tool)
   return !includesAny(`${text} ${normalize(tool.toolCode)}`, ["local-media-mock", "local mock", "local_mock"])
 }
 
-function optionLabel(option: NonNullable<ToolField["options"]>[number]): string {
+function optionLabel(option: ToolFieldOption | string): string {
   if (typeof option === "string") return option
   return option.label || option.value
 }
 
-function optionValue(option: NonNullable<ToolField["options"]>[number]): string {
+function optionValue(option: ToolFieldOption | string): string {
   if (typeof option === "string") return option
   return option.value || option.label
 }
 
-function optionsFromJson(raw?: string | null): NonNullable<ToolField["options"]> {
-  if (!raw || !raw.trim()) return []
-  try {
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .map((item) => {
-        if (typeof item === "string" || typeof item === "number") return String(item)
-        if (item && typeof item === "object") {
-          const label = compactLabel(String(item.label ?? item.name ?? item.value ?? ""))
-          const value = compactLabel(String(item.value ?? item.label ?? item.name ?? ""))
-          if (label || value) return { label: label || value, value: value || label }
-        }
-        return null
-      })
-      .filter((item): item is NonNullable<ToolField["options"]>[number] => Boolean(item))
-  } catch {
-    return []
-  }
-}
-
-function fieldOptions(field: ToolField | undefined): NonNullable<ToolField["options"]> {
+function fieldOptions(field: ToolField | undefined): Array<ToolFieldOption | string> {
   if (!field) return []
-  if (field.options?.length) return field.options
-  return optionsFromJson(field.optionsJson)
+  const rows = Array.isArray(field.options)
+    ? field.options
+    : field.options && Array.isArray(field.options.options)
+      ? field.options.options
+      : []
+  return rows
+    .map((item) => {
+      if (typeof item === "string") return item
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null
+      const row = item as { label?: unknown; value?: unknown }
+      const label = compactLabel(String(row.label ?? row.value ?? ""))
+      const value = compactLabel(String(row.value ?? row.label ?? ""))
+      return label || value ? { label: label || value, value: value || label } : null
+    })
+    .filter((item): item is ToolFieldOption | string => item !== null)
 }
 
 function numberFromOption(value: unknown): number | null {
@@ -402,9 +360,8 @@ function defaultNumber(field: ToolField | undefined, options: ComposerFormatValu
 }
 
 export function selectDefaultTool(tools: ToolSummary[], mode: CreatorMode): ToolSummary | null {
-  const candidates = tools.filter(isOnlineTool)
-  const matched = candidates.find((tool) => toolMatchesMode(tool, mode) && isRealModelBoundTool(tool))
-    ?? candidates.find((tool) => toolMatchesMode(tool, mode))
+  const matched = tools.find((tool) => toolMatchesMode(tool, mode) && isRealModelBoundTool(tool))
+    ?? tools.find((tool) => toolMatchesMode(tool, mode))
   return matched ?? null
 }
 
@@ -413,7 +370,7 @@ export function creatorModeForTool(tool: Partial<ToolSummary> | null | undefined
 }
 
 export function buildComposerModelOptions(tools: ToolSummary[], mode: CreatorMode): ComposerModelOption[] {
-  const candidates = tools.filter((tool) => isOnlineTool(tool) && toolMatchesMode(tool, mode) && isRealModelBoundTool(tool))
+  const candidates = tools.filter((tool) => toolMatchesMode(tool, mode) && isRealModelBoundTool(tool))
   const automatic: ComposerModelOption = {
     key: "auto",
     label: "自动选择",
@@ -422,70 +379,55 @@ export function buildComposerModelOptions(tools: ToolSummary[], mode: CreatorMod
   }
   const configured = candidates.map((tool) => {
     const label =
-      compactLabel(tool.modelConfigName) ||
-      compactLabel(tool.modelName) ||
+      compactLabel(tool.modelDisplayName) ||
       compactLabel(tool.toolName) ||
       tool.toolCode
     return {
       key: `tool:${tool.toolCode}`,
       label,
       toolCode: tool.toolCode,
-      modelConfigId: tool.modelConfigId,
-      modelName: tool.modelName,
       description: tool.description ?? null,
       iconUrl: tool.frontendStyle?.modelIconUrl || tool.coverUrl || null,
-      estimatedCreditCost: tool.estimatedCreditCost,
+      estimatedCreditCost: tool.estimatedCreditCost ?? undefined,
       variableCreditPricing: tool.variableCreditPricing,
     }
   })
   return [automatic, ...configured]
 }
 
-function modelOptionLabel(model: Partial<ModelOptionGroup["models"][number]>): string {
-  return compactLabel(model.displayName)
-    || compactLabel(model.name)
-    || compactLabel(model.modelConfigName)
-    || compactLabel(model.modelName)
-    || compactLabel(model.toolName)
-    || compactLabel(model.configCode)
-    || "未命名模型"
+function modelOptionLabel(model: ModelOptionItem): string {
+  return compactLabel(model.displayName) || "未命名模型"
 }
 
-function modelOptionKey(model: Partial<ModelOptionGroup["models"][number]>): string {
-  const id = model.modelConfigId ?? model.id
-  if (id != null) return `model:${id}`
-  if (model.configCode) return `model:${model.configCode}`
-  return `model:${modelOptionLabel(model)}`
+function modelOptionKey(model: ModelOptionItem): string {
+  return `model:${model.id}`
 }
 
-function groupLabel(group: Partial<ModelOptionGroup>, fallback: string): string {
+function groupLabel(group: ModelOptionGroup, fallback: string): string {
   return compactLabel(group.vendorName)
-    || compactLabel(group.providerName)
     || compactLabel(group.vendorCode)
-    || compactLabel(group.provider)
     || fallback
 }
 
 function toComposerModelOption(
-  model: Partial<ModelOptionGroup["models"][number]>,
-  group: Partial<ModelOptionGroup>,
+  model: ModelOptionItem,
+  group: ModelOptionGroup,
 ): ComposerModelOption {
-  const vendorCode = group.vendorCode ?? group.provider ?? model.vendorCode ?? model.provider ?? null
+  const imageParameters = model.imageParameters ?? inferImageParametersFromText([
+    group.vendorCode,
+    group.vendorName,
+    model.displayName,
+  ].map((value) => compactLabel(value)).filter(Boolean).join(" "))
   return {
     key: modelOptionKey(model),
     label: modelOptionLabel(model),
-    toolCode: model.toolCode || undefined,
-    modelConfigId: model.modelConfigId ?? model.id ?? null,
-    modelName: model.modelName ?? null,
-    description: model.description ?? null,
-    iconUrl: model.modelIconUrl ?? model.iconUrl ?? group.iconUrl ?? null,
-    badges: (model.badges || []).filter((badge): badge is string => Boolean(compactLabel(badge))),
-    capabilities: (model.capabilities || []).filter((capability): capability is string => Boolean(compactLabel(capability))),
-    isDefault: model.isDefault ?? null,
-    vendorCode,
+    modelConfigId: model.id,
+    iconUrl: group.iconUrl ?? null,
+    capabilities: model.capabilities.filter((capability) => Boolean(compactLabel(capability))),
+    isDefault: model.isDefault,
+    vendorCode: group.vendorCode,
     vendorLabel: groupLabel(group, "其他"),
-    imageParameters: model.imageParameters ?? inferImageParametersForModel(model, group),
-    estimatedCreditCost: typeof model.estimatedCreditCost === "number" ? model.estimatedCreditCost : undefined,
+    imageParameters,
   }
 }
 
@@ -497,7 +439,7 @@ export function buildComposerModelGroupsFromResponse(
 
   return groups
     .map((group, index) => ({
-      key: compactLabel(group.vendorCode) || compactLabel(group.provider) || `vendor:${index}`,
+      key: compactLabel(group.vendorCode) || `vendor:${index}`,
       label: groupLabel(group, "其他"),
       iconUrl: group.iconUrl ?? null,
       models: (group.models || []).map((model) => toComposerModelOption(model, group)),
@@ -518,16 +460,15 @@ function inferVendorFromText(text: string): { key: string; label: string } {
 }
 
 export function buildComposerModelGroupsFromTools(tools: ToolSummary[], mode: CreatorMode): ComposerModelGroup[] {
-  const candidates = tools.filter((tool) => isOnlineTool(tool) && toolMatchesMode(tool, mode) && isRealModelBoundTool(tool))
+  const candidates = tools.filter((tool) => toolMatchesMode(tool, mode) && isRealModelBoundTool(tool))
   const grouped = new Map<string, ComposerModelGroup>()
 
   for (const tool of candidates) {
     const label =
-      compactLabel(tool.modelConfigName) ||
-      compactLabel(tool.modelName) ||
+      compactLabel(tool.modelDisplayName) ||
       compactLabel(tool.toolName) ||
       tool.toolCode
-    const vendor = inferVendorFromText(`${tool.modelConfigName || ""} ${tool.modelName || ""} ${tool.toolName || ""} ${tool.toolCode || ""}`)
+    const vendor = inferVendorFromText(`${tool.modelDisplayName || ""} ${tool.toolName || ""} ${tool.toolCode || ""}`)
     if (!grouped.has(vendor.key)) {
       grouped.set(vendor.key, {
         key: vendor.key,
@@ -536,17 +477,15 @@ export function buildComposerModelGroupsFromTools(tools: ToolSummary[], mode: Cr
       })
     }
     grouped.get(vendor.key)!.models.push({
-      key: `model:${tool.modelConfigId ?? tool.toolCode}`,
+      key: `model:${tool.toolCode}`,
       label,
       toolCode: tool.toolCode,
-      modelConfigId: tool.modelConfigId ?? null,
-      modelName: tool.modelName ?? null,
       description: tool.description ?? null,
       iconUrl: tool.frontendStyle?.modelIconUrl || tool.coverUrl || null,
       vendorCode: vendor.key,
       vendorLabel: vendor.label,
-      imageParameters: inferImageParametersFromText(`${vendor.key} ${vendor.label} ${label} ${tool.modelName || ""} ${tool.modelConfigName || ""} ${tool.toolCode || ""} ${tool.toolName || ""}`),
-      estimatedCreditCost: tool.estimatedCreditCost,
+      imageParameters: inferImageParametersFromText(`${vendor.key} ${vendor.label} ${label} ${tool.modelDisplayName || ""} ${tool.toolCode || ""} ${tool.toolName || ""}`),
+      estimatedCreditCost: tool.estimatedCreditCost ?? undefined,
       variableCreditPricing: tool.variableCreditPricing,
     })
   }

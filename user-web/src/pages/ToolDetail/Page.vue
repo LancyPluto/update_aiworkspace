@@ -28,6 +28,7 @@ import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { cleanToolDisplayText } from "@/utils/toolDisplayText"
 import { formatToolCreditLabel, usesVariableWorkflowCredits } from "@/utils/toolCreditLabel"
+import { fieldOptionsFromMeta } from "@/utils/fieldUiMeta"
 import {
   buildImageTemplateTaskParams,
   compactOptionFields,
@@ -74,7 +75,7 @@ const toolUseModalExpanded = ref(false)
 const uploadDragging = ref(false)
 
 const title = computed(() => cleanToolDisplayText(tool.value?.toolName) || `工具 · ${props.id}`)
-const isOffline = computed(() => tool.value?.status === "OFFLINE")
+const isOffline = computed(() => false)
 
 const imageTemplateMode = computed(() => isImageTemplateTool(tool.value))
 const videoTemplateMode = computed(() => isVideoTemplateTool(tool.value))
@@ -178,13 +179,8 @@ function isVideoUrl(value?: string | null) {
 }
 
 function fieldConfig(field?: ToolField | null): Record<string, unknown> {
-  if (!field?.optionsJson) return {}
-  try {
-    const parsed = JSON.parse(field.optionsJson)
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
-  } catch {
-    return {}
-  }
+  const options = field?.options
+  return options && typeof options === "object" && !Array.isArray(options) ? options : {}
 }
 
 function uploadAccept(field?: ToolField | null, fallback: "image" | "video" | "mixed" = "mixed") {
@@ -585,7 +581,7 @@ onMounted(async () => {
 
                   <div v-if="field.fieldType === 'radio'" class="grid grid-cols-2 gap-2">
                     <button
-                      v-for="option in field.options || []"
+                      v-for="option in fieldOptionsFromMeta(field)"
                       :key="optionValue(option)"
                       type="button"
                       class="min-h-9 rounded-md border px-3 py-2 text-xs font-medium transition"
@@ -602,7 +598,7 @@ onMounted(async () => {
                     :value="String(imageOptions[field.fieldKey] ?? '')"
                     @change="updateImageOption(field, ($event.target as HTMLSelectElement).value)"
                   >
-                    <option v-for="option in field.options || []" :key="optionValue(option)" :value="optionValue(option)">
+                    <option v-for="option in fieldOptionsFromMeta(field)" :key="optionValue(option)" :value="optionValue(option)">
                       {{ optionLabel(option) }}
                     </option>
                   </select>
@@ -777,7 +773,7 @@ onMounted(async () => {
 
                   <div v-if="field.fieldType === 'radio'" class="grid grid-cols-2 gap-2">
                     <button
-                      v-for="option in field.options || []"
+                      v-for="option in fieldOptionsFromMeta(field)"
                       :key="optionValue(option)"
                       type="button"
                       class="min-h-9 rounded-md border px-3 py-2 text-xs font-medium transition"
@@ -794,7 +790,7 @@ onMounted(async () => {
                     :value="String(mediaOptions[field.fieldKey] ?? '')"
                     @change="updateMediaOption(field, ($event.target as HTMLSelectElement).value)"
                   >
-                    <option v-for="option in field.options || []" :key="optionValue(option)" :value="optionValue(option)">
+                    <option v-for="option in fieldOptionsFromMeta(field)" :key="optionValue(option)" :value="optionValue(option)">
                       {{ optionLabel(option) }}
                     </option>
                   </select>

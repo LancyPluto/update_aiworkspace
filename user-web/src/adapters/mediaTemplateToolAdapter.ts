@@ -25,7 +25,7 @@ function searchableToolText(tool?: Partial<ToolDetail> | null): string {
     tool?.toolName,
     tool?.categoryName,
     tool?.toolType,
-    tool?.executionHandler,
+    tool?.toolKind,
   ].map((item) => clean(item).toLowerCase()).join(" ")
 }
 
@@ -36,12 +36,10 @@ export function resolveToolKind(tool?: Partial<ToolDetail> | null): ToolKind {
   const type = upper(tool.toolType)
   const input = upper(tool.inputModality)
   const output = upper(tool.outputModality)
-  const handler = upper(tool.executionHandler)
   const text = searchableToolText(tool)
 
   if (type === "AGENT") return "agent"
   if (
-    handler.includes("DIGITAL_HUMAN") ||
     type.includes("DIGITAL_HUMAN") ||
     text.includes("digital_human") ||
     text.includes("digital-human") ||
@@ -50,9 +48,9 @@ export function resolveToolKind(tool?: Partial<ToolDetail> | null): ToolKind {
   ) {
     return "digitalHuman"
   }
-  if (output === "AUDIO" || input === "AUDIO" || type.includes("AUDIO") || type.includes("SPEECH") || handler.includes("AUDIO")) return "audio"
-  if (output === "VIDEO" || type.includes("VIDEO") || handler.includes("VIDEO")) return "video"
-  if (output === "IMAGE" || input === "IMAGE" || type.includes("IMAGE") || handler.includes("IMAGE")) return "image"
+  if (output === "AUDIO" || input === "AUDIO" || type.includes("AUDIO") || type.includes("SPEECH")) return "audio"
+  if (output === "VIDEO" || type.includes("VIDEO")) return "video"
+  if (output === "IMAGE" || input === "IMAGE" || type.includes("IMAGE")) return "image"
   if (output === "TEXT" || input === "TEXT" || type.includes("TEXT")) return "text"
   return "other"
 }
@@ -92,7 +90,7 @@ export function compactMediaOptionFields(tool: Pick<ToolDetail, "fields"> | Part
 
 export function defaultMediaFieldValue(field: ToolField): unknown {
   if (field.defaultValue !== undefined && field.defaultValue !== null && field.defaultValue !== "") return field.defaultValue
-  if ((field.fieldType === "select" || field.fieldType === "radio") && field.options?.length) {
+  if ((field.fieldType === "select" || field.fieldType === "radio") && Array.isArray(field.options) && field.options.length) {
     const option = field.options[0]
     return typeof option === "string" ? option : option.value
   }

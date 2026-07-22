@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.credit.dto.CreditAccountResponse;
+import com.aiminilab.aitoolmarket.credit.dto.GiftCardResponse;
 import com.aiminilab.aitoolmarket.credit.dto.ManualAddCreditsResponse;
 import com.aiminilab.aitoolmarket.credit.entity.GiftCardPackage;
 import com.aiminilab.aitoolmarket.credit.mapper.GiftCardPackageMapper;
@@ -48,65 +49,76 @@ public class AdminUserServiceImpl implements AdminUserService {
 
     @Override
     @Transactional
-    public ManualAddCreditsResponse manualAddCredits(Long userId, int amount, String reason, Long operatorId) {
+    public ManualAddCreditsResponse manualAddCredits(Long userId,
+                                                     int amount,
+                                                     String reason,
+                                                     String operationId,
+                                                     Long operatorId) {
         userMapper.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "用户不存在"));
-        
-        // 获取当前用户的算力账户信息（用于返回前后余额）
+                .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "User not found"));
+        if (amount <= 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Gift card credits must be positive");
+        }
+
+        String normalizedReason = normalizeReason(reason);
         CreditAccountResponse before = creditService.account(userId);
-        
-        // 查找或创建一个默认的礼品卡套餐（用于管理员手动加算力）
-        GiftCardPackage defaultPackage = findOrCreateAdminGiftPackage(amount);
-        
-        // 创建礼品卡记录（不直接增加算力）
-        giftCardService.createGiftCardFromOrder(
+        GiftCardPackage defaultPackage = findOrCreateAdminGiftPackage();
+        GiftCardResponse giftCard = giftCardService.issueAdminGiftCard(
                 userId,
-                null, // orderId 为 null，表示是管理员手动添加
                 defaultPackage.getId(),
-                amount
+                amount,
+                operationId,
+                operatorId,
+                normalizedReason
         );
-        
-        // 获取更新后的账户信息
         CreditAccountResponse after = creditService.account(userId);
-        
+
         return new ManualAddCreditsResponse(
                 userId,
+                operationId.trim(),
+                operatorId,
                 amount,
                 before.balance(),
                 after.balance(),
-                reason != null ? reason : "管理员手动添加礼品卡",
-                LocalDateTime.now()
+                normalizedReason,
+                giftCard,
+                giftCard.createdAt()
         );
     }
-    
-    /**
-     * 查找或创建管理员专用的默认礼品卡套餐
-     */
-    private GiftCardPackage findOrCreateAdminGiftPackage(int credits) {
-        // admin_default 可能是 HIDDEN，不能只查 ACTIVE，否则生产已有隐藏套餐时会重复插入。
+
+    private GiftCardPackage findOrCreateAdminGiftPackage() {
         GiftCardPackage existing = giftCardPackageMapper.findByPackageCode("admin_default");
         if (existing != null) {
+            if (!"HIDDEN".equals(existing.getStatus()) || !Integer.valueOf(0).equals(existing.getCredits())) {
+                existing.setStatus("HIDDEN");
+                existing.setCredits(0);
+                existing.setUpdatedAt(LocalDateTime.now());
+                giftCardPackageMapper.updateById(existing);
+            }
             return existing;
         }
-        
-        // 如果不存在，创建一个新的默认套餐
-        // 这个套餐的 credits 和 price 都是0，实际金额由 createGiftCardFromOrder 的参数决定
-        GiftCardPackage defaultPackage = new GiftCardPackage();
+
         LocalDateTime now = LocalDateTime.now();
+        GiftCardPackage defaultPackage = new GiftCardPackage();
         defaultPackage.setPackageCode("admin_default");
-        defaultPackage.setPackageName("管理员赠送礼品卡");
-        defaultPackage.setCredits(credits); // 设置为当前要赠送的金额
-        defaultPackage.setPriceAmount(BigDecimal.ZERO); // 价格为0，因为是管理员赠送
+        defaultPackage.setPackageName("\u7ba1\u7406\u5458\u8d60\u9001\u793c\u54c1\u5361");
+        defaultPackage.setCredits(0);
+        defaultPackage.setPriceAmount(BigDecimal.ZERO);
         defaultPackage.setCurrency("CNY");
         defaultPackage.setCardTheme("green");
+        defaultPackage.setCardType("CREDIT");
+        defaultPackage.setRequiredMemberTier(null);
         defaultPackage.setStatus("HIDDEN");
         defaultPackage.setSortOrder(999);
         defaultPackage.setCreatedAt(now);
         defaultPackage.setUpdatedAt(now);
-        
         giftCardPackageMapper.insert(defaultPackage);
-        
         return defaultPackage;
+    }
+
+    private String normalizeReason(String reason) {
+        String normalized = reason == null ? "" : reason.trim();
+        return normalized.isEmpty() ? "管理员发放礼品卡" : normalized;
     }
 
     private AdminUserSummaryResponse toSummary(User user) {

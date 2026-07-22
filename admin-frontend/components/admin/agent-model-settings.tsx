@@ -60,7 +60,7 @@ interface ModelForm {
   proxyUrl: string
   inputTokenPricePer1m: string
   outputTokenPricePer1m: string
-  billingUnit: "TOKEN_PER_M" | "PER_CALL" | "IMAGE_TOKEN" | "PER_SECOND"
+  billingUnit: "TOKEN_PER_M" | "PER_CALL" | "IMAGE_TOKEN" | "PER_SECOND" | "PER_CHARACTER"
   unitPrice: string
   enabled: boolean
   agentEnabled: boolean
@@ -325,6 +325,8 @@ function toForm(config: AgentModelConfig, catalog: ModelProviderDescriptor[]): M
         ? "PER_CALL"
         : config.billingUnit === "PER_SECOND"
           ? "PER_SECOND"
+        : config.billingUnit === "PER_CHARACTER"
+          ? "PER_CHARACTER"
         : config.billingUnit === "IMAGE_TOKEN"
           ? "IMAGE_TOKEN"
           : "TOKEN_PER_M",
@@ -373,6 +375,7 @@ function normalizeConfigCode(value: string) {
 function normalizeBillingUnit(value?: string | null): ModelForm["billingUnit"] {
   if (value === "PER_CALL") return "PER_CALL"
   if (value === "PER_SECOND") return "PER_SECOND"
+  if (value === "PER_CHARACTER") return "PER_CHARACTER"
   if (value === "IMAGE_TOKEN") return "IMAGE_TOKEN"
   return "TOKEN_PER_M"
 }
@@ -1141,19 +1144,32 @@ export function AgentModelSettings({ refreshKey = 0 }: AgentModelSettingsProps) 
                     <SelectItem value="TOKEN_PER_M">Token / 1M</SelectItem>
                     <SelectItem value="PER_CALL">按生成次数</SelectItem>
                     <SelectItem value="PER_SECOND">按生成秒数</SelectItem>
+                    <SelectItem value="PER_CHARACTER">按文本字符数</SelectItem>
                     <SelectItem value="IMAGE_TOKEN">图片 Token</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>{form.billingUnit === "PER_SECOND" ? "每秒价格" : "单次价格"}</Label>
+                <Label>
+                  {form.billingUnit === "PER_SECOND"
+                    ? "每秒价格"
+                    : form.billingUnit === "PER_CHARACTER"
+                      ? "每字符价格"
+                      : "单次价格"}
+                </Label>
                 <Input
                   type="number"
                   min={0}
                   step="0.000001"
                   value={form.unitPrice}
                   onChange={(event) => updateForm("unitPrice", event.target.value)}
-                  placeholder={form.billingUnit === "PER_CALL" ? "图片/视频等单次调用成本" : form.billingUnit === "PER_SECOND" ? "视频等按秒生成成本" : "Token 计费通常填 0"}
+                  placeholder={form.billingUnit === "PER_CALL"
+                    ? "图片/视频等单次调用成本"
+                    : form.billingUnit === "PER_SECOND"
+                      ? "视频等按秒生成成本"
+                      : form.billingUnit === "PER_CHARACTER"
+                        ? "语音等按文本字符计费的单字符成本"
+                        : "Token 计费通常填 0"}
                 />
               </div>
             </div>

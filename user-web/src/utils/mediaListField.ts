@@ -11,25 +11,25 @@ export function mediaListFieldKind(field: Pick<ToolField, "fieldType">): "image"
   return field.fieldType === "multi_video" ? "video" : "image"
 }
 
-export function mediaListMax(field: Pick<ToolField, "options" | "optionsJson">): number {
+export function mediaListMax(field: Pick<ToolField, "options">): number {
   return parseFieldMeta(field).maxCount ?? (mediaListFieldKind(field as ToolField) === "video" ? 4 : 8)
 }
 
-export function mediaListMin(field: Pick<ToolField, "options" | "optionsJson">): number {
+export function mediaListMin(field: Pick<ToolField, "options">): number {
   return parseFieldMeta(field).minCount ?? 0
 }
 
-export function mediaListAccept(field: Pick<ToolField, "fieldType" | "options" | "optionsJson">): string {
+export function mediaListAccept(field: Pick<ToolField, "fieldType" | "options">): string {
   const meta = parseFieldMeta(field)
   if (meta.accept) return meta.accept
   return mediaListFieldKind(field) === "video" ? "video/*" : "image/*"
 }
 
-export function mediaListLibraryEnabled(field: Pick<ToolField, "options" | "optionsJson">): boolean {
+export function mediaListLibraryEnabled(field: Pick<ToolField, "options">): boolean {
   return parseFieldMeta(field).libraryEnabled ?? true
 }
 
-export function mediaListLibraryKind(field: Pick<ToolField, "fieldType" | "options" | "optionsJson">): string {
+export function mediaListLibraryKind(field: Pick<ToolField, "fieldType" | "options">): string {
   const meta = parseFieldMeta(field)
   if (meta.libraryKind) return meta.libraryKind
   return mediaListFieldKind(field)

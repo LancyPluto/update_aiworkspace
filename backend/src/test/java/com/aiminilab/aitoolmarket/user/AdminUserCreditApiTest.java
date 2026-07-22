@@ -1,5 +1,7 @@
 package com.aiminilab.aitoolmarket.user;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -33,6 +35,9 @@ class AdminUserCreditApiTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Test
     void taskCreditsFreezeSettleAndReleaseAcrossTaskLifecycle() throws Exception {
@@ -102,7 +107,11 @@ class AdminUserCreditApiTest {
     void adminCanManageUsersAndCredits() throws Exception {
         String adminToken = login("/api/admin/v1/auth/login", "admin");
         String userToken = login("/api/v1/auth/login", "user1");
-        jdbcTemplate.update("UPDATE gift_card_packages SET status = 'HIDDEN' WHERE package_code = 'admin_default'");
+
+        mockMvc.perform(get("/api/v1/credits/gift-card-packages")
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[?(@.packageCode == 'admin_default')]").isEmpty());
 
         mockMvc.perform(get("/api/admin/v1/users")
                         .param("keyword", "user1")
@@ -118,27 +127,85 @@ class AdminUserCreditApiTest {
                 .andExpect(jsonPath("$.data.username").value("user1"))
                 .andExpect(jsonPath("$.data.creditAccount.available").value(200));
 
+        String issueBody = """
+                {
+                  "amount": 50,
+                  "reason": "test grant",
+                  "operationId": "admin-gift-grant-001"
+                }
+                """;
+        String firstIssueResponse = mockMvc.perform(post("/api/admin/v1/users/{userId}/credits/manual-add", 2)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(issueBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.userId").value(2))
+                .andExpect(jsonPath("$.data.operationId").value("admin-gift-grant-001"))
+                .andExpect(jsonPath("$.data.operatorId").value(1))
+                .andExpect(jsonPath("$.data.amount").value(50))
+                .andExpect(jsonPath("$.data.balanceBefore").value(200))
+                .andExpect(jsonPath("$.data.balanceAfter").value(200))
+                .andExpect(jsonPath("$.data.reason").value("test grant"))
+                .andExpect(jsonPath("$.data.giftCard.credits").value(50))
+                .andExpect(jsonPath("$.data.giftCard.status").value("UNUSED"))
+                .andExpect(jsonPath("$.data.giftCard.packageName").value("管理员赠送礼品卡"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode issuedCard = objectMapper.readTree(firstIssueResponse).path("data").path("giftCard");
+        long issuedCardId = issuedCard.path("id").asLong();
+        String issuedCardCode = issuedCard.path("cardCode").asText();
+
+        mockMvc.perform(post("/api/admin/v1/users/{userId}/credits/manual-add", 2)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(issueBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.giftCard.id").value(issuedCardId))
+                .andExpect(jsonPath("$.data.giftCard.cardCode").value(issuedCardCode));
+
         mockMvc.perform(post("/api/admin/v1/users/{userId}/credits/manual-add", 2)
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "amount": 50,
-                                  "reason": "test grant"
+                                  "amount": 51,
+                                  "reason": "test grant",
+                                  "operationId": "admin-gift-grant-001"
                                 }
                                 """))
-                // 管理员手动加算力走礼品卡流程，余额不直接变化
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.balance").value(200))
-                .andExpect(jsonPath("$.data.totalGranted").value(200));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_CONFLICT"));
 
         mockMvc.perform(get("/api/v1/credits/gift-cards")
                         .param("status", "UNUSED")
                         .header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].credits").value(50))
-                .andExpect(jsonPath("$.data[0].status").value("UNUSED"))
-                .andExpect(jsonPath("$.data[0].packageName").value("管理员赠送礼品卡"));
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].id").value(issuedCardId))
+                .andExpect(jsonPath("$.data[0].cardCode").value(issuedCardCode));
+
+        mockMvc.perform(get("/api/v1/credits/account")
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.balance").value(200));
+
+        mockMvc.perform(get("/api/admin/v1/users/{userId}/credits/logs", 2)
+                        .param("logType", "MANUAL_ADD")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(0));
+
+        mockMvc.perform(post("/api/v1/credits/gift-cards/{giftCardId}/redeem", issuedCardId)
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("USED"));
+
+        mockMvc.perform(get("/api/v1/credits/account")
+                        .header("Authorization", "Bearer " + userToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.balance").value(250));
 
         mockMvc.perform(post("/api/admin/v1/users/{userId}/credits/manual-deduct", 2)
                         .header("Authorization", "Bearer " + adminToken)
@@ -150,9 +217,8 @@ class AdminUserCreditApiTest {
                                 }
                                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.balance").value(180));
+                .andExpect(jsonPath("$.data.balance").value(230));
 
-        // 手动加算力走礼品卡流程不产生 MANUAL_ADD 日志，检查 MANUAL_DEDUCT 日志
         mockMvc.perform(get("/api/admin/v1/users/{userId}/credits/logs", 2)
                         .param("logType", "MANUAL_DEDUCT")
                         .header("Authorization", "Bearer " + adminToken))

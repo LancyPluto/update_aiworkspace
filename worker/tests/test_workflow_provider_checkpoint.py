@@ -1,9 +1,11 @@
 import json
 
+import pytest
 import requests
 
 import handlers.workflow_step_handler as workflow_step_handler
-from client.backend_client import BackendClient
+from client.backend_client import BackendClient, BackendClientError
+from client.text_to_speech_client import SpeechGenerationResult
 from handlers.workflow_step_handler import WorkflowStepHandler
 
 
@@ -56,6 +58,37 @@ class FakeVideoPersister:
         return {
             "url": f"/generated/video/{task_id}/video-{index}.mp4",
             "sourceUrl": source_url,
+        }
+
+
+class FakeAudioPersister:
+    def persist_audio_url(
+        self,
+        *,
+        task_id: int,
+        source_url: str,
+        extension: str | None = None,
+        index: int = 1,
+    ) -> dict[str, str]:
+        suffix = extension or "wav"
+        return {
+            "url": f"/generated/audio/{task_id}/voice-{index}.{suffix}",
+            "sourceUrl": source_url,
+        }
+
+    def persist_audio_bytes(
+        self,
+        *,
+        task_id: int,
+        audio_bytes: bytes,
+        content_type: str | None = None,
+        extension: str | None = None,
+        index: int = 1,
+    ) -> dict[str, str]:
+        suffix = extension or "mp3"
+        return {
+            "url": f"/generated/audio/{task_id}/voice-{index}.{suffix}",
+            "sourceUrl": "",
         }
 
 
@@ -185,6 +218,172 @@ def _execution_context(*, checkpoint: dict | None = None, checkpoint_version: in
             "billingUnit": "PER_SECOND",
         },
     }
+
+
+def _tts_execution_context(*, checkpoint: dict | None = None, checkpoint_version: int = 0) -> dict:
+    return {
+        "taskId": 702,
+        "status": "PROCESSING",
+        "providerCheckpoint": checkpoint,
+        "providerCheckpointVersion": checkpoint_version,
+        "params": {
+            "workflowStep": True,
+            "nodeDefType": "TTS_MODEL",
+            "workflowInputs": {
+                "script-planner": {
+                    "scenes": [
+                        {"index": 1, "dialogue": "First scene"},
+                        {"index": 2, "dialogue": "Second scene"},
+                    ]
+                }
+            },
+        },
+        "modelConfig": {
+            "provider": "dashscope_qwen_tts",
+            "modelName": "qwen3-tts-flash",
+            "baseUrl": "https://dashscope.aliyuncs.com",
+            "apiKey": "test-key",
+            "billingUnit": "PER_CHARACTER",
+            "executionOptionsJson": {
+                "voice": "Cherry",
+                "languageType": "Chinese",
+            },
+        },
+    }
+
+
+def _tts_checkpoint(*, scene_status: str = "COMPLETED") -> dict:
+    scene = {
+        "status": scene_status,
+        "speechText": "First scene",
+        "voice": "Cherry",
+        "languageType": "Chinese",
+    }
+    if scene_status == "COMPLETED":
+        scene.update(
+            {
+                "audioUrl": "/generated/audio/702/voice-1.wav",
+                "audioDataUrl": "",
+                "providerRequestId": "qwen-request-1",
+                "billableUnits": 11,
+                "providerCalled": True,
+            }
+        )
+    return {
+        "kind": "WORKFLOW_TTS",
+        "provider": "dashscope_qwen_tts",
+        "protocol": "dashscope_qwen_tts",
+        "model": "qwen3-tts-flash",
+        "scenes": {"1": scene},
+    }
+
+
+def test_multi_scene_tts_reuses_completed_scene_and_only_calls_missing_scene():
+    backend = RecordingBackendClient(
+        _tts_execution_context(checkpoint=_tts_checkpoint(), checkpoint_version=4)
+    )
+
+    class SecondSceneTtsClient:
+        def __init__(self):
+            self.texts: list[str] = []
+
+        def generate(self, **kwargs):
+            self.texts.append(kwargs["text"])
+            assert kwargs["text"] == "Second scene"
+            assert backend.checkpoint_updates[-1]["checkpoint"]["scenes"]["2"]["status"] == "STARTED"
+            return SpeechGenerationResult(
+                audio_url="https://example.com/second.wav",
+                extension="wav",
+                metadata={
+                    "providerRequestId": "qwen-request-2",
+                    "billableUnits": 12,
+                    "voice": "Cherry",
+                    "languageType": "Chinese",
+                },
+            )
+
+    tts_client = SecondSceneTtsClient()
+    result = WorkflowStepHandler(
+        backend_client=backend,
+        tts_client=tts_client,
+        audio_persister=FakeAudioPersister(),
+    ).handle({"taskId": 702, "traceId": "trace-702", "claimToken": "claim-702"})
+
+    assert result["status"] == "SUCCESS"
+    assert tts_client.texts == ["Second scene"]
+    assert [update["expectedVersion"] for update in backend.checkpoint_updates] == [4, 5]
+    assert [update["checkpoint"]["scenes"]["2"]["status"] for update in backend.checkpoint_updates] == [
+        "STARTED",
+        "COMPLETED",
+    ]
+    assert all(update["claimToken"] == "claim-702" for update in backend.checkpoint_updates)
+    output = json.loads(backend.success_payload["contentText"])
+    assert [audio["audioUrl"] for audio in output["audios"]] == [
+        "/generated/audio/702/voice-1.wav",
+        "/generated/audio/702/voice-2.wav",
+    ]
+    assert [call["providerRequestId"] for call in output["providerCalls"]] == [
+        "qwen-request-1",
+        "qwen-request-2",
+    ]
+    assert backend.success_payload["billableUnits"] == 23
+    assert backend.success_payload["providerCalled"] is True
+
+
+def test_workflow_tts_started_checkpoint_is_ambiguous_and_never_replays_provider():
+    backend = RecordingBackendClient(
+        _tts_execution_context(checkpoint=_tts_checkpoint(scene_status="STARTED"), checkpoint_version=7)
+    )
+
+    class RejectingTtsClient:
+        def generate(self, **_kwargs):
+            raise AssertionError("STARTED TTS scene must not be replayed")
+
+    result = WorkflowStepHandler(
+        backend_client=backend,
+        tts_client=RejectingTtsClient(),
+        audio_persister=FakeAudioPersister(),
+    ).handle({"taskId": 702, "traceId": "trace-702", "claimToken": "claim-702"})
+
+    assert result["status"] == "FAILED"
+    assert "ambiguous STARTED checkpoint" in result["error"]
+    assert backend.checkpoint_updates == []
+
+
+def test_checkpointed_tts_success_callback_failure_is_retried_by_queue():
+    class FailingSuccessBackend(RecordingBackendClient):
+        def mark_success(self, task_id: int, payload: dict, trace_id: str | None = None):
+            raise BackendClientError("backend request failed: status=500")
+
+    backend = FailingSuccessBackend(_tts_execution_context())
+
+    class SingleSceneTtsClient:
+        def generate(self, **kwargs):
+            return SpeechGenerationResult(
+                audio_url="https://example.com/audio.wav",
+                extension="wav",
+                metadata={
+                    "providerRequestId": "qwen-request-1",
+                    "billableUnits": len(kwargs["text"]),
+                    "voice": "Cherry",
+                    "languageType": "Chinese",
+                },
+            )
+
+    backend.context["params"]["workflowInputs"]["script-planner"]["scenes"] = [
+        {"index": 1, "dialogue": "First scene"}
+    ]
+    handler = WorkflowStepHandler(
+        backend_client=backend,
+        tts_client=SingleSceneTtsClient(),
+        audio_persister=FakeAudioPersister(),
+    )
+
+    with pytest.raises(BackendClientError, match="status=500"):
+        handler.handle({"taskId": 702, "traceId": "trace-702", "claimToken": "claim-702"})
+
+    assert backend.failed_payload is None
+    assert backend.checkpoint_updates[-1]["checkpoint"]["scenes"]["1"]["status"] == "COMPLETED"
 
 
 def test_workflow_handler_persists_provider_id_before_poll_result_is_consumed(monkeypatch):

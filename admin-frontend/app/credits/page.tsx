@@ -18,6 +18,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ArrowDownLeft, ArrowUpRight, Minus, Plus, Search, TrendingUp, Users } from "lucide-react"
+import { toast } from "sonner"
 import { CreditPowerIcon } from "@/components/admin/credit-power-icon"
 import { cn } from "@/lib/utils"
 import {
@@ -96,6 +97,7 @@ export default function CreditsPage() {
   const [selectedUser, setSelectedUser] = useState("")
   const [amount, setAmount] = useState("100")
   const [reason, setReason] = useState("运营手动调整")
+  const [giftCardOperationId, setGiftCardOperationId] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [recordPage, setRecordPage] = useState(1)
 
@@ -193,7 +195,8 @@ export default function CreditsPage() {
     setSelectedUser(String(user.rawId))
     setAdjustType(type)
     setAmount("100")
-    setReason(type === "add" ? "运营手动加算力" : "运营手动扣算力")
+    setReason(type === "add" ? "运营发放礼品卡" : "运营手动扣算力")
+    setGiftCardOperationId(type === "add" ? crypto.randomUUID() : "")
     setIsAdjustDialogOpen(true)
   }
 
@@ -208,16 +211,26 @@ export default function CreditsPage() {
     setError(null)
     try {
       const payload = { amount: Math.floor(parsedAmount), reason }
+      const selected = users.find((user) => user.rawId === userId)
       if (adjustType === "add") {
-        await manualAddCredits(userId, payload)
+        const operationId = giftCardOperationId || crypto.randomUUID()
+        setGiftCardOperationId(operationId)
+        const issued = await manualAddCredits(userId, { ...payload, operationId })
+        toast.success(`已发送 ${issued.giftCard.credits} 算力礼品卡`, {
+          description: `${selected?.name || `用户 #${userId}`} · 卡号 ${issued.giftCard.cardCode} · 等待用户兑换`,
+        })
       } else {
-        await manualDeductCredits(userId, payload)
+        const updated = await manualDeductCredits(userId, payload)
+        toast.success(`已扣除 ${payload.amount} 算力`, {
+          description: `${selected?.name || `用户 #${userId}`} 当前余额 ${updated.balance}`,
+        })
       }
       setIsAdjustDialogOpen(false)
       await loadCredits()
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "调整算力失败"
       setError(message)
+      toast.error("调整算力失败", { description: message })
     } finally {
       setSubmitting(false)
     }
@@ -278,7 +291,7 @@ export default function CreditsPage() {
       render: (_: unknown, item: CreditUserRow) => (
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" className="gap-1 text-accent" onClick={() => openAdjustDialog(item, "add")}>
-            <Plus className="h-4 w-4" /> 加算力
+            <Plus className="h-4 w-4" /> 发礼品卡
           </Button>
           <Button variant="ghost" size="sm" className="gap-1 text-destructive" onClick={() => openAdjustDialog(item, "subtract")}>
             <Minus className="h-4 w-4" /> 扣算力
@@ -363,8 +376,12 @@ export default function CreditsPage() {
         <Dialog open={isAdjustDialogOpen} onOpenChange={setIsAdjustDialogOpen}>
           <DialogContent className="bg-card border-border">
             <DialogHeader>
-              <DialogTitle>{adjustType === "add" ? "增加算力" : "扣除算力"}</DialogTitle>
-              <DialogDescription>调整会写入后端算力账户，并生成流水记录。</DialogDescription>
+              <DialogTitle>{adjustType === "add" ? "发送礼品卡" : "扣除算力"}</DialogTitle>
+              <DialogDescription>
+                {adjustType === "add"
+                  ? "礼品卡发送后由用户手动兑换，兑换前不改变算力余额。"
+                  : "扣除会写入后端算力账户，并生成流水记录。"}
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="space-y-2">

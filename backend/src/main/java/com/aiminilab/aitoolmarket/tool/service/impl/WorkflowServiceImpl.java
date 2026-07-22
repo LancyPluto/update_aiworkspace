@@ -13,8 +13,11 @@ import com.aiminilab.aitoolmarket.tool.entity.ToolWorkflowVersion;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
+import com.aiminilab.aitoolmarket.agent.dto.ModelProviderResponse;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
+import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
+import com.aiminilab.aitoolmarket.agent.service.ModelProviderMetadataService;
 import com.aiminilab.aitoolmarket.credit.service.PricingService;
 import com.aiminilab.aitoolmarket.credit.dto.ModelPricingSnapshot;
 import com.aiminilab.aitoolmarket.credit.dto.PricingPolicySnapshot;
@@ -43,7 +46,9 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -68,6 +73,8 @@ public class WorkflowServiceImpl implements WorkflowService {
     private final ToolMapper toolMapper;
     private final ToolFieldItemMapper toolFieldItemMapper;
     private final AgentModelConfigMapper modelConfigMapper;
+    private final ModelProviderMetadataService modelProviderMetadataService;
+    private final ModelCapabilityService modelCapabilityService;
     private final PricingService pricingService;
     private final BypassCacheService bypassCacheService;
 
@@ -78,6 +85,8 @@ public class WorkflowServiceImpl implements WorkflowService {
                                ToolMapper toolMapper,
                                ToolFieldItemMapper toolFieldItemMapper,
                                AgentModelConfigMapper modelConfigMapper,
+                               ModelProviderMetadataService modelProviderMetadataService,
+                               ModelCapabilityService modelCapabilityService,
                                PricingService pricingService,
                                BypassCacheService bypassCacheService) {
         this.workflowMapper = workflowMapper;
@@ -87,6 +96,8 @@ public class WorkflowServiceImpl implements WorkflowService {
         this.toolMapper = toolMapper;
         this.toolFieldItemMapper = toolFieldItemMapper;
         this.modelConfigMapper = modelConfigMapper;
+        this.modelProviderMetadataService = modelProviderMetadataService;
+        this.modelCapabilityService = modelCapabilityService;
         this.pricingService = pricingService;
         this.bypassCacheService = bypassCacheService;
     }
@@ -302,6 +313,7 @@ public class WorkflowServiceImpl implements WorkflowService {
         WorkflowDsl dsl = workflowDslService.parse(
                 draft.getNodesJson(), draft.getEdgesJson(), draft.getConfigJson()
         );
+        Map<String, String> rawNodeTypes = rawNodeTypes(draft.getNodesJson());
         for (WorkflowNodeDef node : dsl.nodes()) {
             if (!node.type().isWorkerStep()) {
                 continue;
@@ -330,6 +342,9 @@ public class WorkflowServiceImpl implements WorkflowService {
                         ErrorCode.PARAM_ERROR,
                         "Workflow model node has no active model configuration: " + node.id()
                 );
+            }
+            if (modelConfig != null) {
+                validateModelExecution(node, rawNodeTypes.get(node.id()), modelConfig);
             }
 
             ObjectNode staticParams = pricingParams(node);
@@ -400,6 +415,83 @@ public class WorkflowServiceImpl implements WorkflowService {
             case LLM_TEXT, IMAGE_MODEL, TTS_MODEL, VIDEO_MODEL -> true;
             default -> false;
         };
+    }
+
+    private void validateModelExecution(WorkflowNodeDef node,
+                                        String rawNodeType,
+                                        AgentModelConfig modelConfig) {
+        if (!Boolean.TRUE.equals(modelConfig.getEnabled())) {
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "工作流节点 " + node.id() + " 引用的模型已停用"
+            );
+        }
+
+        String providerCode = modelConfig.getProvider() == null
+                ? ""
+                : modelConfig.getProvider().trim().toLowerCase(Locale.ROOT);
+        ModelProviderResponse provider = modelProviderMetadataService.get(providerCode);
+        String requiredCapability = requiredModelCapability(node, rawNodeType);
+        if (requiredCapability != null
+                && modelCapabilityService.resolveCapabilities(modelConfig).stream()
+                .noneMatch(capability -> capability.equalsIgnoreCase(requiredCapability))) {
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "工作流节点 " + node.id() + " 需要模型能力 " + requiredCapability
+            );
+        }
+        if (requiredCapability != null && provider.capabilities().stream()
+                .noneMatch(capability -> capability.equalsIgnoreCase(requiredCapability))) {
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "工作流节点 " + node.id() + " 的供应商 " + providerCode
+                            + " 未声明能力 " + requiredCapability
+            );
+        }
+        if (!provider.workerReady()) {
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "工作流节点 " + node.id() + " 的供应商 " + providerCode + " Worker 执行器尚未就绪"
+            );
+        }
+        if (!provider.adapterInstalled()) {
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "工作流节点 " + node.id() + " 的供应商 " + providerCode + " Worker 适配器尚未安装"
+            );
+        }
+    }
+
+    private String requiredModelCapability(WorkflowNodeDef node, String rawNodeType) {
+        return switch (node.type().normalized()) {
+            case LLM_TEXT -> "TEXT_GENERATION";
+            case IMAGE_MODEL -> "IMAGE_GENERATION";
+            case TTS_MODEL -> "music_sfx".equals(rawNodeType)
+                    ? "MUSIC_GENERATION"
+                    : "TEXT_TO_SPEECH";
+            case VIDEO_MODEL -> "VIDEO_GENERATION";
+            default -> null;
+        };
+    }
+
+    private Map<String, String> rawNodeTypes(String nodesJson) {
+        JsonNode nodes = readJson(nodesJson, objectMapper.createArrayNode());
+        Map<String, String> types = new LinkedHashMap<>();
+        if (!nodes.isArray()) {
+            return types;
+        }
+        nodes.forEach(node -> {
+            String id = node.path("id").asText("").trim();
+            JsonNode data = node.path("data");
+            String rawType = data.path("nodeDefType").asText("").trim();
+            if (rawType.isBlank()) {
+                rawType = data.path("kind").asText("").trim();
+            }
+            if (!id.isBlank() && !rawType.isBlank()) {
+                types.put(id, rawType.toLowerCase(Locale.ROOT));
+            }
+        });
+        return types;
     }
 
     private ObjectNode pricingParams(WorkflowNodeDef node) {

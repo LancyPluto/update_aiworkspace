@@ -32,7 +32,7 @@ const formValues = ref<Record<string, unknown>>({})
 const dynamicFormRef = ref<InstanceType<typeof DynamicForm> | null>(null)
 
 const title = computed(() => tool.value?.toolName ?? `工具 · ${props.id}`)
-const isOffline = computed(() => tool.value?.status === "OFFLINE")
+const isOffline = computed(() => false)
 const coverMediaUrl = computed(() => normalizeToolMediaUrl(tool.value?.coverUrl))
 const coverIsVideo = computed(() => isVideoPreviewUrl(tool.value?.coverUrl))
 
@@ -53,7 +53,7 @@ const estimateInput = computed<UseTaskEstimateInput | null>(() => {
   } catch {
     params = {}
   }
-  return { toolCode: current.toolCode, params, modelConfigId: current.modelConfigId ?? null }
+  return { toolCode: current.toolCode, params }
 })
 
 const { estimate: liveEstimate, loading: estimateLoading } = useTaskEstimate(estimateInput)

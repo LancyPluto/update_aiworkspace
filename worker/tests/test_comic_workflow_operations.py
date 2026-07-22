@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import handlers.workflow_step_handler as workflow_step_handler
+from client.text_to_speech_client import SpeechGenerationResult
 from handlers.workflow_step_handler import WorkflowStepHandler
 
 
@@ -485,33 +486,127 @@ def test_single_shot_video_checkpoints_and_reuses_itemized_provider_result(monke
     assert _output(replay_backend)["clipVersion"]["clipVersionId"] == _output(backend)["clipVersion"]["clipVersionId"]
 
 
-def test_single_shot_tts_persists_one_selected_shot_audio(monkeypatch):
+def test_single_shot_tts_uses_configured_provider_and_reports_character_usage():
     calls: list[dict] = []
 
     class FakeSpeechClient:
-        def __init__(self, **kwargs):
-            pass
-
-        def generate_speech_data_url(self, **kwargs):
+        def generate(self, **kwargs):
             calls.append(kwargs)
-            return "data:audio/mpeg;base64,ZmFrZQ=="
+            return SpeechGenerationResult(
+                audio_url="https://provider.example/shot-audio.wav",
+                extension="wav",
+                metadata={
+                    "providerRequestId": "dashscope-request-805",
+                    "billableUnits": 10,
+                },
+            )
 
     class FakeAudioPersister:
-        def persist_audio_url(self, *, task_id, source_url, index=1):
+        def persist_audio_url(self, *, task_id, source_url, extension=None, index=1):
             return {"url": f"/generated/audio/{task_id}/audio-{index}.mp3", "sourceUrl": "omitted"}
 
-    monkeypatch.setattr(workflow_step_handler, "SiliconFlowVideoClient", FakeSpeechClient)
-    monkeypatch.setattr(workflow_step_handler, "GeneratedAudioPersister", FakeAudioPersister)
     backend = RecordingBackend()
-    handler = WorkflowStepHandler(backend_client=backend)
+    handler = WorkflowStepHandler(
+        backend_client=backend,
+        tts_client=FakeSpeechClient(),
+        audio_persister=FakeAudioPersister(),
+    )
+    shot = _shot()
+    shot["audio"] = {
+        **shot["audio"],
+        "dialogue": "Buy it now",
+        "voiceId": "Ethan",
+        "language": "English",
+    }
+    context = _context("comic.shot_tts", {"shot": shot}, node_type="TTS_MODEL")
+    context["modelConfig"].update(
+        {
+            "provider": "dashscope_qwen_tts",
+            "modelName": "qwen3-tts-flash",
+            "baseUrl": "https://dashscope.aliyuncs.com",
+            "apiKey": "dashscope-secret",
+            "billingUnit": "PER_CHARACTER",
+            "executionOptionsJson": json.dumps(
+                {"voice": "Cherry", "languageType": "Chinese"}
+            ),
+        }
+    )
 
     result = handler.handle(
-        {"taskId": 805, "__executionContext": _context("comic.shot_tts", {"shot": _shot()}, node_type="TTS_MODEL")}
+        {"taskId": 805, "__executionContext": context}
     )
 
     assert result["status"] == "SUCCESS"
-    assert calls[0]["input_text"] == "别过来。"
+    assert calls == [
+        {
+            "provider": "dashscope_qwen_tts",
+            "model": "qwen3-tts-flash",
+            "text": "Buy it now",
+            "base_url": "https://dashscope.aliyuncs.com",
+            "api_key": "dashscope-secret",
+            "params": {"voice": "Ethan", "languageType": "English"},
+        }
+    ]
     assert _output(backend)["audioVersion"]["audioUrl"] == "/generated/audio/805/audio-1.mp3"
+    assert _output(backend)["audioVersion"]["voice"] == "Ethan"
+    assert _output(backend)["audioVersion"]["languageType"] == "English"
+    assert backend.success_payload["billableUnits"] == 10
+    assert backend.success_payload["providerRequestId"] == "dashscope-request-805"
+    assert _output(backend)["providerCalls"][0]["billableUnits"] == 10
+    assert [item["status"] for item in backend.checkpoints] == ["STARTED", "COMPLETED"]
+
+
+def test_generic_tts_model_uses_same_configured_client():
+    calls: list[dict] = []
+
+    class FakeSpeechClient:
+        def generate(self, **kwargs):
+            calls.append(kwargs)
+            return SpeechGenerationResult(
+                audio_bytes=b"generic-audio",
+                content_type="audio/wav",
+                extension="wav",
+                metadata={"billableUnits": 10},
+            )
+
+    class FakeAudioPersister:
+        def persist_audio_bytes(self, **kwargs):
+            return {"url": "/generated/audio/811/audio-1.wav", "sourceUrl": "generated"}
+
+    context = {
+        "status": "PROCESSING",
+        "params": {
+            "workflowStep": True,
+            "nodeDefType": "TTS_MODEL",
+            "workflowInputs": {
+                "script-planner": {
+                    "scenes": [{"index": 1, "dialogue": "Launch now"}]
+                }
+            },
+        },
+        "modelConfig": {
+            "provider": "dashscope_qwen_tts",
+            "modelName": "qwen3-tts-flash",
+            "baseUrl": "https://dashscope.aliyuncs.com",
+            "apiKey": "dashscope-secret",
+            "billingUnit": "PER_CHARACTER",
+            "executionOptionsJson": {"voice": "Cherry", "languageType": "Chinese"},
+        },
+    }
+    backend = RecordingBackend()
+    handler = WorkflowStepHandler(
+        backend_client=backend,
+        tts_client=FakeSpeechClient(),
+        audio_persister=FakeAudioPersister(),
+    )
+
+    result = handler.handle({"taskId": 811, "__executionContext": context})
+
+    assert result["status"] == "SUCCESS"
+    assert calls[0]["provider"] == "dashscope_qwen_tts"
+    assert calls[0]["params"] == {"voice": "Cherry", "languageType": "Chinese"}
+    assert _output(backend)["audios"][0]["audioUrl"] == "/generated/audio/811/audio-1.wav"
+    assert backend.success_payload["billableUnits"] == 10
 
 
 def test_compose_uses_only_selected_versions_in_story_order():

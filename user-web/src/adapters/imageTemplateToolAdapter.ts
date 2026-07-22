@@ -45,7 +45,7 @@ export function defaultFieldValue(field: ToolField): unknown {
   if (field.defaultValue !== undefined && field.defaultValue !== null && field.defaultValue !== "") {
     return field.defaultValue
   }
-  if ((field.fieldType === "select" || field.fieldType === "radio") && field.options?.length) {
+  if ((field.fieldType === "select" || field.fieldType === "radio") && Array.isArray(field.options) && field.options.length) {
     const option = field.options[0]
     return typeof option === "string" ? option : option.value
   }

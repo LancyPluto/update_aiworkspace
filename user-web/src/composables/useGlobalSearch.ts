@@ -27,12 +27,13 @@ const scopeLabels: Record<GlobalSearchScope, string> = {
   materials: "素材",
 }
 
-export function isAgentTool(tool: Pick<ToolSummary, "toolCode" | "toolType" | "executionHandler">): boolean {
+export function isAgentTool(tool: Pick<ToolSummary, "toolCode" | "toolType" | "toolKind" | "categoryCode">): boolean {
   const type = (tool.toolType || "").toUpperCase()
-  if (type === "AGENT") return true
+  const kind = (tool.toolKind || "").toLowerCase()
+  const category = (tool.categoryCode || "").toLowerCase()
+  if (type === "AGENT" || kind === "agent" || category === "agent") return true
   const code = (tool.toolCode || "").toLowerCase()
-  const handler = (tool.executionHandler || "").toLowerCase()
-  return code.includes("agent") || handler.includes("agent")
+  return code.includes("agent")
 }
 
 function toolHref(tool: ToolSummary, loggedIn: boolean): RouteLocationRaw {
@@ -122,7 +123,6 @@ export function useGlobalSearch() {
             query: { keyword: q, pageNo: 1, pageSize: 12 },
           }).then((page) => {
             for (const tool of page.list) {
-              if ((tool.status || "").toUpperCase() !== "ONLINE") continue
               const agent = isAgentTool(tool)
               if (agent && !includeAgents) continue
               if (!agent && !includeModels) continue
@@ -130,9 +130,9 @@ export function useGlobalSearch() {
                 id: `tool-${tool.toolCode}`,
                 kind: agent ? "agent" : "model",
                 title: tool.toolName,
-                subtitle: tool.description?.trim() || tool.categoryName,
+                subtitle: tool.description?.trim() || tool.categoryName || undefined,
                 href: toolHref(tool, auth.isLoggedIn),
-                coverUrl: tool.coverUrl,
+                coverUrl: tool.coverUrl ?? undefined,
               })
             }
           }),

@@ -29,6 +29,7 @@ export interface NodeParameterDefinition {
 
 export interface NodeTypeDefinition {
   type: string
+  requiredModelCapability?: string
   category: string
   displayName: string
   description: string
@@ -184,6 +185,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
   },
   {
     type: "llm_text",
+    requiredModelCapability: "TEXT_GENERATION",
     category: "模型",
     displayName: "剧本规划器",
     description: "根据初始表单生成剧本与分镜 JSON。",
@@ -203,6 +205,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
   },
   {
     type: "image_model",
+    requiredModelCapability: "IMAGE_GENERATION",
     category: "模型",
     displayName: "关键帧生图",
     description: "根据剧本分镜生成电影感关键帧。",
@@ -224,6 +227,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
   },
   {
     type: "tts_model",
+    requiredModelCapability: "TEXT_TO_SPEECH",
     category: "模型",
     displayName: "角色配音",
     description: "根据对白生成 TTS 音频。",
@@ -242,6 +246,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
   },
   {
     type: "video_model",
+    requiredModelCapability: "VIDEO_GENERATION",
     category: "模型",
     displayName: "图生视频",
     description: "根据关键帧与参数生成视频片段。",
@@ -350,6 +355,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
   // ===== AI 漫剧 SOP 节点（见 docs/AI漫剧工作流完整交付计划书.md §5）=====
   {
     type: "script_planner",
+    requiredModelCapability: "TEXT_GENERATION",
     category: "创意策划",
     displayName: "剧本策划",
     description: "生成系列策划、世界观、分集大纲与样例剧本（钩子-冲突-反转-悬念）。",
@@ -373,6 +379,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
   },
   {
     type: "storyboard_generator",
+    requiredModelCapability: "TEXT_GENERATION",
     category: "创意策划",
     displayName: "分镜拆解",
     description: "把剧本翻译为镜头语言：镜号、景别、运镜、画面描述、台词、时长、首尾帧/视频 Prompt。",
@@ -393,6 +400,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
   },
   {
     type: "character_design",
+    requiredModelCapability: "IMAGE_GENERATION",
     category: "视觉资产",
     displayName: "角色定妆",
     description: "为主角/反派/配角生成身份卡与定妆图（正面/侧面/背面锚点，固定面部、发型、服装、否定词）。",
@@ -412,6 +420,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
   },
   {
     type: "scene_design",
+    requiredModelCapability: "IMAGE_GENERATION",
     category: "视觉资产",
     displayName: "场景设定",
     description: "批量生成场景锚点图，确立画风、光影、空间结构，供关键帧复用。",
@@ -431,6 +440,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
   },
   {
     type: "keyframe_generator",
+    requiredModelCapability: "IMAGE_GENERATION",
     category: "视觉资产",
     displayName: "关键帧生成",
     description: "按分镜逐镜生成首帧/尾帧（风格+场景+角色动作+视角+光影+画幅+否定词）。",
@@ -472,6 +482,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
   },
   {
     type: "image_to_video",
+    requiredModelCapability: "VIDEO_GENERATION",
     category: "动态生成",
     displayName: "图生视频",
     description: "用首尾帧控制运动逐镜生成 3-6 秒片段；超长动作片段接力（上段末帧→下段首帧）。",
@@ -512,6 +523,7 @@ export const NODE_TYPES: NodeTypeDefinition[] = [
   },
   {
     type: "music_sfx",
+    requiredModelCapability: "MUSIC_GENERATION",
     category: "声音剪辑",
     displayName: "配乐/音效",
     description: "按剧情情绪生成或匹配 BGM 与音效（对白最清晰、音效居中、配乐最低）。",

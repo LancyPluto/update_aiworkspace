@@ -9,12 +9,14 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.hamcrest.Matchers.aMapWithSize;
 import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -388,7 +390,7 @@ class ToolApiTest {
     @Test
     void publicToolResponsesDoNotExposeInternalConfigNotesOrEngineSecrets() throws Exception {
         String adminToken = loginAdmin();
-        Long imageModelId = createImageModelConfig(adminToken);
+        Long modelConfigId = createPublicContractModelConfig(adminToken);
 
         String createResponse = mockMvc.perform(post("/api/admin/v1/tools")
                         .header("Authorization", "Bearer " + adminToken)
@@ -399,35 +401,101 @@ class ToolApiTest {
                                   "toolName": "Public Secret Guard Tool",
                                   "categoryId": 2,
                                   "description": "safe public description",
-                                  "toolType": "IMAGE_GENERATION",
-                                  "outputModality": "FILE",
-                                  "modelConfigId": %d,
+                                  "coverUrl": "https://cdn.example.com/public-tool.webp",
+                                  "toolType": "TEXT_GENERATION",
+                                  "inputModality": "TEXT",
+                                  "outputModality": "TEXT",
                                   "estimatedCreditCost": 5,
-                                  "configNote": "operator only note\\n\\n<!-- ppt-workflow:{\\"integrationMode\\":\\"PPT_WORKSPACE\\",\\"customUiRoute\\":\\"/tools/public_secret_guard_tool/workspace\\",\\"creationTypes\\":[\\"idea\\"],\\"steps\\":[{\\"code\\":\\"CREATE\\",\\"name\\":\\"Create\\",\\"credits\\":5,\\"enabled\\":true}],\\"engineSecrets\\":{\\"mineru_token\\":\\"secret-token\\"},\\"engineSecretSources\\":{\\"mineru_token\\":\\"manual\\"}} -->"
+                                  "modelConfigId": %d,
+                                  "executionHandler": "TEXT_GENERATION",
+                                  "configNote": "operator only note\\n\\n<!-- ai-tool-ui:{\\"primaryColor\\":\\"#123456\\",\\"welcomeMessage\\":\\"\\",\\"heroTitle\\":\\"Safe Hero\\",\\"heroSubtitle\\":\\"Safe subtitle\\",\\"demoThumbnails\\":[\\"https://cdn.example.com/one.webp\\",\\"https://cdn.example.com/two.webp\\"]} -->\\n\\n<!-- ppt-workflow:{\\"integrationMode\\":\\"PPT_WORKSPACE\\",\\"customUiRoute\\":\\"/tools/public_secret_guard_tool/workspace\\",\\"creationTypes\\":[\\"idea\\"],\\"steps\\":[{\\"code\\":\\"CREATE\\",\\"name\\":\\"Create\\",\\"credits\\":5,\\"enabled\\":true}],\\"engineSecrets\\":{\\"mineru_token\\":\\"secret-token\\"},\\"engineSecretSources\\":{\\"mineru_token\\":\\"manual\\"}} -->"
                                 }
-                                """.formatted(imageModelId)))
+                                """.formatted(modelConfigId)))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
         Long toolId = Long.parseLong(createResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(put("/api/admin/v1/tools/{toolId}/fields", toolId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "fields": [{
+                                    "fieldKey": "productName",
+                                    "fieldName": "Product Name",
+                                    "fieldType": "TEXT",
+                                    "options": {
+                                      "core": true,
+                                      "maxCount": 4,
+                                      "baseUrl": "https://private-field-upstream.example.com",
+                                      "engineSecrets": {"token": "field-options-secret"}
+                                    },
+                                    "required": true,
+                                    "executionRequired": true,
+                                    "userRequired": true,
+                                    "agentFillStrategy": "ask_user",
+                                    "riskLevel": "LOW",
+                                    "sortOrder": 1
+                                  }]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].fieldType").value("TEXT"))
+                .andExpect(jsonPath("$.data[0].options.engineSecrets.token").value("field-options-secret"));
         publishTool(adminToken, toolId);
 
-        mockMvc.perform(get("/api/v1/tools")
+        ResultActions listResponse = mockMvc.perform(get("/api/v1/tools")
                         .param("keyword", "public_secret_guard_tool"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].toolCode").value("public_secret_guard_tool"))
-                .andExpect(jsonPath("$.data.list[0].configNote").doesNotExist());
+                .andExpect(jsonPath("$.data.list[0].modelDisplayName").value("Public Contract Model"))
+                .andExpect(jsonPath("$.data.list[0].frontendStyle.heroSubtitle").value("Safe subtitle"))
+                .andExpect(jsonPath("$.data.list[0].frontendStyle.demoThumbnails", hasItem("https://cdn.example.com/one.webp")))
+                .andExpect(jsonPath("$.data.list[0].frontendStyle.demoThumbnails[1]").doesNotExist())
+                .andExpect(jsonPath("$.data.list[0].frontendStyle.heroTitle").doesNotExist());
+        assertPublicToolContract(listResponse, "$.data.list[0]", 14);
 
-        mockMvc.perform(get("/api/v1/tools/public_secret_guard_tool"))
+        ResultActions searchResponse = mockMvc.perform(get("/api/v1/tools/search")
+                        .param("keyword", "safe public description"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].toolCode").value("public_secret_guard_tool"));
+        assertPublicToolContract(searchResponse, "$.data.list[0]", 14);
+
+        ResultActions detailResponse = mockMvc.perform(get("/api/v1/tools/public_secret_guard_tool"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.toolCode").value("public_secret_guard_tool"))
-                .andExpect(jsonPath("$.data.configNote").doesNotExist())
-                .andExpect(jsonPath("$.data.workflow.engineSecrets").doesNotExist())
-                .andExpect(jsonPath("$.data.workflow.engineSecretSources").doesNotExist())
-                .andExpect(jsonPath("$.data.integration.extension.engineSecrets").doesNotExist())
-                .andExpect(jsonPath("$.data.integration.extension.engineSecretSources").doesNotExist())
-                .andExpect(jsonPath("$.data.integration.extension.customUiRoute").value("/tools/public_secret_guard_tool/workspace"));
+                .andExpect(jsonPath("$.data.modelDisplayName").value("Public Contract Model"))
+                .andExpect(jsonPath("$.data.frontendStyle.heroTitle").value("Safe Hero"))
+                .andExpect(jsonPath("$.data.frontendStyle.demoThumbnails[1]").value("https://cdn.example.com/two.webp"))
+                .andExpect(jsonPath("$.data.fields[0].fieldKey").value("productName"))
+                .andExpect(jsonPath("$.data.fields[0].fieldType").value("text"))
+                .andExpect(jsonPath("$.data.fields[0].options.core").value(true))
+                .andExpect(jsonPath("$.data.fields[0].options.maxCount").value(4))
+                .andExpect(jsonPath("$.data.fields[0].options.baseUrl").doesNotExist())
+                .andExpect(jsonPath("$.data.fields[0].options.engineSecrets").doesNotExist())
+                .andExpect(jsonPath("$.data.fields[0].optionsJson").doesNotExist())
+                .andExpect(jsonPath("$.data.fields[0].agentFillStrategy").doesNotExist())
+                .andExpect(jsonPath("$.data.fields[0].riskLevel").doesNotExist())
+                .andExpect(jsonPath("$.data.integration").doesNotExist())
+                .andExpect(jsonPath("$.data.workflow").doesNotExist());
+        assertPublicToolContract(detailResponse, "$.data", 15);
+
+        mockMvc.perform(get("/api/admin/v1/tools/{toolId}", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(toolId.intValue()))
+                .andExpect(jsonPath("$.data.categoryId").value(2))
+                .andExpect(jsonPath("$.data.status").value("ONLINE"))
+                .andExpect(jsonPath("$.data.modelConfigId").value(modelConfigId.intValue()))
+                .andExpect(jsonPath("$.data.modelConfigName").value("Public Contract Model"))
+                .andExpect(jsonPath("$.data.modelName").value("private/provider-model-route"))
+                .andExpect(jsonPath("$.data.executionHandler").value("TEXT_GENERATION"))
+                .andExpect(jsonPath("$.data.executionMode").value("DIRECT"))
+                .andExpect(jsonPath("$.data.billingMode").value("FIXED"))
+                .andExpect(jsonPath("$.data.agentSurfaceEnabled").value(false))
+                .andExpect(jsonPath("$.data.configNote").exists());
     }
 
     @Test
@@ -494,6 +562,55 @@ class ToolApiTest {
                 .andExpect(jsonPath("$.data.fields[0].fieldKey").value("sourceImageUrl"))
                 .andExpect(jsonPath("$.data.fields[0].fieldType").value("image_upload"))
                 .andExpect(jsonPath("$.data.fields[0].required").value(true));
+    }
+
+    private void assertPublicToolContract(ResultActions response, String path, int fieldCount) throws Exception {
+        response
+                .andExpect(jsonPath(path, aMapWithSize(fieldCount)))
+                .andExpect(jsonPath(path + ".sortOrder").doesNotExist())
+                .andExpect(jsonPath(path + ".id").doesNotExist())
+                .andExpect(jsonPath(path + ".categoryId").doesNotExist())
+                .andExpect(jsonPath(path + ".configNote").doesNotExist())
+                .andExpect(jsonPath(path + ".status").doesNotExist())
+                .andExpect(jsonPath(path + ".modelConfigId").doesNotExist())
+                .andExpect(jsonPath(path + ".modelConfigName").doesNotExist())
+                .andExpect(jsonPath(path + ".modelName").doesNotExist())
+                .andExpect(jsonPath(path + ".executionHandler").doesNotExist())
+                .andExpect(jsonPath(path + ".executionMode").doesNotExist())
+                .andExpect(jsonPath(path + ".billingMode").doesNotExist())
+                .andExpect(jsonPath(path + ".agentSurfaceEnabled").doesNotExist())
+                .andExpect(jsonPath(path + ".workflowConfigured").doesNotExist())
+                .andExpect(jsonPath(path + ".workflowExecutionEnabled").doesNotExist())
+                .andExpect(jsonPath(path + ".publishedWorkflowVersionId").doesNotExist())
+                .andExpect(jsonPath(path + ".workflowUsable").doesNotExist());
+    }
+
+    private Long createPublicContractModelConfig(String adminToken) throws Exception {
+        String response = mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "Public Contract Model",
+                                  "configCode": "public_tool_contract_model",
+                                  "provider": "minimax",
+                                  "modelName": "private/provider-model-route",
+                                  "baseUrl": "https://private-upstream.example.com/v1",
+                                  "apiKey": "private-api-key",
+                                  "timeoutSeconds": 60,
+                                  "billingUnit": "TOKEN_PER_M",
+                                  "unitPrice": 0,
+                                  "capabilities": ["TEXT_GENERATION"],
+                                  "enabled": true,
+                                  "agentEnabled": true,
+                                  "isDefault": false
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
     }
 
     private Long createTextOnlyModelConfig(String adminToken) throws Exception {

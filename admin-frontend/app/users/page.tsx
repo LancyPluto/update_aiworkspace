@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { AdminLayout } from "@/components/admin/admin-layout"
 import { AdminHeader } from "@/components/admin/header"
 import { DataTable, StatusBadge } from "@/components/admin/data-table"
@@ -13,6 +13,7 @@ import { fetchAdminUsers, manualAddCredits, memberAccountBalance, updateUserStat
 import type { AdminMember } from "@/lib/api/types"
 import { Ban, Eye, Filter, Search, Undo2 } from "lucide-react"
 import { CreditPowerIcon } from "@/components/admin/credit-power-icon"
+import { toast } from "sonner"
 
 interface UserRow {
   id: string
@@ -52,6 +53,7 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [actionId, setActionId] = useState<number | null>(null)
+  const pendingGiftCardOperations = useRef(new Map<string, string>())
 
   async function loadUsers() {
     setLoading(true)
@@ -80,20 +82,29 @@ export default function UsersPage() {
   }, [users, searchQuery, statusFilter])
 
   async function handleCredits(user: UserRow) {
-    const rawAmount = window.prompt(`为 ${user.name} 增加算力，当前余额 ${user.credits}`, "100")
+    const rawAmount = window.prompt(`为 ${user.name} 发送算力礼品卡，当前余额 ${user.credits}`, "100")
     if (rawAmount == null) return
     const amount = Number(rawAmount)
     if (!Number.isFinite(amount) || amount <= 0) {
       window.alert("请输入大于 0 的算力数量")
       return
     }
-    const reason = window.prompt("请输入调整原因", "运营手动加算力") || "运营手动加算力"
+    const reason = window.prompt("请输入发放原因", "运营发放礼品卡") || "运营发放礼品卡"
+    const amountValue = Math.floor(amount)
+    const operationKey = `${user.rawId}:${amountValue}:${reason}`
+    const operationId = pendingGiftCardOperations.current.get(operationKey) || crypto.randomUUID()
+    pendingGiftCardOperations.current.set(operationKey, operationId)
     setActionId(user.rawId)
     try {
-      await manualAddCredits(user.rawId, { amount: Math.floor(amount), reason })
+      const issued = await manualAddCredits(user.rawId, { amount: amountValue, reason, operationId })
+      pendingGiftCardOperations.current.delete(operationKey)
       await loadUsers()
+      toast.success(`已为 ${user.name} 发送 ${issued.giftCard.credits} 算力礼品卡`, {
+        description: `卡号 ${issued.giftCard.cardCode} · 等待用户兑换`,
+      })
     } catch (err) {
-      window.alert(err instanceof ApiError ? err.message : "调整算力失败")
+      const message = err instanceof ApiError ? err.message : "发送礼品卡失败"
+      toast.error("发送礼品卡失败", { description: message })
     } finally {
       setActionId(null)
     }
@@ -163,7 +174,7 @@ export default function UsersPage() {
               </div>
             </DialogContent>
           </Dialog>
-          <Button variant="ghost" size="icon" className="h-8 w-8" disabled={actionId === item.rawId} onClick={() => handleCredits(item)}>
+          <Button title="发送礼品卡" variant="ghost" size="icon" className="h-8 w-8" disabled={actionId === item.rawId} onClick={() => handleCredits(item)}>
             <CreditPowerIcon className="h-4 w-4" />
           </Button>
           <Button variant="ghost" size="icon" className="h-8 w-8" disabled={actionId === item.rawId} onClick={() => handleStatus(item)}>

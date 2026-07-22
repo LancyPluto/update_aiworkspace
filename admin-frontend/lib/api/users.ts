@@ -4,6 +4,8 @@ import type {
   CreditAccount,
   CreditLogItem,
   ManualAddCreditsPayload,
+  ManualAddCreditsResult,
+  ManualCreditAdjustmentPayload,
   PageResponse,
   UpdateUserStatusPayload,
 } from './types'
@@ -22,13 +24,13 @@ export function updateUserStatus(userId: number, payload: UpdateUserStatusPayloa
 }
 
 export function manualAddCredits(userId: number, payload: ManualAddCreditsPayload) {
-  return http.post<CreditAccount>(
+  return http.post<ManualAddCreditsResult>(
     `/api/admin/v1/users/${userId}/credits/manual-add`,
     payload,
   )
 }
 
-export function manualDeductCredits(userId: number, payload: ManualAddCreditsPayload) {
+export function manualDeductCredits(userId: number, payload: ManualCreditAdjustmentPayload) {
   return http.post<CreditAccount>(
     `/api/admin/v1/users/${userId}/credits/manual-deduct`,
     payload,

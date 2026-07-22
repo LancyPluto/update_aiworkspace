@@ -115,8 +115,7 @@ function recommendationHint(kind?: string) {
 function toolDescription(tool: AssetPreviewRecommendation) {
   return (
     cleanToolDisplayText(tool.description) ||
-    cleanToolDisplayText(tool.configNote) ||
-    cleanToolDisplayText(tool.modelConfigName) ||
+    cleanToolDisplayText(tool.modelDisplayName) ||
     "继续创作"
   )
 }
@@ -557,7 +556,7 @@ function sanitizeDownloadName(value: string) {
           <div class="mt-5 grid gap-3 pr-1">
             <button
               v-for="tool in recommendations?.slice(0, 6)"
-              :key="tool.id"
+              :key="tool.toolCode"
               type="button"
               class="group grid grid-cols-[72px_minmax(0,1fr)] gap-4 rounded-[24px] border border-white/8 bg-white/[0.04] p-3 text-left transition hover:-translate-y-0.5 hover:border-primary/45 hover:bg-white/[0.07]"
               @click="activeAsset && emit('use-tool', tool, activeAsset)"

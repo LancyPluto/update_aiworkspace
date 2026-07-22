@@ -40,6 +40,9 @@ export interface AITool {
   capabilities: Capability[]
   inputModality?: string | null
   outputModality?: string | null
+  toolType?: string | null
+  categoryCode?: string | null
+  categoryName?: string | null
   toolKind?: "text" | "image" | "video" | "digitalHuman" | "audio" | "agent" | "other" | string | null
   fields?: ToolField[]
   estimatedCreditCost?: number

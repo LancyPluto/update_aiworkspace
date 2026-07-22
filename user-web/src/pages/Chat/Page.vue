@@ -222,23 +222,12 @@ function setTaskWindows(next: TaskWindow[]) {
   persistTaskWindows()
 }
 
-function isCoreField(field: { options?: unknown; optionsJson?: string | null }): boolean {
+function isCoreField(field: { options?: unknown }): boolean {
   if (field.options && typeof field.options === "object" && !Array.isArray(field.options)) {
     const options = field.options as { core?: unknown; isCore?: unknown }
     if (options.core === true || options.isCore === true) return true
   }
-  if (!field.optionsJson) return false
-  try {
-    const parsed = JSON.parse(field.optionsJson) as unknown
-    return Boolean(
-      parsed &&
-      typeof parsed === "object" &&
-      !Array.isArray(parsed) &&
-      ((parsed as { core?: unknown }).core === true || (parsed as { isCore?: unknown }).isCore === true),
-    )
-  } catch {
-    return false
-  }
+  return false
 }
 
 function normalizeMediaUrl(value?: string | null): string {

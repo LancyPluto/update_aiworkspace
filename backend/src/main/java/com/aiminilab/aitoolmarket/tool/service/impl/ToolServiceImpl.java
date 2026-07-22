@@ -20,6 +20,10 @@ import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaItemRequest;
 import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaResponse;
 import com.aiminilab.aitoolmarket.tool.dto.PromptResponse;
 import com.aiminilab.aitoolmarket.tool.dto.PromptVersionResponse;
+import com.aiminilab.aitoolmarket.tool.dto.PublicToolDetailResponse;
+import com.aiminilab.aitoolmarket.tool.dto.PublicToolFieldResponse;
+import com.aiminilab.aitoolmarket.tool.dto.PublicToolFrontendStyleResponse;
+import com.aiminilab.aitoolmarket.tool.dto.PublicToolSummaryResponse;
 import com.aiminilab.aitoolmarket.tool.dto.TestGenerateRequest;
 import com.aiminilab.aitoolmarket.tool.dto.TestGenerateResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolCategoryResponse;
@@ -35,6 +39,7 @@ import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.dto.WorkflowResponse;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.support.ConfigNoteMergeSupport;
+import com.aiminilab.aitoolmarket.tool.support.ToolFrontendStyleConfig;
 import com.aiminilab.aitoolmarket.tool.entity.ToolCategory;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldItem;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldSchema;
@@ -51,11 +56,6 @@ import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptVersionMapper;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.credit.service.TaskCreditEstimateService;
 import com.aiminilab.aitoolmarket.tool.dto.ApplyToolTemplateRequest;
-import com.aiminilab.aitoolmarket.tool.dto.ToolIntegrationView;
-import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationConfig;
-import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationPlugin;
-import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationRegistry;
-import com.aiminilab.aitoolmarket.tool.integration.ToolIntegrationResolver;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.ToolTemplateService;
 import com.aiminilab.aitoolmarket.tool.service.WorkflowService;
@@ -107,8 +107,6 @@ public class ToolServiceImpl implements ToolService {
     private final TaskCreditEstimateService taskCreditEstimateService;
     private final AssetStorageService assetStorageService;
     private final GeneratedMediaPathSupport generatedMediaPathSupport;
-    private final ToolIntegrationResolver toolIntegrationResolver;
-    private final ToolIntegrationRegistry toolIntegrationRegistry;
     private final BypassCacheService bypassCacheService;
     private final WorkflowExecutionService workflowExecutionService;
     private final WorkflowService workflowService;
@@ -121,8 +119,6 @@ public class ToolServiceImpl implements ToolService {
                            TaskCreditEstimateService taskCreditEstimateService,
                            AssetStorageService assetStorageService,
                            GeneratedMediaPathSupport generatedMediaPathSupport,
-                           ToolIntegrationResolver toolIntegrationResolver,
-                           ToolIntegrationRegistry toolIntegrationRegistry,
                            BypassCacheService bypassCacheService,
                            @Lazy WorkflowExecutionService workflowExecutionService,
                            WorkflowService workflowService) {
@@ -138,8 +134,6 @@ public class ToolServiceImpl implements ToolService {
         this.taskCreditEstimateService = taskCreditEstimateService;
         this.assetStorageService = assetStorageService;
         this.generatedMediaPathSupport = generatedMediaPathSupport;
-        this.toolIntegrationResolver = toolIntegrationResolver;
-        this.toolIntegrationRegistry = toolIntegrationRegistry;
         this.bypassCacheService = bypassCacheService;
         this.workflowExecutionService = workflowExecutionService;
         this.workflowService = workflowService;
@@ -196,11 +190,16 @@ public class ToolServiceImpl implements ToolService {
     }
 
     @Override
-    public PageResponse<ToolSummaryResponse> userTools(String keyword, Long categoryId, Integer pageNo, Integer pageSize) {
+    public PageResponse<PublicToolSummaryResponse> userTools(
+            String keyword,
+            Long categoryId,
+            Integer pageNo,
+            Integer pageSize
+    ) {
         String queryHash = toolListQueryHash(keyword, categoryId, pageNo, pageSize);
         long version = bypassCacheService.currentToolListVersion();
         JavaType type = objectMapper.getTypeFactory()
-                .constructParametricType(PageResponse.class, ToolSummaryResponse.class);
+                .constructParametricType(PageResponse.class, PublicToolSummaryResponse.class);
         return bypassCacheService.getOrLoad(
                 CacheNamespaces.toolList(version, queryHash),
                 bypassCacheService.toolTtl(),
@@ -210,8 +209,8 @@ public class ToolServiceImpl implements ToolService {
     }
 
     @Override
-    public ToolDetailResponse userToolDetail(String toolCode) {
-        JavaType type = objectMapper.getTypeFactory().constructType(ToolDetailResponse.class);
+    public PublicToolDetailResponse userToolDetail(String toolCode) {
+        JavaType type = objectMapper.getTypeFactory().constructType(PublicToolDetailResponse.class);
         return bypassCacheService.getOrLoad(
                 CacheNamespaces.toolDetail(toolCode),
                 bypassCacheService.toolTtl(),
@@ -220,23 +219,36 @@ public class ToolServiceImpl implements ToolService {
         );
     }
 
-    private PageResponse<ToolSummaryResponse> loadUserTools(String keyword, Long categoryId, Integer pageNo, Integer pageSize) {
+    private PageResponse<PublicToolSummaryResponse> loadUserTools(
+            String keyword,
+            Long categoryId,
+            Integer pageNo,
+            Integer pageSize
+    ) {
         int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
         int offset = PageResponse.offset(pageNo, pageSize);
-        List<ToolSummaryResponse> list = toolMapper
+        List<PublicToolSummaryResponse> list = toolMapper
                 .findTools(true, keyword, categoryId, null, normalizedPageSize, offset)
                 .stream()
-                .map(this::toUserFacingSummary)
+                .map(this::toPublicSummary)
                 .toList();
         long total = toolMapper.countTools(true, keyword, categoryId, null);
         return PageResponse.of(list, total, pageNo, pageSize);
     }
 
-    private ToolDetailResponse loadUserToolDetail(String toolCode) {
+    private PublicToolDetailResponse loadUserToolDetail(String toolCode) {
         AiTool tool = toolMapper.findOnlineByCode(toolCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
-        ToolSummaryResponse summary = toUserFacingSummary(tool);
-        return ToolDetailResponse.of(summary, fields(tool.getId()), resolveIntegrationView(tool));
+        PublicToolSummaryResponse summary = toPublicSummary(tool);
+        List<PublicToolFieldResponse> publicFields = fields(tool.getId()).stream()
+                .map(PublicToolFieldResponse::from)
+                .toList();
+        return PublicToolDetailResponse.of(
+                summary,
+                publicFields,
+                PublicToolFrontendStyleResponse.detailFrom(
+                        ToolFrontendStyleConfig.fromConfigNote(tool.getConfigNote(), objectMapper))
+        );
     }
 
     private String toolListQueryHash(String keyword, Long categoryId, Integer pageNo, Integer pageSize) {
@@ -246,24 +258,18 @@ public class ToolServiceImpl implements ToolService {
                 + PageResponse.normalizePageNo(pageNo) + ":" + PageResponse.normalizePageSize(pageSize);
     }
 
-    private ToolSummaryResponse toUserFacingSummary(AiTool tool) {
+    private PublicToolSummaryResponse toPublicSummary(AiTool tool) {
         boolean variableCreditPricing = workflowExecutionService.shouldUseWorkflow(tool);
         Integer estimatedCredits = variableCreditPricing
                 ? null
                 : taskCreditEstimateService.estimateUserFacingTaskCredits(tool);
-        return sanitizeCoverUrl(
-                ToolSummaryResponse.publicFrom(tool, estimatedCredits, variableCreditPricing, objectMapper));
-    }
-
-    private ToolIntegrationView resolveIntegrationView(AiTool tool) {
-        ToolIntegrationConfig config = toolIntegrationResolver.resolve(tool);
-        if (config == null || config.isStandardTask()) {
-            return ToolIntegrationView.of(config, null);
-        }
-        Object extension = toolIntegrationRegistry.find(config.getIntegrationMode())
-                .map(plugin -> plugin.userDetailExtension(tool, config))
-                .orElse(null);
-        return ToolIntegrationView.of(config, extension);
+        return PublicToolSummaryResponse.from(
+                tool,
+                assetStorageService.rewriteResultUrl(tool.getCoverUrl(), false),
+                estimatedCredits,
+                variableCreditPricing,
+                objectMapper
+        );
     }
 
     @Override
@@ -663,11 +669,6 @@ public class ToolServiceImpl implements ToolService {
                                 configured ? workflow.publishedVersionId() : null,
                                 usable
                         ));
-    }
-
-    private ToolSummaryResponse sanitizeCoverUrl(ToolSummaryResponse summary) {
-        return summary.withSanitizedCoverUrl(
-                assetStorageService.rewriteResultUrl(summary.coverUrl(), false));
     }
 
     private ToolSummaryResponse sanitizeCoverUrlForAdmin(ToolSummaryResponse summary) {

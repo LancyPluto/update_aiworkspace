@@ -62,6 +62,7 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     "minimax_music": {"capabilities": {"MUSIC_GENERATION"}, "worker_ready": False},
     "suno_music": {"capabilities": {"MUSIC_GENERATION"}, "worker_ready": True},
     "siliconflow_speech": {"capabilities": {"TEXT_TO_SPEECH"}, "worker_ready": True},
+    "dashscope_qwen_tts": {"capabilities": {"TEXT_TO_SPEECH"}, "worker_ready": True},
 }
 
 

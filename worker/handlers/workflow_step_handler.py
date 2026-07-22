@@ -13,6 +13,7 @@ from client.seedance_video_client import SeedanceVideoClient, SeedanceVideoError
 from client.siliconflow_video_client import SiliconFlowVideoClient, SiliconFlowVideoError
 from client.openai_images_client import OpenAIImagesClient
 from client.agnes_video_client import AgnesVideoClient
+from client.text_to_speech_client import SpeechGenerationResult, TextToSpeechClient, TextToSpeechError
 from config import resolve_siliconflow_api_key
 from providers import registry as provider_registry
 from handlers.digital_human_postprocessor import DigitalHumanPostprocessError, DigitalHumanPostprocessor
@@ -21,6 +22,7 @@ from handlers.generated_image_persister import GeneratedImagePersister
 from handlers.generated_audio_persister import GeneratedAudioPersister
 from handlers.generated_video_persister import GeneratedVideoPersister
 from storage.asset_storage import asset_storage
+from utils.tts_config import merge_tts_params, speech_billable_units
 
 
 LOGGER = logging.getLogger(__name__)
@@ -30,6 +32,41 @@ TERMINAL_TASK_STATUSES = {"SUCCESS", "FAILED", "CANCELLED"}
 SCENE_SECONDS = 5
 MAX_SCENES = 18
 DEFAULT_EPISODE_SECONDS = 30
+TTS_PARAMETER_KEYS = frozenset(
+    {
+        "voice",
+        "voiceId",
+        "voice_id",
+        "language",
+        "languageType",
+        "language_type",
+        "languageBoost",
+        "language_boost",
+        "format",
+        "audioFormat",
+        "responseFormat",
+        "speed",
+        "volume",
+        "vol",
+        "pitch",
+        "sampleRate",
+        "sample_rate",
+        "bitrate",
+        "channel",
+        "ttsMode",
+        "minimaxMode",
+        "mode",
+        "pronunciationTone",
+        "pronunciation_tone",
+        "minimaxGroupId",
+        "groupId",
+        "GroupId",
+        "asyncTimeoutSeconds",
+        "pollTimeoutSeconds",
+        "asyncPollIntervalSeconds",
+        "pollIntervalSeconds",
+    }
+)
 
 COMIC_CHECKPOINT_KIND = "COMIC_OPERATION_V1"
 COMIC_HANDLER_KEYS = {
@@ -58,6 +95,10 @@ class ComicOperationAmbiguousError(RuntimeError):
     """The provider may already have accepted a synchronous comic operation."""
 
 
+class WorkflowTtsOperationAmbiguousError(RuntimeError):
+    """A synchronous workflow TTS call may already have reached the provider."""
+
+
 class WorkflowStepHandler:
     def __init__(
         self,
@@ -66,12 +107,16 @@ class WorkflowStepHandler:
         image_client: SiliconFlowVideoClient | None = None,
         seedance_client: SeedanceVideoClient | None = None,
         postprocessor: DigitalHumanPostprocessor | None = None,
+        tts_client: TextToSpeechClient | None = None,
+        audio_persister: GeneratedAudioPersister | None = None,
     ) -> None:
         self.backend_client = backend_client or BackendClient()
         self.model_client = model_client or ModelClient()
         self.image_client = image_client or SiliconFlowVideoClient()
         self.seedance_client = seedance_client or SeedanceVideoClient()
         self.postprocessor = postprocessor or DigitalHumanPostprocessor()
+        self.tts_client = tts_client or TextToSpeechClient()
+        self.audio_persister = audio_persister or GeneratedAudioPersister()
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any]:
         task_id = int(message["taskId"])
@@ -92,6 +137,7 @@ class WorkflowStepHandler:
             form = _merge_form(workflow_inputs)
             model_config = context.get("modelConfig") or {}
             handler_key = _resolve_comic_handler_key(params, workflow_inputs)
+            checkpointed = bool(handler_key) or node_def_type in {"TTS_MODEL", "VIDEO_MODEL"}
 
             self.backend_client.mark_processing(task_id, progress=12, progress_message="工作流节点执行中", trace_id=trace_id)
 
@@ -113,7 +159,16 @@ class WorkflowStepHandler:
             elif node_def_type == "IMAGE_MODEL":
                 output = self._run_keyframe(form, workflow_inputs, model_config, task_id, trace_id)
             elif node_def_type == "TTS_MODEL":
-                output = self._run_tts(form, workflow_inputs, model_config, task_id, trace_id)
+                output = self._run_tts(
+                    form,
+                    workflow_inputs,
+                    model_config,
+                    task_id,
+                    trace_id,
+                    provider_checkpoint=context.get("providerCheckpoint"),
+                    provider_checkpoint_version=context.get("providerCheckpointVersion"),
+                    claim_token=claim_token,
+                )
             elif node_def_type == "VIDEO_MODEL":
                 output = self._run_video(
                     form,
@@ -146,7 +201,7 @@ class WorkflowStepHandler:
             try:
                 self._mark_failed_safe(task_id, error, trace_id=trace_id)
             except BackendClientError:
-                if handler_key:
+                if checkpointed:
                     raise
                 LOGGER.error(
                     "non-checkpointed workflow failure callback was not accepted; avoiding provider replay taskId=%s",
@@ -156,7 +211,7 @@ class WorkflowStepHandler:
         try:
             self.backend_client.mark_success(task_id, success_payload, trace_id=trace_id)
         except BackendClientError as error:
-            if handler_key:
+            if checkpointed:
                 LOGGER.exception("checkpointed workflow success settlement will be retried taskId=%s", task_id)
                 raise
             LOGGER.exception("non-checkpointed workflow success callback failed taskId=%s", task_id)
@@ -900,10 +955,23 @@ class WorkflowStepHandler:
                 **_empty_usage(provider_called=False),
             }
 
+        tts_params = merge_tts_params(
+            model_config,
+            _tts_param_overrides(form),
+            _tts_param_overrides(audio),
+            _tts_param_overrides(operation_input),
+        )
+        provider = str(model_config.get("provider") or "").strip().lower()
+        provider_registry.require_capability(provider, "TEXT_TO_SPEECH")
+        provider_registry.require_worker_ready(provider)
+        checkpoint_input = {
+            **operation_input,
+            "_ttsParametersFingerprint": _short_hash(tts_params),
+        }
         checkpoint, checkpoint_version, cached, _ = self._begin_comic_operation(
             handler_key="comic.shot_tts",
             item_key=shot_version_id,
-            operation_input=operation_input,
+            operation_input=checkpoint_input,
             model_config=model_config,
             task_id=task_id,
             trace_id=trace_id,
@@ -914,34 +982,36 @@ class WorkflowStepHandler:
         if cached is not None:
             return cached
 
-        presenter_gender = str(
-            audio.get("speakerGender")
-            or shot.get("presenterGender")
-            or DigitalHumanVideoHandler._resolve_presenter_gender(form)
-        )
-        voice = str(
-            operation_input.get("voice")
-            or audio.get("voiceId")
-            or DigitalHumanVideoHandler._resolve_voice(form, presenter_gender)
-        )
-        client = SiliconFlowVideoClient(
-            api_key=resolve_siliconflow_api_key(model_config),
+        speech_result = self.tts_client.generate(
+            provider=provider,
+            model=str(model_config.get("modelName") or ""),
+            text=speech_text,
             base_url=model_config.get("baseUrl"),
+            api_key=model_config.get("apiKey"),
+            params=tts_params,
         )
-        audio_data_url = client.generate_speech_data_url(
-            input_text=speech_text,
-            model=model_config.get("modelName"),
-            voice=voice,
+        call_metadata = dict(speech_result.metadata or {})
+        call_metadata["billableUnits"] = speech_billable_units(
+            model_config,
+            text=speech_text,
+            metadata=call_metadata,
         )
-        call_usage = _provider_call_usage(client, model_config)
-        persisted = GeneratedAudioPersister().persist_audio_url(
-            task_id=task_id,
-            source_url=audio_data_url,
-            index=1,
+        call_usage = _provider_call_usage(call_metadata, model_config)
+        accounting = _provider_accounting_payload(call_metadata)
+        persisted = self._persist_speech_result(task_id, speech_result, index=1)
+        voice = _tts_param_value(tts_params, "voice", "voiceId", "voice_id") or _tts_param_value(
+            call_metadata,
+            "voice",
         )
+        language_type = _tts_param_value(
+            tts_params,
+            "languageType",
+            "language_type",
+            "language",
+        ) or _tts_param_value(call_metadata, "languageType", "language_type", "language")
         audio_version_id = str(
             operation_input.get("audioVersionId")
-            or f"{shot_version_id}:audio:{_short_hash(voice + speech_text)}"
+            or f"{shot_version_id}:audio:{_short_hash({'voice': voice, 'languageType': language_type, 'text': speech_text})}"
         )
         audio_version = {
             "shotId": shot_id,
@@ -950,6 +1020,7 @@ class WorkflowStepHandler:
             "audioUrl": persisted["url"],
             "speechText": speech_text,
             "voice": voice,
+            "languageType": language_type,
             "modelSnapshot": _comic_model_snapshot(model_config),
         }
         result = {
@@ -961,9 +1032,16 @@ class WorkflowStepHandler:
             "audioUrl": audio_version["audioUrl"],
             "speechText": speech_text,
             "voice": voice,
+            "languageType": language_type,
+            **accounting,
             **call_usage,
             "providerCalls": [
-                _comic_provider_call("comic.shot_tts", shot_version_id, model_config, call_usage)
+                _comic_provider_call(
+                    "comic.shot_tts",
+                    shot_version_id,
+                    model_config,
+                    {**call_metadata, **call_usage},
+                )
             ],
         }
         self._complete_comic_operation(
@@ -975,6 +1053,30 @@ class WorkflowStepHandler:
             claim_token=claim_token,
         )
         return result
+
+    def _persist_speech_result(
+        self,
+        task_id: int,
+        result: SpeechGenerationResult,
+        *,
+        index: int,
+    ) -> dict[str, str]:
+        if result.audio_url:
+            return self.audio_persister.persist_audio_url(
+                task_id=task_id,
+                source_url=result.audio_url,
+                extension=result.extension,
+                index=index,
+            )
+        if result.audio_bytes:
+            return self.audio_persister.persist_audio_bytes(
+                task_id=task_id,
+                audio_bytes=result.audio_bytes,
+                content_type=result.content_type,
+                extension=result.extension,
+                index=index,
+            )
+        raise TextToSpeechError("speech provider returned empty audio")
 
     def _run_comic_compose(
         self,
@@ -1319,47 +1421,165 @@ class WorkflowStepHandler:
         model_config: dict[str, Any],
         task_id: int,
         trace_id: str | None,
+        provider_checkpoint: dict[str, Any] | None = None,
+        provider_checkpoint_version: int | None = None,
+        claim_token: str | None = None,
     ) -> dict[str, Any]:
         script = _find_script_payload(workflow_inputs)
         scenes = _scenes_from_script(script, form)
-        client = SiliconFlowVideoClient(
-            api_key=resolve_siliconflow_api_key(model_config),
-            base_url=model_config.get("baseUrl"),
-        )
+        provider = str(model_config.get("provider") or "").strip().lower()
+        provider_registry.require_capability(provider, "TEXT_TO_SPEECH")
+        provider_registry.require_worker_ready(provider)
+        protocol = _provider_protocol(model_config) or provider
+        model = str(model_config.get("modelName") or "")
+        if _matches_workflow_tts_checkpoint(provider_checkpoint, provider, protocol, model):
+            checkpoint = json.loads(json.dumps(provider_checkpoint))
+        else:
+            checkpoint = {
+                "kind": "WORKFLOW_TTS",
+                "provider": provider,
+                "protocol": protocol,
+                "model": model,
+                "scenes": {},
+            }
+        checkpoint_version = max(0, int(provider_checkpoint_version or 0))
+        scene_checkpoints = checkpoint.setdefault("scenes", {})
         total = len(scenes)
         audios: list[dict[str, Any]] = []
+        provider_calls: list[dict[str, Any]] = []
         usage_total = _empty_usage()
         for position, scene in enumerate(scenes, start=1):
-            speech_text = scene.get("dialogue") or scene.get("narration") or form.get("plotOutline") or "奶就放心了。"
-            presenter_gender = scene.get("presenterGender") or DigitalHumanVideoHandler._resolve_presenter_gender(form)
-            voice = DigitalHumanVideoHandler._resolve_voice(form, presenter_gender)
+            scene_key = str(position)
+            speech_text = str(
+                scene.get("dialogue")
+                or scene.get("narration")
+                or form.get("plotOutline")
+                or "奶就放心了。"
+            )
+            tts_params = merge_tts_params(
+                model_config,
+                _tts_param_overrides(form),
+                _tts_param_overrides(scene),
+            )
+            scene_checkpoint = scene_checkpoints.get(scene_key)
+            if not isinstance(scene_checkpoint, dict):
+                scene_checkpoint = {}
+            scene_fingerprint = _short_hash({"speechText": speech_text, "ttsParams": tts_params})
+            checkpoint_fingerprint = str(scene_checkpoint.get("inputFingerprint") or "")
+            if checkpoint_fingerprint and checkpoint_fingerprint != scene_fingerprint:
+                raise WorkflowTtsOperationAmbiguousError(
+                    f"workflow TTS scene {position} checkpoint does not match current input"
+                )
+            scene_status = str(scene_checkpoint.get("status") or "").upper()
+            if scene_status == "COMPLETED" and scene_checkpoint.get("audioUrl"):
+                cached_usage = _provider_call_usage(scene_checkpoint, model_config)
+                _accumulate_usage(usage_total, cached_usage)
+                provider_calls.append(
+                    _comic_provider_call("workflow.tts", scene_key, model_config, scene_checkpoint)
+                )
+                audios.append(
+                    {
+                        "sceneIndex": position,
+                        "audioUrl": scene_checkpoint["audioUrl"],
+                        "audioDataUrl": scene_checkpoint.get("audioDataUrl") or "",
+                        "speechText": scene_checkpoint.get("speechText") or speech_text,
+                        "voice": scene_checkpoint.get("voice") or "",
+                        "languageType": scene_checkpoint.get("languageType") or "",
+                    }
+                )
+                continue
+            if scene_status == "STARTED":
+                raise WorkflowTtsOperationAmbiguousError(
+                    f"workflow TTS scene {position} has ambiguous STARTED checkpoint; refusing provider replay"
+                )
             self.backend_client.mark_processing(
                 task_id,
                 progress=48 + int(15 * position / max(total, 1)),
                 progress_message=f"正在生成角色配音 {position}/{total}",
                 trace_id=trace_id,
             )
-            audio_data_url = client.generate_speech_data_url(
-                input_text=speech_text,
-                model=model_config.get("modelName"),
-                voice=voice,
+            scene_checkpoints[scene_key] = {
+                "status": "STARTED",
+                "speechText": speech_text,
+                "inputFingerprint": scene_fingerprint,
+            }
+            saved = self.backend_client.save_provider_checkpoint(
+                task_id,
+                checkpoint,
+                expected_version=checkpoint_version,
+                trace_id=trace_id,
+                claim_token=claim_token,
             )
-            _accumulate_usage(usage_total, _provider_call_usage(client, model_config))
-            audio_url = _persist_audio_data_url(task_id, audio_data_url, index=position)
+            checkpoint_version = int(saved.get("version") or checkpoint_version + 1)
+            speech_result = self.tts_client.generate(
+                provider=provider,
+                model=model,
+                text=speech_text,
+                base_url=model_config.get("baseUrl"),
+                api_key=model_config.get("apiKey"),
+                params=tts_params,
+            )
+            call_metadata = dict(speech_result.metadata or {})
+            call_metadata["billableUnits"] = speech_billable_units(
+                model_config,
+                text=speech_text,
+                metadata=call_metadata,
+            )
+            voice = _tts_param_value(tts_params, "voice", "voiceId", "voice_id") or _tts_param_value(
+                call_metadata,
+                "voice",
+            )
+            language_type = _tts_param_value(
+                tts_params,
+                "languageType",
+                "language_type",
+                "language",
+            ) or _tts_param_value(call_metadata, "languageType", "language_type", "language")
+            call_usage = _provider_call_usage(call_metadata, model_config)
+            _accumulate_usage(usage_total, call_usage)
+            persisted = self._persist_speech_result(task_id, speech_result, index=position)
+            audio_data_url = (
+                speech_result.audio_url
+                if str(speech_result.audio_url or "").startswith("data:")
+                else ""
+            )
+            completed = {
+                **scene_checkpoints[scene_key],
+                "status": "COMPLETED",
+                "audioUrl": persisted["url"],
+                "audioDataUrl": audio_data_url,
+                "speechText": speech_text,
+                "voice": voice,
+                "languageType": language_type,
+                **_provider_accounting_payload(call_metadata),
+                **call_usage,
+            }
+            scene_checkpoints[scene_key] = completed
+            saved = self.backend_client.save_provider_checkpoint(
+                task_id,
+                checkpoint,
+                expected_version=checkpoint_version,
+                trace_id=trace_id,
+                claim_token=claim_token,
+            )
+            checkpoint_version = int(saved.get("version") or checkpoint_version + 1)
+            provider_calls.append(_comic_provider_call("workflow.tts", scene_key, model_config, completed))
             audios.append(
                 {
                     "sceneIndex": position,
-                    "audioUrl": audio_url,
-                    "audioDataUrl": audio_data_url,
+                    "audioUrl": completed["audioUrl"],
+                    "audioDataUrl": completed["audioDataUrl"],
                     "speechText": speech_text,
                     "voice": voice,
+                    "languageType": language_type,
                 }
             )
         first = audios[0] if audios else {}
-        return {
+        output = {
             "audios": [{key: value for key, value in item.items() if key != "audioDataUrl"} for item in audios],
             "audioDataUrls": [item.get("audioDataUrl") or "" for item in audios],
             "sceneCount": total,
+            "providerCalls": provider_calls,
             # 向后兼容字段
             "audioUrl": first.get("audioUrl") or "",
             "audioDataUrl": first.get("audioDataUrl") or "",
@@ -1367,6 +1587,15 @@ class WorkflowStepHandler:
             "voice": first.get("voice") or "",
             **usage_total,
         }
+        if total == 1:
+            output.update(_provider_accounting_payload(provider_calls[0]))
+        elif total > 1:
+            output["providerAccounting"] = {
+                "status": "UNKNOWN",
+                "reason": "MULTIPLE_PROVIDER_CALLS_REQUIRE_ITEMIZED_ACCOUNTING",
+                "providerCallCount": total,
+            }
+        return output
 
     def _run_video(
         self,
@@ -1822,6 +2051,10 @@ def _comic_provider_call(
         **_comic_model_snapshot(model_config),
     }
     call.update(_provider_accounting_payload(source))
+    for field in ("promptTokens", "completionTokens", "billableUnits"):
+        value = _non_negative_int(source.get(field))
+        if value > 0:
+            call[field] = value
     if "providerRequestId" not in call:
         call["accountingStatus"] = "UNKNOWN"
     return call
@@ -2490,6 +2723,22 @@ def _matches_workflow_video_checkpoint(
     )
 
 
+def _matches_workflow_tts_checkpoint(
+    checkpoint: dict[str, Any] | None,
+    provider: str,
+    protocol: str,
+    model: str,
+) -> bool:
+    return bool(
+        isinstance(checkpoint, dict)
+        and checkpoint.get("kind") == "WORKFLOW_TTS"
+        and str(checkpoint.get("provider") or "") == provider
+        and str(checkpoint.get("protocol") or "") == protocol
+        and str(checkpoint.get("model") or "") == model
+        and isinstance(checkpoint.get("scenes"), dict)
+    )
+
+
 def _merge_form(workflow_inputs: dict[str, Any]) -> dict[str, Any]:
     form: dict[str, Any] = {}
     field_input = workflow_inputs.get("field-input") or {}
@@ -2519,6 +2768,28 @@ def _merge_form(workflow_inputs: dict[str, Any]) -> dict[str, Any]:
     if isinstance(direct_form, dict):
         form.update(direct_form)
     return form
+
+
+def _tts_param_overrides(source: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(source, dict):
+        return {}
+    overrides: dict[str, Any] = {}
+    nested = source.get("ttsParams")
+    if isinstance(nested, dict):
+        overrides.update(nested)
+    for key in TTS_PARAMETER_KEYS:
+        value = source.get(key)
+        if value is not None and value != "":
+            overrides[key] = value
+    return overrides
+
+
+def _tts_param_value(params: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = params.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
 
 
 def _find_upstream(workflow_inputs: dict[str, Any] | None, key: str) -> dict[str, Any]:
@@ -2621,7 +2892,7 @@ def _validate_success_usage(model_config: dict[str, Any], payload: dict[str, Any
         if _non_negative_int(payload.get("promptTokens")) + _non_negative_int(payload.get("completionTokens")) <= 0:
             raise RuntimeError(f"provider usage is missing token counts for {unit}")
         return
-    if unit in {"PER_CALL", "PER_SECOND"}:
+    if unit in {"PER_CALL", "PER_SECOND", "PER_CHARACTER"}:
         if _non_negative_int(payload.get("billableUnits")) <= 0:
             raise RuntimeError(f"provider usage is missing billable units for {unit}")
         return

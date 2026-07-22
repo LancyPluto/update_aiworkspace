@@ -70,4 +70,19 @@ class ModelProviderRegistryTest {
         assertThat(infiniteTalk.get().billingDefault()).isEqualTo("PER_CALL");
         assertThat(infiniteTalk.get().workerReady()).isTrue();
     }
+
+    @Test
+    void loadsDashscopeQwenTextToSpeechProvider() {
+        Optional<ModelProviderDefinition> tts = registry.findByCode("dashscope_qwen_tts");
+
+        assertThat(tts).isPresent();
+        assertThat(tts.get().defaultBaseUrl()).isEqualTo("https://dashscope.aliyuncs.com");
+        assertThat(tts.get().defaultModel()).isEqualTo("qwen3-tts-flash");
+        assertThat(tts.get().billingDefault()).isEqualTo("PER_CHARACTER");
+        assertThat(tts.get().providerProtocol()).isEqualTo("dashscope_qwen_tts");
+        assertThat(tts.get().upstreamVendor()).isEqualTo("qwen");
+        assertThat(tts.get().capabilities()).containsExactly("TEXT_TO_SPEECH");
+        assertThat(tts.get().workerReady()).isTrue();
+        assertThat(tts.get().adapterInstalled()).isTrue();
+    }
 }

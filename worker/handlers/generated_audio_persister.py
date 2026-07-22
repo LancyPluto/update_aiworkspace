@@ -46,6 +46,16 @@ class GeneratedAudioPersister:
     }
 
     _ALLOWED_EXTENSIONS = {".mp3", ".wav", ".flac", ".ogg", ".aac", ".m4a", ".webm", ".pcm"}
+    _EXTENSION_CONTENT_TYPES = {
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".flac": "audio/flac",
+        ".ogg": "audio/ogg",
+        ".aac": "audio/aac",
+        ".m4a": "audio/mp4",
+        ".webm": "audio/webm",
+        ".pcm": "application/octet-stream",
+    }
 
     def __init__(self) -> None:
         self.output_dir = asset_storage.local_root
@@ -65,10 +75,11 @@ class GeneratedAudioPersister:
             raise GeneratedAudioPersistError("generated audio is empty")
 
         resolved_extension = self._normalize_extension(extension) or self._resolve_extension(source_url, content_type)
+        resolved_content_type = self._resolve_content_type(content_type, resolved_extension)
         safe_index = max(int(index or 1), 1)
         relative_key = f"audio/{task_id}/audio-{safe_index}{resolved_extension}"
         try:
-            url = asset_storage.put_bytes_public(relative_key, audio_bytes, content_type)
+            url = asset_storage.put_bytes_public(relative_key, audio_bytes, resolved_content_type)
         except Exception as exc:
             raise GeneratedAudioPersistError(f"write generated audio failed: {exc}") from exc
         path = asset_storage.local_path(relative_key)
@@ -76,15 +87,23 @@ class GeneratedAudioPersister:
             url=url,
             source_url=source_url,
             path=path,
-            content_type=content_type,
+            content_type=resolved_content_type,
         ).to_result_item()
 
-    def persist_audio_url(self, *, task_id: int, source_url: str, index: int = 1) -> dict[str, str]:
+    def persist_audio_url(
+        self,
+        *,
+        task_id: int,
+        source_url: str,
+        extension: str | None = None,
+        index: int = 1,
+    ) -> dict[str, str]:
         audio_bytes, content_type = self._read_audio(source_url)
         return self.persist_audio_bytes(
             task_id=task_id,
             audio_bytes=audio_bytes,
             content_type=content_type,
+            extension=extension,
             source_url=source_url,
             index=index,
         )
@@ -140,4 +159,10 @@ class GeneratedAudioPersister:
         if value in self._ALLOWED_EXTENSIONS:
             return value
         return None
+
+    def _resolve_content_type(self, content_type: str | None, extension: str) -> str | None:
+        normalized = (content_type or "").split(";", 1)[0].strip().lower()
+        if normalized and normalized != "application/octet-stream":
+            return normalized
+        return self._EXTENSION_CONTENT_TYPES.get(extension) or normalized or None
 

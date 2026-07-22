@@ -1072,6 +1072,8 @@ public class DataInitializer implements CommandLineRunner {
                   status VARCHAR(32) NOT NULL DEFAULT 'UNUSED',
                   recharge_order_id BIGINT NULL,
                   issuance_key VARCHAR(128) NULL,
+                  issuance_operator_id BIGINT NULL,
+                  issuance_reason VARCHAR(512) NULL,
                   redeemed_at DATETIME NULL,
                   gifted_from_user_id BIGINT NULL,
                   gifted_at DATETIME NULL,
@@ -1156,7 +1158,10 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("credit_recharge_orders", "package_code_snapshot", "ALTER TABLE credit_recharge_orders ADD COLUMN package_code_snapshot VARCHAR(64) NULL AFTER gift_card_package_id");
         ensureColumn("credit_recharge_orders", "validity_days_snapshot", "ALTER TABLE credit_recharge_orders ADD COLUMN validity_days_snapshot INT NULL AFTER package_code_snapshot");
         ensureColumn("gift_cards", "issuance_key", "ALTER TABLE gift_cards ADD COLUMN issuance_key VARCHAR(128) NULL AFTER recharge_order_id");
+        ensureColumn("gift_cards", "issuance_operator_id", "ALTER TABLE gift_cards ADD COLUMN issuance_operator_id BIGINT NULL AFTER issuance_key");
+        ensureColumn("gift_cards", "issuance_reason", "ALTER TABLE gift_cards ADD COLUMN issuance_reason VARCHAR(512) NULL AFTER issuance_operator_id");
         ensureIndex("gift_cards", "uk_gift_cards_issuance_key", "CREATE UNIQUE INDEX uk_gift_cards_issuance_key ON gift_cards(issuance_key)");
+        executeSql("UPDATE gift_card_packages SET credits = 0, status = 'HIDDEN' WHERE package_code = 'admin_default'");
         ensureIndex(
                 "credit_recharge_orders",
                 "uk_recharge_user_idem",

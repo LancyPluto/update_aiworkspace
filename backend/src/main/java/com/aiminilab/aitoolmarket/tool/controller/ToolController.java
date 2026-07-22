@@ -2,9 +2,9 @@ package com.aiminilab.aitoolmarket.tool.controller;
 
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
+import com.aiminilab.aitoolmarket.tool.dto.PublicToolDetailResponse;
+import com.aiminilab.aitoolmarket.tool.dto.PublicToolSummaryResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolCategoryResponse;
-import com.aiminilab.aitoolmarket.tool.dto.ToolDetailResponse;
-import com.aiminilab.aitoolmarket.tool.dto.ToolSummaryResponse;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -30,22 +30,26 @@ public class ToolController {
     }
 
     @GetMapping("/tools")
-    public ApiResponse<PageResponse<ToolSummaryResponse>> tools(@RequestParam(required = false) String keyword,
-                                                                @RequestParam(required = false) Long categoryId,
-                                                                @RequestParam(required = false) Integer pageNo,
-                                                                @RequestParam(required = false) Integer pageSize) {
+    public ApiResponse<PageResponse<PublicToolSummaryResponse>> tools(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) Integer pageNo,
+            @RequestParam(required = false) Integer pageSize
+    ) {
         return ApiResponse.success(toolService.userTools(keyword, categoryId, pageNo, pageSize));
     }
 
     @GetMapping("/tools/search")
-    public ApiResponse<PageResponse<ToolSummaryResponse>> search(@RequestParam String keyword,
-                                                                 @RequestParam(required = false) Integer pageNo,
-                                                                 @RequestParam(required = false) Integer pageSize) {
+    public ApiResponse<PageResponse<PublicToolSummaryResponse>> search(
+            @RequestParam String keyword,
+            @RequestParam(required = false) Integer pageNo,
+            @RequestParam(required = false) Integer pageSize
+    ) {
         return ApiResponse.success(toolService.userTools(keyword, null, pageNo, pageSize));
     }
 
     @GetMapping("/tools/{toolCode}")
-    public ApiResponse<ToolDetailResponse> detail(@PathVariable String toolCode) {
+    public ApiResponse<PublicToolDetailResponse> detail(@PathVariable String toolCode) {
         return ApiResponse.success(toolService.userToolDetail(toolCode));
     }
 }

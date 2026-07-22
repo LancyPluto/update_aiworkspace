@@ -26,3 +26,9 @@ def test_agnes_providers_are_worker_ready_for_their_capabilities():
     registry.require_capability("agnes_video", "VIDEO_GENERATION")
     registry.require_worker_ready("agnes_video")
     assert registry.provider_protocol("agnes_video") == "agnes_video"
+
+
+def test_dashscope_qwen_tts_is_worker_ready_for_text_to_speech():
+    registry.require_capability("dashscope_qwen_tts", "TEXT_TO_SPEECH")
+    registry.require_worker_ready("dashscope_qwen_tts")
+    assert registry.provider_protocol("dashscope_qwen_tts") == "dashscope_qwen_tts"

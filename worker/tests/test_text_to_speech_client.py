@@ -70,7 +70,83 @@ class FakeAudioFileResponse:
         return None
 
 
+class FakeDashScopeResponse:
+    status_code = 200
+    text = ""
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {
+            "output": {
+                "audio": {
+                    "url": "https://dashscope-result.example/audio.wav",
+                }
+            },
+            "request_id": "dashscope-request-1",
+            "usage": {"characters": 13},
+        }
+
+
 class TextToSpeechClientTest(unittest.TestCase):
+    def test_dashscope_qwen_tts_uses_official_multimodal_generation_contract(self):
+        client = TextToSpeechClient()
+        with patch(
+            "client.text_to_speech_client.requests.post",
+            return_value=FakeDashScopeResponse(),
+        ) as post:
+            result = client.generate(
+                provider="dashscope_qwen_tts",
+                model="qwen3-tts-flash",
+                text="Hello product",
+                base_url="https://dashscope.aliyuncs.com/",
+                api_key="dashscope-secret",
+                params={},
+            )
+
+        self.assertEqual(
+            post.call_args.args[0],
+            "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+        )
+        self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer dashscope-secret")
+        self.assertEqual(
+            post.call_args.kwargs["json"],
+            {
+                "model": "qwen3-tts-flash",
+                "input": {
+                    "text": "Hello product",
+                    "voice": "Cherry",
+                    "language_type": "Chinese",
+                },
+            },
+        )
+        self.assertEqual(result.audio_url, "https://dashscope-result.example/audio.wav")
+        self.assertEqual(result.extension, "wav")
+        self.assertEqual(result.metadata["providerRequestId"], "dashscope-request-1")
+        self.assertEqual(result.metadata["billableUnits"], 13)
+        self.assertEqual(result.metadata["voice"], "Cherry")
+        self.assertEqual(result.metadata["languageType"], "Chinese")
+
+    def test_dashscope_qwen_tts_does_not_replay_ambiguous_post(self):
+        client = TextToSpeechClient()
+        client.max_transport_attempts = 3
+        with patch(
+            "client.text_to_speech_client.requests.post",
+            side_effect=requests.exceptions.ConnectionError("connection dropped"),
+        ) as post:
+            with self.assertRaises(TextToSpeechError):
+                client.generate(
+                    provider="dashscope_qwen_tts",
+                    model="qwen3-tts-flash",
+                    text="Hello product",
+                    base_url="https://dashscope.aliyuncs.com",
+                    api_key="dashscope-secret",
+                    params={},
+                )
+
+        self.assertEqual(post.call_count, 1)
+
     def test_minimax_async_create_query_and_downloads_file(self):
         client = TextToSpeechClient()
         with patch("client.text_to_speech_client.time.sleep"), patch(
@@ -93,6 +169,7 @@ class TextToSpeechClientTest(unittest.TestCase):
         self.assertEqual(result.extension, "mp3")
         self.assertEqual(result.metadata["taskId"], "task-1")
         self.assertEqual(result.metadata["fileId"], "file-1")
+        self.assertEqual(result.metadata["voice"], "English_expressive_narrator")
         self.assertIn("/v1/t2a_async_v2", post.call_args.args[0])
         self.assertIn("/v1/query/t2a_async_query_v2", request.call_args_list[0].args[1])
         self.assertIn("/v1/files/retrieve_content", request.call_args_list[1].args[1])
@@ -116,6 +193,7 @@ class TextToSpeechClientTest(unittest.TestCase):
         self.assertEqual(post.call_count, 2)
         self.assertEqual(result.audio_bytes, b"audio")
         self.assertEqual(result.metadata["traceId"], "provider-trace")
+        self.assertEqual(result.metadata["voice"], "English_expressive_narrator")
         headers = post.call_args.kwargs["headers"]
         self.assertEqual(headers["Connection"], "close")
         self.assertEqual(headers["User-Agent"], "ai-tool-market-worker/tts")
@@ -140,6 +218,23 @@ class TextToSpeechClientTest(unittest.TestCase):
         self.assertIn("url=https://api.minimax.io/v1/t2a_v2", message)
         self.assertIn("errorType=SSLError", message)
         self.assertNotIn("group-secret", message)
+
+    def test_siliconflow_speech_reports_actual_default_voice(self):
+        client = TextToSpeechClient()
+        with patch(
+            "client.text_to_speech_client.requests.post",
+            return_value=FakeAudioFileResponse(),
+        ):
+            result = client.generate(
+                provider="siliconflow_speech",
+                model="FunAudioLLM/CosyVoice2-0.5B",
+                text="hello",
+                base_url="https://api.siliconflow.cn",
+                api_key="secret",
+                params={},
+            )
+
+        self.assertEqual(result.metadata["voice"], "FunAudioLLM/CosyVoice2-0.5B:alex")
 
 
 def _fake_tar_audio_response(audio_bytes: bytes):

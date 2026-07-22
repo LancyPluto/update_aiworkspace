@@ -18,6 +18,13 @@ public interface GiftCardService {
 
     GiftCardResponse transfer(Long userId, Long giftCardId, String recipientAccount);
 
+    GiftCardResponse issueAdminGiftCard(Long userId,
+                                        Long giftCardPackageId,
+                                        int credits,
+                                        String operationId,
+                                        Long operatorId,
+                                        String reason);
+
     void createGiftCardFromOrder(Long userId, Long orderId, Long giftCardPackageId, int credits);
 
     void createGiftCardsFromOrderItems(Long userId, Long orderId, List<CreditRechargeOrderItem> items);

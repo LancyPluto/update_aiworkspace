@@ -7,6 +7,8 @@ import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.agent.service.AgentRateLimitService;
 import com.aiminilab.aitoolmarket.auth.security.InternalRequestSignatureVerifier;
 import com.aiminilab.aitoolmarket.auth.security.TokenDenylistService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,7 +22,9 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static com.aiminilab.aitoolmarket.testsupport.InternalApiTestSupport.signed;
@@ -54,6 +58,9 @@ class AdminAgentApiTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @MockBean
     private TokenDenylistService tokenDenylistService;
@@ -296,6 +303,46 @@ class AdminAgentApiTest {
     }
 
     @Test
+    void qwenTtsModelUsesPerCharacterProviderDefault() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+
+        mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "Qwen3 TTS per character",
+                                  "configCode": "qwen3_tts_per_character_test",
+                                  "provider": "dashscope_qwen_tts",
+                                  "modelName": "qwen3-tts-flash",
+                                  "baseUrl": "https://dashscope.aliyuncs.com",
+                                  "apiKey": "dashscope-test-key",
+                                  "executionOptionsJson": "{\\\"voice\\\":\\\"Cherry\\\",\\\"languageType\\\":\\\"Chinese\\\"}",
+                                  "unitPrice": 0.0001,
+                                  "enabled": false,
+                                  "agentEnabled": false,
+                                  "isDefault": false,
+                                  "capabilities": ["TEXT_TO_SPEECH"]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.billingUnit").value("PER_CHARACTER"))
+                .andExpect(jsonPath("$.data.unitPrice").value(0.0001));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT billing_unit FROM agent_model_configs WHERE config_code = ?",
+                String.class,
+                "qwen3_tts_per_character_test"
+        )).isEqualTo("PER_CHARACTER");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT execution_options_json FROM agent_model_configs WHERE config_code = ?",
+                String.class,
+                "qwen3_tts_per_character_test"
+        )).contains("\"voice\":\"Cherry\"").contains("\"languageType\":\"Chinese\"");
+    }
+
+    @Test
     void adminAgentModelToggleControlsUserSelectableModelsWithKlingCredentials() throws Exception {
         mockExternalAuthDependencies();
         String adminToken = login("/api/admin/v1/auth/login", "admin");
@@ -323,10 +370,36 @@ class AdminAgentApiTest {
                         .content(createBody))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.agentEnabled").value(true))
+                .andExpect(jsonPath("$.data.baseUrl").value("https://api-beijing.klingai.com"))
+                .andExpect(jsonPath("$.data.extraAuthJsonMasked").value("********"))
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
         String id = created.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1");
+
+        String unnamedCreated = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "configCode": "kling-agent-unnamed",
+                                  "provider": "kling_video",
+                                  "modelName": "private-internal-model-route",
+                                  "baseUrl": "https://private-upstream.example.com",
+                                  "extraAuthJson": "{\\"accessKey\\":\\"test-access-key\\",\\"secretKey\\":\\"test-secret-key\\"}",
+                                  "timeoutSeconds": 60,
+                                  "billingUnit": "PER_CALL",
+                                  "unitPrice": 3,
+                                  "enabled": true,
+                                  "agentEnabled": true,
+                                  "isDefault": false
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        String unnamedId = unnamedCreated.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1");
 
         String enabledList = mockMvc.perform(get("/api/v1/agent/model-configs")
                         .header("Authorization", "Bearer " + userToken))
@@ -334,7 +407,39 @@ class AdminAgentApiTest {
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
-        assertThat(enabledList).contains("\"configCode\":\"kling-agent-selectable\"");
+        assertThat(enabledList).contains("\"displayName\":\"Kling Agent Selectable\"");
+        JsonNode selectableModel = null;
+        for (JsonNode model : objectMapper.readTree(enabledList).path("data")) {
+            if ("Kling Agent Selectable".equals(model.path("displayName").asText())) {
+                selectableModel = model;
+                break;
+            }
+        }
+        assertThat(selectableModel).isNotNull();
+        Set<String> responseFields = new HashSet<>();
+        selectableModel.fieldNames().forEachRemaining(responseFields::add);
+        assertThat(responseFields).containsExactlyInAnyOrder(
+                "id",
+                "displayName",
+                "isDefault",
+                "capabilities",
+                "chatSelectable",
+                "channelCode",
+                "channelLabel",
+                "channelIconAsset"
+        );
+
+        JsonNode unnamedSelectableModel = null;
+        for (JsonNode model : objectMapper.readTree(enabledList).path("data")) {
+            if (unnamedId.equals(model.path("id").asText())) {
+                unnamedSelectableModel = model;
+                break;
+            }
+        }
+        assertThat(unnamedSelectableModel).isNotNull();
+        assertThat(unnamedSelectableModel.path("displayName").asText())
+                .doesNotContain("private-internal-model-route")
+                .endsWith(" " + unnamedId);
 
         String disableBody = createBody.replace("\"agentEnabled\": true", "\"agentEnabled\": false");
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/admin/v1/agent/model-config/{id}", id)
@@ -350,7 +455,7 @@ class AdminAgentApiTest {
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
-        assertThat(disabledList).doesNotContain("\"configCode\":\"kling-agent-selectable\"");
+        assertThat(disabledList).doesNotContain("\"displayName\":\"Kling Agent Selectable\"");
     }
 
     @Test
@@ -621,6 +726,76 @@ class AdminAgentApiTest {
                 .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
                 .andExpect(jsonPath("$.message").value(containsString(
                         "does not support capability VIDEO_GENERATION")));
+    }
+
+    @Test
+    @Transactional
+    void legacyOpenAiAccountAtMoonshotCanSaveKimiModelButStillRejectsCrossVendorAccount() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long moonshotAccountId = createVendorAccount(
+                adminToken,
+                "openai",
+                "Legacy Kimi account",
+                "https://api.moonshot.cn/v1"
+        );
+        Long klingAccountId = createVendorAccount(
+                adminToken,
+                "kling",
+                "Kimi cross vendor guard",
+                "https://api-beijing.klingai.com"
+        );
+        jdbcTemplate.update("""
+                INSERT INTO agent_model_configs(vendor_account_id, display_name, config_code, provider, model_name,
+                                                base_url, api_key, billing_unit, capabilities,
+                                                enabled, agent_enabled, is_default)
+                VALUES(?, 'Kimi K3', 'kimi_k3_legacy_vendor_test', 'openai_compatible', 'kimi-k3',
+                       NULL, '', 'TOKEN_PER_M', '["TEXT_GENERATION"]',
+                       0, 0, 0)
+                """, moonshotAccountId);
+        Long modelId = jdbcTemplate.queryForObject(
+                "SELECT id FROM agent_model_configs WHERE config_code = ?",
+                Long.class,
+                "kimi_k3_legacy_vendor_test"
+        );
+
+        String overview = mockMvc.perform(get("/api/admin/v1/unified-api/overview")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        JsonNode moonshotGroup = null;
+        for (JsonNode vendor : objectMapper.readTree(overview).path("data").path("vendors")) {
+            if ("moonshot".equals(vendor.path("vendorCode").asText())) {
+                moonshotGroup = vendor;
+                break;
+            }
+        }
+        assertThat(moonshotGroup).isNotNull();
+        assertThat(moonshotGroup.path("accounts").findValuesAsText("id"))
+                .contains(moonshotAccountId.toString());
+        assertThat(moonshotGroup.path("models").findValuesAsText("id"))
+                .contains(modelId.toString());
+
+        String modelBody = kimiModelBody(moonshotAccountId);
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(
+                                "/api/admin/v1/agent/model-config/{id}", modelId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(modelBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.vendorAccountId").value(moonshotAccountId.intValue()))
+                .andExpect(jsonPath("$.data.provider").value("openai_compatible"));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(
+                                "/api/admin/v1/agent/model-config/{id}", modelId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(kimiModelBody(klingAccountId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
+                .andExpect(jsonPath("$.message").value(containsString("does not belong")));
     }
 
     @Test
@@ -1242,6 +1417,26 @@ class AdminAgentApiTest {
                   "agentEnabled": false,
                   "isDefault": false,
                   "capabilities": ["VIDEO_GENERATION"]
+                }
+                """.formatted(vendorAccountId);
+    }
+
+    private String kimiModelBody(Long vendorAccountId) {
+        return """
+                {
+                  "vendorAccountId": %d,
+                  "displayName": "Kimi K3",
+                  "configCode": "kimi_k3_legacy_vendor_test",
+                  "provider": "openai_compatible",
+                  "modelName": "kimi-k3",
+                  "baseUrl": "",
+                  "timeoutSeconds": 60,
+                  "billingUnit": "TOKEN_PER_M",
+                  "unitPrice": 0,
+                  "enabled": false,
+                  "agentEnabled": false,
+                  "isDefault": false,
+                  "capabilities": ["TEXT_GENERATION"]
                 }
                 """.formatted(vendorAccountId);
     }

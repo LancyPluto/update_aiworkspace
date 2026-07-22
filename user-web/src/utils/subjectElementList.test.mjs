@@ -10,8 +10,8 @@ async function importSubjectElementList() {
     .replace(
       /import \{ parseFieldMeta \} from ".*?"\r?\n/,
       `const parseFieldMeta = (field) => {
-        if (!field?.optionsJson) return {}
-        try { return JSON.parse(field.optionsJson) } catch { return {} }
+        const options = field?.options
+        return options && typeof options === "object" && !Array.isArray(options) ? options : {}
       }\n`,
     )
   const { outputText } = ts.transpileModule(source, {
@@ -30,13 +30,13 @@ const subjectList = await importSubjectElementList()
 const field = {
   fieldName: "主体参考列表",
   required: true,
-  optionsJson: JSON.stringify({ minCount: 1, maxCount: 2 }),
+  options: { minCount: 1, maxCount: 2 },
 }
 
 const optionalField = {
   fieldName: "主体参考列表",
   required: false,
-  optionsJson: JSON.stringify({ minCount: 0, maxCount: 2 }),
+  options: { minCount: 0, maxCount: 2 },
 }
 
 test("serializes selected library subject to element_id", () => {
@@ -98,7 +98,7 @@ test("serializes temporary image and video subjects", () => {
 
 test("falls back to default max when field config uses zero", () => {
   const max = subjectList.subjectElementMax({
-    optionsJson: JSON.stringify({ maxCount: 0 }),
+    options: { maxCount: 0 },
   })
 
   assert.equal(max, 7)
@@ -108,10 +108,10 @@ test("supports maxItems alias and allowedModes for motion control", () => {
   const motionField = {
     fieldName: "主体参考列表",
     required: false,
-    optionsJson: JSON.stringify({
+    options: {
       maxItems: 1,
       allowedModes: ["library_ref", "element_id"],
-    }),
+    },
   }
 
   assert.equal(subjectList.subjectElementMax(motionField), 1)

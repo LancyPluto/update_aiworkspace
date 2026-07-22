@@ -1,6 +1,8 @@
 package com.aiminilab.aitoolmarket.agent;
 
 import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -8,6 +10,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+
+import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -30,10 +36,13 @@ class ModelOptionsApiTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private ObjectMapper objectMapper;
+
     @Test
     void publicModelOptionsGroupsEnabledAgentModelsByVendorWithoutSecrets() throws Exception {
         String adminToken = loginAdmin();
-        createModelConfig(adminToken, "public_image_enabled", "Public Image Enabled", "siliconflow_images",
+        long enabledModelId = createModelConfig(adminToken, "public_image_enabled", "Public Image Enabled", "siliconflow_images",
                 "Tongyi-MAI/Z-Image-Turbo", true, true,
                 """
                 {
@@ -51,6 +60,8 @@ class ModelOptionsApiTest {
                   "defaultQuality": "high"
                 }
                 """);
+        long unnamedModelId = createModelConfig(adminToken, "public_image_unnamed", "", "siliconflow_images",
+                "private-internal-model-route", true, true, "");
         createModelConfig(adminToken, "public_image_disabled", "Public Image Disabled", "siliconflow_images",
                 "disabled-image-model", false, true, "");
         createModelConfig(adminToken, "public_image_agent_disabled", "Public Image Agent Disabled", "siliconflow_images",
@@ -60,7 +71,6 @@ class ModelOptionsApiTest {
                         .param("mode", "image"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].vendorCode").value("siliconflow"))
-                .andExpect(jsonPath("$.data[0].models[0].configCode").value("public_image_enabled"))
                 .andExpect(jsonPath("$.data[0].models[0].capabilities[0]").value("IMAGE_GENERATION"))
                 .andExpect(jsonPath("$.data[0].models[0].imageParameters.sizes[0].label").value("方图 1024"))
                 .andExpect(jsonPath("$.data[0].models[0].imageParameters.sizes[0].value").value("1024x1024"))
@@ -74,11 +84,38 @@ class ModelOptionsApiTest {
                 .getResponse()
                 .getContentAsString();
 
-        assertThat(response).contains("public_image_enabled");
-        assertThat(response).doesNotContain("public_image_disabled");
-        assertThat(response).doesNotContain("public_image_agent_disabled");
-        assertThat(response).doesNotContain("apiKey");
-        assertThat(response).doesNotContain("extraAuth");
+        JsonNode group = objectMapper.readTree(response).path("data").get(0);
+        Set<String> groupFields = new HashSet<>();
+        group.fieldNames().forEachRemaining(groupFields::add);
+        assertThat(groupFields).containsExactlyInAnyOrder("vendorCode", "vendorName", "iconUrl", "models");
+
+        JsonNode enabledModel = findModel(group.path("models"), enabledModelId);
+        Set<String> modelFields = new HashSet<>();
+        enabledModel.fieldNames().forEachRemaining(modelFields::add);
+        assertThat(modelFields).containsExactlyInAnyOrder(
+                "id", "displayName", "capabilities", "imageParameters", "isDefault"
+        );
+        assertThat(enabledModel.path("displayName").asText()).isEqualTo("Public Image Enabled");
+
+        JsonNode unnamedModel = findModel(group.path("models"), unnamedModelId);
+        assertThat(unnamedModel.path("displayName").asText())
+                .doesNotContain("private-internal-model-route")
+                .endsWith(" " + unnamedModelId);
+
+        assertThat(response)
+                .contains("Public Image Enabled")
+                .doesNotContain("public_image_enabled")
+                .doesNotContain("public_image_disabled")
+                .doesNotContain("public_image_agent_disabled")
+                .doesNotContain("Public Image Disabled")
+                .doesNotContain("Public Image Agent Disabled")
+                .doesNotContain("Tongyi-MAI/Z-Image-Turbo")
+                .doesNotContain("private-internal-model-route")
+                .doesNotContain("unitPrice")
+                .doesNotContain("billingUnit")
+                .doesNotContain("0.03")
+                .doesNotContain("apiKey")
+                .doesNotContain("extraAuth");
     }
 
     private String loginAdmin() throws Exception {
@@ -95,9 +132,9 @@ class ModelOptionsApiTest {
         return AuthTestTokens.adminJwtFrom(result);
     }
 
-    private void createModelConfig(String adminToken, String configCode, String displayName, String provider,
+    private long createModelConfig(String adminToken, String configCode, String displayName, String provider,
                                    String modelName, boolean enabled, boolean agentEnabled, String extraAuthJson) throws Exception {
-        mockMvc.perform(post("/api/admin/v1/agent/model-config")
+        String response = mockMvc.perform(post("/api/admin/v1/agent/model-config")
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -122,6 +159,21 @@ class ModelOptionsApiTest {
                                         ? "\"\""
                                         : "\"" + extraAuthJson.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"",
                                 enabled, agentEnabled)))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.modelName").value(modelName))
+                .andExpect(jsonPath("$.data.unitPrice").value(0.03))
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+        return objectMapper.readTree(response).path("data").path("id").asLong();
+    }
+
+    private JsonNode findModel(JsonNode models, long modelId) {
+        for (JsonNode model : models) {
+            if (model.path("id").asLong() == modelId) {
+                return model;
+            }
+        }
+        throw new AssertionError("Model not found: " + modelId);
     }
 }

@@ -1591,6 +1591,8 @@ CREATE TABLE IF NOT EXISTS gift_cards (
   status VARCHAR(32) NOT NULL DEFAULT 'UNUSED',
   recharge_order_id BIGINT,
   issuance_key VARCHAR(128) UNIQUE,
+  issuance_operator_id BIGINT,
+  issuance_reason VARCHAR(512),
   redeemed_at DATETIME NULL,
   gifted_from_user_id BIGINT NULL,
   gifted_at DATETIME NULL,
@@ -1610,7 +1612,7 @@ INSERT INTO gift_card_packages (
 ('member_gift_growth', '进阶版会员礼品卡', 10500, 169.00, 'purple', 'MEMBER_CREDIT', 'growth', 'ACTIVE', 102),
 ('member_gift_pro', '高级版会员礼品卡', 22000, 339.00, 'gold', 'MEMBER_CREDIT', 'pro', 'ACTIVE', 103),
 ('member_gift_flagship', '豪华版会员礼品卡', 45000, 679.00, 'dark', 'MEMBER_CREDIT', 'flagship', 'ACTIVE', 104),
-('admin_default', '管理员赠送礼品卡', 0, 0.00, 'green', 'CREDIT', NULL, 'ACTIVE', 999);
+('admin_default', '管理员赠送礼品卡', 0, 0.00, 'green', 'CREDIT', NULL, 'HIDDEN', 999);
 
 CREATE TABLE admin_operation_logs (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,

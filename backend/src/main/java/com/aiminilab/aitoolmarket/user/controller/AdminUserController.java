@@ -5,7 +5,9 @@ import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.credit.dto.CreditAccountResponse;
 import com.aiminilab.aitoolmarket.credit.dto.CreditLogResponse;
+import com.aiminilab.aitoolmarket.credit.dto.ManualAddCreditsResponse;
 import com.aiminilab.aitoolmarket.credit.dto.ManualCreditRequest;
+import com.aiminilab.aitoolmarket.credit.dto.ManualGiftCardIssueRequest;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
 import com.aiminilab.aitoolmarket.user.dto.AdminUserResponse;
 import com.aiminilab.aitoolmarket.user.dto.UpdateUserStatusRequest;
@@ -71,16 +73,15 @@ public class AdminUserController {
     }
 
     @PostMapping("/{userId}/credits/manual-add")
-    public ApiResponse<CreditAccountResponse> manualAdd(@PathVariable Long userId,
-                                                        @Valid @RequestBody ManualCreditRequest request) {
-        // 管理员手动加算力：创建礼品卡（UNUSED），用户需手动兑换后才到账
-        adminUserService.manualAddCredits(
+    public ApiResponse<ManualAddCreditsResponse> manualAdd(@PathVariable Long userId,
+                                                           @Valid @RequestBody ManualGiftCardIssueRequest request) {
+        return ApiResponse.success(adminUserService.manualAddCredits(
                 userId,
                 request.amount(),
                 request.reason(),
+                request.operationId(),
                 AuthContext.get().userId()
-        );
-        return ApiResponse.success(creditService.account(userId));
+        ));
     }
 
     @PostMapping("/{userId}/credits/manual-deduct")

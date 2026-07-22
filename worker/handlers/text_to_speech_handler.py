@@ -13,6 +13,7 @@ from client.text_to_speech_client import (
 from handlers.generated_audio_persister import GeneratedAudioPersistError, GeneratedAudioPersister
 from providers import registry as provider_registry
 from providers.registry import ProviderRegistryError
+from utils.tts_config import merge_tts_params, speech_billable_units
 
 
 LOGGER = logging.getLogger(__name__)
@@ -51,9 +52,7 @@ class TextToSpeechHandler:
                 raise TextToSpeechError("text is required")
 
             self._mark_processing_safe(task_id, progress=12, progress_message="TTS task started", trace_id=trace_id)
-            tts_params = dict(params)
-            if model_config.get("minimaxGroupId"):
-                tts_params.setdefault("minimaxGroupId", model_config.get("minimaxGroupId"))
+            tts_params = merge_tts_params(model_config, params)
             result = self.tts_client.generate(
                 provider=provider,
                 model=str(model_config.get("modelName") or context.get("modelName") or ""),
@@ -79,14 +78,22 @@ class TextToSpeechHandler:
                 },
                 ensure_ascii=False,
             )
+            success_payload = {
+                "resourceType": "AUDIO",
+                "contentText": content,
+                "billableUnits": speech_billable_units(
+                    model_config,
+                    text=text,
+                    metadata=result.metadata,
+                ),
+                "providerCalled": True,
+            }
+            provider_request_id = _provider_request_id(result.metadata)
+            if provider_request_id:
+                success_payload["providerRequestId"] = provider_request_id
             self.backend_client.mark_success(
                 task_id,
-                {
-                    "resourceType": "AUDIO",
-                    "contentText": content,
-                    "billableUnits": 1,
-                    "providerCalled": True,
-                },
+                success_payload,
                 trace_id=trace_id,
             )
             LOGGER.info("TTS task %s completed traceId=%s", task_id, trace_id or "-")
@@ -106,7 +113,11 @@ class TextToSpeechHandler:
 
     def _persist_audio(self, task_id: int, result: SpeechGenerationResult) -> dict[str, str]:
         if result.audio_url:
-            return self.audio_persister.persist_audio_url(task_id=task_id, source_url=result.audio_url)
+            return self.audio_persister.persist_audio_url(
+                task_id=task_id,
+                source_url=result.audio_url,
+                extension=result.extension,
+            )
         if result.audio_bytes:
             return self.audio_persister.persist_audio_bytes(
                 task_id=task_id,
@@ -154,3 +165,14 @@ def _resolve_text(params: dict[str, Any]) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def _provider_request_id(metadata: dict[str, Any] | None) -> str:
+    source = metadata if isinstance(metadata, dict) else {}
+    return str(
+        source.get("providerRequestId")
+        or source.get("provider_request_id")
+        or source.get("requestId")
+        or source.get("request_id")
+        or ""
+    ).strip()

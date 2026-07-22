@@ -42,7 +42,6 @@ import {
   resolveAgentModelVendor,
   vendorIconClassForGroup,
 } from "@/utils/agentModelGroups"
-import { formatModelPriceSummary } from "@/utils/formatModelPrice"
 import { lightTap } from "@/utils/haptic"
 import { useInfiniteScroll } from "@/composables/useInfiniteScroll"
 
@@ -568,7 +567,7 @@ function mentionFromAgentFile(file: AgentFile): { mention: AgentReferenceMention
 }
 
 function modelLabel(model: AgentModelConfig) {
-  const base = model.displayName || model.modelName || model.configCode || `Model ${model.id}`
+  const base = model.displayName || `Model ${model.id}`
   return model.chatSelectable === false ? `${base}（工具）` : base
 }
 
@@ -590,7 +589,7 @@ function agentCapabilityLabel(capability: string) {
 function modelMeta(model: AgentModelConfig) {
   const capabilities = model.capabilities?.filter(Boolean).slice(0, 2).map(agentCapabilityLabel).join(" · ")
   const vendorLabel = modelVendorMeta(model).label
-  return capabilities || model.modelName || vendorLabel || model.configCode || model.provider
+  return capabilities || vendorLabel
 }
 
 function changeModel(rawId: string) {
@@ -1096,7 +1095,6 @@ defineExpose({
                 <strong>{{ modelLabel(model) }}</strong>
                 <small>{{ modelMeta(model) }}</small>
               </span>
-              <span class="model-detail-price">{{ formatModelPriceSummary(model) }}</span>
               <Check v-if="model.id === modelConfigId" class="h-4 w-4 shrink-0 text-primary" />
             </button>
           </section>
@@ -1787,15 +1785,6 @@ defineExpose({
 .model-detail-item:hover {
   background: rgb(255 255 255 / 0.07);
   color: #fff;
-}
-
-.model-detail-price {
-  flex-shrink: 0;
-  max-width: 108px;
-  font-size: 11px;
-  color: rgb(255 255 255 / 0.42);
-  text-align: right;
-  white-space: nowrap;
 }
 
 .model-picker-fade-enter-active,

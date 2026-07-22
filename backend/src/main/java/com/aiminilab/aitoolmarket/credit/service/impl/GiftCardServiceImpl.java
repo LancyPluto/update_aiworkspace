@@ -22,10 +22,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
 public class GiftCardServiceImpl implements GiftCardService {
+
+    private static final String ADMIN_ISSUANCE_PREFIX = "ADMIN_MANUAL:";
 
     private final GiftCardPackageMapper packageMapper;
     private final GiftCardMapper giftCardMapper;
@@ -156,6 +159,63 @@ public class GiftCardServiceImpl implements GiftCardService {
 
     @Override
     @Transactional
+    public GiftCardResponse issueAdminGiftCard(Long userId,
+                                               Long giftCardPackageId,
+                                               int credits,
+                                               String operationId,
+                                               Long operatorId,
+                                               String reason) {
+        GiftCardPackage pkg = packageMapper.selectById(giftCardPackageId);
+        if (pkg == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Gift card package not found");
+        }
+        if (credits <= 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Gift card credits must be positive");
+        }
+        if (operatorId == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "Issuing operator is required");
+        }
+
+        String normalizedOperationId = normalizeOperationId(operationId);
+        String normalizedReason = normalizeIssuanceReason(reason);
+        String issuanceKey = ADMIN_ISSUANCE_PREFIX + normalizedOperationId;
+        GiftCard existing = giftCardMapper.findByIssuanceKey(issuanceKey);
+        if (existing != null) {
+            validateAdminIssuance(existing, userId, credits, operatorId, normalizedReason);
+            return GiftCardResponse.from(existing, pkg.getPackageName(), pkg.getCardTheme());
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        GiftCard card = new GiftCard();
+        card.setCardCode(generateCardCode());
+        card.setPackageId(giftCardPackageId);
+        card.setOwnerUserId(userId);
+        card.setOriginalUserId(userId);
+        card.setCredits(credits);
+        card.setCardType("CREDIT");
+        card.setRequiredMemberTier(null);
+        card.setStatus("UNUSED");
+        card.setRechargeOrderId(null);
+        card.setIssuanceKey(issuanceKey);
+        card.setIssuanceOperatorId(operatorId);
+        card.setIssuanceReason(normalizedReason);
+        card.setRedeemedAt(null);
+        card.setGiftedFromUserId(null);
+        card.setGiftedAt(null);
+        card.setCreatedAt(now);
+        card.setUpdatedAt(now);
+        giftCardMapper.insertIssuanceIfAbsent(card);
+
+        GiftCard persisted = giftCardMapper.findByIssuanceKey(issuanceKey);
+        if (persisted == null) {
+            throw new IllegalStateException("Admin gift card issuance was not persisted");
+        }
+        validateAdminIssuance(persisted, userId, credits, operatorId, normalizedReason);
+        return GiftCardResponse.from(persisted, pkg.getPackageName(), pkg.getCardTheme());
+    }
+
+    @Override
+    @Transactional
     public void createGiftCardFromOrder(Long userId, Long orderId, Long giftCardPackageId, int credits) {
         GiftCardPackage pkg = packageMapper.selectById(giftCardPackageId);
         if (pkg == null) {
@@ -226,6 +286,45 @@ public class GiftCardServiceImpl implements GiftCardService {
             throw new BusinessException(ErrorCode.FORBIDDEN, "不能兑换自己购买的会员礼品卡");
         }
         membershipService.requireActiveTierAtLeast(userId, card.getRequiredMemberTier(), "兑换");
+    }
+
+    private void validateAdminIssuance(GiftCard card,
+                                       Long userId,
+                                       int credits,
+                                       Long operatorId,
+                                       String reason) {
+        boolean matches = Objects.equals(card.getOriginalUserId(), userId)
+                && Objects.equals(card.getCredits(), credits)
+                && Objects.equals(card.getIssuanceOperatorId(), operatorId)
+                && Objects.equals(card.getIssuanceReason(), reason);
+        if (!matches) {
+            throw new BusinessException(
+                    ErrorCode.IDEMPOTENCY_CONFLICT,
+                    "operationId was already used with different gift card parameters"
+            );
+        }
+    }
+
+    private String normalizeOperationId(String operationId) {
+        if (operationId == null || operationId.isBlank()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "operationId is required");
+        }
+        String normalized = operationId.trim();
+        if (normalized.length() > 100) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "operationId must not exceed 100 characters");
+        }
+        return normalized;
+    }
+
+    private String normalizeIssuanceReason(String reason) {
+        String normalized = reason == null ? "" : reason.trim();
+        if (normalized.isEmpty()) {
+            return "管理员发放礼品卡";
+        }
+        if (normalized.length() > 512) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "reason must not exceed 512 characters");
+        }
+        return normalized;
     }
 
     private String normalizeCardType(String cardType) {

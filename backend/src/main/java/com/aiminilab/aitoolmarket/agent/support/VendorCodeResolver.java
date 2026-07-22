@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.agent.config.ModelProviderDefinition;
 import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendor;
+import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorMapper;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
@@ -19,6 +20,7 @@ public class VendorCodeResolver {
     private static final Map<String, String> PROVIDER_TO_VENDOR = Map.ofEntries(
             Map.entry("deepseek", "deepseek"),
             Map.entry("openai_compatible", "openai"),
+            Map.entry("moonshot_compatible", "moonshot"),
             Map.entry("anthropic_compatible", "minimax"),
             Map.entry("minimax", "minimax"),
             Map.entry("minimax_speech", "minimax"),
@@ -32,6 +34,7 @@ public class VendorCodeResolver {
             Map.entry("infinitetalk", "infinitetalk"),
             Map.entry("kling_video", "kling"),
             Map.entry("bailian_happyhorse", "qwen"),
+            Map.entry("dashscope_qwen_tts", "qwen"),
             Map.entry("ofox_openai_images", "openai_gateway"),
             Map.entry("openai_images_gateway", "openai_gateway"),
             Map.entry("agnes_chat", "agnes"),
@@ -78,6 +81,26 @@ public class VendorCodeResolver {
         return resolveVendorCode(config.getProvider(), config.getBaseUrl(), config.getDisplayName(), config.getModelName());
     }
 
+    public String resolveEffectiveVendorCode(ModelVendorAccount account) {
+        if (account == null) {
+            return "other";
+        }
+        String declared = canonicalVendorCode(account.getVendorCode());
+        String inferred = canonicalVendorCode(resolveVendorCode(
+                "openai_compatible",
+                account.getBaseUrl(),
+                account.getAccountName(),
+                null
+        ));
+        if ((declared.isBlank() || "openai".equals(declared))
+                && !inferred.isBlank()
+                && !"openai".equals(inferred)
+                && !"other".equals(inferred)) {
+            return inferred;
+        }
+        return declared.isBlank() ? inferred : declared;
+    }
+
     public String resolveVendorCode(String provider, String baseUrl, String displayName, String modelName) {
         String normalizedProvider = provider == null ? "" : provider.trim().toLowerCase(Locale.ROOT);
         String mapped = PROVIDER_TO_VENDOR.get(normalizedProvider);
@@ -107,6 +130,7 @@ public class VendorCodeResolver {
         String normalized = vendorCode == null ? "" : vendorCode.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
             case "dashscope", "aliyun_bailian" -> "qwen";
+            case "kimi", "moonshot_compatible" -> "moonshot";
             case "openai_gateway" -> "openai";
             case "suno_music" -> "suno";
             default -> normalized;

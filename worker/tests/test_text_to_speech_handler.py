@@ -2,6 +2,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 WORKER_ROOT = Path(__file__).resolve().parents[1]
@@ -9,8 +10,10 @@ if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
 from client.text_to_speech_client import SpeechGenerationResult
+from handlers.generated_audio_persister import GeneratedAudioPersister
 from handlers.text_to_speech_handler import TextToSpeechHandler
 from task_queue.redis_consumer import TaskHandlerRouter
+from utils.tts_config import merge_tts_params
 
 
 class FakeBackend:
@@ -57,7 +60,7 @@ class FakeTtsClient:
             audio_bytes=b"audio-bytes",
             content_type="audio/mpeg",
             extension="mp3",
-            metadata={"providerTrace": "trace"},
+            metadata={"providerTrace": "trace", "usageCharacters": 14},
         )
 
 
@@ -88,6 +91,41 @@ class RecordingHandler:
 
 
 class TextToSpeechHandlerTest(unittest.TestCase):
+    def test_tts_params_keep_legacy_minimax_group_id_as_model_default(self):
+        params = merge_tts_params(
+            {
+                "minimaxGroupId": "legacy-group",
+                "executionOptionsJson": json.dumps({"voice": "English_narrator"}),
+            },
+            {"speed": 1.1},
+        )
+
+        self.assertEqual(
+            params,
+            {
+                "minimaxGroupId": "legacy-group",
+                "voice": "English_narrator",
+                "speed": 1.1,
+            },
+        )
+
+    def test_audio_persister_uses_explicit_wav_extension_and_content_type(self):
+        persister = GeneratedAudioPersister()
+        with patch("handlers.generated_audio_persister.asset_storage") as storage:
+            storage.put_bytes_public.return_value = "/generated/audio/106/audio-1.wav"
+            storage.local_path.return_value = Path("C:/tmp/audio-1.wav")
+            result = persister.persist_audio_bytes(
+                task_id=106,
+                audio_bytes=b"RIFF-wave",
+                content_type="application/octet-stream",
+                extension="wav",
+            )
+
+        self.assertEqual(result["url"], "/generated/audio/106/audio-1.wav")
+        self.assertEqual(result["contentType"], "audio/wav")
+        self.assertEqual(storage.put_bytes_public.call_args.args[0], "audio/106/audio-1.wav")
+        self.assertEqual(storage.put_bytes_public.call_args.args[2], "audio/wav")
+
     def test_handler_generates_and_persists_audio(self):
         context = {
             "taskId": 101,
@@ -124,6 +162,74 @@ class TextToSpeechHandlerTest(unittest.TestCase):
         content = json.loads(success_payload["contentText"])
         self.assertEqual(content["audios"][0]["url"], "/generated/audio/101/audio-1.mp3")
         self.assertEqual(content["metadata"]["providerTrace"], "trace")
+
+    def test_handler_reports_character_units_for_per_character_model(self):
+        class CharacterUsageTtsClient(FakeTtsClient):
+            def generate(self, **kwargs):
+                self.calls.append(kwargs)
+                return SpeechGenerationResult(
+                    audio_url="https://provider.example/qwen-audio.wav",
+                    extension="wav",
+                    metadata={
+                        "providerRequestId": "dashscope-request-105",
+                        "billableUnits": 14,
+                    },
+                )
+
+        context = {
+            "taskId": 105,
+            "traceId": "trace-105",
+            "status": "QUEUED",
+            "toolCode": "qwen_tts_demo",
+            "toolType": "TEXT_TO_SPEECH",
+            "params": {
+                "text": "Hello from TTS",
+                "voiceId": "Ethan",
+                "language": "English",
+                "responseFormat": "wav",
+                "groupId": "runtime-group",
+            },
+            "modelConfig": {
+                "provider": "dashscope_qwen_tts",
+                "modelName": "qwen3-tts-flash",
+                "baseUrl": "https://dashscope.aliyuncs.com",
+                "apiKey": "secret",
+                "billingUnit": "PER_CHARACTER",
+                "executionOptionsJson": json.dumps(
+                    {
+                        "voice": "Cherry",
+                        "languageType": "Chinese",
+                        "speed": 0.9,
+                        "format": "mp3",
+                        "minimaxGroupId": "default-group",
+                    }
+                ),
+            },
+        }
+        backend = FakeBackend(context)
+        tts_client = CharacterUsageTtsClient()
+        persister = FakePersister()
+        handler = TextToSpeechHandler(
+            backend_client=backend,
+            tts_client=tts_client,
+            audio_persister=persister,
+        )
+
+        result = handler.handle({"taskId": 105})
+
+        self.assertEqual(result["status"], "SUCCESS")
+        self.assertEqual(backend.successes[0][1]["billableUnits"], 14)
+        self.assertEqual(backend.successes[0][1]["providerRequestId"], "dashscope-request-105")
+        self.assertEqual(tts_client.calls[0]["params"]["voice"], "Ethan")
+        self.assertEqual(tts_client.calls[0]["params"]["languageType"], "English")
+        self.assertEqual(tts_client.calls[0]["params"]["speed"], 0.9)
+        self.assertEqual(tts_client.calls[0]["params"]["format"], "wav")
+        self.assertEqual(tts_client.calls[0]["params"]["minimaxGroupId"], "runtime-group")
+        self.assertNotIn("voiceId", tts_client.calls[0]["params"])
+        self.assertNotIn("language", tts_client.calls[0]["params"])
+        self.assertNotIn("responseFormat", tts_client.calls[0]["params"])
+        self.assertNotIn("groupId", tts_client.calls[0]["params"])
+        self.assertEqual(persister.calls[0]["extension"], "wav")
 
     def test_router_sends_text_to_speech_tool_type_to_tts_handler(self):
         context = {

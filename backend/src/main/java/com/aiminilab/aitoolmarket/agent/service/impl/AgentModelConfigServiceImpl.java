@@ -5,6 +5,7 @@ import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
+import com.aiminilab.aitoolmarket.agent.dto.AgentSelectableModelResponse;
 import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentModelConfigResponse;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
@@ -49,6 +50,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     private static final String BILLING_UNIT_PER_CALL = "PER_CALL";
     private static final String BILLING_UNIT_IMAGE_TOKEN = "IMAGE_TOKEN";
     private static final String BILLING_UNIT_PER_SECOND = "PER_SECOND";
+    private static final String BILLING_UNIT_PER_CHARACTER = "PER_CHARACTER";
     private static final BigDecimal TOKEN_UNIT_SCALE = BigDecimal.valueOf(1000);
     private static final String TEST_STRATEGY_ACCEPT_ONLY = "accept_only";
 
@@ -112,18 +114,18 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     }
 
     @Override
-    public List<AgentModelConfigResponse> agentSelectableList() {
+    public List<AgentSelectableModelResponse> agentSelectableList() {
         List<AgentModelConfig> configs = agentVisibleConfigs();
         if (!configs.isEmpty()) {
             return configs.stream()
-                    .map(config -> toResponse(config, isChatSelectableForAgent(config)))
+                    .map(config -> toSelectableResponse(config, isChatSelectableForAgent(config)))
                     .toList();
         }
         AgentModelConfig fallback = credentialResolver.resolveForExecution(findOrDefault());
         if (Boolean.FALSE.equals(fallback.getEnabled()) || Boolean.FALSE.equals(fallback.getAgentEnabled())) {
             return List.of();
         }
-        return List.of(toResponse(fallback, isChatSelectableForAgent(fallback)));
+        return List.of(toSelectableResponse(fallback, isChatSelectableForAgent(fallback)));
     }
 
     @Override
@@ -783,6 +785,18 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         );
     }
 
+    private AgentSelectableModelResponse toSelectableResponse(AgentModelConfig config, boolean chatSelectable) {
+        String channelCode = vendorCodeResolver.resolveVendorCode(config);
+        return AgentSelectableModelResponse.from(
+                config,
+                capabilitiesCodec,
+                chatSelectable,
+                channelCode,
+                vendorCodeResolver.vendorLabel(channelCode),
+                vendorCodeResolver.vendorIconAsset(channelCode)
+        );
+    }
+
     private List<AgentModelConfig> executableAgentConfigs() {
         return agentModelConfigMapper.findAgentEnabled()
                 .stream()
@@ -901,7 +915,13 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "token price must be non-negative");
         }
         String billingUnit = resolveBillingUnit(request.billingUnit(), provider);
-        if (!Set.of(BILLING_UNIT_TOKEN_PER_M, BILLING_UNIT_PER_CALL, BILLING_UNIT_IMAGE_TOKEN, BILLING_UNIT_PER_SECOND).contains(billingUnit)) {
+        if (!Set.of(
+                BILLING_UNIT_TOKEN_PER_M,
+                BILLING_UNIT_PER_CALL,
+                BILLING_UNIT_IMAGE_TOKEN,
+                BILLING_UNIT_PER_SECOND,
+                BILLING_UNIT_PER_CHARACTER
+        ).contains(billingUnit)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "unsupported billing unit");
         }
         if (request.extraAuthJson() != null && !request.extraAuthJson().isBlank()) {
@@ -946,40 +966,36 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         if (!java.util.Objects.equals(account.getRoutingPoolId(), pool.getId())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account does not belong to the selected routing pool");
         }
-        String modelBaseUrl = blankToNull(request.baseUrl());
-        if (modelBaseUrl == null) {
-            modelBaseUrl = account.getBaseUrl();
-        }
-        String modelVendor = vendorCodeResolver.canonicalVendorCode(vendorCodeResolver.resolveVendorCode(
-                request.provider(),
-                modelBaseUrl,
-                request.displayName(),
-                request.modelName()
-        ));
+        String modelVendor = resolveModelVendorCode(request);
+        String effectiveAccountVendor = vendorCodeResolver.canonicalVendorCode(
+                vendorCodeResolver.resolveEffectiveVendorCode(account));
+        String declaredAccountVendor = vendorCodeResolver.canonicalVendorCode(account.getVendorCode());
         String poolVendor = vendorCodeResolver.canonicalVendorCode(pool.getVendorCode());
-        if (!modelVendor.equals(poolVendor)) {
+        if (!modelVendor.equals(effectiveAccountVendor)
+                || (!poolVendor.equals(effectiveAccountVendor) && !poolVendor.equals(declaredAccountVendor))) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "routing pool does not belong to the model provider vendor");
         }
     }
 
     private void validateVendorAccountMatchesModel(AgentModelConfigRequest request, ModelVendorAccount account) {
-        String modelBaseUrl = blankToNull(request.baseUrl());
-        if (modelBaseUrl == null) {
-            modelBaseUrl = account.getBaseUrl();
-        }
-        String modelVendor = vendorCodeResolver.canonicalVendorCode(vendorCodeResolver.resolveVendorCode(
-                request.provider(),
-                modelBaseUrl,
-                request.displayName(),
-                request.modelName()
-        ));
-        String accountVendor = vendorCodeResolver.canonicalVendorCode(account.getVendorCode());
+        String modelVendor = resolveModelVendorCode(request);
+        String accountVendor = vendorCodeResolver.canonicalVendorCode(
+                vendorCodeResolver.resolveEffectiveVendorCode(account));
         if (!modelVendor.equals(accountVendor)) {
             throw new BusinessException(
                     ErrorCode.PARAM_ERROR,
                     "vendor account does not belong to the model provider vendor"
             );
         }
+    }
+
+    private String resolveModelVendorCode(AgentModelConfigRequest request) {
+        return vendorCodeResolver.canonicalVendorCode(vendorCodeResolver.resolveVendorCode(
+                request.provider(),
+                blankToNull(request.baseUrl()),
+                request.displayName(),
+                request.modelName()
+        ));
     }
 
     private void validateEnabledModelAccount(AgentModelConfigRequest request, ModelVendorAccount account) {
@@ -1269,6 +1285,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         }
         if (BILLING_UNIT_PER_SECOND.equalsIgnoreCase(defaultUnit)) {
             return BILLING_UNIT_PER_SECOND;
+        }
+        if (BILLING_UNIT_PER_CHARACTER.equalsIgnoreCase(defaultUnit)) {
+            return BILLING_UNIT_PER_CHARACTER;
         }
         return BILLING_UNIT_TOKEN_PER_M;
     }

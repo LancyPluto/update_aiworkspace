@@ -49,7 +49,7 @@ const props = defineProps<{
 
 const model = defineModel<Record<string, unknown>>({ required: true })
 
-type FieldOption = string | { label: string; value: string; promptPrefix?: string }
+type FieldOption = string | { label: string; value: string }
 const MULTI_IMAGE_HISTORY_KEY = "aidesu_multi_image_history:image"
 const MULTI_VIDEO_HISTORY_KEY = "aidesu_multi_image_history:video"
 

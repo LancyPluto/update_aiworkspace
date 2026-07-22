@@ -16,6 +16,11 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import type { WorkflowNode, WorkflowNodeData, AgentModelConfig } from "@/lib/api/types"
+import {
+  capabilityLabel,
+  workflowModelIssue,
+  workflowModelOptions,
+} from "@/lib/model-capabilities"
 import type { EditableField } from "@/lib/tool-fields"
 import { NODE_TYPE_MAP, type NodeTypeDefinition } from "./node-registry"
 import type { WorkflowSlot } from "./workflow-node"
@@ -129,16 +134,34 @@ export function InspectorPanel({
     [node, onUpdate],
   )
 
-  const modelOptions = useMemo(
-    () => modelConfigs.filter((config) => config.enabled !== false),
-    [modelConfigs],
-  )
+  const selectedModelId = useMemo(() => {
+    const raw = data?.parameters?.modelConfigId
+    if (raw == null || raw === "") return null
+    const id = Number(raw)
+    return Number.isFinite(id) && id > 0 ? id : null
+  }, [data?.parameters?.modelConfigId])
 
   const selectedModel = useMemo(() => {
-    const id = Number(data?.parameters?.modelConfigId)
-    if (!Number.isFinite(id)) return null
-    return modelConfigs.find((config) => config.id === id) || null
-  }, [data?.parameters?.modelConfigId, modelConfigs])
+    if (selectedModelId == null) return null
+    return modelConfigs.find((config) => config.id === selectedModelId) || null
+  }, [selectedModelId, modelConfigs])
+
+  const requiredModelCapability = def?.requiredModelCapability
+  const modelIssue = requiredModelCapability
+    ? workflowModelIssue(selectedModel, requiredModelCapability)
+    : null
+  const modelOptions = useMemo(
+    () => workflowModelOptions(modelConfigs, requiredModelCapability, selectedModelId),
+    [modelConfigs, requiredModelCapability, selectedModelId],
+  )
+
+  const modelIssueMessage = useMemo(() => {
+    if (!modelIssue || !requiredModelCapability) return null
+    const capability = capabilityLabel(requiredModelCapability)
+    if (modelIssue === "MISSING") return `请选择${capability}模型后再发布。`
+    if (modelIssue === "DISABLED") return `当前绑定模型已停用，请重新选择${capability}模型。`
+    return `当前绑定模型不具备${capability}能力，请重新选择。`
+  }, [modelIssue, requiredModelCapability])
 
   return (
     <aside className="flex h-full flex-col">
@@ -197,6 +220,11 @@ export function InspectorPanel({
                     modelOptions={modelOptions}
                   />
                 ))}
+                {modelIssueMessage ? (
+                  <p className="rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-xs leading-5 text-destructive">
+                    {modelIssueMessage}
+                  </p>
+                ) : null}
               </div>
             ) : null}
 
