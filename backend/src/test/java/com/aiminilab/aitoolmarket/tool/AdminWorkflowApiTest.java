@@ -750,6 +750,130 @@ class AdminWorkflowApiTest {
                 .andExpect(jsonPath("$.message").value(containsString("inactive model configuration")));
     }
 
+    @Test
+    void publishRejectsDisabledModelConfig() throws Exception {
+        String adminToken = login();
+        Long toolId = createTool(adminToken, "wf_disabled_tts_model");
+        long modelId = createWorkflowModel(
+                "wf_disabled_tts_model_config",
+                "minimax_speech",
+                "TEXT_TO_SPEECH",
+                false
+        );
+        saveWorkflow(adminToken, toolId, singleModelNodes("tts_model", "shot-audio", modelId),
+                singleModelEdges("shot-audio"), 0L).andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
+                .andExpect(jsonPath("$.message").value(containsString("模型已停用")));
+    }
+
+    @Test
+    void publishRejectsModelWithoutNodeCapability() throws Exception {
+        String adminToken = login();
+        Long toolId = createTool(adminToken, "wf_tts_model_capability_mismatch");
+        long modelId = createWorkflowModel(
+                "wf_tts_model_capability_mismatch_config",
+                "minimax_speech",
+                "TEXT_GENERATION",
+                true
+        );
+        saveWorkflow(adminToken, toolId, singleModelNodes("tts_model", "shot-audio", modelId),
+                singleModelEdges("shot-audio"), 0L).andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
+                .andExpect(jsonPath("$.message").value(containsString("TEXT_TO_SPEECH")));
+    }
+
+    @Test
+    void publishRejectsProviderWithoutNodeCapability() throws Exception {
+        String adminToken = login();
+        Long toolId = createTool(adminToken, "wf_tts_provider_capability_mismatch");
+        long modelId = createWorkflowModel(
+                "wf_tts_provider_capability_mismatch_config",
+                "minimax",
+                "TEXT_TO_SPEECH",
+                true
+        );
+        saveWorkflow(adminToken, toolId, singleModelNodes("tts_model", "shot-audio", modelId),
+                singleModelEdges("shot-audio"), 0L).andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
+                .andExpect(jsonPath("$.message").value(containsString("供应商 minimax 未声明能力 TEXT_TO_SPEECH")));
+    }
+
+    @Test
+    void publishRejectsProviderWhoseWorkerIsNotReady() throws Exception {
+        String adminToken = login();
+        Long toolId = createTool(adminToken, "wf_video_provider_worker_not_ready");
+        long modelId = createWorkflowModel(
+                "wf_video_provider_worker_not_ready_config",
+                "vidu_video",
+                "VIDEO_GENERATION",
+                true
+        );
+        saveWorkflow(adminToken, toolId, singleModelNodes("video_model", "shot-video", modelId),
+                singleModelEdges("shot-video"), 0L).andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
+                .andExpect(jsonPath("$.message").value(containsString("Worker 执行器尚未就绪")));
+    }
+
+    @Test
+    void publishAcceptsMusicSfxModelWithMusicCapability() throws Exception {
+        String adminToken = login();
+        Long toolId = createTool(adminToken, "wf_music_sfx_capability");
+        long modelId = createWorkflowModel(
+                "wf_music_sfx_capability_config",
+                "suno_music",
+                "MUSIC_GENERATION",
+                true
+        );
+        saveWorkflow(adminToken, toolId, singleModelNodes("music_sfx", "background-music", modelId),
+                singleModelEdges("background-music"), 0L).andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.publishedVersionId").isNumber());
+    }
+
+    @Test
+    void publishUsesProviderCapabilityWhenLegacyModelCapabilitiesAreEmpty() throws Exception {
+        String adminToken = login();
+        Long toolId = createTool(adminToken, "wf_tts_provider_capability_fallback");
+        long modelId = createWorkflowModel(
+                "wf_tts_provider_capability_fallback_config",
+                "dashscope_qwen_tts",
+                "TEXT_TO_SPEECH",
+                true
+        );
+        jdbcTemplate.update(
+                "UPDATE agent_model_configs SET capabilities = '[]', billing_unit = 'PER_CHARACTER', unit_price = 0.01 WHERE id = ?",
+                modelId
+        );
+        saveWorkflow(adminToken, toolId, singleModelNodes("tts_model", "shot-audio", modelId),
+                singleModelEdges("shot-audio"), 0L).andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/workflow/publish", toolId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.publishedVersionId").isNumber());
+    }
+
     private void saveWorkflow(String adminToken, Long toolId, String nodesJson, String edgesJson) throws Exception {
         long revision = currentDraftRevision(adminToken, toolId);
         saveWorkflow(adminToken, toolId, nodesJson, edgesJson, revision)
@@ -825,7 +949,7 @@ class AdminWorkflowApiTest {
                   input_token_price_per_1m, output_token_price_per_1m,
                   billing_unit, unit_price, capabilities,
                   enabled, agent_enabled, is_default, is_deleted
-                ) VALUES (?, ?, 'test', 'token-priced-model', 'https://example.invalid/v1', 60,
+                ) VALUES (?, ?, 'mock', 'token-priced-model', 'https://example.invalid/v1', 60,
                           2.0, 4.0, 'TOKEN_PER_M', 0, '["TEXT_GENERATION"]', 1, 1, 0, 0)
                 """, "Workflow token priced model", configCode);
         return jdbcTemplate.queryForObject(
@@ -833,6 +957,74 @@ class AdminWorkflowApiTest {
                 Long.class,
                 configCode
         );
+    }
+
+    private long createWorkflowModel(String configCode,
+                                     String provider,
+                                     String capability,
+                                     boolean enabled) {
+        jdbcTemplate.update("""
+                INSERT INTO agent_model_configs(
+                  display_name, config_code, provider, model_name, base_url, timeout_seconds,
+                  billing_unit, unit_price, capabilities,
+                  enabled, agent_enabled, is_default, is_deleted
+                ) VALUES (?, ?, ?, 'workflow-test-model', 'https://example.invalid', 60,
+                          'PER_CALL', 0.02, ?, ?, 0, 0, 0)
+                """, "Workflow model " + configCode, configCode, provider,
+                "[\"" + capability + "\"]", enabled ? 1 : 0);
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM agent_model_configs WHERE config_code = ?",
+                Long.class,
+                configCode
+        );
+    }
+
+    private String singleModelNodes(String nodeType, String nodeId, long modelId) {
+        return """
+                [
+                  {"id":"start","data":{"nodeDefType":"start","title":"Start"}},
+                  {"id":"%s","data":{"nodeDefType":"%s","title":"Model",
+                    "parameters":{"modelConfigId":%d}}},
+                  {"id":"output","data":{"nodeDefType":"video_output","title":"Output"}}
+                ]
+                """.formatted(nodeId, nodeType, modelId);
+    }
+
+    private String singleModelEdges(String nodeId) {
+        return """
+                [
+                  {"id":"e1","source":"start","target":"%s"},
+                  {"id":"e2","source":"%s","target":"output"}
+                ]
+                """.formatted(nodeId, nodeId);
+    }
+
+    private Long createTextOnlyModelConfig(String adminToken) throws Exception {
+        String response = mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "Workflow Text Only Model",
+                                  "configCode": "workflow_text_only_publish_guard",
+                                  "provider": "minimax",
+                                  "modelName": "MiniMax-M2.7",
+                                  "baseUrl": "https://api.minimaxi.com/v1",
+                                  "apiKey": "fake-key",
+                                  "timeoutSeconds": 60,
+                                  "billingUnit": "TOKEN_PER_M",
+                                  "unitPrice": 0,
+                                  "capabilities": ["TEXT_GENERATION"],
+                                  "enabled": true,
+                                  "agentEnabled": true,
+                                  "isDefault": false
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
     }
 
     private String login() throws Exception {

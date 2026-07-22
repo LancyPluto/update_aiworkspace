@@ -26,7 +26,8 @@ public record ExecutionModelConfigResponse(
         List<String> capabilities,
         String credentialSource,
         String credentialFingerprint,
-        ProxyPolicy proxyPolicy
+        ProxyPolicy proxyPolicy,
+        String billingUnit
 ) {
     public static ExecutionModelConfigResponse from(AgentModelConfig config, List<String> capabilities) {
         return from(config, capabilities, null);
@@ -53,7 +54,8 @@ public record ExecutionModelConfigResponse(
                 capabilities == null ? List.of() : capabilities,
                 credentialSource(config.getVendorAccountId(), config.getApiKey(), config.getExtraAuthJson()),
                 credentialFingerprint(config.getApiKey(), config.getExtraAuthJson()),
-                proxyPolicy
+                proxyPolicy,
+                config.getBillingUnit()
         );
     }
 
@@ -82,7 +84,8 @@ public record ExecutionModelConfigResponse(
                 snapshot.capabilities() == null ? List.of() : snapshot.capabilities(),
                 credentialSource(snapshot.vendorAccountId(), snapshot.apiKey(), snapshot.extraAuthJson()),
                 credentialFingerprint(snapshot.apiKey(), snapshot.extraAuthJson()),
-                runtimeProxyPolicy
+                runtimeProxyPolicy,
+                snapshot.billingUnit()
         );
     }
 

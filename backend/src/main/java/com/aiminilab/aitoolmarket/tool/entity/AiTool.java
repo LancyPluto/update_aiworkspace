@@ -36,6 +36,8 @@ public class AiTool {
     @TableField(exist = false)
     private String modelConfigName;
     @TableField(exist = false)
+    private String modelDisplayName;
+    @TableField(exist = false)
     private String modelName;
     private Long createdBy;
     private Long updatedBy;
@@ -225,6 +227,14 @@ public class AiTool {
 
     public void setModelConfigName(String modelConfigName) {
         this.modelConfigName = modelConfigName;
+    }
+
+    public String getModelDisplayName() {
+        return modelDisplayName;
+    }
+
+    public void setModelDisplayName(String modelDisplayName) {
+        this.modelDisplayName = modelDisplayName;
     }
 
     public String getModelName() {

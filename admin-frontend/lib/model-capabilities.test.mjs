@@ -16,13 +16,14 @@ async function importTsModule(path) {
   return import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}#${Date.now()}`)
 }
 
-test("fallback provider capabilities include supported video providers", async () => {
+test("fallback provider capabilities include supported workflow providers", async () => {
   const { resolvedModelCapabilities } = await importTsModule("./model-capabilities.ts")
 
   assert.deepEqual(resolvedModelCapabilities({ provider: "agnes_chat" }), ["TEXT_GENERATION"])
   assert.deepEqual(resolvedModelCapabilities({ provider: "agnes_images" }), ["IMAGE_GENERATION"])
   assert.deepEqual(resolvedModelCapabilities({ provider: "agnes_video" }), ["VIDEO_GENERATION"])
   assert.deepEqual(resolvedModelCapabilities({ provider: "infinitetalk" }), ["VIDEO_GENERATION"])
+  assert.deepEqual(resolvedModelCapabilities({ provider: "dashscope_qwen_tts" }), ["TEXT_TO_SPEECH"])
 })
 
 test("model capabilities are normalized, deduplicated, and hide the legacy digital-human marker", async () => {
@@ -146,4 +147,40 @@ test("tool types without a dedicated worker handler fall back to text execution"
   assert.equal(defaultExecutionHandlerForToolType("IMAGE_TO_IMAGE"), "TEXT_GENERATION")
   assert.equal(defaultExecutionHandlerForToolType("SPEECH_TO_TEXT"), "TEXT_GENERATION")
   assert.equal(defaultExecutionHandlerForToolType(undefined), "TEXT_GENERATION")
+})
+
+test("workflow model options keep only enabled compatible models and preserve an invalid current binding", async () => {
+  const { workflowModelOptions } = await importTsModule("./model-capabilities.ts")
+  const models = [
+    { id: 1, enabled: true, provider: "dashscope_qwen_tts", capabilities: ["TEXT_TO_SPEECH"] },
+    { id: 2, enabled: true, provider: "agnes_chat", capabilities: ["TEXT_GENERATION"] },
+    { id: 3, enabled: false, provider: "siliconflow_speech", capabilities: ["TEXT_TO_SPEECH"] },
+  ]
+
+  assert.deepEqual(
+    workflowModelOptions(models, "TEXT_TO_SPEECH", null).map((model) => model.id),
+    [1],
+  )
+  assert.deepEqual(
+    workflowModelOptions(models, "TEXT_TO_SPEECH", 2).map((model) => model.id),
+    [2, 1],
+  )
+})
+
+test("workflow model issue distinguishes missing, disabled, and incompatible bindings", async () => {
+  const { workflowModelIssue } = await importTsModule("./model-capabilities.ts")
+
+  assert.equal(workflowModelIssue(null, "TEXT_TO_SPEECH"), "MISSING")
+  assert.equal(
+    workflowModelIssue({ id: 1, enabled: false, capabilities: ["TEXT_TO_SPEECH"] }, "TEXT_TO_SPEECH"),
+    "DISABLED",
+  )
+  assert.equal(
+    workflowModelIssue({ id: 2, enabled: true, capabilities: ["VIDEO_GENERATION"] }, "TEXT_TO_SPEECH"),
+    "CAPABILITY_MISMATCH",
+  )
+  assert.equal(
+    workflowModelIssue({ id: 3, enabled: true, capabilities: ["TEXT_TO_SPEECH"] }, "TEXT_TO_SPEECH"),
+    null,
+  )
 })

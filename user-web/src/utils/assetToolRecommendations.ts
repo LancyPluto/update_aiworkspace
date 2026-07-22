@@ -1,6 +1,5 @@
 import type { TaskDetail, ToolSummary } from "@/api/types"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
-import { cleanToolDisplayText } from "@/utils/toolDisplayText"
 
 const DEFAULT_RECOMMENDATION_LIMIT = 8
 
@@ -45,7 +44,7 @@ export function recommendToolsForAsset(
 function supportsAssetInput(tool: ToolSummary, asset: AssetPreviewItem): boolean {
   const target = assetInputTarget(asset)
   const input = normalizeModality(tool.inputModality)
-  const text = `${tool.toolName} ${tool.description || ""} ${cleanToolDisplayText(tool.configNote)} ${tool.toolCode}`
+  const text = `${tool.toolName} ${tool.description || ""} ${tool.modelDisplayName || ""} ${tool.toolCode}`
   return (
     (target && (input.includes(target) || input.includes("MULTIMODAL") || input.includes("FILE"))) ||
     assetKeyword(asset).test(text)

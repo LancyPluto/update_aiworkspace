@@ -343,8 +343,8 @@ x-test-scenarios:
             data.status: FAILED
             data.errorCode: MODEL_CALL_FAILED
 
-  - id: CREDIT-ADMIN-MANUAL-ADD
-    name: 管理员手动加算力后用户账户和流水可查?
+  - id: CREDIT-ADMIN-GIFT-CARD
+    name: 管理员发送待用户兑换的算力礼品卡
     priority: P0
     dependsOn: [AUTH-USER-HAPPY, AUTH-ADMIN-HAPPY]
     steps:
@@ -354,27 +354,13 @@ x-test-scenarios:
           userId: "{{userId}}"
         request:
           amount: 50
-          reason: 自动化测试补充算?
+          operationId: openapi-admin-gift-card-50
+          reason: 自动化测试发放礼品卡
         expect:
           status: 200
           body:
             code: SUCCESS
-      - operationId: getCreditAccount
-        auth: userToken
-        expect:
-          status: 200
-          body:
-            code: SUCCESS
-            data.available: ">=50"
-      - operationId: getCreditLogs
-        auth: userToken
-        request:
-          pageNo: 1
-          pageSize: 20
-        expect:
-          status: 200
-          body:
-            code: SUCCESS
+            data.giftCard.status: UNUSED
 
 paths:
   /api/health:
@@ -697,6 +683,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/ToolCategoryListApiResponse"
 
+  /api/v1/model-options:
+    get:
+      tags: [Marketplace]
+      summary: List public model options grouped by vendor
+      operationId: listPublicModelOptions
+      parameters:
+        - name: mode
+          in: query
+          required: false
+          description: Optional generation mode used to filter model capabilities.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Public model option groups
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelOptionGroupListApiResponse"
+
   /api/v1/tools:
     get:
       tags: [Marketplace]
@@ -713,7 +719,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ToolPageApiResponse"
+                $ref: "#/components/schemas/PublicToolPageApiResponse"
 
   /api/v1/tools/search:
     get:
@@ -730,7 +736,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ToolPageApiResponse"
+                $ref: "#/components/schemas/PublicToolPageApiResponse"
 
   /api/v1/tools/{toolCode}:
     get:
@@ -745,9 +751,26 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ToolDetailApiResponse"
+                $ref: "#/components/schemas/PublicToolDetailApiResponse"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /api/v1/agent/model-configs:
+    get:
+      tags: [AgentChat]
+      summary: List models available in the user Agent model picker
+      operationId: listAgentSelectableModels
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Selectable public model metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentSelectableModelListApiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /api/v1/tasks:
     post:
@@ -1422,7 +1445,7 @@ paths:
   /api/admin/v1/users/{userId}/credits/manual-add:
     post:
       tags: [AdminUsers]
-      summary: 管理员手动增加算?
+      summary: 管理员向用户发送算力礼品卡
       operationId: manualAddCredits
       security:
         - bearerAuth: []
@@ -1433,19 +1456,20 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ManualCreditRequest"
+              $ref: "#/components/schemas/ManualGiftCardIssueRequest"
             examples:
               add:
                 value:
                   amount: 50
-                  reason: 自动化测试补充算?
+                  operationId: 9fd9a1c7-ae7d-4a5d-af2f-cc2575a5dc20
+                  reason: 运营发放礼品卡
       responses:
         "200":
-          description: 增加后的账户
+          description: 已发送的待兑换礼品卡，用户余额保持不变
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CreditAccountApiResponse"
+                $ref: "#/components/schemas/ManualAddCreditsApiResponse"
 
   /api/admin/v1/users/{userId}/credits/manual-deduct:
     post:
@@ -2321,6 +2345,434 @@ components:
           type: string
           example: ACTIVE
 
+    ModelOptionGroupListApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/PublicModelOptionGroup"
+
+    PublicModelOptionGroup:
+      type: object
+      additionalProperties: false
+      required: [vendorCode, vendorName, iconUrl, models]
+      properties:
+        vendorCode:
+          type: string
+        vendorName:
+          type: string
+        iconUrl:
+          type: string
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicModelOptionItem"
+
+    PublicModelOptionItem:
+      type: object
+      additionalProperties: false
+      required: [id, displayName, capabilities, imageParameters, isDefault]
+      properties:
+        id:
+          type: integer
+          format: int64
+        displayName:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        imageParameters:
+          $ref: "#/components/schemas/PublicModelImageParameters"
+        isDefault:
+          type: boolean
+
+    PublicModelImageParameters:
+      type: object
+      nullable: true
+      additionalProperties: false
+      required: [sizes, defaultSize, counts, defaultCount, qualities, defaultQuality]
+      properties:
+        sizes:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/PublicModelParameterOption"
+        defaultSize:
+          type: string
+          nullable: true
+        counts:
+          type: array
+          nullable: true
+          items:
+            type: integer
+        defaultCount:
+          type: integer
+          nullable: true
+        qualities:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/PublicModelParameterOption"
+        defaultQuality:
+          type: string
+          nullable: true
+
+    PublicModelParameterOption:
+      type: object
+      additionalProperties: false
+      required: [label, value]
+      properties:
+        label:
+          type: string
+        value:
+          type: string
+
+    PublicToolPageApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/PublicToolPage"
+
+    PublicToolPage:
+      type: object
+      additionalProperties: false
+      properties:
+        list:
+          type: array
+          description: Ordered by the server; no internal tool ordering identifier is exposed.
+          items:
+            $ref: "#/components/schemas/PublicToolSummary"
+        total:
+          type: integer
+          format: int64
+        pageNo:
+          type: integer
+        pageSize:
+          type: integer
+        hasNext:
+          type: boolean
+
+    PublicToolSummary:
+      type: object
+      additionalProperties: false
+      required: [toolCode, toolName]
+      properties:
+        toolCode:
+          type: string
+          example: xiaohongshu_copywriting
+        toolName:
+          type: string
+        categoryCode:
+          type: string
+          nullable: true
+        categoryName:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        coverUrl:
+          type: string
+          nullable: true
+        toolType:
+          type: string
+          nullable: true
+        inputModality:
+          type: string
+          nullable: true
+        outputModality:
+          type: string
+          nullable: true
+        toolKind:
+          type: string
+          enum: [text, image, video, digitalHuman, audio, agent, other]
+        estimatedCreditCost:
+          type: integer
+          nullable: true
+        variableCreditPricing:
+          type: boolean
+        modelDisplayName:
+          type: string
+          nullable: true
+        frontendStyle:
+          $ref: "#/components/schemas/PublicToolSummaryFrontendStyle"
+
+    PublicToolDetailApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/PublicToolDetail"
+
+    PublicToolDetail:
+      type: object
+      additionalProperties: false
+      required: [toolCode, toolName, fields]
+      properties:
+        toolCode:
+          type: string
+          example: xiaohongshu_copywriting
+        toolName:
+          type: string
+        categoryCode:
+          type: string
+          nullable: true
+        categoryName:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        coverUrl:
+          type: string
+          nullable: true
+        toolType:
+          type: string
+          nullable: true
+        inputModality:
+          type: string
+          nullable: true
+        outputModality:
+          type: string
+          nullable: true
+        toolKind:
+          type: string
+          enum: [text, image, video, digitalHuman, audio, agent, other]
+        estimatedCreditCost:
+          type: integer
+          nullable: true
+        variableCreditPricing:
+          type: boolean
+        modelDisplayName:
+          type: string
+          nullable: true
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicToolField"
+        frontendStyle:
+          $ref: "#/components/schemas/PublicToolFrontendStyle"
+
+    PublicToolField:
+      type: object
+      additionalProperties: false
+      required: [fieldKey, fieldName, fieldType, required, sortOrder]
+      properties:
+        fieldKey:
+          type: string
+        fieldName:
+          type: string
+        fieldType:
+          type: string
+          enum: [text, textarea, select, number, radio, aspect_ratio, checkbox, slider, image, multi_image, multi_video, subject_element_list, omni_video_list, file, image_upload, video_upload, audio_upload]
+        placeholder:
+          type: string
+          nullable: true
+        options:
+          oneOf:
+            - type: array
+              items:
+                oneOf:
+                  - type: string
+                  - $ref: "#/components/schemas/SelectOption"
+            - $ref: "#/components/schemas/PublicToolFieldUiOptions"
+        required:
+          type: boolean
+        executionRequired:
+          type: boolean
+          nullable: true
+        userRequired:
+          type: boolean
+          nullable: true
+        defaultValue:
+          type: string
+          nullable: true
+        sortOrder:
+          type: integer
+
+    PublicToolFieldUiOptions:
+      type: object
+      additionalProperties: false
+      properties:
+        core:
+          type: boolean
+        isCore:
+          type: boolean
+        uiRole:
+          type: string
+        role:
+          type: string
+        placement:
+          type: string
+        uiTier:
+          type: string
+          enum: [simple, advanced, all]
+        uiGroup:
+          type: string
+        uiGroupLabel:
+          type: string
+        uiOrder:
+          type: number
+        layoutHint:
+          type: string
+        helpText:
+          type: string
+        submitPolicy:
+          type: string
+          enum: [submit, ui_only]
+        visibleWhen:
+          type: object
+          additionalProperties:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
+        slider:
+          type: object
+          additionalProperties: false
+          properties:
+            min:
+              type: number
+            max:
+              type: number
+            step:
+              type: number
+        maxLength:
+          type: number
+        maxLengthByModel:
+          type: object
+          additionalProperties:
+            type: number
+        defaultValue:
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+        minCount:
+          type: number
+        maxCount:
+          type: number
+        maxItems:
+          type: number
+        accept:
+          type: string
+        accepts:
+          $ref: "#/components/schemas/PublicToolStringOrStringList"
+        mimeTypes:
+          $ref: "#/components/schemas/PublicToolStringOrStringList"
+        formats:
+          $ref: "#/components/schemas/PublicToolStringOrStringList"
+        extensions:
+          $ref: "#/components/schemas/PublicToolStringOrStringList"
+        maxSizeMb:
+          type: number
+        requiresPublicUrl:
+          type: boolean
+        minDuration:
+          type: number
+        durationByOrientation:
+          type: object
+          additionalProperties:
+            type: number
+        forceCharacterOrientation:
+          type: string
+        allowedModes:
+          type: array
+          items:
+            type: string
+        libraryEnabled:
+          type: boolean
+        libraryKind:
+          type: string
+        unit:
+          type: string
+        options:
+          type: array
+          items:
+            oneOf:
+              - type: string
+              - $ref: "#/components/schemas/SelectOption"
+
+    PublicToolStringOrStringList:
+      oneOf:
+        - type: string
+        - type: array
+          items:
+            type: string
+
+    PublicToolSummaryFrontendStyle:
+      type: object
+      additionalProperties: false
+      properties:
+        primaryColor:
+          type: string
+        mediaDisplayMode:
+          type: string
+        modelIconUrl:
+          type: string
+        comparisonOriginalUrl:
+          type: string
+        comparisonEffectUrl:
+          type: string
+        heroSubtitle:
+          type: string
+        demoThumbnails:
+          type: array
+          maxItems: 1
+          items:
+            type: string
+
+    PublicToolFrontendStyle:
+      type: object
+      additionalProperties: false
+      properties:
+        primaryColor:
+          type: string
+        welcomeMessage:
+          type: string
+        mediaDisplayMode:
+          type: string
+        modelIconUrl:
+          type: string
+        comparisonOriginalUrl:
+          type: string
+        comparisonEffectUrl:
+          type: string
+        audioPreviewUrl:
+          type: string
+        heroTitle:
+          type: string
+        heroSubtitle:
+          type: string
+        demoThumbnails:
+          type: array
+          items:
+            type: string
+        useCases:
+          type: array
+          items:
+            type: string
+        steps:
+          type: array
+          items:
+            type: string
+        recommendedToolCodes:
+          type: array
+          items:
+            type: string
+        beforeVideoUrl:
+          type: string
+        afterVideoUrl:
+          type: string
+
     ToolPageApiResponse:
       allOf:
         - $ref: "#/components/schemas/ApiResponse"
@@ -2867,6 +3319,96 @@ components:
           type: string
           format: date-time
 
+    ManualGiftCardIssueRequest:
+      type: object
+      required: [amount, operationId]
+      properties:
+        amount:
+          type: integer
+          minimum: 1
+          example: 50
+        reason:
+          type: string
+          maxLength: 512
+          example: 运营发放礼品卡
+        operationId:
+          type: string
+          maxLength: 100
+          example: 9fd9a1c7-ae7d-4a5d-af2f-cc2575a5dc20
+
+    AdminIssuedGiftCard:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        cardCode:
+          type: string
+        packageName:
+          type: string
+          nullable: true
+        credits:
+          type: integer
+        status:
+          type: string
+          enum: [UNUSED, USED, EXPIRED]
+        cardTheme:
+          type: string
+          nullable: true
+        cardType:
+          type: string
+        requiredMemberTier:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        giftedFromUserId:
+          type: integer
+          format: int64
+          nullable: true
+        giftedAt:
+          type: string
+          format: date-time
+          nullable: true
+        redeemedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    ManualAddCreditsResult:
+      type: object
+      properties:
+        userId:
+          type: integer
+          format: int64
+        operationId:
+          type: string
+        operatorId:
+          type: integer
+          format: int64
+        amount:
+          type: integer
+        balanceBefore:
+          type: integer
+        balanceAfter:
+          type: integer
+        reason:
+          type: string
+        giftCard:
+          $ref: "#/components/schemas/AdminIssuedGiftCard"
+        createdAt:
+          type: string
+          format: date-time
+
+    ManualAddCreditsApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ManualAddCreditsResult"
+
     ManualCreditRequest:
       type: object
       required: [amount]
@@ -3243,6 +3785,45 @@ components:
               items:
                 $ref: "#/components/schemas/AgentModelConfig"
 
+    AgentSelectableModelListApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/AgentSelectableModel"
+
+    AgentSelectableModel:
+      type: object
+      additionalProperties: false
+      required: [id, displayName, isDefault, capabilities, chatSelectable, channelCode, channelLabel, channelIconAsset]
+      properties:
+        id:
+          type: integer
+          format: int64
+        displayName:
+          type: string
+        isDefault:
+          type: boolean
+          nullable: true
+        capabilities:
+          type: array
+          items:
+            type: string
+        chatSelectable:
+          type: boolean
+        channelCode:
+          type: string
+          nullable: true
+        channelLabel:
+          type: string
+          nullable: true
+        channelIconAsset:
+          type: string
+          nullable: true
+
     AgentMemoryApiResponse:
       allOf:
         - $ref: "#/components/schemas/ApiResponse"
@@ -3357,7 +3938,7 @@ components:
           format: double
         billingUnit:
           type: string
-          enum: [TOKEN_PER_M, PER_CALL]
+          enum: [TOKEN_PER_M, PER_CALL, PER_SECOND, PER_CHARACTER, IMAGE_TOKEN]
         unitPrice:
           type: number
           format: double
@@ -3490,11 +4071,11 @@ components:
           description: Output token cost per 1M tokens.
         billingUnit:
           type: string
-          enum: [TOKEN_PER_M, PER_CALL]
+          enum: [TOKEN_PER_M, PER_CALL, PER_SECOND, PER_CHARACTER, IMAGE_TOKEN]
         unitPrice:
           type: number
           format: double
-          description: Cost per billable generated item when billingUnit is PER_CALL.
+          description: Cost per billable unit for PER_CALL, PER_SECOND, or PER_CHARACTER.
         enabled:
           type: boolean
         isDefault:
@@ -3606,7 +4187,7 @@ components:
           format: double
         billingUnit:
           type: string
-          enum: [TOKEN_PER_M, PER_CALL]
+          enum: [TOKEN_PER_M, PER_CALL, PER_SECOND, PER_CHARACTER, IMAGE_TOKEN]
         billableUnits:
           type: integer
         unitPrice:

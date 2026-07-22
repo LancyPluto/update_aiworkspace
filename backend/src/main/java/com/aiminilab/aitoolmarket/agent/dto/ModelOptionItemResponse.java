@@ -3,22 +3,13 @@ package com.aiminilab.aitoolmarket.agent.dto;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.support.ImageGenerationParameterResolver;
 
-import java.math.BigDecimal;
 import java.util.List;
 
 public record ModelOptionItemResponse(
         Long id,
-        Long modelConfigId,
-        String configCode,
         String displayName,
-        String modelName,
-        String provider,
-        String vendorCode,
-        String vendorName,
         List<String> capabilities,
         ImageGenerationParametersResponse imageParameters,
-        BigDecimal unitPrice,
-        String billingUnit,
         Boolean isDefault
 ) {
     public static ModelOptionItemResponse from(AgentModelConfig config,
@@ -28,18 +19,18 @@ public record ModelOptionItemResponse(
                                                ImageGenerationParameterResolver imageParameterResolver) {
         return new ModelOptionItemResponse(
                 config.getId(),
-                config.getId(),
-                config.getConfigCode(),
-                config.getDisplayName(),
-                config.getModelName(),
-                config.getProvider(),
-                vendorCode,
-                vendorName,
+                publicDisplayName(config, vendorName),
                 capabilities == null ? List.of() : List.copyOf(capabilities),
                 imageParameterResolver.resolve(config),
-                config.getUnitPrice(),
-                config.getBillingUnit(),
-                config.getDefault()
+                Boolean.TRUE.equals(config.getDefault())
         );
+    }
+
+    private static String publicDisplayName(AgentModelConfig config, String vendorName) {
+        if (config.getDisplayName() != null && !config.getDisplayName().isBlank()) {
+            return config.getDisplayName().trim();
+        }
+        String safeVendorName = vendorName == null || vendorName.isBlank() ? "其他" : vendorName.trim();
+        return safeVendorName + " 模型 " + config.getId();
     }
 }

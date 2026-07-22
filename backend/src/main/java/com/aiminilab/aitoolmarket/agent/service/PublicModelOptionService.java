@@ -86,8 +86,8 @@ public class PublicModelOptionService {
     private String resolveVendorCode(AgentModelConfig config, Map<Long, ModelVendorAccount> accountById) {
         if (config.getVendorAccountId() != null) {
             ModelVendorAccount account = accountById.get(config.getVendorAccountId());
-            if (account != null && account.getVendorCode() != null && !account.getVendorCode().isBlank()) {
-                return canonicalVendorCode(account.getVendorCode());
+            if (account != null) {
+                return canonicalVendorCode(vendorCodeResolver.resolveEffectiveVendorCode(account));
             }
         }
         return canonicalVendorCode(vendorCodeResolver.resolveVendorCode(config));
@@ -107,7 +107,7 @@ public class PublicModelOptionService {
                 .sorted(Comparator
                         .comparing((ModelOptionItemResponse model) -> !Boolean.TRUE.equals(model.isDefault()))
                         .thenComparing(model -> text(model.displayName()))
-                        .thenComparing(model -> text(model.modelName())))
+                        .thenComparing(model -> model.id() == null ? Long.MAX_VALUE : model.id()))
                 .toList();
     }
 

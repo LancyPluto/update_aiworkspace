@@ -255,26 +255,20 @@ export interface ToolCategory {
 
 /** GET /api/v1/tools 列表项 */
 export interface ToolSummary {
-  id: number
   toolCode: string
   toolName: string
-  categoryId: number
-  categoryName: string
+  categoryCode?: string | null
+  categoryName?: string | null
   description?: string | null
   coverUrl?: string | null
   toolType?: string | null
   inputModality?: string | null
   outputModality?: string | null
   toolKind?: "text" | "image" | "video" | "digitalHuman" | "audio" | "agent" | "other" | string | null
-  configNote?: string | null
-  status: ToolBizStatus
   estimatedCreditCost?: number | null
   /** 交互式工作流：展示「算力不详」，按步骤实际模型成本×1.2 扣费 */
   variableCreditPricing?: boolean | null
-  modelConfigId?: number | null
-  modelConfigName?: string | null
-  modelName?: string | null
-  executionHandler?: string | null
+  modelDisplayName?: string | null
   frontendStyle?: ToolFrontendStyle | null
 }
 
@@ -282,8 +276,9 @@ export interface ToolSummary {
 export interface ToolFieldOption {
   label: string
   value: string
-  promptPrefix?: string
 }
+
+export type ToolFieldOptions = Array<ToolFieldOption | string> | Record<string, unknown>
 
 /** 动态字段定义 */
 export interface ToolField {
@@ -308,14 +303,11 @@ export interface ToolField {
     | "video_upload"
     | "audio_upload"
   placeholder?: string | null
-  options?: Array<ToolFieldOption | string> | null
-  optionsJson?: string | null
+  options?: ToolFieldOptions | null
   required: boolean
   executionRequired?: boolean
   userRequired?: boolean
   defaultValue?: string | null
-  agentFillStrategy?: string | null
-  riskLevel?: string | null
   sortOrder: number
 }
 
@@ -338,28 +330,7 @@ export interface ToolFrontendStyle {
 }
 
 /** GET /api/v1/tools/{toolCode} —— 包含字段配置 */
-export interface ToolDetail {
-  id: number
-  toolCode: string
-  toolName: string
-  categoryId: number
-  categoryName: string
-  description?: string | null
-  coverUrl?: string | null
-  toolType?: string | null
-  inputModality?: string | null
-  outputModality?: string | null
-  toolKind?: "text" | "image" | "video" | "digitalHuman" | "audio" | "agent" | "other" | string | null
-  configNote?: string | null
-  status: ToolBizStatus
-  estimatedCreditCost?: number | null
-  /** 交互式工作流：展示「算力不详」，按步骤实际模型成本×1.2 扣费 */
-  variableCreditPricing?: boolean | null
-  modelConfigId?: number | null
-  modelConfigName?: string | null
-  modelName?: string | null
-  executionHandler?: string | null
-  frontendStyle?: ToolFrontendStyle | null
+export interface ToolDetail extends ToolSummary {
   /** 动态字段列表 */
   fields: ToolField[]
 }
@@ -381,37 +352,17 @@ export interface ImageGenerationParameters {
 }
 
 export interface ModelOptionItem {
-  id?: number | null
-  modelConfigId?: number | null
-  configCode?: string | null
-  displayName?: string | null
-  name?: string | null
-  modelConfigName?: string | null
-  modelName?: string | null
-  description?: string | null
-  toolCode?: string | null
-  toolName?: string | null
-  provider?: string | null
-  providerName?: string | null
-  vendorCode?: string | null
-  vendorName?: string | null
-  iconUrl?: string | null
-  modelIconUrl?: string | null
-  estimatedCreditCost?: number | null
-  badges?: string[] | null
-  capabilities?: string[] | null
-  imageParameters?: ImageGenerationParameters | null
-  isDefault?: boolean | null
-  enabled?: boolean | null
+  id: number
+  displayName: string
+  capabilities: string[]
+  imageParameters: ImageGenerationParameters | null
+  isDefault: boolean
 }
 
 export interface ModelOptionGroup {
-  vendorCode?: string | null
-  vendorName?: string | null
-  provider?: string | null
-  providerName?: string | null
-  iconUrl?: string | null
-  sortOrder?: number | null
+  vendorCode: string
+  vendorName: string
+  iconUrl: string | null
   models: ModelOptionItem[]
 }
 
@@ -809,16 +760,12 @@ export interface CreateAgentMessageResponse {
 export interface AgentModelConfig {
   id: number
   displayName?: string | null
-  configCode?: string | null
-  provider: string
-  modelName: string
-  baseUrl?: string | null
-  apiKeyMasked?: string | null
-  extraAuthJsonMasked?: string | null
-  enabled: boolean
-  agentEnabled?: boolean | null
   isDefault?: boolean | null
   capabilities?: string[] | null
+  chatSelectable?: boolean | null
+  channelCode?: string | null
+  channelLabel?: string | null
+  channelIconAsset?: string | null
 }
 
 export interface AgentRun {

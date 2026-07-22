@@ -62,7 +62,7 @@ export interface CapabilityState {
   fields: Record<string, unknown>
 }
 
-type FieldOption = string | { label: string; value: string; promptPrefix?: string }
+type FieldOption = string | { label: string; value: string }
 type AspectRatioOption = { label: string; value: string }
 type MaterialKind = "image" | "video" | "audio" | "file"
 

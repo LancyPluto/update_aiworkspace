@@ -22,17 +22,17 @@ export const SUBJECT_ELEMENT_MODE_OPTIONS: Array<{ label: string; value: Subject
   { label: "视频主体", value: "video_element" },
 ]
 
-export function subjectElementMax(field: Pick<ToolField, "options" | "optionsJson">): number {
+export function subjectElementMax(field: Pick<ToolField, "options">): number {
   const meta = parseFieldMeta(field)
   const maxCount = Number(meta.maxCount ?? meta.maxItems)
   return Number.isFinite(maxCount) && maxCount > 0 ? maxCount : 7
 }
 
-export function subjectElementMin(field: Pick<ToolField, "options" | "optionsJson">): number {
+export function subjectElementMin(field: Pick<ToolField, "options">): number {
   return parseFieldMeta(field).minCount ?? 0
 }
 
-export function subjectElementAllowedModes(field: Pick<ToolField, "options" | "optionsJson">): SubjectElementMode[] {
+export function subjectElementAllowedModes(field: Pick<ToolField, "options">): SubjectElementMode[] {
   const raw = parseFieldMeta(field).allowedModes || []
   const allowed = raw.filter((mode): mode is SubjectElementMode =>
     ["element_id", "library_ref", "image_element", "video_element"].includes(mode),
@@ -135,7 +135,7 @@ export function serializeSubjectElementItems(items: SubjectElementEditorItem[]):
 
 export function validateSubjectElementItems(
   items: SubjectElementEditorItem[],
-  field: Pick<ToolField, "fieldName" | "options" | "optionsJson" | "required">,
+  field: Pick<ToolField, "fieldName" | "options" | "required">,
 ): { valid: boolean; message?: string } {
   const minCount = subjectElementMin(field)
   const maxCount = subjectElementMax(field)

@@ -358,13 +358,41 @@ export interface AdminMember {
   creditAccount?: CreditAccount | null
 }
 
-export interface ManualAddCreditsPayload {
+export interface ManualCreditAdjustmentPayload {
   amount: number
   reason?: string
 }
 
-/** 手动加减算力接口返回与 CreditAccountResponse 一致 */
-export type ManualAddCreditsResult = CreditAccount
+export interface ManualAddCreditsPayload extends ManualCreditAdjustmentPayload {
+  operationId: string
+}
+
+export interface AdminIssuedGiftCard {
+  id: number
+  cardCode: string
+  packageName?: string | null
+  credits: number
+  status: string
+  cardTheme?: string | null
+  cardType?: string | null
+  requiredMemberTier?: string | null
+  createdAt: string
+  giftedFromUserId?: number | null
+  giftedAt?: string | null
+  redeemedAt?: string | null
+}
+
+export interface ManualAddCreditsResult {
+  userId: number
+  operationId: string
+  operatorId: number
+  amount: number
+  balanceBefore: number
+  balanceAfter: number
+  reason: string
+  giftCard: AdminIssuedGiftCard
+  createdAt: string
+}
 
 export interface UpdateUserStatusPayload {
   status: string
@@ -423,7 +451,7 @@ export interface AgentModelConfig {
   outputTokenPricePer1k?: number | null
   inputTokenPricePer1m?: number | null
   outputTokenPricePer1m?: number | null
-  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | 'IMAGE_TOKEN' | 'PER_SECOND' | string | null
+  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | 'IMAGE_TOKEN' | 'PER_SECOND' | 'PER_CHARACTER' | string | null
   unitPrice?: number | null
   enabled: boolean
   agentEnabled?: boolean | null
@@ -716,7 +744,7 @@ export interface AgentModelConfigPayload {
   outputTokenPricePer1k?: number
   inputTokenPricePer1m?: number
   outputTokenPricePer1m?: number
-  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | 'IMAGE_TOKEN' | 'PER_SECOND' | string
+  billingUnit?: 'TOKEN_PER_M' | 'PER_CALL' | 'IMAGE_TOKEN' | 'PER_SECOND' | 'PER_CHARACTER' | string
   unitPrice?: number
   enabled?: boolean
   agentEnabled?: boolean

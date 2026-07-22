@@ -602,6 +602,134 @@ public class WorkflowBillingService {
         }
     }
 
+    public int perCharacterReservationCredits(ToolWorkflowVersion version,
+                                              WorkflowRunStep step,
+                                              int publishedEstimate) {
+        JsonNode nodePolicy = readJson(version.getBillingPolicyJson())
+                .path("nodePolicies")
+                .path(step.getNodeId());
+        if (!"MODEL_PRICING".equals(nodePolicy.path("pricingSource").asText())) {
+            return publishedEstimate;
+        }
+        AgentModelConfig modelConfig = readModelPricing(nodePolicy.get("modelPricingSnapshot"));
+        if (modelConfig == null || !"PER_CHARACTER".equalsIgnoreCase(modelConfig.getBillingUnit())) {
+            return publishedEstimate;
+        }
+
+        String handlerKey = nodePolicy.path("staticParams").path("handlerKey").asText("").trim();
+        JsonNode dynamicInput = readJson(step.getInputJson());
+        String speechText = reservationSpeechText(dynamicInput, handlerKey);
+        if (speechText.isBlank()) {
+            return "comic.shot_tts".equals(handlerKey) ? 0 : publishedEstimate;
+        }
+
+        ObjectNode params = (ObjectNode) billingParams(nodePolicy, step);
+        params.put("text", speechText);
+        PricingQuote quote = pricingService.computeQuote(
+                readPricingPolicy(nodePolicy.path("pricingPolicy")),
+                modelConfig,
+                params,
+                null,
+                requiredNonNegativeInteger(nodePolicy, "fallbackChargeCredits", step.getNodeId())
+        );
+        if (!quote.modelDerived() || quote.chargeCredits() <= 0) {
+            throw new IllegalStateException(
+                    "Workflow PER_CHARACTER reservation has no valid dynamic quote: " + step.getNodeId()
+            );
+        }
+        return quote.chargeCredits();
+    }
+
+    private String reservationSpeechText(JsonNode input, String handlerKey) {
+        JsonNode operationInput = input.path("operationInput");
+        if ("comic.shot_tts".equals(handlerKey)) {
+            JsonNode shot = findNamedValue(operationInput, "shot");
+            return sceneSpeechText(shot != null && shot.isObject() ? shot : operationInput);
+        }
+
+        JsonNode scenes = findNamedValue(input, "scenes", "shots");
+        String fallback = firstText(input.path("form"), "plotOutline", "text", "content");
+        if (scenes != null && scenes.isArray()) {
+            StringBuilder combined = new StringBuilder();
+            for (JsonNode scene : scenes) {
+                String text = sceneSpeechText(scene);
+                if (text.isBlank()) {
+                    text = fallback;
+                }
+                combined.append(text);
+            }
+            if (!combined.isEmpty()) {
+                return combined.toString();
+            }
+        }
+        String direct = firstText(operationInput, "text", "input", "prompt", "content", "plotOutline");
+        return direct.isBlank() ? fallback : direct;
+    }
+
+    private String sceneSpeechText(JsonNode scene) {
+        if (scene == null || !scene.isObject()) {
+            return "";
+        }
+        JsonNode audio = scene.path("audio");
+        for (String value : List.of(
+                firstText(audio, "dialogue"),
+                firstText(scene, "dialogue"),
+                firstText(audio, "narration"),
+                firstText(scene, "narration")
+        )) {
+            if (!value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private String firstText(JsonNode value, String... names) {
+        if (value == null || !value.isObject()) {
+            return "";
+        }
+        for (String name : names) {
+            JsonNode candidate = value.get(name);
+            if (candidate != null && candidate.isTextual() && !candidate.textValue().isBlank()) {
+                return candidate.textValue().trim();
+            }
+        }
+        return "";
+    }
+
+    private JsonNode findNamedValue(JsonNode value, String... names) {
+        return findNamedValue(value, 0, names);
+    }
+
+    private JsonNode findNamedValue(JsonNode value, int depth, String... names) {
+        if (value == null || value.isNull() || depth > 8) {
+            return null;
+        }
+        if (value.isObject()) {
+            for (String name : names) {
+                JsonNode candidate = value.get(name);
+                if (candidate != null && !candidate.isNull()) {
+                    return candidate;
+                }
+            }
+            var children = value.elements();
+            while (children.hasNext()) {
+                JsonNode found = findNamedValue(children.next(), depth + 1, names);
+                if (found != null) {
+                    return found;
+                }
+            }
+        } else if (value.isArray()) {
+            for (JsonNode child : value) {
+                JsonNode found = findNamedValue(child, depth + 1, names);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
     private Settlement settleFromSnapshot(WorkflowStepCharge charge,
                                            WorkerSuccessRequest request) {
         WorkflowRun run = runMapper.selectById(charge.getRunId());
@@ -703,7 +831,7 @@ public class WorkflowBillingService {
                 ? ""
                 : modelConfig.getBillingUnit().trim().toUpperCase(Locale.ROOT);
         boolean priced = switch (unit) {
-            case "PER_CALL", "PER_SECOND" -> positive(modelConfig.getUnitPrice());
+            case "PER_CALL", "PER_SECOND", "PER_CHARACTER" -> positive(modelConfig.getUnitPrice());
             case "TOKEN_PER_M", "IMAGE_TOKEN" -> positive(modelConfig.getInputTokenPricePer1m())
                     || positive(modelConfig.getOutputTokenPricePer1m())
                     || positive(modelConfig.getInputTokenPricePer1k())
@@ -759,7 +887,7 @@ public class WorkflowBillingService {
                     (request.promptTokens() != null || request.completionTokens() != null)
                             && (Math.max(0, request.promptTokens() == null ? 0 : request.promptTokens())
                             + Math.max(0, request.completionTokens() == null ? 0 : request.completionTokens()) > 0);
-            case "PER_CALL", "PER_SECOND" ->
+            case "PER_CALL", "PER_SECOND", "PER_CHARACTER" ->
                     request.billableUnits() != null && request.billableUnits() > 0;
             default -> false;
         };

@@ -2,6 +2,8 @@ package com.aiminilab.aitoolmarket.tool.service;
 
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaAdminResponse;
+import com.aiminilab.aitoolmarket.tool.dto.PublicToolDetailResponse;
+import com.aiminilab.aitoolmarket.tool.dto.PublicToolSummaryResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolCategoryResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolCoverUploadResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolDetailResponse;
@@ -36,9 +38,9 @@ public interface ToolService {
 
     ToolCategoryResponse updateCategoryStatus(Long categoryId, String status);
 
-    PageResponse<ToolSummaryResponse> userTools(String keyword, Long categoryId, Integer pageNo, Integer pageSize);
+    PageResponse<PublicToolSummaryResponse> userTools(String keyword, Long categoryId, Integer pageNo, Integer pageSize);
 
-    ToolDetailResponse userToolDetail(String toolCode);
+    PublicToolDetailResponse userToolDetail(String toolCode);
 
     PageResponse<ToolSummaryResponse> adminTools(String keyword, Long categoryId, String status, Integer pageNo, Integer pageSize);
 

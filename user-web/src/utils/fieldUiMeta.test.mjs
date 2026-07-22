@@ -19,15 +19,15 @@ async function importFieldUiMeta() {
 
 const fieldUiMeta = await importFieldUiMeta()
 
-test("parses reusable form metadata from optionsJson", () => {
+test("parses reusable form metadata from structured options", () => {
   const meta = fieldUiMeta.parseFieldMeta({
-    optionsJson: JSON.stringify({
+    options: {
       uiRole: "motion_video",
       uiOrder: 2,
       layoutHint: "paired_media",
       helpText: "MP4/MOV",
       submitPolicy: "ui_only",
-    }),
+    },
   })
 
   assert.equal(meta.uiRole, "motion_video")
@@ -39,9 +39,9 @@ test("parses reusable form metadata from optionsJson", () => {
 
 test("groups fields by uiGroup and sorts by uiOrder", () => {
   const groups = fieldUiMeta.groupVisibleFields([
-    { fieldKey: "mode", fieldName: "质量", sortOrder: 99, optionsJson: JSON.stringify({ uiGroup: "settings", uiGroupLabel: "常用设置", uiOrder: 6 }) },
-    { fieldKey: "imageUrl", fieldName: "人物图片", sortOrder: 99, optionsJson: JSON.stringify({ uiGroup: "core", uiGroupLabel: "核心输入", uiOrder: 1 }) },
-    { fieldKey: "videoUrl", fieldName: "动作视频", sortOrder: 99, optionsJson: JSON.stringify({ uiGroup: "core", uiGroupLabel: "核心输入", uiOrder: 2 }) },
+    { fieldKey: "mode", fieldName: "质量", sortOrder: 99, options: { uiGroup: "settings", uiGroupLabel: "常用设置", uiOrder: 6 } },
+    { fieldKey: "imageUrl", fieldName: "人物图片", sortOrder: 99, options: { uiGroup: "core", uiGroupLabel: "核心输入", uiOrder: 1 } },
+    { fieldKey: "videoUrl", fieldName: "动作视频", sortOrder: 99, options: { uiGroup: "core", uiGroupLabel: "核心输入", uiOrder: 2 } },
   ])
 
   assert.equal(groups[0].key, "core")
@@ -51,7 +51,7 @@ test("groups fields by uiGroup and sorts by uiOrder", () => {
 
 test("advanced fields stay visible without a custom-mode switch", () => {
   const fields = [
-    { fieldKey: "staticMask", fieldName: "静态遮罩", optionsJson: JSON.stringify({ uiTier: "advanced" }) },
+    { fieldKey: "staticMask", fieldName: "静态遮罩", options: { uiTier: "advanced" } },
   ]
 
   assert.equal(fieldUiMeta.filterFieldsForUi(fields, {}, { advancedModeEnabled: false }).length, 1)

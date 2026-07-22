@@ -19,12 +19,11 @@ async function importTsModule(path) {
 const adapter = await importTsModule("./creatorAdapter.ts")
 
 const videoTool = {
-  id: 1,
   toolCode: "text_to_video",
   toolName: "Text to Video",
-  categoryId: 1,
+  categoryCode: "video-generation",
   categoryName: "视频生成",
-  status: "ONLINE",
+  toolKind: "video",
   estimatedCreditCost: 10,
   inputModality: "TEXT",
   outputModality: "VIDEO",
@@ -89,27 +88,25 @@ test("advanced form values satisfy unmapped required fields", () => {
   assert.equal(result.params.style, "写实")
 })
 
-test("selects default online tools by creator mode without hardcoding model labels", () => {
+test("selects default public tools by creator mode without hardcoding model labels", () => {
   const tools = [
-    { id: 1, toolCode: "offline_video", toolName: "Offline", categoryId: 1, categoryName: "视频", status: "OFFLINE", estimatedCreditCost: 1, outputModality: "VIDEO" },
-    { id: 2, toolCode: "image", toolName: "Image", categoryId: 1, categoryName: "图片", status: "ONLINE", estimatedCreditCost: 1, outputModality: "IMAGE" },
-    { id: 3, toolCode: "video", toolName: "Video", categoryId: 1, categoryName: "视频", status: "ONLINE", estimatedCreditCost: 1, outputModality: "VIDEO" },
+    { toolCode: "image", toolName: "Image", categoryCode: "image", categoryName: "Image", toolKind: "image", estimatedCreditCost: 1, outputModality: "IMAGE" },
+    { toolCode: "video", toolName: "Video", categoryCode: "video", categoryName: "Video", toolKind: "video", estimatedCreditCost: 1, outputModality: "VIDEO" },
   ]
 
   assert.equal(adapter.selectDefaultTool(tools, "video")?.toolCode, "video")
   assert.equal(adapter.selectDefaultTool(tools, "image")?.toolCode, "image")
 })
 
-test("builds homepage composer model options from online tool model bindings", () => {
+test("builds homepage composer model options from public tool model bindings", () => {
   assert.equal(typeof adapter.buildComposerModelOptions, "function")
 
   const tools = [
-    { id: 1, toolCode: "offline_video", toolName: "Offline", categoryId: 1, categoryName: "视频", status: "OFFLINE", estimatedCreditCost: 1, outputModality: "VIDEO", modelConfigName: "Offline Model", modelName: "offline" },
-    { id: 2, toolCode: "image_v21", toolName: "Image Creator", categoryId: 1, categoryName: "图片", status: "ONLINE", estimatedCreditCost: 1, outputModality: "IMAGE", modelConfigName: "Kling Image 2.1", modelName: "kling-v2-1" },
-    { id: 3, toolCode: "video_v3", toolName: "Video Creator", categoryId: 1, categoryName: "视频", status: "ONLINE", estimatedCreditCost: 1, outputModality: "VIDEO", modelConfigName: "Kling Video 3.0", modelName: "kling-v3" },
-    { id: 4, toolCode: "local_mock_video_generator", toolName: "Local Mock", categoryId: 1, categoryName: "视频", status: "ONLINE", estimatedCreditCost: 1, outputModality: "VIDEO", modelConfigId: 99, modelConfigName: "Local Media Mock", modelName: "local-media-mock" },
-    { id: 5, toolCode: "unbound_video", toolName: "Unbound", categoryId: 1, categoryName: "视频", status: "ONLINE", estimatedCreditCost: 1, outputModality: "VIDEO", modelConfigName: null, modelName: null },
-    { id: 6, toolCode: "banana_ppt_generator", toolName: "AI PPT Generator", categoryId: 1, categoryName: "智能体", toolType: "IMAGE_GENERATION", status: "ONLINE", estimatedCreditCost: 1, outputModality: "FILE", executionHandler: "TEXT_GENERATION", modelConfigName: "DeepSeek Chat", modelName: "deepseek-chat" },
+    { toolCode: "image_v21", toolName: "Image Creator", categoryCode: "image", categoryName: "Image", toolKind: "image", estimatedCreditCost: 1, outputModality: "IMAGE", modelDisplayName: "Kling Image 2.1" },
+    { toolCode: "video_v3", toolName: "Video Creator", categoryCode: "video", categoryName: "Video", toolKind: "video", estimatedCreditCost: 1, outputModality: "VIDEO", modelDisplayName: "Kling Video 3.0" },
+    { toolCode: "local_mock_video_generator", toolName: "Local Mock", categoryCode: "video", categoryName: "Video", toolKind: "video", estimatedCreditCost: 1, outputModality: "VIDEO", modelDisplayName: "Local Media Mock" },
+    { toolCode: "unbound_video", toolName: "Unbound", categoryCode: "video", categoryName: "Video", toolKind: "video", estimatedCreditCost: 1, outputModality: "VIDEO", modelDisplayName: null },
+    { toolCode: "banana_ppt_generator", toolName: "AI PPT Generator", categoryCode: "agent", categoryName: "Agent", toolType: "AGENT", toolKind: "agent", estimatedCreditCost: 1, outputModality: "FILE", modelDisplayName: "DeepSeek Chat" },
   ]
 
   const videoOptions = adapter.buildComposerModelOptions(tools, "video")
@@ -130,16 +127,12 @@ test("builds composer model groups from public model options response", () => {
       {
         vendorCode: "kling",
         vendorName: "Kling",
+        iconUrl: "/assets/vendor-icons/kling.svg",
         models: [
           {
-            modelConfigId: 42,
+            id: 42,
             displayName: "Kling 2.1",
-            modelName: "kling-v2-1",
-            description: "Create short videos from a prompt",
-            iconUrl: "/assets/vendor-icons/kling.svg",
-            badges: ["最新"],
-            toolCode: "kling_video",
-            estimatedCreditCost: 12,
+            capabilities: ["video_generation"],
             isDefault: true,
             imageParameters: {
               sizes: [{ label: "方图", value: "1024x1024" }],
@@ -153,12 +146,14 @@ test("builds composer model groups from public model options response", () => {
       {
         vendorCode: "veo",
         vendorName: "Veo",
+        iconUrl: "/assets/vendor-icons/veo.svg",
         models: [
           {
             id: 77,
-            name: "Veo 3",
-            modelName: "veo-3",
-            estimatedCreditCost: 20,
+            displayName: "Veo 3",
+            capabilities: ["video_generation"],
+            imageParameters: null,
+            isDefault: false,
           },
         ],
       },
@@ -168,38 +163,43 @@ test("builds composer model groups from public model options response", () => {
   assert.deepEqual(groups.map((group) => group.label), ["Kling", "Veo"])
   assert.equal(groups[0].models[0].key, "model:42")
   assert.equal(groups[0].models[0].modelConfigId, 42)
-  assert.equal(groups[0].models[0].toolCode, "kling_video")
-  assert.equal(groups[0].models[0].description, "Create short videos from a prompt")
+  assert.equal(groups[0].models[0].label, "Kling 2.1")
   assert.equal(groups[0].models[0].iconUrl, "/assets/vendor-icons/kling.svg")
-  assert.deepEqual(groups[0].models[0].badges, ["最新"])
+  assert.deepEqual(groups[0].models[0].capabilities, ["video_generation"])
   assert.equal(groups[0].models[0].isDefault, true)
   assert.deepEqual(groups[0].models[0].imageParameters.counts, [1, 2])
   assert.equal(groups[1].models[0].key, "model:77")
 })
 
-test("infers image size and count options for legacy public image model responses", () => {
+test("infers image size and count options for public image model responses", () => {
   const groups = adapter.buildComposerModelGroupsFromResponse({
     mode: "image",
     groups: [
       {
         vendorCode: "agnes",
         vendorName: "Agnes AI",
+        iconUrl: "/assets/vendor-icons/agnes.svg",
         models: [
           {
-            modelConfigId: 65,
+            id: 65,
             displayName: "agnes-image-2.1-flash",
-            modelName: "agnes-image-2.1-flash",
+            capabilities: ["image_generation"],
+            imageParameters: null,
+            isDefault: true,
           },
         ],
       },
       {
         vendorCode: "openai",
         vendorName: "OpenAI",
+        iconUrl: "/assets/vendor-icons/openai.svg",
         models: [
           {
-            modelConfigId: 25,
+            id: 25,
             displayName: "gpt-image-2-4k",
-            modelName: "gpt-image-2-4k",
+            capabilities: ["image_generation"],
+            imageParameters: null,
+            isDefault: false,
           },
         ],
       },
@@ -222,20 +222,21 @@ test("infers parameters only for actual Kling image models, not image-to-video e
       {
         vendorCode: "kling",
         vendorName: "可灵",
+        iconUrl: "/assets/vendor-icons/kling.svg",
         models: [
           {
-            modelConfigId: 9,
-            configCode: "kling-v1-image-to-video",
-            displayName: "可灵 V1 图生视频",
-            modelName: "kling-v1-i2v",
-            provider: "kling_video",
+            id: 9,
+            displayName: "Kling V1 image-to-video",
+            capabilities: ["image_generation"],
+            imageParameters: null,
+            isDefault: false,
           },
           {
-            modelConfigId: 23,
-            configCode: "8",
-            displayName: "可灵生图 v2-1",
-            modelName: "kling-v2-1",
-            provider: "kling_video",
+            id: 23,
+            displayName: "Kling-v2-1 image generation",
+            capabilities: ["image_generation"],
+            imageParameters: null,
+            isDefault: true,
           },
         ],
       },
@@ -259,86 +260,73 @@ test("builds composer model groups from tools as endpoint fallback", () => {
 
   const groups = adapter.buildComposerModelGroupsFromTools([
     {
-      id: 1,
       toolCode: "kling_video",
       toolName: "Kling Video",
-      categoryId: 1,
-      categoryName: "视频",
-      status: "ONLINE",
+      categoryCode: "video",
+      categoryName: "Video",
+      toolKind: "video",
       estimatedCreditCost: 12,
       outputModality: "VIDEO",
-      modelConfigId: 42,
-      modelConfigName: "Kling 2.1",
-      modelName: "kling-v2-1",
+      modelDisplayName: "Kling 2.1",
     },
     {
-      id: 2,
       toolCode: "veo_video",
       toolName: "Veo Video",
-      categoryId: 1,
-      categoryName: "视频",
-      status: "ONLINE",
+      categoryCode: "video",
+      categoryName: "Video",
+      toolKind: "video",
       estimatedCreditCost: 20,
       outputModality: "VIDEO",
-      modelConfigId: 77,
-      modelConfigName: "Veo 3",
-      modelName: "veo-3",
+      modelDisplayName: "Veo 3",
     },
   ], "video")
 
   assert.deepEqual(groups.map((group) => group.label), ["Kling", "Veo"])
-  assert.deepEqual(groups.flatMap((group) => group.models.map((model) => model.modelConfigId)), [42, 77])
+  assert.deepEqual(groups.flatMap((group) => group.models.map((model) => model.toolCode)), ["kling_video", "veo_video"])
+  assert.deepEqual(groups.flatMap((group) => group.models.map((model) => model.key)), ["model:kling_video", "model:veo_video"])
 })
 
 test("keeps video, digital human, image, and audio model candidates mutually exclusive", () => {
   const tools = [
     {
-      id: 1,
       toolCode: "digital_human_video",
       toolName: "Digital Human Presenter",
-      categoryId: 1,
-      categoryName: "数字人",
-      status: "ONLINE",
+      categoryCode: "digital-human",
+      categoryName: "Digital Human",
+      toolKind: "digitalHuman",
       estimatedCreditCost: 30,
       outputModality: "VIDEO",
-      modelConfigName: "Avatar Video",
-      modelName: "avatar-v1",
+      modelDisplayName: "Avatar Video",
     },
     {
-      id: 2,
       toolCode: "voice_tts",
       toolName: "Voice TTS",
-      categoryId: 1,
-      categoryName: "音频",
-      status: "ONLINE",
+      categoryCode: "audio",
+      categoryName: "Audio",
+      toolKind: "audio",
       estimatedCreditCost: 5,
       outputModality: "AUDIO",
-      modelConfigName: "TTS Pro",
-      modelName: "tts-pro",
+      modelDisplayName: "TTS Pro",
     },
     {
-      id: 3,
       toolCode: "plain_video",
       toolName: "Plain Video Generator",
-      categoryId: 1,
-      categoryName: "视频",
-      status: "ONLINE",
+      categoryCode: "video",
+      categoryName: "Video",
+      toolKind: "video",
       estimatedCreditCost: 10,
       outputModality: "VIDEO",
-      modelConfigName: "Video Pro",
-      modelName: "video-pro",
+      modelDisplayName: "Video Pro",
     },
     {
-      id: 4,
       toolCode: "image_model",
       toolName: "Image Generator",
-      categoryId: 1,
-      categoryName: "图片",
-      status: "ONLINE",
+      categoryCode: "image",
+      categoryName: "Image",
+      toolKind: "image",
       estimatedCreditCost: 4,
       outputModality: "IMAGE",
-      modelConfigName: "Image Pro",
-      modelName: "image-pro",
+      modelDisplayName: "Image Pro",
     },
   ]
 

@@ -25,6 +25,7 @@ public class PricingServiceImpl implements PricingService {
 
     private static final String BILLING_UNIT_PER_CALL = "PER_CALL";
     private static final String BILLING_UNIT_PER_SECOND = "PER_SECOND";
+    private static final String BILLING_UNIT_PER_CHARACTER = "PER_CHARACTER";
     private static final String BILLING_UNIT_IMAGE_TOKEN = "IMAGE_TOKEN";
     private static final String BILLING_UNIT_TOKEN_PER_M = "TOKEN_PER_M";
 
@@ -225,11 +226,17 @@ public class PricingServiceImpl implements PricingService {
         String unit = modelConfig.getBillingUnit() == null
                 ? ""
                 : modelConfig.getBillingUnit().trim().toUpperCase(java.util.Locale.ROOT);
-        if ((BILLING_UNIT_PER_CALL.equals(unit) || BILLING_UNIT_PER_SECOND.equals(unit))
+        if ((BILLING_UNIT_PER_CALL.equals(unit)
+                || BILLING_UNIT_PER_SECOND.equals(unit)
+                || BILLING_UNIT_PER_CHARACTER.equals(unit))
                 && modelConfig.getUnitPrice() != null) {
             int units = resolveUnits(unit, params, usage);
             BigDecimal cost = price(modelConfig.getUnitPrice()).multiply(BigDecimal.valueOf(units));
-            String detail = BILLING_UNIT_PER_SECOND.equals(unit) ? (units + " 秒") : (units + " 次");
+            String detail = switch (unit) {
+                case BILLING_UNIT_PER_SECOND -> units + " 秒";
+                case BILLING_UNIT_PER_CHARACTER -> units + " 字符";
+                default -> units + " 次";
+            };
             return cost.compareTo(BigDecimal.ZERO) > 0 ? VendorCost.derived(cost, detail) : VendorCost.fallback();
         }
         if (BILLING_UNIT_IMAGE_TOKEN.equals(unit)) {
@@ -279,6 +286,26 @@ public class PricingServiceImpl implements PricingService {
         }
         if (BILLING_UNIT_PER_SECOND.equals(unit)) {
             return durationSeconds(params);
+        }
+        if (BILLING_UNIT_PER_CHARACTER.equals(unit)) {
+            return textCharacters(params);
+        }
+        return 1;
+    }
+
+    private int textCharacters(JsonNode params) {
+        if (params == null || !params.isObject()) {
+            return 1;
+        }
+        for (String key : List.of("text", "input", "prompt", "content")) {
+            JsonNode value = params.get(key);
+            if (value == null || !value.isTextual()) {
+                continue;
+            }
+            String text = value.textValue().trim();
+            if (!text.isEmpty()) {
+                return text.codePointCount(0, text.length());
+            }
         }
         return 1;
     }

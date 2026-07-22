@@ -29,29 +29,30 @@ const adapter = await importTsModule("./toolPresentationAdapter.ts")
 
 test("classifies video and image tools from modality, category, and type", () => {
   const videoTool = {
-    id: 1,
     toolCode: "text_to_video",
     toolName: "Text to Video",
-    categoryId: 1,
+    categoryCode: "video-generation",
     categoryName: "视频生成",
-    status: "ONLINE",
+    toolKind: "video",
     estimatedCreditCost: 10,
     inputModality: "TEXT",
     outputModality: "VIDEO",
   }
   const imageTool = {
     ...videoTool,
-    id: 2,
     toolCode: "image_creator",
     toolName: "Image Creator",
+    categoryCode: "image-tools",
     categoryName: "图片工具",
+    toolKind: "image",
     outputModality: "IMAGE",
   }
   const fallbackVideoTool = {
     ...videoTool,
-    id: 3,
     toolCode: "motion_magic",
+    categoryCode: "creative-tools",
     categoryName: "创意工具",
+    toolKind: "other",
     toolType: "video-effect",
     outputModality: "TEXT",
   }
@@ -65,14 +66,13 @@ test("classifies video and image tools from modality, category, and type", () =>
 
 test("maps backend tool summaries into qianduan-style cards without losing route identity", () => {
   const tool = {
-    id: 9,
     toolCode: "banana_ppt_generator",
     toolName: "PPT Generator",
-    categoryId: 2,
+    categoryCode: "office",
     categoryName: "办公",
     description: "Create slides",
     coverUrl: "generated/tool-covers/ppt.png",
-    status: "ONLINE",
+    toolKind: "agent",
     estimatedCreditCost: 20,
     outputModality: "TEXT",
   }
@@ -92,13 +92,12 @@ test("maps backend tool summaries into qianduan-style cards without losing route
 
 test("maps ordinary tool CTAs to the migrated creator while preserving tool identity", () => {
   const tool = {
-    id: 10,
     toolCode: "text to video",
     toolName: "Video",
-    categoryId: 2,
+    categoryCode: "video",
     categoryName: "视频",
     coverUrl: null,
-    status: "ONLINE",
+    toolKind: "video",
     estimatedCreditCost: 5,
     outputModality: "VIDEO",
   }
@@ -112,23 +111,23 @@ test("maps ordinary tool CTAs to the migrated creator while preserving tool iden
 
 test("does not use bundled visual fallbacks for backend tools without cover images", () => {
   const agentTool = {
-    id: 11,
     toolCode: "ai_comic_drama_agent",
     toolName: "AI Comic Agent",
-    categoryId: 3,
+    categoryCode: "agent",
     categoryName: "智能体",
     coverUrl: null,
-    status: "ONLINE",
+    toolKind: "agent",
     estimatedCreditCost: 3,
     outputModality: "TEXT",
   }
 
   const imageTool = {
     ...agentTool,
-    id: 12,
     toolCode: "poster_creator",
     toolName: "Poster Creator",
+    categoryCode: "image-tools",
     categoryName: "图片工具",
+    toolKind: "image",
     outputModality: "IMAGE",
   }
 
@@ -138,14 +137,13 @@ test("does not use bundled visual fallbacks for backend tools without cover imag
 
 test("repairs mojibake backend display text in migrated tool cards", () => {
   const tool = {
-    id: 17,
     toolCode: "banana_ppt_generator",
     toolName: "AI PPT ç”Ÿæˆå™¨",
-    categoryId: 1,
+    categoryCode: "copywriting",
     categoryName: "Copywriting",
     description: "åŸºäºŽ banana-slides çš„å¤šæ­¥éª¤ PPT ç”Ÿæˆ",
     coverUrl: null,
-    status: "ONLINE",
+    toolKind: "agent",
     estimatedCreditCost: 90,
     outputModality: "FILE",
   }
@@ -158,9 +156,8 @@ test("repairs mojibake backend display text in migrated tool cards", () => {
 
 test("filters public tool cards by requested creator mode", () => {
   const tools = [
-    { id: 1, toolCode: "v", toolName: "V", categoryId: 1, categoryName: "视频", status: "ONLINE", estimatedCreditCost: 1, outputModality: "VIDEO" },
-    { id: 2, toolCode: "i", toolName: "I", categoryId: 1, categoryName: "图片", status: "ONLINE", estimatedCreditCost: 1, outputModality: "IMAGE" },
-    { id: 3, toolCode: "off", toolName: "Off", categoryId: 1, categoryName: "视频", status: "OFFLINE", estimatedCreditCost: 1, outputModality: "VIDEO" },
+    { toolCode: "v", toolName: "V", categoryCode: "video", categoryName: "视频", toolKind: "video", estimatedCreditCost: 1, outputModality: "VIDEO" },
+    { toolCode: "i", toolName: "I", categoryCode: "image", categoryName: "图片", toolKind: "image", estimatedCreditCost: 1, outputModality: "IMAGE" },
   ]
 
   assert.deepEqual(adapter.toWorkspaceToolCards(tools, "video").map((tool) => tool.id), ["v"])
@@ -170,9 +167,9 @@ test("filters public tool cards by requested creator mode", () => {
 
 test("keeps default homepage generation channels out of public tool cards", () => {
   const tools = [
-    { id: 1, toolCode: "gpt_image_text_to_image", toolName: "Default Image", categoryId: 1, categoryName: "图片", status: "ONLINE", estimatedCreditCost: 1, outputModality: "IMAGE" },
-    { id: 2, toolCode: "agnes_text_to_video", toolName: "Default Video", categoryId: 1, categoryName: "视频", status: "ONLINE", estimatedCreditCost: 1, outputModality: "VIDEO" },
-    { id: 3, toolCode: "kling_video_editor", toolName: "Kling Video Editor", categoryId: 1, categoryName: "视频工具", status: "ONLINE", estimatedCreditCost: 12, outputModality: "VIDEO" },
+    { toolCode: "gpt_image_text_to_image", toolName: "Default Image", categoryCode: "image", categoryName: "图片", toolKind: "image", estimatedCreditCost: 1, outputModality: "IMAGE" },
+    { toolCode: "agnes_text_to_video", toolName: "Default Video", categoryCode: "video", categoryName: "视频", toolKind: "video", estimatedCreditCost: 1, outputModality: "VIDEO" },
+    { toolCode: "kling_video_editor", toolName: "Kling Video Editor", categoryCode: "video-tools", categoryName: "视频工具", toolKind: "video", estimatedCreditCost: 12, outputModality: "VIDEO" },
   ]
 
   assert.equal(adapter.isInternalDefaultCreationTool("gpt_image_text_to_image"), true)
@@ -184,14 +181,13 @@ test("keeps default homepage generation channels out of public tool cards", () =
 
 test("classifies configured video cover URLs as video card media", () => {
   const tool = {
-    id: 21,
     toolCode: "kling_video_preview",
     toolName: "Kling Video Preview",
-    categoryId: 2,
+    categoryCode: "video",
     categoryName: "Video",
     description: "Preview video",
     coverUrl: "/generated/tool-covers/kling-preview.mp4",
-    status: "ONLINE",
+    toolKind: "video",
     estimatedCreditCost: 24,
     outputModality: "VIDEO",
   }
@@ -204,13 +200,12 @@ test("classifies configured video cover URLs as video card media", () => {
 
 test("classifies generated video URLs with filename question marks as video media", () => {
   const tool = {
-    id: 22,
     toolCode: "local_video_preview",
     toolName: "Local Video Preview",
-    categoryId: 2,
+    categoryCode: "video",
     categoryName: "Video",
     coverUrl: "/generated/tool-covers/??????????-local-video-preview-20260603211234.mp4",
-    status: "ONLINE",
+    toolKind: "video",
     estimatedCreditCost: 1,
     outputModality: "VIDEO",
   }
@@ -220,23 +215,21 @@ test("classifies generated video URLs with filename question marks as video medi
   assert.equal(card.mediaType, "video")
 })
 
-test("does not use internal config notes as public card descriptions", () => {
+test("uses a public fallback when the tool description is absent", () => {
   const tool = {
-    id: 23,
-    toolCode: "internal_note_tool",
-    toolName: "Internal Note Tool",
-    categoryId: 2,
+    toolCode: "description_fallback_tool",
+    toolName: "Description Fallback Tool",
+    categoryCode: "video",
     categoryName: "Video",
     description: null,
-    configNote: "operator-only instructions <!-- ppt-workflow:{\"engineSecrets\":{\"token\":\"secret\"}} -->",
     coverUrl: null,
-    status: "ONLINE",
+    toolKind: "video",
     estimatedCreditCost: 1,
     outputModality: "VIDEO",
   }
 
   const card = adapter.toWorkspaceToolCard(tool)
 
-  assert.notEqual(card.description, "operator-only instructions")
-  assert.equal(card.description.includes("secret"), false)
+  assert.equal(card.description.length > 0, true)
+  assert.notEqual(card.description, tool.toolName)
 })

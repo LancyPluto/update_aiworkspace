@@ -25,21 +25,6 @@ type CatalogEntry = {
 /** Vite publicDir=asset锛岄潤鎬佽祫婧愯矾寰勪负 /assets/vendor-icons */
 export const VENDOR_ICON_BASE = "/assets/vendor-icons"
 
-/** 涓浆绔欙細浼樺厛鎸?baseUrl 鍩熷悕鍖归厤 */
-const relayCatalog: CatalogEntry[] = [
-  { key: "relay:siliconflow", label: "纭呭熀娴佸姩", mark: "SF", iconAsset: "siliconflow", patterns: ["siliconflow"] },
-  { key: "relay:openrouter", label: "OpenRouter", mark: "OR", iconAsset: "openrouter", patterns: ["openrouter"] },
-  { key: "relay:ofox", label: "oFox", mark: "OX", iconAsset: "ofox", patterns: ["ofox.ai", "ofox"] },
-  { key: "relay:api2d", label: "API2D", mark: "2D", iconAsset: "api2d", patterns: ["api2d", "openai.api2d"] },
-  { key: "relay:closeai", label: "CloseAI", mark: "CA", iconAsset: "closeai", patterns: ["closeai", "close-ai"] },
-  { key: "relay:newapi", label: "New API", mark: "N", iconAsset: "newapi", patterns: ["new-api", "newapi", "one-api", "oneapi"] },
-  { key: "relay:oneapi", label: "One API", mark: "1", iconAsset: "oneapi", patterns: ["oneapi"] },
-  { key: "relay:aiproxy", label: "AI Proxy", mark: "PX", iconAsset: "aiproxy", patterns: ["aiproxy", "ai-proxy"] },
-  { key: "relay:groq", label: "Groq", mark: "GQ", iconAsset: "groq", patterns: ["groq.com"] },
-  { key: "relay:together", label: "Together AI", mark: "TG", iconAsset: "together", patterns: ["together.ai", "together.xyz"] },
-  { key: "relay:azure", label: "Azure OpenAI", mark: "Az", iconAsset: "azure", patterns: ["openai.azure.com", ".azure.com/openai"] },
-]
-
 /** 妯″瀷鍘傚晢锛氭寜妯″瀷鍚?/ 瀹樻柟 API 鍩熷悕璇嗗埆 */
 const vendorCatalog: CatalogEntry[] = [
   { key: "vendor:openai", label: "OpenAI", mark: "OA", iconAsset: "openai", patterns: ["api.openai.com", "openai.com/v1", "gpt-", "o1-", "o3-", "chatgpt"] },
@@ -86,8 +71,6 @@ const vendorFallback: AgentModelGroupMeta = {
   kind: "vendor",
 }
 
-const relayFallbackIcon = `${VENDOR_ICON_BASE}/relay.svg`
-
 export function catalogIconUrl(iconAsset: string) {
   return `${VENDOR_ICON_BASE}/${iconAsset}.svg`
 }
@@ -103,14 +86,10 @@ function toMeta(entry: CatalogEntry, kind: AgentModelGroupKind): AgentModelGroup
 }
 
 function modelSearchText(model: AgentModelConfig) {
-  return [model.displayName, model.modelName, model.configCode, model.provider, model.baseUrl]
+  return [model.displayName, model.channelCode, model.channelLabel]
     .filter(Boolean)
     .join(" ")
     .toLowerCase()
-}
-
-function baseSearchText(model: AgentModelConfig) {
-  return `${model.baseUrl || ""} ${model.provider || ""}`.toLowerCase()
 }
 
 function matchesAny(text: string, patterns: string[]) {
@@ -119,64 +98,6 @@ function matchesAny(text: string, patterns: string[]) {
 
 function findCatalogMatch(text: string, catalog: CatalogEntry[]) {
   return catalog.find((entry) => matchesAny(text, entry.patterns)) ?? null
-}
-
-function parseHostname(baseUrl?: string | null) {
-  if (!baseUrl?.trim()) return ""
-  try {
-    return new URL(baseUrl.trim()).hostname.toLowerCase()
-  } catch {
-    return ""
-  }
-}
-
-function isOfficialVendorHost(hostname: string) {
-  if (!hostname) return false
-  const officialHosts = [
-    "api.openai.com",
-    "api.deepseek.com",
-    "dashscope.aliyuncs.com",
-    "api.minimaxi.com",
-    "open.bigmodel.cn",
-    "api.moonshot.cn",
-    "ark.cn-beijing.volces.com",
-    "api.anthropic.com",
-    "generativelanguage.googleapis.com",
-    "api-beijing.klingai.com",
-    "api.minimax.chat",
-  ]
-  return officialHosts.some((host) => hostname === host || hostname.endsWith(`.${host}`))
-}
-
-function isRelayCompatibleProvider(provider: string) {
-  const normalized = provider.toLowerCase()
-  return normalized.includes("openai_compatible")
-    || normalized.includes("anthropic_compatible")
-    || normalized.includes("openai_images")
-    || normalized.includes("gateway")
-}
-
-function relayLabelFromHost(hostname: string): string {
-  const match = findCatalogMatch(hostname, relayCatalog)
-  if (match) return match.label
-  const short = hostname.replace(/^www\./, "")
-  const parts = short.split(".")
-  const brand = parts.length >= 2 ? parts[parts.length - 2] : short
-  return `涓浆绔?路 ${brand}`
-}
-
-function relayMetaFromHost(hostname: string): AgentModelGroupMeta {
-  const match = findCatalogMatch(hostname, relayCatalog)
-  if (match) {
-    return toMeta(match, "relay")
-  }
-  return {
-    key: `relay:host:${hostname}`,
-    label: relayLabelFromHost(hostname),
-    mark: hostname.slice(0, 1).toUpperCase(),
-    iconUrl: relayFallbackIcon,
-    kind: "relay",
-  }
 }
 
 export function resolveAgentModelGroup(model: AgentModelConfig): AgentModelGroupMeta {
@@ -192,46 +113,11 @@ export function resolveAgentModelGroup(model: AgentModelConfig): AgentModelGroup
     }
   }
   const allText = modelSearchText(model)
-  const baseText = baseSearchText(model)
-  const hostname = parseHostname(model.baseUrl)
-
-  const relayFromBase = findCatalogMatch(baseText, relayCatalog)
-  if (relayFromBase) {
-    return toMeta(relayFromBase, "relay")
-  }
-
-  if (hostname && !isOfficialVendorHost(hostname)) {
-    const relayFromHost = findCatalogMatch(hostname, relayCatalog)
-    if (relayFromHost) {
-      return toMeta(relayFromHost, "relay")
-    }
-    if (isRelayCompatibleProvider(model.provider || "")) {
-      return relayMetaFromHost(hostname)
-    }
-  }
-
   const vendorFromModel = findCatalogMatch(allText, vendorCatalog)
   if (vendorFromModel) {
     return toMeta(vendorFromModel, "vendor")
   }
-
-  const vendorFromBase = findCatalogMatch(baseText, vendorCatalog)
-  if (vendorFromBase) {
-    return toMeta(vendorFromBase, "vendor")
-  }
-
-  if ((model.provider || "").toLowerCase().includes("mock")) {
-    return { ...vendorFallback, key: "vendor:mock", label: "Mock" }
-  }
-
-  const provider = model.provider || "unknown"
-  return {
-    key: `vendor:provider:${provider}`,
-    label: provider,
-    mark: provider.slice(0, 1).toUpperCase(),
-    iconUrl: vendorFallback.iconUrl,
-    kind: "vendor",
-  }
+  return vendorFallback
 }
 
 export function groupKeyForModel(model: AgentModelConfig) {
@@ -252,26 +138,11 @@ export function resolveAgentModelVendor(model: AgentModelConfig): AgentModelGrou
     }
   }
   const allText = modelSearchText(model)
-  const baseText = baseSearchText(model)
   const vendorFromModel = findCatalogMatch(allText, vendorCatalog)
   if (vendorFromModel) {
     return toMeta(vendorFromModel, "vendor")
   }
-  const vendorFromBase = findCatalogMatch(baseText, vendorCatalog)
-  if (vendorFromBase) {
-    return toMeta(vendorFromBase, "vendor")
-  }
-  if ((model.provider || "").toLowerCase().includes("mock")) {
-    return { ...vendorFallback, key: "vendor:mock", label: "Mock" }
-  }
-  const provider = model.provider || "unknown"
-  return {
-    key: `vendor:provider:${provider}`,
-    label: provider,
-    mark: provider.slice(0, 1).toUpperCase(),
-    iconUrl: vendorFallback.iconUrl,
-    kind: "vendor",
-  }
+  return vendorFallback
 }
 
 export function buildAgentModelGroups(models: AgentModelConfig[]): AgentModelGroup[] {

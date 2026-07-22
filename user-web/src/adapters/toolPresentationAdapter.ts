@@ -57,13 +57,12 @@ export function isWorkflowTool(tool: Partial<ToolSummary>): boolean {
   if (WORKFLOW_TOOL_CODES.has(code)) return true
 
   const type = normalize(tool.toolType).toUpperCase()
-  const handler = normalize(tool.executionHandler).toUpperCase()
+  const kind = normalize(tool.toolKind).toUpperCase()
   const input = normalize(tool.inputModality).toUpperCase()
   const output = normalize(tool.outputModality).toUpperCase()
 
-  if (type === "AGENT" || handler === "DIGITAL_HUMAN") return true
+  if (type === "AGENT" || kind === "DIGITALHUMAN") return true
   if (type === "TEXT_TO_SPEECH" || type === "SPEECH_TO_TEXT" || type === "MUSIC_GENERATION") return true
-  if (handler === "TEXT_TO_SPEECH" || handler === "SPEECH_TO_TEXT" || handler === "MUSIC_GENERATION") return true
   if (input === "AUDIO" || output === "AUDIO") return true
 
   return isAgentTool(tool) || includesAny(searchableText(tool), [
@@ -102,16 +101,11 @@ function searchableText(tool: Partial<ToolSummary>): string {
     tool.toolType,
     tool.toolName,
     tool.description,
-    tool.modelName,
-    tool.modelConfigName,
+    tool.modelDisplayName,
   ]
     .map((value) => normalize(value))
     .filter(Boolean)
     .join(" ")
-}
-
-export function isOnlineTool(tool: Pick<ToolSummary, "status">): boolean {
-  return normalize(tool.status) === "online"
 }
 
 export function isInternalDefaultCreationTool(tool: Pick<ToolSummary, "toolCode"> | string): boolean {
@@ -177,7 +171,6 @@ export function toWorkspaceToolCard(tool: ToolSummary): ToolCardModel {
 
 export function toWorkspaceToolCards(tools: ToolSummary[], mode: ToolModeFilter = "all"): ToolCardModel[] {
   return tools
-    .filter(isOnlineTool)
     .filter((tool) => !isInternalDefaultCreationTool(tool))
     .filter((tool) => {
       if (mode === "video") return isVideoTool(tool)

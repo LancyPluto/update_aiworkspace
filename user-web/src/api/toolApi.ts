@@ -9,38 +9,6 @@ import {
   mockFetchEnabledAITools,
 } from "./aiToolMock"
 
-const FRONTEND_STYLE_PATTERN = /<!-- ai-tool-ui:(.*?) -->/s
-
-function parseFrontendStyle(
-  configNote?: string | null,
-): Pick<AITool, "primaryColor" | "welcomeMessage" | "mediaDisplayMode" | "modelIconUrl" | "comparisonOriginalUrl" | "comparisonEffectUrl" | "audioPreviewUrl"> {
-  const match = (configNote || "").match(FRONTEND_STYLE_PATTERN)
-  if (!match) return {}
-
-  try {
-    const parsed = JSON.parse(match[1]) as {
-      primaryColor?: unknown
-      welcomeMessage?: unknown
-      mediaDisplayMode?: unknown
-      modelIconUrl?: unknown
-      comparisonOriginalUrl?: unknown
-      comparisonEffectUrl?: unknown
-      audioPreviewUrl?: unknown
-    }
-    return {
-      primaryColor: typeof parsed.primaryColor === "string" ? parsed.primaryColor : undefined,
-      welcomeMessage: typeof parsed.welcomeMessage === "string" ? parsed.welcomeMessage : undefined,
-      mediaDisplayMode: parsed.mediaDisplayMode === "comparison" ? "comparison" : parsed.mediaDisplayMode === "effect" ? "effect" : "icon",
-      modelIconUrl: typeof parsed.modelIconUrl === "string" ? parsed.modelIconUrl : undefined,
-      comparisonOriginalUrl: typeof parsed.comparisonOriginalUrl === "string" ? parsed.comparisonOriginalUrl : undefined,
-      comparisonEffectUrl: typeof parsed.comparisonEffectUrl === "string" ? parsed.comparisonEffectUrl : undefined,
-      audioPreviewUrl: typeof parsed.audioPreviewUrl === "string" ? parsed.audioPreviewUrl : undefined,
-    }
-  } catch {
-    return {}
-  }
-}
-
 function capabilitiesFromTool(tool: ToolSummary): Capability[] {
   const capabilities: Capability[] = []
   const input = (tool.inputModality || "").toUpperCase()
@@ -69,25 +37,27 @@ function capabilitiesFromTool(tool: ToolSummary): Capability[] {
   return capabilities
 }
 
-export function mapToolToAITool(tool: ToolSummary | ToolDetail): AITool {
-  const style = parseFrontendStyle(tool.configNote)
+export function mapToolToAITool(tool: ToolSummary | ToolDetail, order = 0): AITool {
+  const style = tool.frontendStyle || {}
   const outputModality = (tool.outputModality || "").trim().toUpperCase()
+  const rawMediaDisplayMode = style.mediaDisplayMode ?? (outputModality === "VIDEO" ? "effect" : "icon")
   const mediaDisplayMode =
-    style.mediaDisplayMode ?? (outputModality === "VIDEO" ? "effect" : "icon")
+    rawMediaDisplayMode === "comparison" ? "comparison" : rawMediaDisplayMode === "effect" ? "effect" : "icon"
   return {
     id: tool.toolCode,
     name: tool.toolName,
     iconUrl: tool.coverUrl || "",
     description: tool.description || "",
-    enabled: (tool.status || "").toUpperCase() === "ONLINE",
-    order: tool.id,
-    primaryColor: style.primaryColor,
-    welcomeMessage: style.welcomeMessage,
+    enabled: true,
+    order,
+    primaryColor: style.primaryColor ?? undefined,
+    welcomeMessage: style.welcomeMessage ?? undefined,
     mediaDisplayMode,
-    modelIconUrl: style.modelIconUrl,
-    comparisonOriginalUrl: style.comparisonOriginalUrl,
-    comparisonEffectUrl: style.comparisonEffectUrl,
-    audioPreviewUrl: style.audioPreviewUrl,
+    modelIconUrl: style.modelIconUrl ?? undefined,
+    comparisonOriginalUrl: style.comparisonOriginalUrl ?? undefined,
+    comparisonEffectUrl: style.comparisonEffectUrl ?? undefined,
+    audioPreviewUrl: style.audioPreviewUrl ?? undefined,
+    frontendStyle: style,
     capabilities: capabilitiesFromTool(tool),
     inputModality: tool.inputModality,
     outputModality: tool.outputModality,
@@ -95,9 +65,8 @@ export function mapToolToAITool(tool: ToolSummary | ToolDetail): AITool {
     categoryCode: tool.categoryCode,
     categoryName: tool.categoryName,
     fields: "fields" in tool ? tool.fields : undefined,
-    estimatedCreditCost: tool.estimatedCreditCost,
-    modelConfigName: tool.modelConfigName,
-    modelName: tool.modelName,
+    estimatedCreditCost: tool.estimatedCreditCost ?? undefined,
+    modelConfigName: tool.modelDisplayName,
   }
 }
 
@@ -140,10 +109,7 @@ export async function fetchToolByCode(
 export async function fetchEnabledAITools(options?: { token?: string | null }): Promise<AITool[]> {
   if (isMockMode()) return mockFetchEnabledAITools()
   const page = await fetchTools({ token: options?.token, query: { pageNo: 1, pageSize: 100 } })
-  return page.list
-    .filter((tool) => (tool.status || "").toUpperCase() === "ONLINE")
-    .map(mapToolToAITool)
-    .sort((a, b) => a.order - b.order)
+  return [...page.list].reverse().map((tool, index) => mapToolToAITool(tool, index))
 }
 
 export async function fetchAIToolById(

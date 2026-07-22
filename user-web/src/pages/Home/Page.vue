@@ -87,11 +87,7 @@ const routerActions = [
   { label: "音乐生成", modality: "AUDIO", icon: Music },
 ]
 
-const onlineTools = computed(() =>
-  [...tools.value]
-    .filter((tool) => (tool.status || "").toUpperCase() === "ONLINE")
-    .sort((a, b) => a.id - b.id),
-)
+const onlineTools = computed(() => [...tools.value].reverse())
 
 const toolsByCode = computed(() => new Map(onlineTools.value.map((tool) => [tool.toolCode, tool])))
 
@@ -225,7 +221,7 @@ function costLabel(tool: ToolSummary) {
 }
 
 function modelLabel(tool: ToolSummary) {
-  return tool.modelConfigName || tool.modelName || tool.categoryName || modalityLabel(tool.outputModality)
+  return tool.modelDisplayName || tool.categoryName || modalityLabel(tool.outputModality)
 }
 
 function goToAgentWithPrompt(rawPrompt?: string) {

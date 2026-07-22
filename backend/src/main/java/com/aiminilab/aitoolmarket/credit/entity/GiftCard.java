@@ -19,6 +19,8 @@ public class GiftCard {
     private String status;
     private Long rechargeOrderId;
     private String issuanceKey;
+    private Long issuanceOperatorId;
+    private String issuanceReason;
     private LocalDateTime redeemedAt;
     private Long giftedFromUserId;
     private LocalDateTime giftedAt;
@@ -47,6 +49,10 @@ public class GiftCard {
     public void setRechargeOrderId(Long rechargeOrderId) { this.rechargeOrderId = rechargeOrderId; }
     public String getIssuanceKey() { return issuanceKey; }
     public void setIssuanceKey(String issuanceKey) { this.issuanceKey = issuanceKey; }
+    public Long getIssuanceOperatorId() { return issuanceOperatorId; }
+    public void setIssuanceOperatorId(Long issuanceOperatorId) { this.issuanceOperatorId = issuanceOperatorId; }
+    public String getIssuanceReason() { return issuanceReason; }
+    public void setIssuanceReason(String issuanceReason) { this.issuanceReason = issuanceReason; }
     public LocalDateTime getRedeemedAt() { return redeemedAt; }
     public void setRedeemedAt(LocalDateTime redeemedAt) { this.redeemedAt = redeemedAt; }
     public Long getGiftedFromUserId() { return giftedFromUserId; }

@@ -158,6 +158,8 @@ class UnifiedApiOverviewServiceImplTest {
         when(modelConfigMapper.findAllActive()).thenReturn(List.of(source, cachedFailure));
         when(accountMapper.countActiveModelsByAccountId(anyLong())).thenReturn(1);
         when(vendorCodeResolver.resolveVendorCode(anyString(), any(), any(), any())).thenReturn("openai");
+        when(vendorCodeResolver.resolveEffectiveVendorCode(any(ModelVendorAccount.class))).thenReturn("openai");
+        when(vendorCodeResolver.canonicalVendorCode(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
         when(vendorCodeResolver.vendorLabel("openai")).thenReturn("OpenAI");
         when(vendorCodeResolver.vendorIconAsset("openai")).thenReturn(null);
         when(vendorCodeResolver.vendorCatalog()).thenReturn(Map.of("openai", "OpenAI"));
@@ -202,6 +204,8 @@ class UnifiedApiOverviewServiceImplTest {
         when(modelConfigMapper.findAllActive()).thenReturn(List.of(model));
         when(accountMapper.countActiveModelsByAccountId(anyLong())).thenReturn(1);
         when(vendorCodeResolver.resolveVendorCode(anyString(), any(), any(), any())).thenReturn("openai");
+        when(vendorCodeResolver.resolveEffectiveVendorCode(any(ModelVendorAccount.class))).thenReturn("openai");
+        when(vendorCodeResolver.canonicalVendorCode(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
         when(vendorCodeResolver.vendorLabel("openai")).thenReturn("OpenAI");
         when(vendorCodeResolver.vendorIconAsset("openai")).thenReturn(null);
         when(vendorCodeResolver.vendorCatalog()).thenReturn(Map.of("openai", "OpenAI"));
@@ -245,6 +249,8 @@ class UnifiedApiOverviewServiceImplTest {
                 openState(1L), openState(2L)));
         when(accountMapper.countActiveModelsByAccountId(anyLong())).thenReturn(1);
         when(vendorCodeResolver.resolveVendorCode(anyString(), any(), any(), any())).thenReturn("openai");
+        when(vendorCodeResolver.resolveEffectiveVendorCode(any(ModelVendorAccount.class))).thenReturn("openai");
+        when(vendorCodeResolver.canonicalVendorCode(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
         when(vendorCodeResolver.vendorLabel("openai")).thenReturn("OpenAI");
         when(vendorCodeResolver.vendorIconAsset("openai")).thenReturn(null);
         when(vendorCodeResolver.vendorCatalog()).thenReturn(Map.of("openai", "OpenAI"));

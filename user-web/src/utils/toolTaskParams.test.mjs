@@ -10,8 +10,8 @@ async function importToolTaskParams() {
     .replace(
       /import \{ parseFieldMeta \} from ".*?"\r?\n/,
       `const parseFieldMeta = (field) => {
-        if (!field?.optionsJson) return {}
-        try { return JSON.parse(field.optionsJson) } catch { return {} }
+        const options = field?.options
+        return options && typeof options === "object" && !Array.isArray(options) ? options : {}
       }\n`,
     )
   const { outputText } = ts.transpileModule(source, {
@@ -61,9 +61,9 @@ test("keeps the original dynamic aspect-ratio field key for gateway forms", () =
 
 test("filters ui-only fields from task params", () => {
   const fields = [
-    { fieldKey: "prompt", fieldType: "textarea", required: false, optionsJson: "" },
-    { fieldKey: "staticMask", fieldType: "image_upload", required: false, optionsJson: JSON.stringify({ submitPolicy: "ui_only" }) },
-    { fieldKey: "dynamicMasks", fieldType: "textarea", required: false, optionsJson: JSON.stringify({ submitPolicy: "ui_only" }) },
+    { fieldKey: "prompt", fieldType: "textarea", required: false },
+    { fieldKey: "staticMask", fieldType: "image_upload", required: false, options: { submitPolicy: "ui_only" } },
+    { fieldKey: "dynamicMasks", fieldType: "textarea", required: false, options: { submitPolicy: "ui_only" } },
   ]
 
   assert.deepEqual(
@@ -78,8 +78,8 @@ test("filters ui-only fields from task params", () => {
 
 test("keeps non-empty array fields and custom aspect ratio values", () => {
   const fields = [
-    { fieldKey: "elementList", fieldType: "subject_element_list", required: false, optionsJson: "" },
-    { fieldKey: "aspectRatio", fieldType: "aspect_ratio", required: false, optionsJson: "" },
+    { fieldKey: "elementList", fieldType: "subject_element_list", required: false },
+    { fieldKey: "aspectRatio", fieldType: "aspect_ratio", required: false },
   ]
 
   assert.deepEqual(

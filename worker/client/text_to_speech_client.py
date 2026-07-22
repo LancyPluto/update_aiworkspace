@@ -5,7 +5,7 @@ from pathlib import Path
 import tarfile
 import time
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import requests
 
@@ -68,7 +68,72 @@ class TextToSpeechClient:
                 api_key=api_key,
                 params=params,
             )
+        if normalized_provider == "dashscope_qwen_tts":
+            return self._generate_dashscope_qwen_tts(
+                model=model,
+                text=text,
+                base_url=base_url or "https://dashscope.aliyuncs.com",
+                api_key=api_key,
+                params=params,
+            )
         raise TextToSpeechError(f"unsupported TTS provider: {provider or 'empty'}")
+
+    def _generate_dashscope_qwen_tts(
+        self,
+        *,
+        model: str,
+        text: str,
+        base_url: str,
+        api_key: str,
+        params: dict[str, Any],
+    ) -> SpeechGenerationResult:
+        payload = {
+            "model": model or "qwen3-tts-flash",
+            "input": {
+                "text": text,
+                "voice": _string_param(params, "voice", "voiceId", "voice_id", default="Cherry"),
+                "language_type": _string_param(
+                    params,
+                    "languageType",
+                    "language_type",
+                    "language",
+                    default="Chinese",
+                ),
+            },
+        }
+        response = self._post_json(
+            self._join_path(
+                base_url,
+                "/api/v1/services/aigc/multimodal-generation/generation",
+            ),
+            api_key=api_key,
+            payload=payload,
+            timeout_error="dashscope qwen TTS request timed out",
+            request_error="dashscope qwen TTS request failed",
+            allow_transport_retry=False,
+        )
+        output = response.get("output")
+        audio = output.get("audio") if isinstance(output, dict) else None
+        audio_url = str(audio.get("url") or "").strip() if isinstance(audio, dict) else ""
+        if not audio_url:
+            raise TextToSpeechError("dashscope qwen TTS response missing output.audio.url")
+
+        usage = response.get("usage")
+        reported_characters = _optional_positive_int(
+            usage.get("characters") if isinstance(usage, dict) else None
+        )
+        billable_units = reported_characters if reported_characters is not None else len(text)
+        return SpeechGenerationResult(
+            audio_url=audio_url,
+            extension=_extension_from_url(audio_url, default="wav"),
+            metadata={
+                "providerRequestId": response.get("request_id"),
+                "billableUnits": billable_units,
+                "usageCharacters": billable_units,
+                "voice": payload["input"]["voice"],
+                "languageType": payload["input"]["language_type"],
+            },
+        )
 
     def _generate_minimax_speech(
         self,
@@ -167,6 +232,7 @@ class TextToSpeechClient:
             metadata={
                 "traceId": response.get("trace_id"),
                 "extraInfo": response.get("extra_info") or {},
+                "voice": payload["voice_setting"]["voice_id"],
             },
         )
 
@@ -246,6 +312,7 @@ class TextToSpeechClient:
                 "taskId": task_id,
                 "fileId": file_id,
                 "usageCharacters": create_response.get("usage_characters"),
+                "voice": payload["voice_setting"]["voice_id"],
             },
         )
 
@@ -319,7 +386,7 @@ class TextToSpeechClient:
             audio_bytes=response.content,
             content_type=content_type or _content_type_for_format(audio_format),
             extension=audio_format,
-            metadata={},
+            metadata={"voice": payload["voice"]},
         )
 
     def _post_json(
@@ -330,6 +397,7 @@ class TextToSpeechClient:
         payload: dict[str, Any],
         timeout_error: str,
         request_error: str,
+        allow_transport_retry: bool = True,
     ) -> dict[str, Any]:
         response: requests.Response | None = None
         for attempt in range(1, self.max_transport_attempts + 1):
@@ -344,7 +412,11 @@ class TextToSpeechClient:
             except requests.exceptions.Timeout as exc:
                 raise TextToSpeechTimeoutError(f"{timeout_error}: url={_redact_url(url)}") from exc
             except requests.exceptions.RequestException as exc:
-                if attempt < self.max_transport_attempts and _is_retryable_transport_error(exc):
+                if (
+                    allow_transport_retry
+                    and attempt < self.max_transport_attempts
+                    and _is_retryable_transport_error(exc)
+                ):
                     LOGGER.warning(
                         "TTS provider transport error, retrying: url=%s attempt=%s/%s errorType=%s error=%s",
                         _redact_url(url),
@@ -541,6 +613,21 @@ def _optional_float_param(params: dict[str, Any], *keys: str) -> float | None:
         except (TypeError, ValueError):
             continue
     return None
+
+
+def _optional_positive_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _extension_from_url(url: str, *, default: str) -> str:
+    suffix = Path(urlparse(url).path).suffix.lower().lstrip(".")
+    return suffix or default
 
 
 def _content_type_for_format(audio_format: str) -> str:

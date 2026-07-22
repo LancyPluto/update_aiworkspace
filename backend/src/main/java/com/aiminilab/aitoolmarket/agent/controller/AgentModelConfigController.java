@@ -1,6 +1,6 @@
 package com.aiminilab.aitoolmarket.agent.controller;
 
-import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigResponse;
+import com.aiminilab.aitoolmarket.agent.dto.AgentSelectableModelResponse;
 import com.aiminilab.aitoolmarket.agent.service.AgentModelConfigService;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,7 +20,7 @@ public class AgentModelConfigController {
     }
 
     @GetMapping
-    public ApiResponse<List<AgentModelConfigResponse>> list() {
+    public ApiResponse<List<AgentSelectableModelResponse>> list() {
         return ApiResponse.success(agentModelConfigService.agentSelectableList());
     }
 }

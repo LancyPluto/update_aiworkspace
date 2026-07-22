@@ -18,6 +18,7 @@ export const fallbackProviderCapabilities: Record<string, string[]> = {
   minimax_music: ["MUSIC_GENERATION"],
   suno_music: ["MUSIC_GENERATION"],
   minimax_speech: ["TEXT_TO_SPEECH"],
+  dashscope_qwen_tts: ["TEXT_TO_SPEECH"],
   siliconflow_speech: ["TEXT_TO_SPEECH"],
   siliconflow_asr: ["SPEECH_TO_TEXT"],
   seedance: ["VIDEO_GENERATION"],
@@ -188,6 +189,34 @@ export function defaultRequiredModelCapabilitiesForTool(
 export function defaultExecutionHandlerForToolType(toolType: string | null | undefined): string {
   const normalized = toolType?.trim().toUpperCase() || ""
   return EXECUTION_HANDLERS.has(normalized) ? normalized : "TEXT_GENERATION"
+}
+
+export type WorkflowModelIssue = "MISSING" | "DISABLED" | "CAPABILITY_MISMATCH"
+
+export function workflowModelIssue(
+  config: AgentModelConfig | null | undefined,
+  requiredCapability: string,
+): WorkflowModelIssue | null {
+  if (!config) return "MISSING"
+  if (config.enabled === false) return "DISABLED"
+  return modelConfigSupportsCapability(config, requiredCapability) ? null : "CAPABILITY_MISMATCH"
+}
+
+export function workflowModelOptions(
+  configs: AgentModelConfig[],
+  requiredCapability: string | undefined,
+  selectedModelId: number | null,
+): AgentModelConfig[] {
+  const compatible = configs.filter(
+    (config) =>
+      config.enabled !== false &&
+      (!requiredCapability || modelConfigSupportsCapability(config, requiredCapability)),
+  )
+  if (selectedModelId == null || compatible.some((config) => config.id === selectedModelId)) {
+    return compatible
+  }
+  const selected = configs.find((config) => config.id === selectedModelId)
+  return selected ? [selected, ...compatible] : compatible
 }
 
 export function isPptWorkspaceTool(tool: { toolCode: string; configNote?: string | null }): boolean {

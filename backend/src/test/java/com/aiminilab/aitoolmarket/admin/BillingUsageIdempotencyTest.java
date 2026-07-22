@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.admin;
 
 import com.aiminilab.aitoolmarket.admin.service.BillingService;
+import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -63,6 +64,38 @@ class BillingUsageIdempotencyTest {
                 key, "WORKFLOW_STEP", 2L, 9001L, null,
                 10, 5, 1, 19, new BigDecimal("0.15"), new BigDecimal("1.2")
         )).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void perCharacterUsageDerivesVendorCostWhenProviderCostIsNotReported() {
+        AgentModelConfig modelConfig = new AgentModelConfig();
+        modelConfig.setProvider("dashscope_qwen_tts");
+        modelConfig.setModelName("qwen3-tts-flash");
+        modelConfig.setBillingUnit("PER_CHARACTER");
+        modelConfig.setUnitPrice(new BigDecimal("0.02"));
+
+        Long usageId = billingService.recordUsageOnce(
+                "workflow:1:step:tts:attempt:1:usage",
+                "WORKFLOW_STEP",
+                3L,
+                9001L,
+                modelConfig,
+                0,
+                0,
+                12,
+                36,
+                null,
+                new BigDecimal("1.50")
+        );
+
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT billing_unit, billable_units, vendor_cost_amount, charged_credits "
+                        + "FROM billing_usage_logs WHERE id = ?",
+                usageId
+        )).containsEntry("billing_unit", "PER_CHARACTER")
+                .containsEntry("billable_units", 12)
+                .containsEntry("vendor_cost_amount", new BigDecimal("0.240000"))
+                .containsEntry("charged_credits", 36);
     }
 
     @Test

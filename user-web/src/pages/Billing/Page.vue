@@ -76,7 +76,8 @@ function usageReason(log: BillingUsageLog) {
   const tokens = log.totalTokens > 0
     ? `\uff0c\u6d88\u8017 ${log.promptTokens.toLocaleString()} \u8f93\u5165 / ${log.completionTokens.toLocaleString()} \u8f93\u51fa tokens`
     : ""
-  const unitLabel = (log.billingUnit || "").toUpperCase() === "PER_SECOND" ? "\u79d2" : "\u6b21"
+  const billingUnit = (log.billingUnit || "").toUpperCase()
+  const unitLabel = billingUnit === "PER_SECOND" ? "\u79d2" : billingUnit === "PER_CHARACTER" ? "\u5b57\u7b26" : "\u6b21"
   const units = (log.billableUnits ?? 0) > 0 ? `\uff0c\u8ba1\u8d39 ${log.billableUnits} ${unitLabel}` : ""
   return `${source} \u8c03\u7528 ${model}${tokens}${units}`
 }

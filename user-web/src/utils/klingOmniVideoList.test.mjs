@@ -10,8 +10,8 @@ async function importKlingOmniVideoList() {
     .replace(
       /import \{ parseFieldMeta \} from ".*?"\r?\n/,
       `const parseFieldMeta = (field) => {
-        if (!field?.optionsJson) return {}
-        try { return JSON.parse(field.optionsJson) } catch { return {} }
+        const options = field?.options
+        return options && typeof options === "object" && !Array.isArray(options) ? options : {}
       }\n`,
     )
   const { outputText } = ts.transpileModule(source, {
@@ -30,7 +30,7 @@ const omniVideoList = await importKlingOmniVideoList()
 const field = {
   fieldName: "参考视频列表",
   required: true,
-  optionsJson: JSON.stringify({ minCount: 1, maxCount: 4, accept: "video/*" }),
+  options: { minCount: 1, maxCount: 4, accept: "video/*" },
 }
 
 test("serializes omni video references as documented objects", () => {

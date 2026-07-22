@@ -301,7 +301,7 @@ public class WorkflowRuntimeAdmissionService {
             return false;
         }
         return switch (snapshot.path("billingUnit").asText().trim().toUpperCase(Locale.ROOT)) {
-            case "PER_CALL", "PER_SECOND" -> positiveDecimal(snapshot.get("unitPrice"));
+            case "PER_CALL", "PER_SECOND", "PER_CHARACTER" -> positiveDecimal(snapshot.get("unitPrice"));
             case "TOKEN_PER_M", "IMAGE_TOKEN" -> positiveDecimal(snapshot.get("inputTokenPricePer1m"))
                     || positiveDecimal(snapshot.get("outputTokenPricePer1m"))
                     || positiveDecimal(snapshot.get("inputTokenPricePer1k"))

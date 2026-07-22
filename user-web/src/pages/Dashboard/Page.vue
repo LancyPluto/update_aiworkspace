@@ -229,7 +229,7 @@ const filteredCurrentTools = computed(() => {
   const keyword = modelSearch.value.trim().toLowerCase()
   if (!keyword) return currentTools.value
   return currentTools.value.filter((tool) =>
-    [tool.toolName, tool.modelConfigName, tool.modelName, tool.description, tool.toolCode]
+    [tool.toolName, tool.modelDisplayName, tool.description, tool.toolCode]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(keyword)),
   )
@@ -272,7 +272,6 @@ const estimateInput = computed<UseTaskEstimateInput | null>(() => {
   return {
     toolCode: tool.toolCode,
     params,
-    modelConfigId: tool.modelConfigId ?? null,
     skip: usesVariableWorkflowCredits(tool),
   }
 })
@@ -295,8 +294,7 @@ const composerGenerateCost = computed(() => {
 })
 
 const sortedCurrentTools = computed(() => {
-  const list = currentTools.value.length > 0 ? [...currentTools.value] : [...tools.value]
-  return list.sort((a, b) => a.id - b.id)
+  return (currentTools.value.length > 0 ? [...currentTools.value] : [...tools.value]).reverse()
 })
 
 const visibleFeaturedTools = computed(() => {
@@ -1095,12 +1093,9 @@ function toolSummaryForRetry(task: TaskDetail): ToolSummary {
   const matched = tools.value.find((item) => item.toolCode === task.toolCode)
   if (matched) return matched
   return {
-    id: 0,
     toolCode: task.toolCode,
     toolName: task.toolName,
-    categoryId: 0,
     categoryName: "",
-    status: "ONLINE",
     estimatedCreditCost: 0,
     toolType: task.toolType,
     inputModality: task.inputModality,
@@ -1388,10 +1383,10 @@ function historyCardClass(task: TaskDetail, blocks: ResultBlock[]): string {
  * Falls back through frontendStyle.comparisonEffectUrl → demoThumbnails → coverUrl
  * to handle cases where the OSS cover URL is inaccessible (e.g. encoding issues).
  */
-const brokenToolCoverIds = ref<Set<number>>(new Set())
+const brokenToolCoverIds = ref<Set<string>>(new Set())
 
 function toolCardCover(tool: ToolSummary): string {
-  if (brokenToolCoverIds.value.has(tool.id)) {
+  if (brokenToolCoverIds.value.has(tool.toolCode)) {
     return resolveSummaryToolCoverUrl({
       ...tool,
       frontendStyle: {
@@ -1405,8 +1400,8 @@ function toolCardCover(tool: ToolSummary): string {
 }
 
 function onToolCoverError(tool: ToolSummary) {
-  if (!brokenToolCoverIds.value.has(tool.id)) {
-    brokenToolCoverIds.value = new Set([...brokenToolCoverIds.value, tool.id])
+  if (!brokenToolCoverIds.value.has(tool.toolCode)) {
+    brokenToolCoverIds.value = new Set([...brokenToolCoverIds.value, tool.toolCode])
   }
 }
 
@@ -1414,7 +1409,7 @@ function usesComparisonToolCover(tool: ToolSummary): boolean {
   return tool.frontendStyle?.mediaDisplayMode === "comparison"
     && Boolean(tool.frontendStyle?.comparisonOriginalUrl)
     && Boolean(tool.frontendStyle?.comparisonEffectUrl)
-    && !brokenToolCoverIds.value.has(tool.id)
+    && !brokenToolCoverIds.value.has(tool.toolCode)
 }
 
 function audioTaskTitle(track?: DashboardAudioTrack | null): string {
@@ -1902,7 +1897,7 @@ onUnmounted(() => {
                 <div class="grid gap-6 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 <article
                   v-for="tool in visibleFeaturedTools"
-                  :key="tool.id"
+                  :key="tool.toolCode"
                   class="marketplace-tool-card"
                   @click="selectTool(tool)"
                 >
@@ -3089,7 +3084,7 @@ onUnmounted(() => {
                       <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                         <button
                           v-for="tool in filteredCurrentTools"
-                          :key="tool.id"
+                          :key="tool.toolCode"
                           type="button"
                           class="marketplace-tool-card"
                           :class="selectedToolCode === tool.toolCode ? 'marketplace-tool-card--selected' : ''"

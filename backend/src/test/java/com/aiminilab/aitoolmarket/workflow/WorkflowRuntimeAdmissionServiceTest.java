@@ -203,6 +203,16 @@ class WorkflowRuntimeAdmissionServiceTest {
     }
 
     @Test
+    void perCharacterModelPricingSnapshotCanBeAdmitted() {
+        enableHealthyRuntime(100, 100);
+        version.setBillingPolicyJson(modelBillingPolicy("tts", 10, "PER_CHARACTER"));
+        when(dslService.parse(version.getNodesJson(), version.getEdgesJson(), version.getConfigJson()))
+                .thenReturn(dsl(worker("tts", "comic.shot_tts")));
+
+        assertThat(service.admitNewRun(11L, 7L).estimatedRunCredits()).isEqualTo(10L);
+    }
+
+    @Test
     void localComposeIsTheOnlyZeroCostWorkerAdmission() {
         enableHealthyRuntime(100, 100);
         version.setBillingPolicyJson(localZeroCostBillingPolicy("compose", "comic.compose"));
@@ -311,6 +321,10 @@ class WorkflowRuntimeAdmissionServiceTest {
     }
 
     private String modelBillingPolicy(String nodeId, int credits) {
+        return modelBillingPolicy(nodeId, credits, "PER_CALL");
+    }
+
+    private String modelBillingPolicy(String nodeId, int credits, String billingUnit) {
         ObjectMapper mapper = new ObjectMapper();
         ObjectNode root = mapper.createObjectNode().put("mode", "WORKFLOW_STEP");
         ObjectNode nodePolicy = baseNodePolicy(mapper, credits, 0, "MODEL_PRICING");
@@ -320,7 +334,7 @@ class WorkflowRuntimeAdmissionServiceTest {
         model.put("id", 101L);
         model.put("provider", "test");
         model.put("modelName", "test-model");
-        model.put("billingUnit", "PER_CALL");
+        model.put("billingUnit", billingUnit);
         model.put("unitPrice", new BigDecimal("0.100000"));
         root.putObject("nodePolicies").set(nodeId, nodePolicy);
         return root.toString();

@@ -18,29 +18,42 @@ async function importTsModule(path) {
 
 const adapter = await importTsModule("./mediaTemplateToolAdapter.ts")
 
+const publicVideoTool = {
+  toolCode: "video_effect",
+  toolName: "Video Effect",
+  categoryCode: "video-effects",
+  categoryName: "Video Effects",
+  toolType: "VIDEO_GENERATION",
+  inputModality: "VIDEO",
+  outputModality: "VIDEO",
+  toolKind: "video",
+  modelDisplayName: "Video Effect Model",
+}
+
 test("resolves toolKind from backend field before modality fallback", () => {
-  assert.equal(adapter.resolveToolKind({ toolKind: "digitalHuman", outputModality: "VIDEO" }), "digitalHuman")
-  assert.equal(adapter.resolveToolKind({ outputModality: "VIDEO", toolType: "VIDEO_GENERATION" }), "video")
-  assert.equal(adapter.resolveToolKind({ outputModality: "AUDIO", toolType: "TEXT_TO_SPEECH" }), "audio")
-  assert.equal(adapter.resolveToolKind({ outputModality: "FILE", toolType: "FILE_PROCESSING" }), "other")
+  assert.equal(adapter.resolveToolKind({ ...publicVideoTool, toolCode: "digital_human", toolKind: "digitalHuman" }), "digitalHuman")
+  assert.equal(adapter.resolveToolKind({ ...publicVideoTool, toolKind: null }), "video")
+  assert.equal(adapter.resolveToolKind({ ...publicVideoTool, toolKind: null, outputModality: "AUDIO", toolType: "TEXT_TO_SPEECH" }), "audio")
+  assert.equal(adapter.resolveToolKind({ ...publicVideoTool, toolKind: null, outputModality: "FILE", toolType: "FILE_PROCESSING" }), "other")
 })
 
 test("detects Pollo-style video and digital human effect tools", () => {
   assert.equal(adapter.isVideoTemplateTool({
-    toolKind: "video",
-    outputModality: "VIDEO",
+    ...publicVideoTool,
     frontendStyle: { mediaDisplayMode: "effect", beforeVideoUrl: "/before.mp4", afterVideoUrl: "/after.mp4" },
   }), true)
 
   assert.equal(adapter.isVideoTemplateTool({
+    ...publicVideoTool,
+    toolCode: "digital_human",
     toolKind: "digitalHuman",
-    outputModality: "VIDEO",
     frontendStyle: { mediaDisplayMode: "effect" },
   }), true)
 })
 
 test("builds media template task params from uploaded source media", () => {
   const tool = {
+    ...publicVideoTool,
     fields: [
       { fieldKey: "sourceVideoUrl", fieldName: "上传视频", fieldType: "file", required: true, sortOrder: 1 },
       { fieldKey: "duration", fieldName: "时长", fieldType: "radio", required: false, defaultValue: "10", sortOrder: 2 },

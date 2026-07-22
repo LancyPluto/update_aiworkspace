@@ -27,16 +27,16 @@ export const KLING_OMNI_KEEP_SOUND_OPTIONS: Array<{ label: string; value: KlingO
   { label: "保留原声", value: "yes" },
 ]
 
-export function klingOmniVideoMax(field: Pick<ToolField, "options" | "optionsJson">): number {
+export function klingOmniVideoMax(field: Pick<ToolField, "options">): number {
   const maxCount = Number(parseFieldMeta(field).maxCount)
   return Number.isFinite(maxCount) && maxCount > 0 ? maxCount : 4
 }
 
-export function klingOmniVideoMin(field: Pick<ToolField, "options" | "optionsJson">): number {
+export function klingOmniVideoMin(field: Pick<ToolField, "options">): number {
   return parseFieldMeta(field).minCount ?? 0
 }
 
-export function klingOmniVideoAccept(field: Pick<ToolField, "options" | "optionsJson">): string {
+export function klingOmniVideoAccept(field: Pick<ToolField, "options">): string {
   return parseFieldMeta(field).accept || "video/*"
 }
 
@@ -116,7 +116,7 @@ export function hasBaseKlingOmniVideo(items: KlingOmniVideoEditorItem[]): boolea
 
 export function validateKlingOmniVideoItems(
   items: KlingOmniVideoEditorItem[],
-  field: Pick<ToolField, "fieldName" | "options" | "optionsJson" | "required">,
+  field: Pick<ToolField, "fieldName" | "options" | "required">,
 ): { valid: boolean; message?: string } {
   const minCount = klingOmniVideoMin(field)
   const maxCount = klingOmniVideoMax(field)

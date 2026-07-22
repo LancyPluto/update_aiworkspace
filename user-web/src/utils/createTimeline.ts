@@ -80,7 +80,7 @@ export function classifyCreateToolMode(
     tool?.inputModality,
     tool?.outputModality,
     tool?.categoryName,
-    tool?.executionHandler,
+    tool?.toolKind,
   ])
   if (/(digital[_\s-]?human|avatar|presenter|数字人|口播|主播)/i.test(text)) return "digitalHuman"
   if (/(audio|voice|speech|tts|music|音频|语音|声音|配音|音乐)/i.test(text)) return "audio"
@@ -114,8 +114,7 @@ export function resolveTimelineModelLabel(task: TaskDetail, tool?: ToolSummary):
     compactText(task.modelConfigName) ||
     compactText(task.modelName) ||
     compactText(params.modelLabel) ||
-    compactText(tool?.modelConfigName) ||
-    compactText(tool?.modelName) ||
+    compactText(tool?.modelDisplayName) ||
     compactText(params.model) ||
     compactText(params.modelName) ||
     compactText(task.toolName) ||

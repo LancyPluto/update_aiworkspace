@@ -81,7 +81,8 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
 
         Map<String, List<ModelVendorAccountResponse>> accountsByVendor = new LinkedHashMap<>();
         for (ModelVendorAccount account : accounts) {
-            String vendorCode = canonicalVendorCode(resolveAccountVendorCode(account));
+            String vendorCode = vendorCodeResolver.canonicalVendorCode(
+                    vendorCodeResolver.resolveEffectiveVendorCode(account));
             accountsByVendor.computeIfAbsent(vendorCode, key -> new ArrayList<>())
                     .add(ModelVendorAccountResponse.from(
                             account,
@@ -91,7 +92,7 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
 
         Map<String, List<UnifiedApiModelItemResponse>> modelsByVendor = new LinkedHashMap<>();
         for (AgentModelConfig config : configs) {
-            String vendorCode = canonicalVendorCode(resolveConfigVendorCode(config, accountById));
+            String vendorCode = vendorCodeResolver.canonicalVendorCode(resolveConfigVendorCode(config, accountById));
             String accountName = null;
             String accountHealthStatus = null;
             if (config.getVendorAccountId() != null) {
@@ -133,7 +134,9 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
 
         List<UnifiedApiUnconfiguredVendorResponse> unconfigured = vendorCodeResolver.vendorCatalog().entrySet().stream()
                 .filter(entry -> !"openai_gateway".equals(entry.getKey()))
-                .filter(entry -> !configuredVendors.contains(canonicalVendorCode(entry.getKey())))
+                .filter(entry -> !"infinite_talk".equalsIgnoreCase(entry.getKey()))
+                .filter(entry -> !"infinitetalk".equalsIgnoreCase(entry.getKey()))
+                .filter(entry -> !configuredVendors.contains(vendorCodeResolver.canonicalVendorCode(entry.getKey())))
                 .filter(entry -> !"mock".equals(entry.getKey()))
                 .sorted(Map.Entry.comparingByValue())
                 .map(entry -> new UnifiedApiUnconfiguredVendorResponse(
@@ -172,7 +175,7 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
         if (config.getVendorAccountId() != null) {
             ModelVendorAccount account = accountById.get(config.getVendorAccountId());
             if (account != null && account.getVendorCode() != null) {
-                return resolveAccountVendorCode(account);
+                return vendorCodeResolver.resolveEffectiveVendorCode(account);
             }
         }
         String inferred = vendorCodeResolver.resolveVendorCode(config);
@@ -194,8 +197,8 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
         List<ModelVendorAccount> poolMembers = accountById.values().stream()
                 .filter(account -> Objects.equals(
                         account.getRoutingPoolId(), reference.getRoutingPoolId()))
-                .filter(account -> vendorCode.equals(canonicalVendorCode(
-                        resolveAccountVendorCode(account))))
+                .filter(account -> vendorCode.equals(vendorCodeResolver.canonicalVendorCode(
+                        vendorCodeResolver.resolveEffectiveVendorCode(account))))
                 .toList();
         if (poolMembers.isEmpty()) {
             return "ROUTING_POOL_EMPTY";
@@ -277,33 +280,6 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
 
     private static boolean equalsIgnoreCase(String left, String right) {
         return left == null ? right == null : right != null && left.equalsIgnoreCase(right);
-    }
-
-    private String resolveAccountVendorCode(ModelVendorAccount account) {
-        String declared = account.getVendorCode() == null ? "" : account.getVendorCode().trim();
-        String inferred = vendorCodeResolver.resolveVendorCode(
-                "openai_compatible",
-                account.getBaseUrl(),
-                account.getAccountName(),
-                null
-        );
-        if ("openai".equalsIgnoreCase(inferred)) {
-            return "openai";
-        }
-        if (!inferred.isBlank() && !"openai".equalsIgnoreCase(inferred) && !"other".equalsIgnoreCase(inferred)) {
-            return inferred;
-        }
-        return declared.isBlank() ? inferred : declared;
-    }
-
-    private static String canonicalVendorCode(String vendorCode) {
-        if ("openai_gateway".equalsIgnoreCase(vendorCode)) {
-            return "openai";
-        }
-        if ("suno_music".equalsIgnoreCase(vendorCode)) {
-            return "suno";
-        }
-        return vendorCode;
     }
 
     private List<String> providersForVendor(String vendorCode) {

@@ -565,6 +565,108 @@ class WorkflowLateCallbackTest {
     }
 
     @Test
+    void perCharacterSettlementUsesReportedCharacterUnits() {
+        configureSnapshotPricedStep(50, 100, "PER_CHARACTER", "0.01");
+        jdbcTemplate.update(
+                "UPDATE workflow_run_steps SET input_json = ? WHERE id = ?",
+                "{\"quality\":\"hd\",\"operationInput\":{\"shot\":{\"audio\":{\"dialogue\":\"Hello world!\"}}}}",
+                stepId
+        );
+        WorkflowStepAttempt active = scheduler.dispatch(stepId);
+        claim(active);
+        WorkerSuccessRequest request = new WorkerSuccessRequest(
+                "AUDIO", "{\"url\":\"/audio/test.wav\"}", 0, 0, 12,
+                null, null, "qwen-request-1", true, "worker-claim"
+        );
+
+        assertThat(callbacks.succeeded(active.getChildTaskId(), request)).isTrue();
+
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, reserved_credits, charged_credits "
+                        + "FROM workflow_step_charges WHERE attempt_id = ?",
+                active.getId()
+        )).containsEntry("status", "CAPTURED")
+                .containsEntry("reserved_credits", 36)
+                .containsEntry("charged_credits", 36);
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT billing_unit, billable_units, unit_price, vendor_cost_amount, "
+                        + "provider_cost_currency, provider_charged "
+                        + "FROM billing_usage_logs WHERE idempotency_key = ?",
+                active.getClaimToken() + ":usage"
+        )).containsEntry("billing_unit", "PER_CHARACTER")
+                .containsEntry("billable_units", 12)
+                .containsEntry("unit_price", new BigDecimal("0.01000000"))
+                .containsEntry("vendor_cost_amount", new BigDecimal("0.000000"))
+                .containsEntry("provider_cost_currency", "UNKNOWN")
+                .containsEntry("provider_charged", 0);
+    }
+
+    @Test
+    void perCharacterStepReservesFromActualShotDialogueBeforeDispatch() {
+        configureSnapshotPricedStep(1, 100, "PER_CHARACTER", "0.02");
+        jdbcTemplate.update(
+                "UPDATE workflow_run_steps SET input_json = ? WHERE id = ?",
+                "{\"operationInput\":{\"shot\":{\"audio\":{\"dialogue\":\"Hello\",\"narration\":\"This narration is ignored\"}}}}",
+                stepId
+        );
+
+        WorkflowStepAttempt active = scheduler.dispatch(stepId);
+
+        assertThat(active).isNotNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT reserved_credits FROM workflow_step_charges WHERE attempt_id = ?",
+                Integer.class,
+                active.getId()
+        )).isEqualTo(15);
+    }
+
+    @Test
+    void silentComicShotDoesNotReserveCharacterCredits() {
+        configureSnapshotPricedStep(1, 0, "PER_CHARACTER", "0.02");
+        jdbcTemplate.update(
+                "UPDATE workflow_run_steps SET input_json = ? WHERE id = ?",
+                "{\"operationInput\":{\"shot\":{\"audio\":{\"dialogue\":\"\",\"narration\":\"\"}}}}",
+                stepId
+        );
+
+        WorkflowStepAttempt active = scheduler.dispatch(stepId);
+
+        assertThat(active).isNotNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workflow_step_charges WHERE attempt_id = ?",
+                Integer.class,
+                active.getId()
+        )).isZero();
+    }
+
+    @Test
+    void perCharacterStepStopsBeforeProviderDispatchWhenDynamicReservationIsInsufficient() {
+        configureSnapshotPricedStep(1, 14, "PER_CHARACTER", "0.02");
+        jdbcTemplate.update(
+                "UPDATE workflow_run_steps SET input_json = ? WHERE id = ?",
+                "{\"operationInput\":{\"shot\":{\"audio\":{\"dialogue\":\"Hello\"}}}}",
+                stepId
+        );
+        int tasksBefore = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_tasks", Integer.class);
+        int outboxBefore = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM task_outbox_events", Integer.class);
+
+        assertThat(scheduler.dispatch(stepId)).isNull();
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM workflow_runs WHERE id = ?",
+                String.class,
+                runIdForStep()
+        )).isEqualTo("AWAITING_FUNDS");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workflow_step_attempts WHERE step_id = ?",
+                Integer.class,
+                stepId
+        )).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ai_tasks", Integer.class)).isEqualTo(tasksBefore);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM task_outbox_events", Integer.class)).isEqualTo(outboxBefore);
+    }
+
+    @Test
     void modelPricingSettlementRejectsMissingProviderCalledDeclaration() {
         configureSnapshotPricedStep(20, 100);
         WorkflowStepAttempt active = scheduler.dispatch(stepId);
@@ -1273,6 +1375,13 @@ class WorkflowLateCallbackTest {
     }
 
     private void configureSnapshotPricedStep(int maxCreditCost, int balance) {
+        configureSnapshotPricedStep(maxCreditCost, balance, "PER_CALL", "0.10");
+    }
+
+    private void configureSnapshotPricedStep(int maxCreditCost,
+                                             int balance,
+                                             String billingUnit,
+                                             String unitPrice) {
         configurePaidStep(maxCreditCost, 1, balance);
         jdbcTemplate.update("UPDATE workflow_run_steps SET input_json = '{\"quality\":\"hd\"}' WHERE id = ?", stepId);
         String policy = """
@@ -1281,7 +1390,7 @@ class WorkflowLateCallbackTest {
                   "maxCreditCost":%d,
                   "maxProviderCostCny":0.10,
                   "fallbackChargeCredits":0,
-                  "staticParams":{"quality":"sd"},
+                  "staticParams":{"quality":"sd","handlerKey":"comic.shot_tts"},
                   "modelPricingSnapshot":{
                     "id":99001,
                     "provider":"snapshot-provider",
@@ -1290,8 +1399,8 @@ class WorkflowLateCallbackTest {
                     "outputTokenPricePer1k":0,
                     "inputTokenPricePer1m":0,
                     "outputTokenPricePer1m":0,
-                    "billingUnit":"PER_CALL",
-                    "unitPrice":0.10
+                    "billingUnit":"%s",
+                    "unitPrice":%s
                   },
                   "pricingPolicy":{
                     "markupRatio":1.5,
@@ -1309,7 +1418,7 @@ class WorkflowLateCallbackTest {
                     }]
                   }
                 }}}
-                """.formatted(maxCreditCost);
+                """.formatted(maxCreditCost, billingUnit, unitPrice);
         jdbcTemplate.update("""
                 UPDATE tool_workflow_versions
                 SET billing_policy_json = ?

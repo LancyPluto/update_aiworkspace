@@ -70,6 +70,46 @@ class PricingServiceImplTest {
     }
 
     @Test
+    void perCharacterEstimateUsesRequestTextLengthWhenUsageIsUnknown() {
+        AiTool tool = new AiTool();
+        AgentModelConfig config = new AgentModelConfig();
+        config.setId(11L);
+        config.setBillingUnit("PER_CHARACTER");
+        config.setUnitPrice(new BigDecimal("0.02"));
+        var params = OBJECT_MAPPER.createObjectNode();
+        params.put("text", "Hello");
+
+        PricingQuote estimate = pricingService.computeQuote(
+                tool, config, params, null, 0
+        );
+
+        assertThat(estimate.modelDerived()).isTrue();
+        assertThat(estimate.vendorCost()).isEqualByComparingTo("0.10");
+        assertThat(estimate.chargeCredits()).isEqualTo(15);
+    }
+
+    @Test
+    void perCharacterSettlementUsesReportedBillableUnits() {
+        AiTool tool = new AiTool();
+        AgentModelConfig config = new AgentModelConfig();
+        config.setId(12L);
+        config.setBillingUnit("PER_CHARACTER");
+        config.setUnitPrice(new BigDecimal("0.02"));
+
+        PricingQuote settlement = pricingService.computeQuote(
+                tool,
+                config,
+                OBJECT_MAPPER.createObjectNode(),
+                new PricingUsage(0, 0, 12),
+                0
+        );
+
+        assertThat(settlement.modelDerived()).isTrue();
+        assertThat(settlement.vendorCost()).isEqualByComparingTo("0.24");
+        assertThat(settlement.chargeCredits()).isEqualTo(36);
+    }
+
+    @Test
     void happyHorseOfficialPricing_720pAnd1080p() throws Exception {
         AiTool tool = new AiTool();
         tool.setId(10L);

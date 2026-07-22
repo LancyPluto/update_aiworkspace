@@ -61,6 +61,25 @@ providers:
     modelParamSchemaJson: '{"models":["qwen3.6-plus"],"fields":[{"key":"modelName","label":"模型名称","type":"text","required":true},{"key":"capabilities","label":"能力","type":"multi_select","options":["TEXT_GENERATION","VISION_INPUT"],"required":true}]}'
     description: Alibaba Cloud Model Studio Bailian Qwen OpenAI-compatible Chat Completions endpoint. Use qwen3.6-plus with VISION_INPUT for Agent image understanding.
 
+  - code: dashscope_qwen_tts
+    label: Alibaba Cloud Qwen3 TTS
+    capabilities:
+      - TEXT_TO_SPEECH
+    defaultBaseUrl: https://dashscope.aliyuncs.com
+    defaultModel: qwen3-tts-flash
+    billingDefault: PER_CHARACTER
+    providerProtocol: dashscope_qwen_tts
+    vendorKind: direct
+    upstreamVendor: qwen
+    testStrategy: accept_only
+    workerReady: true
+    adapterInstalled: true
+    adapterKey: dashscope_qwen_tts
+    metadataVersion: dashscope_qwen_tts.v1
+    authSchemaJson: '{"fields":[{"key":"apiKey","label":"DASHSCOPE_API_KEY","type":"password","required":true},{"key":"baseUrl","label":"Base URL","type":"url","required":false,"placeholder":"https://dashscope.aliyuncs.com"}]}'
+    modelParamSchemaJson: '{"models":["qwen3-tts-flash"],"fields":[{"key":"modelName","label":"模型名称","type":"text","required":true},{"key":"billingUnit","label":"计费单位","type":"select","options":["PER_CHARACTER"],"required":true},{"key":"capabilities","label":"能力","type":"multi_select","options":["TEXT_TO_SPEECH"],"required":true}]}'
+    description: Alibaba Cloud Model Studio Qwen3 text-to-speech through the DashScope multimodal generation protocol.
+
   - code: anthropic_compatible
     label: Anthropic compatible
     capabilities:
