@@ -546,7 +546,12 @@
   font-size: 12px;
 }
 
-.gift-card-preview-list,
+.gift-card-preview-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .gift-library-list {
   display: grid;
   gap: 10px;
@@ -554,15 +559,23 @@
 
 .gift-card-row {
   min-width: 0;
-  min-height: 68px;
+  min-height: 96px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(90px, auto);
-  align-items: center;
-  gap: 16px;
+  align-content: space-between;
+  gap: 12px;
   border: 1px solid #343a37;
   border-radius: 6px;
   background: #101311;
   padding: 12px 14px;
+}
+
+.gift-card-row-header,
+.gift-card-row-footer {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .gift-card-row-copy {
@@ -604,7 +617,20 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
   white-space: nowrap;
+}
+
+.gift-card-row-footer .gift-card-credits {
+  text-align: left;
+}
+
+.gift-card-use-btn {
+  width: auto;
+  min-width: 72px;
+  min-height: 34px;
+  padding: 0 12px;
+  flex: 0 0 auto;
 }
 
 .more-action {
@@ -933,18 +959,16 @@
     border-left: 0;
   }
 
+  .gift-card-preview-list {
+    grid-template-columns: 1fr;
+  }
+
   .gift-card-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px;
+    min-height: 92px;
   }
 
-  .gift-card-row .gift-card-status {
-    justify-self: start;
-  }
-
-  .gift-card-row .gift-card-credits {
-    grid-column: 2;
-    grid-row: 1 / span 2;
+  .gift-card-use-btn {
+    width: auto;
   }
 
   .danger-zone {

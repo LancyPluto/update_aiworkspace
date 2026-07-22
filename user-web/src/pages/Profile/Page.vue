@@ -107,7 +107,19 @@ const giftCardCreditTotal = computed(() =>
     .filter((card) => card.status === "UNUSED")
     .reduce((sum, card) => sum + card.credits, 0),
 )
-const giftCardPreview = computed(() => giftCards.value.slice(0, 2))
+const orderedGiftCards = computed(() =>
+  [...giftCards.value].sort((a, b) => {
+    const timeA = Date.parse(a.createdAt)
+    const timeB = Date.parse(b.createdAt)
+    if (Number.isFinite(timeA) && Number.isFinite(timeB) && timeA !== timeB) return timeB - timeA
+    return b.id - a.id
+  }),
+)
+const giftCardPreview = computed(() => {
+  const latestUnused = orderedGiftCards.value.find((card) => card.status === "UNUSED")
+  if (!latestUnused) return orderedGiftCards.value.slice(0, 2)
+  return [latestUnused, ...orderedGiftCards.value.filter((card) => card.id !== latestUnused.id).slice(0, 1)]
+})
 
 let bodyOverflowBeforeGiftDialog = ""
 
@@ -542,14 +554,28 @@ onBeforeUnmount(() => {
             <div v-else-if="giftCards.length === 0" class="gift-card-state">暂无礼品卡</div>
             <div v-else class="gift-card-preview-list">
               <article v-for="card in giftCardPreview" :key="card.id" class="gift-card-row">
-                <div class="gift-card-row-copy">
-                  <strong>{{ card.packageName }}</strong>
-                  <code>{{ maskCardCode(card.cardCode) }}</code>
+                <div class="gift-card-row-header">
+                  <div class="gift-card-row-copy">
+                    <strong>{{ card.packageName }}</strong>
+                    <code>{{ maskCardCode(card.cardCode) }}</code>
+                  </div>
+                  <span class="gift-card-status" :class="giftCardStatusClass(card.status)">
+                    {{ giftCardStatusLabel(card.status) }}
+                  </span>
                 </div>
-                <span class="gift-card-status" :class="giftCardStatusClass(card.status)">
-                  {{ giftCardStatusLabel(card.status) }}
-                </span>
-                <div class="gift-card-credits">{{ card.credits.toLocaleString() }} <span>算力</span></div>
+                <div class="gift-card-row-footer">
+                  <div class="gift-card-credits">{{ card.credits.toLocaleString() }} <span>算力</span></div>
+                  <button
+                    v-if="card.status === 'UNUSED'"
+                    type="button"
+                    class="gift-card-btn redeem-btn gift-card-use-btn"
+                    :disabled="redeemingCardId === card.id || !canRedeemOwnedGiftCard(card)"
+                    @click="redeemCard(card.id)"
+                  >
+                    <Loader2 v-if="redeemingCardId === card.id" class="h-4 w-4 animate-spin" />
+                    {{ canRedeemOwnedGiftCard(card) ? "使用" : "仅可赠送" }}
+                  </button>
+                </div>
               </article>
             </div>
           </div>
@@ -609,7 +635,7 @@ onBeforeUnmount(() => {
             </div>
             <div v-else-if="giftCards.length === 0" class="gift-card-state">暂无礼品卡</div>
             <div v-else class="gift-library-list">
-              <article v-for="card in giftCards" :key="card.id" class="gift-library-card">
+              <article v-for="card in orderedGiftCards" :key="card.id" class="gift-library-card">
                 <div class="gift-library-copy">
                   <div class="gift-library-title-row">
                     <strong>{{ card.packageName }}</strong>
