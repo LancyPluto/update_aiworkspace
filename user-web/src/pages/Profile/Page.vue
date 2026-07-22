@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue"
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue"
 import { useRouter } from "vue-router"
-import { Camera, Check, ChevronRight, ClipboardCopy, ExternalLink, Loader2, Sparkles, Trash2, X } from "lucide-vue-next"
+import { Camera, Check, ChevronRight, ClipboardCopy, ExternalLink, Loader2, Pencil, Sparkles, Trash2, X } from "lucide-vue-next"
 import CreditPowerIcon from "@/components/CreditPowerIcon/CreditPowerIcon.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
 import { fetchCreditAccount, fetchMyGiftCards, redeemGiftCard, redeemGiftCardByCode } from "@/api/creditApi"
@@ -15,7 +15,10 @@ import { memberTierLabel } from "@/utils/giftCardTierConfig"
 const auth = useAuthStore()
 const router = useRouter()
 const fileInputRef = ref<HTMLInputElement | null>(null)
+const nicknameInputRef = ref<HTMLInputElement | null>(null)
 const nickname = ref("")
+const nicknameBeforeEdit = ref("")
+const editingNickname = ref(false)
 const bio = ref("")
 const autoPublishAssets = ref(true)
 const promptPublicByDefault = ref(false)
@@ -98,15 +101,6 @@ const maskedPhone = computed(() => {
 const userTypeLabel = computed(() => (auth.user?.userType === "ADMIN" ? "管理员" : "普通用户"))
 const accountStatusLabel = computed(() => (auth.user?.status === "ACTIVE" ? "正常" : "受限"))
 const membershipLabel = computed(() => auth.user?.membershipPlan || "基础版")
-const completedProfileItems = computed(() => {
-  let count = 0
-  if (auth.user?.avatarUrl) count += 1
-  if (nickname.value.trim()) count += 1
-  if (bio.value.trim()) count += 1
-  if (auth.user?.phone || auth.user?.email) count += 1
-  return count
-})
-const profileCompletion = computed(() => Math.round((completedProfileItems.value / 4) * 100))
 const unusedGiftCards = computed(() => giftCards.value.filter((card) => card.status === "UNUSED").length)
 const giftCardCreditTotal = computed(() =>
   giftCards.value
@@ -157,6 +151,22 @@ function openAvatarPicker() {
   fileInputRef.value?.click()
 }
 
+async function startNicknameEdit() {
+  error.value = ""
+  success.value = ""
+  nicknameBeforeEdit.value = nickname.value
+  editingNickname.value = true
+  await nextTick()
+  nicknameInputRef.value?.focus()
+  nicknameInputRef.value?.select()
+}
+
+function cancelNicknameEdit() {
+  if (saving.value) return
+  nickname.value = nicknameBeforeEdit.value
+  editingNickname.value = false
+}
+
 async function handleAvatarSelected(event: Event) {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
@@ -176,16 +186,21 @@ async function handleAvatarSelected(event: Event) {
 }
 
 async function saveProfile() {
+  const normalizedNickname = nickname.value.trim()
+  if (!normalizedNickname || saving.value) return
   error.value = ""
   success.value = ""
   saving.value = true
   try {
+    nickname.value = normalizedNickname
     await auth.updateProfile({
-      nickname: nickname.value,
+      nickname: normalizedNickname,
     })
-    success.value = "资料已保存"
+    nicknameBeforeEdit.value = normalizedNickname
+    editingNickname.value = false
+    success.value = "昵称已更新"
   } catch (err) {
-    error.value = err instanceof Error ? err.message : "资料保存失败"
+    error.value = err instanceof Error ? err.message : "昵称保存失败"
   } finally {
     saving.value = false
   }
@@ -398,7 +413,51 @@ onBeforeUnmount(() => {
           </div>
           <div class="identity-copy">
             <div class="identity-title-row">
-              <h2>{{ displayName }}</h2>
+              <div class="identity-name-control">
+                <template v-if="!editingNickname">
+                  <h2>{{ displayName }}</h2>
+                  <button
+                    type="button"
+                    class="identity-icon-action edit"
+                    aria-label="编辑昵称"
+                    title="编辑昵称"
+                    @click="startNicknameEdit"
+                  >
+                    <Pencil class="h-4 w-4" />
+                  </button>
+                </template>
+                <div v-else class="nickname-editor">
+                  <input
+                    ref="nicknameInputRef"
+                    v-model="nickname"
+                    maxlength="40"
+                    aria-label="昵称"
+                    @keydown.enter.prevent="saveProfile"
+                    @keydown.esc.prevent="cancelNicknameEdit"
+                  />
+                  <button
+                    type="button"
+                    class="identity-icon-action save"
+                    :disabled="saving || !nickname.trim()"
+                    aria-label="保存昵称"
+                    title="保存昵称"
+                    @click="saveProfile"
+                  >
+                    <Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
+                    <Check v-else class="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    class="identity-icon-action"
+                    :disabled="saving"
+                    aria-label="取消编辑"
+                    title="取消编辑"
+                    @click="cancelNicknameEdit"
+                  >
+                    <X class="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
               <span class="status-pill" :class="{ muted: auth.user?.status !== 'ACTIVE' }">{{ accountStatusLabel }}</span>
             </div>
             <p>{{ accountLabel }}</p>
@@ -425,35 +484,6 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="settings-list" aria-label="个人配置">
-        <section class="setting-band">
-          <div class="section-copy">
-            <p class="panel-kicker">公开资料</p>
-            <h2>公开身份</h2>
-            <p>这些信息会显示在社区主页和公开作品中。</p>
-          </div>
-          <div class="band-content public-fields">
-            <label class="form-field">
-              <span>昵称</span>
-              <input v-model="nickname" maxlength="40" placeholder="设置一个好记的昵称" />
-            </label>
-            <div class="read-only-field">
-              <span>账号</span>
-              <strong>{{ accountLabel }}</strong>
-            </div>
-            <div class="account-lines">
-              <div><span>身份</span><strong>{{ userTypeLabel }}</strong></div>
-              <div><span>会员</span><strong>{{ membershipLabel }}</strong></div>
-              <div><span>资料完成度</span><strong>{{ profileCompletion }}%</strong></div>
-            </div>
-          </div>
-          <div class="band-action">
-            <button type="button" class="primary-action" :disabled="saving || !nickname.trim()" @click="saveProfile">
-              <Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
-              保存资料
-            </button>
-          </div>
-        </section>
-
         <section class="setting-band">
           <div class="section-copy">
             <p class="panel-kicker">社区展示</p>
