@@ -101,6 +101,7 @@ const modelPickerOpen = ref(false)
 const modelSearch = ref("")
 const selectedChatTool = ref<AITool | null>(null)
 const selectedToolDetailLoading = ref(false)
+let selectedToolDetailRequestVersion = 0
 const capabilityRef = ref<InstanceType<typeof CapabilityControls> | null>(null)
 const capabilityParams = ref<Record<string, unknown>>({})
 const primaryReferenceInfo = ref<PrimaryReferenceMaterialInfo>({
@@ -517,7 +518,7 @@ watch(
   selectedToolCode,
   (code) => {
     if (code) void loadSelectedToolDetail(code)
-    else selectedChatTool.value = null
+    else clearSelectedToolDetail()
   },
   { immediate: false },
 )
@@ -739,7 +740,7 @@ async function createWithSelectedTool() {
     submitError.value = "工具配置加载中，请稍候"
     return
   }
-  if (!selectedChatTool.value) {
+  if (!selectedChatTool.value || selectedChatTool.value.id !== tool.toolCode) {
     submitError.value = "工具配置加载失败，请重新选择模型"
     return
   }
@@ -1722,20 +1723,45 @@ function looksLikeStoredMediaUrl(value: string): boolean {
   return false
 }
 
+function resetSelectedToolPresentation() {
+  selectedChatTool.value = null
+  composerMediaSlots.value = []
+  capabilityParams.value = {}
+  primaryReferenceInfo.value = {
+    available: false,
+    fieldName: "",
+    kind: "file",
+    count: 0,
+    maxCount: 1,
+    previewUrls: [],
+    uploading: false,
+  }
+}
+
+function clearSelectedToolDetail() {
+  selectedToolDetailRequestVersion += 1
+  selectedToolDetailLoading.value = false
+  resetSelectedToolPresentation()
+}
+
 async function loadSelectedToolDetail(toolCode: string) {
+  const requestVersion = ++selectedToolDetailRequestVersion
   selectedToolDetailLoading.value = true
+  resetSelectedToolPresentation()
   try {
-    selectedChatTool.value = await fetchAIToolById(toolCode, { token: auth.token })
-    const subjectReplay = buildSubjectReplayParams(selectedChatTool.value.fields || [])
+    const detail = await fetchAIToolById(toolCode, { token: auth.token })
+    if (requestVersion !== selectedToolDetailRequestVersion || selectedToolCode.value !== toolCode) return
+    selectedChatTool.value = detail
+    const subjectReplay = buildSubjectReplayParams(detail.fields || [])
     if (subjectReplay) {
       replayParams.value = subjectReplay
       expandComposer()
     } else if (pendingAssetReplay.value) {
-      replayParams.value = buildAssetReplayParams(selectedChatTool.value.fields || [], pendingAssetReplay.value)
+      replayParams.value = buildAssetReplayParams(detail.fields || [], pendingAssetReplay.value)
       if (pendingAssetReplay.value.prompt) promptText.value = pendingAssetReplay.value.prompt
     }
   } finally {
-    selectedToolDetailLoading.value = false
+    if (requestVersion === selectedToolDetailRequestVersion) selectedToolDetailLoading.value = false
   }
 }
 
@@ -3137,7 +3163,8 @@ onUnmounted(() => {
                 </div>
 
                 <CapabilityControls
-                  v-if="selectedChatTool"
+                  v-if="selectedChatTool && selectedChatTool.id === selectedToolCode"
+                  :key="selectedChatTool.id"
                   ref="capabilityRef"
                   layout="composer"
                   :capabilities="selectedChatTool.capabilities || []"
