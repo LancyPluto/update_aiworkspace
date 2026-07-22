@@ -6,6 +6,7 @@ public record FileUploadResponse(
         String url,
         String name,
         String contentType,
-        Long size
+        Long size,
+        boolean historyVisible
 ) {
 }

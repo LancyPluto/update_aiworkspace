@@ -15,9 +15,10 @@ public interface UserUploadAssetMapper extends BaseMapper<UserUploadAsset> {
 
     @Insert("""
             INSERT INTO user_upload_assets(user_id, file_id, asset_kind, original_filename, content_type,
-                                           file_size, url, storage_path, status, created_at, updated_at)
+                                           file_size, url, storage_path, history_visible, status, created_at, updated_at)
             VALUES(#{asset.userId}, #{asset.fileId}, #{asset.assetKind}, #{asset.originalFilename}, #{asset.contentType},
-                   #{asset.fileSize}, #{asset.url}, #{asset.storagePath}, #{asset.status}, #{asset.createdAt}, #{asset.updatedAt})
+                   #{asset.fileSize}, #{asset.url}, #{asset.storagePath}, #{asset.historyVisible}, #{asset.status},
+                   #{asset.createdAt}, #{asset.updatedAt})
             """)
     @Options(useGeneratedKeys = true, keyProperty = "asset.id")
     void insertAsset(@Param("asset") UserUploadAsset asset);
@@ -27,6 +28,7 @@ public interface UserUploadAssetMapper extends BaseMapper<UserUploadAsset> {
             FROM user_upload_assets
             WHERE user_id = #{userId}
               AND status = 'ACTIVE'
+              AND history_visible = 1
               AND (#{kind} IS NULL OR #{kind} = '' OR asset_kind = #{kind})
             """)
     long countActiveByUser(@Param("userId") Long userId,
@@ -37,6 +39,7 @@ public interface UserUploadAssetMapper extends BaseMapper<UserUploadAsset> {
             FROM user_upload_assets
             WHERE user_id = #{userId}
               AND status = 'ACTIVE'
+              AND history_visible = 1
               AND (#{kind} IS NULL OR #{kind} = '' OR asset_kind = #{kind})
             ORDER BY id DESC
             LIMIT #{limit} OFFSET #{offset}

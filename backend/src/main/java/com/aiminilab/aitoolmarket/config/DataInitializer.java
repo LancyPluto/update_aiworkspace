@@ -720,6 +720,7 @@ public class DataInitializer implements CommandLineRunner {
                   file_size BIGINT NULL,
                   url VARCHAR(1024) NOT NULL,
                   storage_path VARCHAR(1024) NULL,
+                  history_visible TINYINT NOT NULL DEFAULT 1,
                   status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
                   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -727,6 +728,7 @@ public class DataInitializer implements CommandLineRunner {
                   KEY idx_user_upload_assets_user_url (user_id, url(255))
                 )
                 """);
+        ensureColumn("user_upload_assets", "history_visible", "ALTER TABLE user_upload_assets ADD COLUMN history_visible TINYINT NOT NULL DEFAULT 1");
         ensureColumn("agent_model_configs", "display_name", "ALTER TABLE agent_model_configs ADD COLUMN display_name VARCHAR(128) NULL");
         ensureColumn("agent_model_configs", "config_code", "ALTER TABLE agent_model_configs ADD COLUMN config_code VARCHAR(64) NULL");
         ensureColumn("agent_model_configs", "console_url", "ALTER TABLE agent_model_configs ADD COLUMN console_url VARCHAR(512) NULL");

@@ -15,6 +15,7 @@ public class UserUploadAsset {
     private Long fileSize;
     private String url;
     private String storagePath;
+    private Boolean historyVisible;
     private String status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -37,6 +38,8 @@ public class UserUploadAsset {
     public void setUrl(String url) { this.url = url; }
     public String getStoragePath() { return storagePath; }
     public void setStoragePath(String storagePath) { this.storagePath = storagePath; }
+    public Boolean getHistoryVisible() { return historyVisible; }
+    public void setHistoryVisible(Boolean historyVisible) { this.historyVisible = historyVisible; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public LocalDateTime getCreatedAt() { return createdAt; }

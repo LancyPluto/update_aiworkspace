@@ -124,7 +124,7 @@ export async function fetchAIToolById(
 /** POST /api/v1/tool-upload — 工具表单文件上传（支持 mp3/wav 等音频） */
 export async function uploadToolFile(
   file: File,
-  options?: { token?: string | null },
+  options?: { token?: string | null; retainHistory?: boolean },
 ): Promise<{ assetId?: number; fileId: string; url: string; name?: string; contentType?: string; size?: number }> {
   const uploadFile = await compressImage(file, 512, 0.8)
   const formData = new FormData()
@@ -132,6 +132,7 @@ export async function uploadToolFile(
   return apiRequest<{ assetId?: number; fileId: string; url: string; name?: string; contentType?: string; size?: number }>("POST", "/api/v1/tool-upload", {
     token: options?.token,
     body: formData,
+    query: options?.retainHistory === undefined ? undefined : { retainHistory: options.retainHistory },
   })
 }
 

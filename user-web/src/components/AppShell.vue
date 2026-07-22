@@ -231,11 +231,11 @@ const creditPercent = computed(() => {
 })
 const creditProgressWidth = computed(() => `${Math.max(3, creditPercent.value)}%`)
 const creditWarning = computed(() => remainingCredits.value != null && creditPercent.value <= 20)
-const remainingCredits = computed(() => credit.value?.available ?? credit.value?.balance ?? null)
+const remainingCredits = computed(() => credit.value?.balance ?? null)
 const creditQuota = computed(() => {
   if (!credit.value) return null
   if (credit.value.totalGranted > 0) return credit.value.totalGranted
-  return (credit.value.available ?? credit.value.balance) + Math.max(credit.value.totalConsumed ?? 0, 0)
+  return credit.value.balance + Math.max(credit.value.totalConsumed ?? 0, 0)
 })
 
 // 套餐代码到会员版本的映射
