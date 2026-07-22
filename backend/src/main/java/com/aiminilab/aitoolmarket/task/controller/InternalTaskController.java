@@ -8,12 +8,16 @@ import com.aiminilab.aitoolmarket.task.dto.ExecutionContextResponse;
 import com.aiminilab.aitoolmarket.task.dto.InternalCreateTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.ProviderCheckpointRequest;
 import com.aiminilab.aitoolmarket.task.dto.ProviderCheckpointResponse;
+import com.aiminilab.aitoolmarket.task.dto.ProviderCallbackEventResponse;
+import com.aiminilab.aitoolmarket.task.dto.ProviderCallbackRegistrationRequest;
+import com.aiminilab.aitoolmarket.task.dto.ProviderCallbackRegistrationResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskDetailResponse;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.dto.WorkerFailedRequest;
 import com.aiminilab.aitoolmarket.task.dto.WorkerProcessingRequest;
 import com.aiminilab.aitoolmarket.task.dto.WorkerSuccessRequest;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
+import com.aiminilab.aitoolmarket.task.service.ProviderCallbackService;
 import com.aiminilab.aitoolmarket.task.service.TaskService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,10 +34,14 @@ public class InternalTaskController {
 
     private final InternalTaskService internalTaskService;
     private final TaskService taskService;
+    private final ProviderCallbackService providerCallbackService;
 
-    public InternalTaskController(InternalTaskService internalTaskService, TaskService taskService) {
+    public InternalTaskController(InternalTaskService internalTaskService,
+                                  TaskService taskService,
+                                  ProviderCallbackService providerCallbackService) {
         this.internalTaskService = internalTaskService;
         this.taskService = taskService;
+        this.providerCallbackService = providerCallbackService;
     }
 
     @PostMapping
@@ -78,6 +86,21 @@ public class InternalTaskController {
             @PathVariable Long taskId,
             @Valid @RequestBody ProviderCheckpointRequest request) {
         return ApiResponse.success(internalTaskService.saveProviderCheckpoint(taskId, request));
+    }
+
+    @PostMapping("/{taskId}/provider-callback-registration")
+    public ApiResponse<ProviderCallbackRegistrationResponse> registerProviderCallback(
+            @PathVariable Long taskId,
+            @Valid @RequestBody ProviderCallbackRegistrationRequest request) {
+        return ApiResponse.success(providerCallbackService.register(taskId, request));
+    }
+
+    @GetMapping("/{taskId}/provider-callback")
+    public ApiResponse<ProviderCallbackEventResponse> latestProviderCallback(
+            @PathVariable Long taskId,
+            @RequestParam String providerCode,
+            @RequestParam String claimToken) {
+        return ApiResponse.success(providerCallbackService.latest(taskId, providerCode, claimToken));
     }
 
     @PostMapping("/{taskId}/processing")

@@ -7,6 +7,7 @@ import com.aiminilab.aitoolmarket.config.AuthInterceptor;
 import com.aiminilab.aitoolmarket.task.controller.InternalTaskController;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
+import com.aiminilab.aitoolmarket.task.service.ProviderCallbackService;
 import com.aiminilab.aitoolmarket.task.service.TaskService;
 import com.aiminilab.aitoolmarket.task.support.ProviderCheckpointLimits;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
@@ -56,7 +57,11 @@ class WorkerInternalApiSecurityTest {
         );
         authInterceptor.init(new MockFilterConfig());
 
-        mockMvc = MockMvcBuilders.standaloneSetup(new InternalTaskController(internalTaskService, taskService))
+        mockMvc = MockMvcBuilders.standaloneSetup(new InternalTaskController(
+                        internalTaskService,
+                        taskService,
+                        mock(ProviderCallbackService.class)
+                ))
                 .addFilters(authInterceptor)
                 .build();
     }

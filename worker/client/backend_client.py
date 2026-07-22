@@ -7,7 +7,7 @@ import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 import requests
 
@@ -140,6 +140,43 @@ class BackendClient:
         if last_error is not None:
             raise last_error
         raise BackendClientError("provider checkpoint retry exhausted")
+
+    def register_provider_callback(
+        self,
+        task_id: int,
+        provider_code: str,
+        *,
+        trace_id: str | None = None,
+        claim_token: str | None = None,
+    ) -> dict[str, Any]:
+        payload = {"providerCode": provider_code}
+        self._attach_claim_token(payload, claim_token)
+        response = self._request(
+            "POST",
+            f"/api/internal/v1/tasks/{task_id}/provider-callback-registration",
+            json_body=payload,
+            timeout=self.timeout,
+            trace_id=trace_id,
+        )
+        return self._parse_response(response)
+
+    def get_provider_callback(
+        self,
+        task_id: int,
+        provider_code: str,
+        *,
+        trace_id: str | None = None,
+        claim_token: str | None = None,
+    ) -> dict[str, Any]:
+        token = claim_token or _CURRENT_CLAIM_TOKEN.get()
+        query = urlencode({"providerCode": provider_code, "claimToken": token or ""})
+        response = self._request(
+            "GET",
+            f"/api/internal/v1/tasks/{task_id}/provider-callback?{query}",
+            timeout=self.timeout,
+            trace_id=trace_id,
+        )
+        return self._parse_response(response)
 
     def mark_success(
         self,

@@ -31,7 +31,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.datasource.username=sa",
         "spring.datasource.password=",
         "spring.sql.init.mode=always",
-        "spring.sql.init.schema-locations=classpath:schema-test.sql"
+        "spring.sql.init.schema-locations=classpath:schema-test.sql",
+        "app.provider-callback.public-base-url=https://wlcloudai.com"
 })
 class WorkerInternalApiTest {
 
@@ -46,6 +47,78 @@ class WorkerInternalApiTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Test
+    void sunoCallbackRegistrationAndInboxArePublicIdempotentAndWorkerReadable() throws Exception {
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        Long toolId = createTool(adminToken, "worker_suno_callback_tool", 3);
+        publishTool(adminToken, toolId);
+        String userToken = login("/api/v1/auth/login", "user1");
+        Long taskId = createTask(userToken, "worker_suno_callback_tool");
+
+        String claimBody = """
+                {"workerId":"worker-suno","claimToken":"claim-suno"}
+                """;
+        mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/claim", taskId), "POST",
+                        "/api/internal/v1/tasks/%d/claim".formatted(taskId), claimBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(claimBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.claimed").value(true));
+
+        String registrationBody = """
+                {"providerCode":"suno_music","claimToken":"claim-suno"}
+                """;
+        String registrationJson = mockMvc.perform(signed(
+                        post("/api/internal/v1/tasks/{taskId}/provider-callback-registration", taskId),
+                        "POST",
+                        "/api/internal/v1/tasks/%d/provider-callback-registration".formatted(taskId),
+                        registrationBody
+                ).contentType(MediaType.APPLICATION_JSON).content(registrationBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.callbackUrl").value(
+                        org.hamcrest.Matchers.startsWith("https://wlcloudai.com/api/v1/provider-callbacks/suno/music/")
+                ))
+                .andReturn().getResponse().getContentAsString();
+        String callbackUrl = objectMapper.readTree(registrationJson).path("data").path("callbackUrl").asText();
+        String callbackToken = callbackUrl.substring(callbackUrl.lastIndexOf('/') + 1);
+
+        String callbackBody = """
+                {
+                  "code":200,
+                  "msg":"All generated successfully.",
+                  "data":{
+                    "callbackType":"complete",
+                    "task_id":"suno-provider-task-1",
+                    "data":[{"id":"audio-1","audio_url":"https://cdn.example/song.mp3"}]
+                  }
+                }
+                """;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            mockMvc.perform(post("/api/v1/provider-callbacks/suno/music/{token}", callbackToken)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(callbackBody))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("received"));
+        }
+
+        String callbackPath = "/api/internal/v1/tasks/%d/provider-callback".formatted(taskId);
+        mockMvc.perform(signed(get(callbackPath), "GET", callbackPath, "")
+                        .param("providerCode", "suno_music")
+                        .param("claimToken", "claim-suno"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.providerTaskId").value("suno-provider-task-1"))
+                .andExpect(jsonPath("$.data.callbackType").value("complete"))
+                .andExpect(jsonPath("$.data.payload.data.data[0].audio_url")
+                        .value("https://cdn.example/song.mp3"));
+
+        Integer inboxCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM provider_callback_inbox WHERE task_id = ?",
+                Integer.class,
+                taskId
+        );
+        assertThat(inboxCount).isEqualTo(1);
+    }
 
     @Test
     void workerCanReadContextMarkProcessingAndWriteSuccessResult() throws Exception {

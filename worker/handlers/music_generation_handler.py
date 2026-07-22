@@ -48,6 +48,43 @@ class MusicGenerationHandler:
             provider_registry.require_worker_ready(provider)
             prompt = _resolve_prompt(params)
 
+            provider_checkpoint = context.get("providerCheckpoint")
+            provider_checkpoint_version = max(0, int(context.get("providerCheckpointVersion") or 0))
+            resume_task_id = _matching_music_resume(
+                provider_checkpoint,
+                provider,
+                str(model_config.get("modelName") or context.get("modelName") or ""),
+            )
+            callback_url: str | None = None
+            callback_loader = None
+            register_callback = getattr(self.backend_client, "register_provider_callback", None)
+            get_callback = getattr(self.backend_client, "get_provider_callback", None)
+            if callable(register_callback) and callable(get_callback):
+                registration = register_callback(task_id, "suno_music", trace_id=trace_id)
+                callback_url = str(registration.get("callbackUrl") or "").strip() or None
+                callback_loader = lambda: get_callback(task_id, "suno_music", trace_id=trace_id)
+
+            def save_submission(external_task_id: str) -> None:
+                nonlocal provider_checkpoint, provider_checkpoint_version
+                save_checkpoint = getattr(self.backend_client, "save_provider_checkpoint", None)
+                if not callable(save_checkpoint):
+                    return
+                checkpoint = {
+                    "kind": "MUSIC_SUBMISSION",
+                    "provider": provider,
+                    "model": str(model_config.get("modelName") or context.get("modelName") or ""),
+                    "status": "SUBMITTED",
+                    "taskId": external_task_id,
+                }
+                saved = save_checkpoint(
+                    task_id,
+                    checkpoint,
+                    expected_version=provider_checkpoint_version,
+                    trace_id=trace_id,
+                )
+                provider_checkpoint_version = int(saved.get("version") or provider_checkpoint_version + 1)
+                provider_checkpoint = checkpoint
+
             self._mark_processing_safe(task_id, progress=10, progress_message="Music generation started", trace_id=trace_id)
             result = self.music_client.generate(
                 model=str(model_config.get("modelName") or context.get("modelName") or ""),
@@ -56,6 +93,10 @@ class MusicGenerationHandler:
                 api_key=model_config.get("apiKey"),
                 params=params,
                 model_config=model_config,
+                callback_url=callback_url,
+                resume_task_id=resume_task_id,
+                submitted_callback=save_submission,
+                callback_result_loader=callback_loader,
             )
             self.backend_client.mark_processing(
                 task_id,
@@ -158,3 +199,16 @@ def _resolve_prompt(params: dict[str, Any]) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def _matching_music_resume(checkpoint: Any, provider: str, model: str) -> str | None:
+    if not isinstance(checkpoint, dict):
+        return None
+    if str(checkpoint.get("kind") or "").upper() != "MUSIC_SUBMISSION":
+        return None
+    if str(checkpoint.get("provider") or "").lower() != provider.lower():
+        return None
+    if str(checkpoint.get("model") or "") != model:
+        return None
+    task_id = str(checkpoint.get("taskId") or "").strip()
+    return task_id or None

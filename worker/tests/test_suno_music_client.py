@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
+import requests
 
 
 WORKER_ROOT = Path(__file__).resolve().parents[1]
@@ -97,6 +98,65 @@ class SunoMusicClientTest(unittest.TestCase):
         self.assertEqual(create_payload["callBackUrl"], "https://example.com/suno-callback")
         self.assertNotIn("style", create_payload)
         self.assertEqual(request.call_args_list[1].kwargs["params"]["taskId"], "task-1")
+
+    def test_create_read_timeout_is_not_reposted_and_callback_recovers_result(self):
+        client = SunoMusicClient()
+        callbacks = iter([
+            None,
+            {
+                "eventId": 9,
+                "providerTaskId": "task-from-callback",
+                "providerStatusCode": 200,
+                "callbackType": "complete",
+                "payload": {
+                    "code": 200,
+                    "msg": "success",
+                    "data": {
+                        "callbackType": "complete",
+                        "task_id": "task-from-callback",
+                        "data": [{"id": "audio-1", "audio_url": "https://cdn.example/song.mp3"}],
+                    },
+                },
+            },
+        ])
+        with patch.object(
+            OutboundRequestsClient,
+            "request",
+            autospec=True,
+            side_effect=requests.ReadTimeout("create response lost"),
+        ) as request:
+            result = client.generate(
+                model="V5",
+                prompt="callback recovery",
+                base_url="https://api.sunoapi.org",
+                api_key="secret",
+                params={},
+                callback_url="https://wlcloudai.com/api/v1/provider-callbacks/suno/music/" + "a" * 64,
+                callback_result_loader=lambda: next(callbacks),
+            )
+
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(result.task_id, "task-from-callback")
+        self.assertEqual(result.tracks[0].audio_url, "https://cdn.example/song.mp3")
+
+    def test_submitted_callback_receives_external_task_id_before_polling(self):
+        submitted = []
+        client = SunoMusicClient()
+        with patch.object(
+            OutboundRequestsClient,
+            "request",
+            autospec=True,
+            side_effect=[FakeCreateResponse(), FakeRecordResponse()],
+        ):
+            client.generate(
+                model="V5",
+                prompt="checkpoint test",
+                base_url="https://api.sunoapi.org",
+                api_key="secret",
+                params={},
+                submitted_callback=submitted.append,
+            )
+        self.assertEqual(submitted, ["task-1"])
 
     def test_extract_tracks_reads_nested_response_suno_data(self):
         detail = {

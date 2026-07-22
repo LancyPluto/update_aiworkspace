@@ -19,6 +19,8 @@ class FakeBackend:
         self.processing = []
         self.successes = []
         self.failures = []
+        self.checkpoints = []
+        self.callback_registrations = []
 
     def get_execution_context(self, task_id, trace_id=None):
         return self.context
@@ -35,6 +37,17 @@ class FakeBackend:
         self.failures.append((task_id, payload, trace_id))
         return {}
 
+    def register_provider_callback(self, task_id, provider_code, trace_id=None):
+        self.callback_registrations.append((task_id, provider_code, trace_id))
+        return {"callbackUrl": f"https://wlcloudai.com/api/v1/provider-callbacks/suno/music/{'a' * 64}"}
+
+    def get_provider_callback(self, task_id, provider_code, trace_id=None):
+        return {}
+
+    def save_provider_checkpoint(self, task_id, checkpoint, expected_version, trace_id=None):
+        self.checkpoints.append((task_id, checkpoint, expected_version, trace_id))
+        return {"version": expected_version + 1}
+
 
 class FakeMusicClient:
     def __init__(self, result=None, error=None):
@@ -46,6 +59,8 @@ class FakeMusicClient:
         self.calls.append(kwargs)
         if self.error:
             raise self.error
+        if self.result is not None and kwargs.get("submitted_callback"):
+            kwargs["submitted_callback"](self.result.task_id)
         return self.result
 
 
@@ -111,6 +126,8 @@ class MusicGenerationHandlerTest(unittest.TestCase):
         self.assertEqual(handled["externalTaskId"], "suno-task-1")
         self.assertEqual(music_client.calls[0]["prompt"], "warm cinematic pop about a city sunrise")
         self.assertEqual(music_client.calls[0]["model_config"]["extraAuthJson"], '{"proxyUrl":"http://127.0.0.1:7890"}')
+        self.assertTrue(music_client.calls[0]["callback_url"].startswith("https://wlcloudai.com/"))
+        self.assertEqual(backend.checkpoints[0][1]["taskId"], "suno-task-1")
         self.assertEqual(persister.calls[0]["index"], 1)
         self.assertEqual(persister.calls[1]["index"], 2)
         success_payload = backend.successes[0][1]

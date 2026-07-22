@@ -47,6 +47,9 @@ spring:
       timeout: 2s
 
 app:
+  provider-callback:
+    public-base-url: ${PUBLIC_BASE_URL:http://localhost:8080}
+    token-ttl-hours: ${PROVIDER_CALLBACK_TOKEN_TTL_HOURS:24}
   env: ${APP_ENV:local}
   cache:
     enabled: ${APP_CACHE_ENABLED:true}

@@ -6,7 +6,7 @@ import logging
 import mimetypes
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 import requests
@@ -25,6 +25,14 @@ class SunoMusicError(RuntimeError):
 
 class SunoMusicTimeoutError(SunoMusicError):
     pass
+
+
+class SunoMusicTransportError(SunoMusicError):
+    pass
+
+
+class SunoMusicSubmissionUnknownError(SunoMusicTimeoutError):
+    """The create request may have reached Suno, but its response was not received."""
 
 
 @dataclass(frozen=True)
@@ -48,6 +56,7 @@ class SunoGenerationResult:
 class SunoMusicClient:
     def __init__(self) -> None:
         self.timeout = (5, 60)
+        self.poll_timeout = (5, 15)
         self.poll_interval_seconds = settings.suno_poll_interval_seconds
         self.timeout_seconds = settings.suno_timeout_seconds
 
@@ -61,6 +70,10 @@ class SunoMusicClient:
         params: dict[str, Any],
         extra_auth_json: str | None = None,
         model_config: dict[str, Any] | None = None,
+        callback_url: str | None = None,
+        resume_task_id: str | None = None,
+        submitted_callback: Callable[[str], None] | None = None,
+        callback_result_loader: Callable[[], dict[str, Any] | None] | None = None,
     ) -> SunoGenerationResult:
         http = OutboundRequestsClient.from_model_config(model_config, extra_auth_json=extra_auth_json)
         try:
@@ -71,6 +84,10 @@ class SunoMusicClient:
                 api_key=api_key,
                 params=params,
                 http=http,
+                callback_url=callback_url,
+                resume_task_id=resume_task_id,
+                submitted_callback=submitted_callback,
+                callback_result_loader=callback_result_loader,
             )
         finally:
             http.close()
@@ -84,6 +101,10 @@ class SunoMusicClient:
         api_key: str | None,
         params: dict[str, Any],
         http: OutboundRequestsClient,
+        callback_url: str | None,
+        resume_task_id: str | None,
+        submitted_callback: Callable[[str], None] | None,
+        callback_result_loader: Callable[[], dict[str, Any] | None] | None,
     ) -> SunoGenerationResult:
         resolved_api_key = _resolve_api_key(api_key)
         if not resolved_api_key:
@@ -117,10 +138,17 @@ class SunoMusicClient:
                 "use customMode=true for long lyrics or detailed song structure."
             )
 
+        callback_result = _generation_result_from_callback(_load_callback(callback_result_loader))
+        if callback_result is not None:
+            return callback_result
+
+        effective_params = dict(params)
+        if callback_url:
+            effective_params["callBackUrl"] = callback_url
         payload = self._build_payload(
             model=model,
             prompt=prompt_text,
-            params=params,
+            params=effective_params,
             api_key=resolved_api_key,
             http=http,
         )
@@ -133,9 +161,50 @@ class SunoMusicClient:
             payload.get("customMode"),
             bool(upload_url),
         )
-        task_id = self._create_task(root_url=root_url, headers=headers, payload=payload, upload_cover=bool(upload_url), http=http)
-        tracks, detail = self._poll_task(root_url=root_url, headers=headers, task_id=task_id, http=http)
+        task_id = (resume_task_id or "").strip()
+        if not task_id:
+            try:
+                task_id = self._create_task(
+                    root_url=root_url,
+                    headers=headers,
+                    payload=payload,
+                    upload_cover=bool(upload_url),
+                    http=http,
+                )
+            except SunoMusicSubmissionUnknownError as exc:
+                recovered = self._wait_for_callback(callback_result_loader)
+                if recovered is not None:
+                    return recovered
+                raise SunoMusicSubmissionUnknownError(
+                    "Suno create response timed out; delivery is unknown and no callback arrived before the provider deadline"
+                ) from exc
+            if submitted_callback:
+                submitted_callback(task_id)
+        tracks, detail = self._poll_task(
+            root_url=root_url,
+            headers=headers,
+            task_id=task_id,
+            http=http,
+            callback_result_loader=callback_result_loader,
+        )
         return SunoGenerationResult(task_id=task_id, tracks=tracks, metadata={"record": detail, "payload": _safe_payload(payload)})
+
+    def _wait_for_callback(
+        self,
+        callback_result_loader: Callable[[], dict[str, Any] | None] | None,
+    ) -> SunoGenerationResult | None:
+        if callback_result_loader is None:
+            return None
+        deadline = time.monotonic() + max(self.timeout_seconds, 30)
+        while time.monotonic() < deadline:
+            recovered = _generation_result_from_callback(_load_callback(callback_result_loader))
+            if recovered is not None:
+                return recovered
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(self.poll_interval_seconds, remaining))
+        return None
 
     def _create_task(
         self,
@@ -162,12 +231,27 @@ class SunoMusicClient:
         headers: dict[str, str],
         task_id: str,
         http: OutboundRequestsClient,
+        callback_result_loader: Callable[[], dict[str, Any] | None] | None = None,
     ) -> tuple[list[SunoTrack], dict[str, Any]]:
         deadline = time.monotonic() + max(self.timeout_seconds, 30)
         url = f"{root_url}/api/v1/generate/record-info"
         last_status = ""
         while True:
-            response = self._request_with_retry("GET", url, http=http, headers=headers, params={"taskId": task_id})
+            recovered = _generation_result_from_callback(_load_callback(callback_result_loader))
+            if recovered is not None:
+                if recovered.task_id != task_id:
+                    raise SunoMusicError("Suno callback task id does not match submitted task id")
+                return recovered.tracks, {"status": "SUCCESS", "callback": recovered.metadata}
+            try:
+                response = self._request_with_retry("GET", url, http=http, headers=headers, params={"taskId": task_id})
+            except SunoMusicTransportError as exc:
+                if time.monotonic() >= deadline:
+                    raise SunoMusicTimeoutError(
+                        f"Suno task timed out after polling transport failures: taskId={task_id}"
+                    ) from exc
+                LOGGER.warning("Suno poll transport failed; keeping existing task taskId=%s: %s", task_id, exc)
+                time.sleep(min(self.poll_interval_seconds, max(0.0, deadline - time.monotonic())))
+                continue
             data = _json_response(response)
             detail = data.get("data") if isinstance(data.get("data"), dict) else data
             status = str(detail.get("status") or data.get("status") or "").upper()
@@ -200,19 +284,42 @@ class SunoMusicClient:
         last_exc: Exception | None = None
         for attempt in range(3):
             try:
-                response = http.request(method, url, timeout=self.timeout, **kwargs)
-                if response.status_code in {405, 430, 500, 502, 503, 504} and attempt < 2:
+                request_timeout = self.poll_timeout if method.upper() == "GET" else self.timeout
+                response = http.request(method, url, timeout=request_timeout, **kwargs)
+                if method.upper() == "GET" and response.status_code in {405, 430, 500, 502, 503, 504} and attempt < 2:
                     time.sleep(1.5 * (attempt + 1))
                     continue
                 _raise_for_status(response)
                 return response
-            except requests.RequestException as exc:
+            except requests.ConnectTimeout as exc:
                 last_exc = exc
                 if attempt < 2:
                     time.sleep(1.5 * (attempt + 1))
                     continue
-                raise SunoMusicError(f"Suno request failed: {exc}") from exc
-        raise SunoMusicError(f"Suno request failed: {last_exc}")
+                if method.upper() == "POST":
+                    raise SunoMusicTransportError(f"Suno create connection timed out before delivery: {exc}") from exc
+                raise SunoMusicTransportError(f"Suno poll connection timed out: {exc}") from exc
+            except requests.ReadTimeout as exc:
+                if method.upper() == "POST":
+                    raise SunoMusicSubmissionUnknownError(f"Suno create response timed out: {exc}") from exc
+                last_exc = exc
+                if attempt < 2:
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                raise SunoMusicTransportError(f"Suno poll response timed out: {exc}") from exc
+            except requests.HTTPError as exc:
+                raise SunoMusicError(f"Suno request rejected: {exc}") from exc
+            except requests.RequestException as exc:
+                last_exc = exc
+                if method.upper() == "POST":
+                    raise SunoMusicSubmissionUnknownError(
+                        f"Suno create delivery state is unknown after transport failure: {exc}"
+                    ) from exc
+                if attempt < 2:
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                raise SunoMusicTransportError(f"Suno poll request failed: {exc}") from exc
+        raise SunoMusicTransportError(f"Suno request failed: {last_exc}")
 
     def _build_payload(
         self,
@@ -270,6 +377,50 @@ class SunoMusicClient:
             if number is not None:
                 payload[key] = number
         return {key: value for key, value in payload.items() if value != ""}
+
+
+def _load_callback(
+    callback_result_loader: Callable[[], dict[str, Any] | None] | None,
+) -> dict[str, Any] | None:
+    if callback_result_loader is None:
+        return None
+    try:
+        value = callback_result_loader()
+    except Exception:
+        LOGGER.warning("Could not read persisted Suno callback; polling provider will continue", exc_info=True)
+        return None
+    return value if isinstance(value, dict) and value else None
+
+
+def _generation_result_from_callback(event: dict[str, Any] | None) -> SunoGenerationResult | None:
+    if not event:
+        return None
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else event
+    if not isinstance(payload, dict):
+        return None
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    callback_type = str(
+        data.get("callbackType") or data.get("callback_type") or event.get("callbackType") or ""
+    ).strip().lower()
+    try:
+        code = int(payload.get("code"))
+    except (TypeError, ValueError):
+        code = int(event.get("providerStatusCode") or 500)
+    task_id = str(
+        data.get("task_id") or data.get("taskId") or event.get("providerTaskId") or ""
+    ).strip()
+    if code != 200 or callback_type == "error":
+        raise SunoMusicError(str(payload.get("msg") or "Suno callback reported generation failure"))
+    if callback_type != "complete":
+        return None
+    tracks = _extract_tracks(data)
+    if not task_id or not tracks:
+        raise SunoMusicError("Suno completion callback is missing task id or audio tracks")
+    return SunoGenerationResult(
+        task_id=task_id,
+        tracks=tracks,
+        metadata={"callback": payload, "callbackEventId": event.get("eventId")},
+    )
 
 
 def _resolve_generation_type(params: dict[str, Any]) -> str:

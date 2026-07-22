@@ -1672,3 +1672,38 @@ CREATE TABLE learning_tutorials (
   CONSTRAINT fk_learning_tutorial_category FOREIGN KEY (category_id) REFERENCES learning_categories(id)
 );
 CREATE INDEX idx_learning_tutorials_visible ON learning_tutorials(category_id, enabled, sort_order, id);
+CREATE TABLE provider_callback_registrations (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  provider_code VARCHAR(64) NOT NULL,
+  task_id BIGINT NOT NULL,
+  route_attempt_id BIGINT,
+  token_hash CHAR(64) NOT NULL UNIQUE,
+  provider_task_id VARCHAR(128),
+  status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+  expires_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_provider_callback_task ON provider_callback_registrations(task_id, provider_code, created_at);
+CREATE INDEX idx_provider_callback_external ON provider_callback_registrations(provider_code, provider_task_id);
+
+CREATE TABLE provider_callback_inbox (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  registration_id BIGINT NOT NULL,
+  provider_code VARCHAR(64) NOT NULL,
+  task_id BIGINT NOT NULL,
+  provider_task_id VARCHAR(128) NOT NULL,
+  callback_type VARCHAR(32) NOT NULL,
+  provider_status_code INT,
+  payload_json CLOB NOT NULL,
+  payload_sha256 CHAR(64) NOT NULL,
+  process_status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+  received_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  processed_at TIMESTAMP,
+  last_error VARCHAR(1000),
+  UNIQUE(provider_code, provider_task_id, callback_type, payload_sha256),
+  CONSTRAINT fk_provider_callback_registration
+    FOREIGN KEY (registration_id) REFERENCES provider_callback_registrations(id)
+);
+CREATE INDEX idx_provider_callback_inbox_task ON provider_callback_inbox(task_id, provider_code, received_at);
+CREATE INDEX idx_provider_callback_inbox_pending ON provider_callback_inbox(process_status, received_at);

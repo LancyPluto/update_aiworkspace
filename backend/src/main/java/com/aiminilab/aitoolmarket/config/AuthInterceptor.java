@@ -188,6 +188,8 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
                 || path.startsWith("/api/v1/auth/")
                 || ("POST".equalsIgnoreCase(method) && path.equals("/api/v1/observability/web-vitals"))
                 || ("POST".equalsIgnoreCase(method) && path.equals("/api/v1/observability/media-events"))
+                || ("POST".equalsIgnoreCase(method)
+                    && path.matches("/api/v1/provider-callbacks/suno/music/[a-f0-9]{64}"))
                 || path.equals("/api/v1/settings/customer-service")
                 || path.startsWith("/api/v1/pay/wechat/")
                 || path.startsWith("/api/v1/pay/alipay/")

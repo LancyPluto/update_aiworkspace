@@ -76,7 +76,7 @@ class Settings:
     suno_music_model: str = os.getenv('SUNO_MUSIC_MODEL', 'V5')
     suno_callback_url: str = os.getenv('SUNO_CALLBACK_URL', '')
     suno_file_upload_base_url: str = os.getenv('SUNO_FILE_UPLOAD_BASE_URL', 'https://sunoapiorg.redpandaai.co')
-    suno_poll_interval_seconds: float = float(os.getenv('SUNO_POLL_INTERVAL_SECONDS', '8'))
+    suno_poll_interval_seconds: float = float(os.getenv('SUNO_POLL_INTERVAL_SECONDS', '30'))
     suno_timeout_seconds: int = int(os.getenv('SUNO_TIMEOUT_SECONDS', '900'))
     digital_human_video_provider: str = os.getenv('DIGITAL_HUMAN_VIDEO_PROVIDER', 'seedance')
     infinitetalk_base_url: str = os.getenv('INFINITETALK_BASE_URL', 'http://host.docker.internal:7860')
