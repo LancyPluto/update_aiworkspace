@@ -31,6 +31,28 @@ class DeployContractTests(unittest.TestCase):
         self.assertNotIn("Duplicate column name.*success", script)
         self.assertNotIn("Duplicate key name.*success", script)
 
+    def test_model_capability_migration_normalizes_provider_join_collation(self) -> None:
+        migration = self.read("sql/111_ai_tool_required_model_capabilities.sql")
+        self.assertIn("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;", migration)
+        self.assertRegex(
+            migration,
+            r"ON metadata\.provider_code COLLATE utf8mb4_unicode_ci\s*"
+            r"= model\.provider COLLATE utf8mb4_unicode_ci",
+        )
+
+    def test_backend_build_uses_strict_persistent_maven_cache(self) -> None:
+        dockerfile = self.read("backend/Dockerfile")
+        cache_mount = (
+            "RUN --mount=type=cache,target=/root/.m2/repository,sharing=locked"
+        )
+        self.assertTrue(dockerfile.startswith("# syntax=docker/dockerfile:1.7\n"))
+        self.assertEqual(2, dockerfile.count(cache_mount))
+        self.assertIn("mvn -B dependency:go-offline -DskipTests", dockerfile)
+        self.assertNotRegex(
+            dockerfile,
+            r"dependency:go-offline[^\n]*\|\|\s*true",
+        )
+
     def test_workflow_schema_deployment_does_not_switch_existing_tool(self) -> None:
         migration = self.read("sql/093_workflow_rollout_safety.sql")
         self.assertIn("SET execution_mode = 'DIRECT'", migration)
@@ -661,11 +683,39 @@ class DeployContractTests(unittest.TestCase):
     def test_rollback_does_not_recreate_application_dependencies(self) -> None:
         rollback = self.read("deploy/scripts/rollback_release.sh")
         self.assertIn(
-            'up -d --force-recreate --no-deps "${app_services[@]}"',
+            'up -d --force-recreate --no-deps --no-build --pull never "${restorable_app_services[@]}"',
             rollback,
         )
         self.assertIn("--env-file ../.env", rollback)
         self.assertIn("mihomo|mihomo-init)", rollback)
+
+    def test_deploy_snapshots_old_images_and_rollback_never_rebuilds(self) -> None:
+        capture = self.read("deploy/scripts/capture_rollback_images.sh")
+        rollback = self.read("deploy/scripts/rollback_release.sh")
+        linux_deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
+        windows_deploy = self.read("deploy/scripts/remote_deploy_production.py")
+
+        self.assertIn("last-deploy.images.tsv", capture)
+        self.assertIn("{{.Image}}", capture)
+        self.assertIn("{{.Config.Image}}", capture)
+        self.assertIn("ai-tool-market-rollback-${service}:previous", capture)
+        self.assertIn("capture_rollback_images.sh", linux_deploy)
+        self.assertIn("capture_rollback_images.sh", windows_deploy)
+        self.assertLess(
+            linux_deploy.index("capture_rollback_images.sh"),
+            linux_deploy.index("apply_sql_migrations.sh"),
+        )
+        self.assertLess(
+            windows_deploy.index("capture_rollback_images.sh"),
+            windows_deploy.index("apply_sql_migrations.sh"),
+        )
+        self.assertIn('docker image tag "$rollback_ref" "$image_ref"', rollback)
+        self.assertIn("preserved rollback image changed", rollback)
+        self.assertIn("last-deploy.images.tsv", rollback)
+        self.assertNotIn(
+            'docker compose "${compose_args[@]}" build',
+            rollback,
+        )
 
     def test_release_gate_requires_fresh_monitoring_metrics(self) -> None:
         health = self.read("deploy/scripts/verify_release_health.sh")

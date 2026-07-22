@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # Build from repository root: docker build -f backend/Dockerfile .
 ARG DOCKER_REGISTRY=
 FROM ${DOCKER_REGISTRY:-}maven:3.9-eclipse-temurin-17 AS build
@@ -16,10 +17,12 @@ COPY deploy/config/maven-settings-china.xml /root/.m2/settings.xml
 COPY backend/pom.xml ./pom.xml
 
 # Official Maven Central; outbound via mihomo proxy (HTTP_PROXY) on production builds.
-RUN mvn -B dependency:go-offline -DskipTests || true
+RUN --mount=type=cache,target=/root/.m2/repository,sharing=locked \
+    mvn -B dependency:go-offline -DskipTests
 
 COPY backend/src ./src
-RUN mvn -B -DskipTests package
+RUN --mount=type=cache,target=/root/.m2/repository,sharing=locked \
+    mvn -B -DskipTests package
 
 ARG DOCKER_REGISTRY=
 FROM ${DOCKER_REGISTRY:-}eclipse-temurin:17-jre-jammy

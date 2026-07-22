@@ -76,6 +76,7 @@ fi
 cd "$REMOTE_DIR"
 rm -f .deploy_revision.pending .deploy_meta.pending
 : > deploy/logs/last-deploy.services.txt
+rm -f deploy/logs/last-deploy.images.tsv
 git config user.email "deploy@wlcloudai.com"
 git config user.name "Production Deploy"
 git remote set-url origin "$GIT_REPO_URL"

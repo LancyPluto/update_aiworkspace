@@ -183,6 +183,7 @@ SERVICES="{services}"
 git config --global --add safe.directory "$REMOTE_DIR" 2>/dev/null || true
 chown -R root:root "$REMOTE_DIR" 2>/dev/null || true
 mkdir -p "$REMOTE_DIR/deploy/logs"
+rm -f "$REMOTE_DIR/deploy/logs/last-deploy.images.tsv"
 
 for rel in .env engines/banana-slides/.env; do
   if [ -f "$REMOTE_DIR/$rel" ]; then
@@ -261,6 +262,10 @@ done
 
 git log -1 --oneline
 rm -f "$BUNDLE"
+echo "Capturing current application images for rollback ..."
+REMOTE_DIR="$REMOTE_DIR" \
+  DEPLOY_SERVICES="backend worker agent-service admin-frontend user-web banana-slides" \
+  bash "$REMOTE_DIR/deploy/scripts/capture_rollback_images.sh"
 
 {ENV_PATCH_SCRIPT}
 

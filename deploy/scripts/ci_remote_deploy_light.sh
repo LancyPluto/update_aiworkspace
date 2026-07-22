@@ -118,6 +118,10 @@ if [ "\$GITHUB_SHA" != "unknown" ] && [ "\$RELEASE_SHA" != "\$GITHUB_SHA" ]; the
   echo "::error::Checked-out release SHA mismatch: expected \$GITHUB_SHA, got \$RELEASE_SHA" >&2
   exit 1
 fi
+echo "Capturing current application images for rollback ..."
+REMOTE_DIR="\$REMOTE_DIR" \
+  DEPLOY_SERVICES="backend worker agent-service admin-frontend user-web banana-slides" \
+  bash "\$REMOTE_DIR/deploy/scripts/capture_rollback_images.sh"
 
 read_env_value() {
   python3 - "\$1" <<'PY'

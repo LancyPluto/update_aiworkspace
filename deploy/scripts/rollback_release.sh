@@ -4,6 +4,7 @@ set -euo pipefail
 REMOTE_DIR="${REMOTE_DIR:-/root/ai_tool_market}"
 DEPLOY_SERVICES="${DEPLOY_SERVICES:-${*:-}}"
 MANIFEST="$REMOTE_DIR/deploy/logs/last-deploy.json"
+IMAGE_SNAPSHOT="$REMOTE_DIR/deploy/logs/last-deploy.images.tsv"
 # Keep rollback independent of the checked-out revision's registry default.
 # A private ACR mirror can override this through the deployment environment.
 CADVISOR_IMAGE="${CADVISOR_IMAGE:-m.daocloud.io/ghcr.io/google/cadvisor:v0.60.5}"
@@ -13,6 +14,38 @@ if [ ! -f "$MANIFEST" ]; then
   echo "ERROR: deploy manifest is missing; automatic rollback is unavailable" >&2
   exit 1
 fi
+if [ ! -f "$IMAGE_SNAPSHOT" ]; then
+  echo "ERROR: rollback image snapshot is missing; refusing to rebuild old source" >&2
+  exit 1
+fi
+
+declare -A rollback_image_ids=()
+declare -A rollback_image_refs=()
+while IFS=$'\t' read -r service image_id image_ref; do
+  case "$service" in
+    backend|worker|agent-service|admin-frontend|user-web|banana-slides) ;;
+    *)
+      echo "ERROR: invalid service in rollback image snapshot: $service" >&2
+      exit 1
+      ;;
+  esac
+  if [ -n "${rollback_image_ids[$service]+x}" ]; then
+    echo "ERROR: duplicate service in rollback image snapshot: $service" >&2
+    exit 1
+  fi
+  if [ "$image_id" != "-" ]; then
+    if [[ ! "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] \
+        || [[ -z "$image_ref" || "$image_ref" = "-" || "$image_ref" =~ [[:space:]] ]]; then
+      echo "ERROR: invalid image metadata in rollback snapshot for $service" >&2
+      exit 1
+    fi
+  elif [ "$image_ref" != "-" ]; then
+    echo "ERROR: invalid absent-image marker in rollback snapshot for $service" >&2
+    exit 1
+  fi
+  rollback_image_ids["$service"]="$image_id"
+  rollback_image_refs["$service"]="$image_ref"
+done < "$IMAGE_SNAPSHOT"
 
 old_sha="$(python3 - "$MANIFEST" <<'PY'
 import json
@@ -134,6 +167,50 @@ service_available() {
   return 1
 }
 
+application_container_for_service() {
+  case "$1" in
+    backend) printf '%s' ai-supermarket-backend ;;
+    worker) printf '%s' ai-supermarket-worker ;;
+    agent-service) printf '%s' ai-supermarket-agent-service ;;
+    admin-frontend) printf '%s' ai-supermarket-admin-frontend ;;
+    user-web) printf '%s' ai-supermarket-user-web ;;
+    banana-slides) printf '%s' ai-supermarket-banana-slides ;;
+    *) return 1 ;;
+  esac
+}
+
+restorable_app_services=()
+for service in "${app_services[@]}"; do
+  if [ -z "${rollback_image_ids[$service]+x}" ]; then
+    echo "ERROR: rollback image snapshot has no record for $service" >&2
+    exit 1
+  fi
+
+  image_id="${rollback_image_ids[$service]}"
+  image_ref="${rollback_image_refs[$service]}"
+  if [ "$image_id" = "-" ]; then
+    container="$(application_container_for_service "$service")"
+    if docker container inspect "$container" >/dev/null 2>&1; then
+      echo "Removing $service container created by the failed release"
+      docker rm -f "$container"
+    fi
+    continue
+  fi
+  if ! service_available "$service"; then
+    echo "ERROR: $service is unavailable in the previous revision compose" >&2
+    exit 1
+  fi
+  rollback_ref="ai-tool-market-rollback-${service}:previous"
+  preserved_image_id="$(docker image inspect --format '{{.Id}}' "$rollback_ref")"
+  if [ "$preserved_image_id" != "$image_id" ]; then
+    echo "ERROR: preserved rollback image changed for $service" >&2
+    exit 1
+  fi
+  docker image tag "$rollback_ref" "$image_ref"
+  restorable_app_services+=("$service")
+  echo "Restored image tag for $service: $image_ref -> $preserved_image_id"
+done
+
 monitoring_stack=(prometheus grafana loki alloy node-exporter cadvisor blackbox-exporter)
 available_monitoring_services=()
 missing_monitoring_services=()
@@ -195,9 +272,8 @@ if [ "${#missing_monitoring_services[@]}" -gt 0 ]; then
   done
 fi
 
-if [ "${#app_services[@]}" -gt 0 ]; then
-  docker compose "${compose_args[@]}" build "${app_services[@]}"
-  docker compose "${compose_args[@]}" up -d --force-recreate --no-deps "${app_services[@]}"
+if [ "${#restorable_app_services[@]}" -gt 0 ]; then
+  docker compose "${compose_args[@]}" up -d --force-recreate --no-deps --no-build --pull never "${restorable_app_services[@]}"
   if [ "$nginx_requested" != true ]; then
     docker compose "${compose_args[@]}" restart nginx
   fi
@@ -229,10 +305,10 @@ if [ "$require_monitoring" -eq 1 ]; then
 else
   REQUIRE_MONITORING=0 bash "$health_script"
 fi
-if [[ " ${app_services[*]} " == *" user-web "* ]]; then
+if [[ " ${restorable_app_services[*]} " == *" user-web "* ]]; then
   docker exec ai-supermarket-user-web sh -c "printf '%s\\n' '{\"gitSha\":\"'$old_sha'\",\"builtAt\":\"'\"$(date -Iseconds)\"'\"}' > /dist-out/build-info.json"
 fi
-rolled_back_services=("${app_services[@]}")
+rolled_back_services=("${restorable_app_services[@]}")
 if [ "$nginx_requested" = true ]; then
   rolled_back_services+=(nginx)
 fi

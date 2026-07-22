@@ -1,4 +1,4 @@
-SET NAMES utf8mb4;
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 DROP PROCEDURE IF EXISTS ensure_ai_tool_required_model_capabilities;
 
@@ -288,7 +288,8 @@ WHERE UPPER(COALESCE(execution_handler, '')) = 'DIGITAL_HUMAN'
     SELECT 1
     FROM agent_model_configs model
     LEFT JOIN model_provider_metadata metadata
-      ON metadata.provider_code = model.provider
+      ON metadata.provider_code COLLATE utf8mb4_unicode_ci
+       = model.provider COLLATE utf8mb4_unicode_ci
      AND metadata.enabled = 1
     WHERE model.id = ai_tools.model_config_id
       AND model.is_deleted = 0
