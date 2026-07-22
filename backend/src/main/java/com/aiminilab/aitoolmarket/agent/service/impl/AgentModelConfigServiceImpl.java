@@ -237,13 +237,11 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         boolean providerChanged = previousProvider != null
                 && !previousProvider.trim().equalsIgnoreCase(providerTrimmed);
         List<String> capabilities;
-        if (request.capabilities() != null && !request.capabilities().isEmpty()) {
+        if (request.capabilities() != null) {
             capabilities = modelCapabilityService.normalizeCapabilities(providerTrimmed, request.capabilities());
         } else if (!providerChanged && existing != null && existing.getCapabilities() != null && !existing.getCapabilities().isBlank()) {
-            capabilities = capabilitiesCodec.parse(existing.getCapabilities());
-            if (capabilities.isEmpty()) {
-                capabilities = modelCapabilityService.normalizeCapabilities(providerTrimmed, List.of());
-            }
+            capabilities = modelCapabilityService.normalizeCapabilities(
+                    providerTrimmed, capabilitiesCodec.parse(existing.getCapabilities()));
         } else {
             capabilities = modelCapabilityService.normalizeCapabilities(providerTrimmed, List.of());
         }
@@ -606,8 +604,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                         || "VIDEO_GENERATION".equalsIgnoreCase(capability)
                         || "TEXT_TO_SPEECH".equalsIgnoreCase(capability)
                         || "SPEECH_TO_TEXT".equalsIgnoreCase(capability)
-                        || "MUSIC_GENERATION".equalsIgnoreCase(capability)
-                        || "DIGITAL_HUMAN".equalsIgnoreCase(capability));
+                        || "MUSIC_GENERATION".equalsIgnoreCase(capability));
     }
 
     private boolean hasExecutableCredential(AgentModelConfig config) {

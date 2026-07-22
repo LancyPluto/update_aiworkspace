@@ -45,6 +45,7 @@ import com.aiminilab.aitoolmarket.workflow.service.WorkflowStepCallbackService;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowRunLockService;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
+import com.aiminilab.aitoolmarket.tool.support.ToolModelCapabilitySupport;
 import com.aiminilab.aitoolmarket.tool.support.ToolRuntimeConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -60,6 +61,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 
 @Service
 public class InternalTaskServiceImpl implements InternalTaskService {
@@ -140,20 +142,56 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         ToolRuntimeConfig runtimeConfig = ToolRuntimeConfig.fromConfigNote(tool.getConfigNote(), objectMapper);
         ExecutionContextResponse response;
         if (snapshot != null) {
+            if (isWorkflowStepTask(task)) {
+                validateWorkflowStepSnapshotCapabilities(task, snapshot);
+            } else {
+                validateSnapshotCapabilities(tool, snapshot);
+            }
             var runtimeProxyPolicy = outboundProxyPolicyResolver.resolve(snapshot.toModelConfig());
             response = ExecutionContextResponse.of(task, workerParams,
                     ExecutionModelConfigResponse.from(snapshot, runtimeProxyPolicy), snapshot, fields,
                     runtimeConfig.systemPrompt(), runtimeConfig.adminPrompt());
         } else {
-            AgentModelConfig modelConfig = resolveTaskModelConfig(task, tool);
-            modelCapabilityService.validateExecution(tool, modelConfig);
-            List<String> caps = modelCapabilityService.resolveCapabilities(modelConfig);
-            AgentModelConfig executionConfig = agentModelConfigService.resolveForExecution(modelConfig);
+            boolean workflowStep = isWorkflowStepTask(task);
+            AgentModelConfig modelConfig = workflowStep
+                    ? resolveWorkflowStepModelConfig(task)
+                    : resolveTaskModelConfig(task, tool);
+            if (workflowStep) {
+                validateWorkflowStepModel(task, modelConfig);
+            } else {
+                modelCapabilityService.validateExecution(tool, modelConfig);
+            }
+            List<String> caps = modelConfig == null
+                    ? List.of()
+                    : modelCapabilityService.resolveCapabilities(modelConfig);
+            AgentModelConfig executionConfig = modelConfig == null
+                    ? null
+                    : agentModelConfigService.resolveForExecution(modelConfig);
             response = ExecutionContextResponse.of(task, workerParams,
-                    ExecutionModelConfigResponse.from(executionConfig, caps, outboundProxyPolicyResolver.resolve(executionConfig)), fields,
+                    ExecutionModelConfigResponse.from(executionConfig, caps,
+                            executionConfig == null ? null : outboundProxyPolicyResolver.resolve(executionConfig)), fields,
                     runtimeConfig.systemPrompt(), runtimeConfig.adminPrompt());
         }
         return response.withProviderCheckpoint(parseProviderCheckpoint(task));
+    }
+
+    private void validateSnapshotCapabilities(AiTool tool, ModelExecutionSnapshot snapshot) {
+        validateSnapshotCapabilities(ToolModelCapabilitySupport.resolve(tool, objectMapper), snapshot);
+    }
+
+    private void validateWorkflowStepSnapshotCapabilities(AiTask task, ModelExecutionSnapshot snapshot) {
+        validateSnapshotCapabilities(workflowStepRequiredCapabilities(task), snapshot);
+    }
+
+    private void validateSnapshotCapabilities(List<String> required, ModelExecutionSnapshot snapshot) {
+        List<String> available = ToolModelCapabilitySupport.normalizeLegacy(snapshot.capabilities());
+        List<String> missing = required.stream()
+                .filter(capability -> !available.contains(capability))
+                .toList();
+        if (!missing.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "model snapshot does not support required capabilities " + missing);
+        }
     }
 
     @Override
@@ -430,6 +468,56 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             }
         }
         return modelCapabilityService.resolveModelConfigForTool(tool);
+    }
+
+    private AgentModelConfig resolveWorkflowStepModelConfig(AiTask task) {
+        Long modelConfigId = task.getModelConfigId();
+        if (modelConfigId == null) {
+            JsonNode params = parseParams(task.getParamsJson());
+            JsonNode configuredId = params.path("nodeParameters").path("modelConfigId");
+            if (!configuredId.isIntegralNumber()) {
+                configuredId = params.path("modelConfigId");
+            }
+            if (configuredId.isIntegralNumber() && configuredId.canConvertToLong()) {
+                modelConfigId = configuredId.longValue();
+            }
+        }
+        if (modelConfigId == null) {
+            return null;
+        }
+        AgentModelConfig selected = agentModelConfigMapper.findActiveById(modelConfigId);
+        if (selected == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "workflow step model config not found: " + modelConfigId);
+        }
+        return selected;
+    }
+
+    private void validateWorkflowStepModel(AiTask task, AgentModelConfig modelConfig) {
+        if (modelConfig == null) {
+            return;
+        }
+        List<String> requiredCapabilities = workflowStepRequiredCapabilities(task);
+        if (!requiredCapabilities.isEmpty()) {
+            modelCapabilityService.validateModelCapabilities(modelConfig, requiredCapabilities);
+        }
+        modelCapabilityService.validateModelExecution(modelConfig, requiredCapabilities);
+    }
+
+    private List<String> workflowStepRequiredCapabilities(AiTask task) {
+        JsonNode params = parseParams(task.getParamsJson());
+        String explicit = params.path("nodeParameters").path("requiredCapability").asText("").trim();
+        if (!explicit.isEmpty()) {
+            return ToolModelCapabilitySupport.normalizeLegacy(List.of(explicit));
+        }
+        String nodeType = params.path("nodeDefType").asText("").trim().toUpperCase(Locale.ROOT);
+        return switch (nodeType) {
+            case "LLM_TEXT", "MODEL_CALL" -> List.of("TEXT_GENERATION");
+            case "IMAGE_MODEL" -> List.of("IMAGE_GENERATION");
+            case "TTS_MODEL" -> List.of("TEXT_TO_SPEECH");
+            case "VIDEO_MODEL" -> List.of("VIDEO_GENERATION");
+            default -> List.of();
+        };
     }
 
     @Override

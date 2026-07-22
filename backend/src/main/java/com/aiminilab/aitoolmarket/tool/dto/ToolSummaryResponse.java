@@ -3,8 +3,11 @@ package com.aiminilab.aitoolmarket.tool.dto;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.support.ToolFrontendStyleConfig;
 import com.aiminilab.aitoolmarket.tool.support.ToolKindSupport;
+import com.aiminilab.aitoolmarket.tool.support.ToolModelCapabilitySupport;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.annotation.JsonInclude;
+
+import java.util.List;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ToolSummaryResponse(
@@ -28,6 +31,7 @@ public record ToolSummaryResponse(
         String modelConfigName,
         String modelName,
         String executionHandler,
+        List<String> requiredModelCapabilities,
         String executionMode,
         String billingMode,
         Boolean agentSurfaceEnabled,
@@ -37,6 +41,8 @@ public record ToolSummaryResponse(
         Boolean workflowUsable,
         ToolFrontendStyleConfig frontendStyle
 ) {
+    private static final ObjectMapper CAPABILITY_OBJECT_MAPPER = new ObjectMapper();
+
     public static ToolSummaryResponse from(AiTool tool) {
         return from(tool, tool.getEstimatedCreditCost());
     }
@@ -67,6 +73,7 @@ public record ToolSummaryResponse(
                 tool.getModelConfigName(),
                 tool.getModelName(),
                 tool.getExecutionHandler(),
+                ToolModelCapabilitySupport.resolve(tool, CAPABILITY_OBJECT_MAPPER),
                 tool.getExecutionMode(),
                 tool.getBillingMode(),
                 tool.getAgentSurfaceEnabled(),
@@ -109,6 +116,7 @@ public record ToolSummaryResponse(
                 tool.getModelConfigName(),
                 tool.getModelName(),
                 tool.getExecutionHandler(),
+                ToolModelCapabilitySupport.resolve(tool, objectMapper),
                 tool.getExecutionMode(),
                 tool.getBillingMode(),
                 tool.getAgentSurfaceEnabled(),
@@ -147,6 +155,7 @@ public record ToolSummaryResponse(
                 modelConfigName,
                 modelName,
                 executionHandler,
+                requiredModelCapabilities,
                 executionMode,
                 billingMode,
                 agentSurfaceEnabled,
@@ -183,6 +192,7 @@ public record ToolSummaryResponse(
                 modelConfigName,
                 modelName,
                 executionHandler,
+                requiredModelCapabilities,
                 executionMode,
                 billingMode,
                 agentSurfaceEnabled,

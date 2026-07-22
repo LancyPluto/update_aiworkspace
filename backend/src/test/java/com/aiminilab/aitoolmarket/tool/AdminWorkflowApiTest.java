@@ -245,9 +245,8 @@ class AdminWorkflowApiTest {
     }
 
     @Test
-    void workflowLifecycleIgnoresUnrelatedToolModelGateDuringPublishAndOnlineEditing() throws Exception {
+    void unboundWorkflowLifecycleDoesNotRequireToolLevelModelDuringPublishAndOnlineEditing() throws Exception {
         String adminToken = login();
-        Long textOnlyModelId = createTextOnlyModelConfig(adminToken);
         String response = mockMvc.perform(post("/api/admin/v1/tools")
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -261,10 +260,9 @@ class AdminWorkflowApiTest {
                                   "inputModality": "IMAGE",
                                   "outputModality": "IMAGE",
                                   "estimatedCreditCost": 3,
-                                  "modelConfigId": %d,
                                   "executionHandler": "IMAGE_GENERATION"
                                 }
-                                """.formatted(textOnlyModelId)))
+                                """))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()
@@ -294,10 +292,9 @@ class AdminWorkflowApiTest {
                                   "inputModality": "IMAGE",
                                   "outputModality": "IMAGE",
                                   "estimatedCreditCost": 3,
-                                  "modelConfigId": %d,
                                   "executionHandler": "IMAGE_GENERATION"
                                 }
-                                """.formatted(textOnlyModelId)))
+                                """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("ONLINE"));
 
@@ -836,34 +833,6 @@ class AdminWorkflowApiTest {
                 Long.class,
                 configCode
         );
-    }
-
-    private Long createTextOnlyModelConfig(String adminToken) throws Exception {
-        String response = mockMvc.perform(post("/api/admin/v1/agent/model-config")
-                        .header("Authorization", "Bearer " + adminToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "displayName": "Workflow Text Only Model",
-                                  "configCode": "workflow_text_only_publish_guard",
-                                  "provider": "minimax",
-                                  "modelName": "MiniMax-M2.7",
-                                  "baseUrl": "https://api.minimaxi.com/v1",
-                                  "apiKey": "fake-key",
-                                  "timeoutSeconds": 60,
-                                  "billingUnit": "TOKEN_PER_M",
-                                  "unitPrice": 0,
-                                  "capabilities": ["TEXT_GENERATION"],
-                                  "enabled": true,
-                                  "agentEnabled": true,
-                                  "isDefault": false
-                                }
-                                """))
-                .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-        return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
     }
 
     private String login() throws Exception {

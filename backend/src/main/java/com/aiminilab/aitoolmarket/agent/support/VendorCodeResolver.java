@@ -29,6 +29,7 @@ public class VendorCodeResolver {
             Map.entry("siliconflow_asr", "siliconflow"),
             Map.entry("volcengine_images", "volcengine"),
             Map.entry("seedance", "volcengine"),
+            Map.entry("infinitetalk", "infinitetalk"),
             Map.entry("kling_video", "kling"),
             Map.entry("bailian_happyhorse", "qwen"),
             Map.entry("ofox_openai_images", "openai_gateway"),
@@ -61,6 +62,7 @@ public class VendorCodeResolver {
         VENDOR_LABELS.put("kling", "可灵");
         VENDOR_LABELS.put("vidu", "Vidu (生数科技)");
         VENDOR_LABELS.put("mineru", "MinerU");
+        VENDOR_LABELS.put("infinitetalk", "InfiniteTalk");
         VENDOR_LABELS.put("mock", "Mock");
     }
 

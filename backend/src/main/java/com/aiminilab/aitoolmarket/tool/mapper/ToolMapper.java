@@ -167,6 +167,7 @@ public interface ToolMapper extends BaseMapper<AiTool> {
                 model_config_id = #{tool.modelConfigId},
                 template_id = #{tool.templateId},
                 execution_handler = #{tool.executionHandler},
+                required_model_capabilities = #{tool.requiredModelCapabilities},
                 updated_by = #{operatorId}, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{toolId} AND is_deleted = 0
             """)

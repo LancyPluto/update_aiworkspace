@@ -3,6 +3,23 @@ export interface ModelProviderLike {
   capabilities: string[]
 }
 
+export interface ModelProviderDefaultsLike extends ModelProviderLike {
+  defaultModel?: string | null
+  defaultBaseUrl?: string | null
+  billingDefault?: string | null
+}
+
+export interface ModelProviderSwitchState {
+  provider: string
+  modelName: string
+  baseUrl?: string
+  capabilities?: string[]
+  executionTask?: string
+  executionOptionsJson?: string
+  endpointPath?: string | null
+  billingUnit?: string
+}
+
 function normalized(value: string | null | undefined) {
   return (value || "").trim().toLowerCase()
 }
@@ -13,6 +30,14 @@ export function findModelProvider<T extends ModelProviderLike>(
 ) {
   const code = normalized(providerCode)
   return providers.find((provider) => normalized(provider.code) === code)
+}
+
+export function supportedModelProviders<T extends ModelProviderLike>(
+  providers: T[],
+  supportedProviderCodes: string[] | null | undefined,
+) {
+  const supported = new Set((supportedProviderCodes || []).map(normalized).filter(Boolean))
+  return providers.filter((provider) => supported.has(normalized(provider.code)))
 }
 
 export function selectDefaultModelProvider<T extends ModelProviderLike>(
@@ -34,10 +59,8 @@ export function selectDefaultModelProvider<T extends ModelProviderLike>(
 export function capabilitiesForModelProvider<T extends ModelProviderLike>(
   capabilities: string[] | null | undefined,
   provider?: T,
-  agentOnlyCapability = "VISION_INPUT",
 ) {
   const requested = capabilities || []
-  const agentOnly = requested.filter((capability) => capability.toUpperCase() === agentOnlyCapability)
   const defaults = provider?.capabilities?.length ? provider.capabilities : ["TEXT_GENERATION"]
 
   if (requested.length === 0) return [...defaults]
@@ -45,11 +68,29 @@ export function capabilitiesForModelProvider<T extends ModelProviderLike>(
 
   const allowed = new Set(provider.capabilities.map((capability) => capability.toUpperCase()))
   const compatible = requested.filter((capability) => allowed.has(capability.toUpperCase()))
-  const executable = compatible.length > 0 ? compatible : [...defaults]
-  return [
-    ...executable,
-    ...agentOnly.filter(
-      (capability) => !executable.some((item) => item.toUpperCase() === capability.toUpperCase()),
-    ),
-  ]
+  return compatible.length > 0 ? compatible : [...defaults]
+}
+
+export function modelFormAfterProviderSwitch<T extends ModelProviderSwitchState>(
+  current: T,
+  previous: ModelProviderDefaultsLike | undefined,
+  next: ModelProviderDefaultsLike,
+  nextCapabilities: string[],
+  nextExecutionTask: string,
+): T {
+  const currentModelName = current.modelName.trim()
+  const previousDefaultModel = previous?.defaultModel?.trim() || ""
+  const hasCustomModelName = Boolean(currentModelName && currentModelName !== previousDefaultModel)
+
+  return {
+    ...current,
+    provider: next.code,
+    modelName: hasCustomModelName ? current.modelName : next.defaultModel || "",
+    baseUrl: next.defaultBaseUrl || "",
+    capabilities: [...nextCapabilities],
+    executionTask: nextExecutionTask,
+    executionOptionsJson: "",
+    endpointPath: null,
+    billingUnit: next.billingDefault || "TOKEN_PER_M",
+  }
 }

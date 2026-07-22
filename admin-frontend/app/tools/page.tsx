@@ -64,7 +64,18 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { ComparisonSweepPreview, ToolUserPreviewCard } from "@/components/admin/tool-user-preview-card"
 import { ToolIntegrationApiSection } from "@/components/admin/tool-integration-api-section"
-import { resolveIntegrationPluginId } from "@/lib/model-capabilities"
+import {
+  capabilityLabel,
+  defaultExecutionHandlerForToolType,
+  defaultRequiredModelCapabilitiesForTool,
+  modelConfigSupportsToolRequirements,
+  normalizeLegacyRequiredModelCapabilities,
+  normalizeModelCapabilities,
+  normalizeRequiredModelCapabilities,
+  resolveIntegrationPluginId,
+  resolvedModelCapabilities,
+  selectableModelCapabilities,
+} from "@/lib/model-capabilities"
 import {
   extractFrontendStyle,
   extractIntegrationMarkers,
@@ -143,6 +154,7 @@ interface ToolRow {
   modelConfigName: string | null
   modelName: string | null
   executionHandler?: string | null
+  requiredModelCapabilities: string[]
 }
 
 interface AgentSkillForm {
@@ -194,6 +206,7 @@ interface ToolForm {
   pricingRulesJson: string
   modelConfigId: string
   templateCode: string
+  requiredModelCapabilities: string[]
 }
 
 const initialForm: ToolForm = {
@@ -217,6 +230,7 @@ const initialForm: ToolForm = {
   pricingRulesJson: "[]",
   modelConfigId: "",
   templateCode: "text_generation_default",
+  requiredModelCapabilities: ["TEXT_GENERATION"],
 }
 
 const toolTypeOptions = [
@@ -255,80 +269,6 @@ const defaultModalitiesByType: Record<string, { input: string; output: string }>
   EMBEDDING: { input: "TEXT", output: "JSON" },
   RERANK: { input: "TEXT", output: "JSON" },
   AGENT: { input: "MULTIMODAL", output: "TEXT" },
-}
-
-function executionCapabilityForTool(
-  toolType: string,
-  toolCode: string,
-  executionHandler?: string | null,
-  inputModality?: string | null,
-  outputModality?: string | null,
-): string {
-  const eh = executionHandler?.trim()
-  if (eh) return eh.toUpperCase()
-  const code = (toolCode || "").trim()
-  if (code === "digital_human_agent") return "DIGITAL_HUMAN"
-  const normalizedType = (toolType || "").trim().toUpperCase()
-  if (normalizedType === "MUSIC_GENERATION") return "MUSIC_GENERATION"
-  const input = (inputModality || "").trim().toUpperCase()
-  const output = (outputModality || "").trim().toUpperCase()
-  if (input === "TEXT" && output === "AUDIO") return "TEXT_TO_SPEECH"
-  if (input === "AUDIO" && output === "TEXT") return "SPEECH_TO_TEXT"
-  if (input === "TEXT" && output === "IMAGE") return "IMAGE_GENERATION"
-  if (input === "IMAGE" && output === "IMAGE") return "IMAGE_TO_IMAGE"
-  if (input === "IMAGE" && output === "TEXT") return "IMAGE_UNDERSTANDING"
-  if (output === "VIDEO") return "VIDEO_GENERATION"
-  if (output === "JSON" && normalizedType === "EMBEDDING") return "EMBEDDING"
-  if (output === "JSON" && normalizedType === "RERANK") return "RERANK"
-  return normalizedType || "TEXT_GENERATION"
-}
-
-const fallbackProviderCapabilities: Record<string, string[]> = {
-  mock: ["TEXT_GENERATION"],
-  openai_compatible: ["TEXT_GENERATION"],
-  anthropic_compatible: ["TEXT_GENERATION"],
-  minimax: ["TEXT_GENERATION"],
-  siliconflow: ["IMAGE_GENERATION", "DIGITAL_HUMAN"],
-  siliconflow_images: ["IMAGE_GENERATION", "DIGITAL_HUMAN"],
-  volcengine_images: ["IMAGE_GENERATION"],
-  minimax_speech: ["TEXT_TO_SPEECH"],
-  siliconflow_speech: ["TEXT_TO_SPEECH"],
-  siliconflow_asr: ["SPEECH_TO_TEXT"],
-  seedance: ["VIDEO_GENERATION", "DIGITAL_HUMAN"],
-  worker_video: ["VIDEO_GENERATION"],
-}
-
-function modelConfigSupportsCapability(
-  config: AgentModelConfig,
-  capability: string,
-  providerCapabilities?: Record<string, string[]>,
-): boolean {
-  const caps = resolvedModelCapabilities(config, providerCapabilities)
-  if (caps.length === 0) return false
-  const want = capability.toUpperCase()
-  return caps.some((c) => (c || "").toUpperCase() === want)
-}
-
-function resolvedModelCapabilities(
-  config: AgentModelConfig,
-  providerCapabilities?: Record<string, string[]>,
-): string[] {
-  if (config.capabilities && config.capabilities.length > 0) {
-    return config.capabilities
-      .filter((capability) => capability && capability.trim())
-      .map((capability) => capability.trim().toUpperCase())
-  }
-  const provider = (config.provider || "").trim().toLowerCase()
-  const catalog = providerCapabilities ?? fallbackProviderCapabilities
-  return (catalog[provider] || [])
-    .filter((capability) => capability && capability.trim())
-    .map((capability) => capability.trim().toUpperCase())
-}
-
-function capabilityLabel(capability: string): string {
-  const value = capability.toUpperCase()
-  if (value === "VISION_INPUT") return "图片视觉"
-  return toolTypeOptions.find((item) => item.value === value)?.label || value
 }
 
 function optionLabel(options: Array<{ value: string; label: string }>, value?: string | null) {
@@ -492,6 +432,7 @@ function shouldShowToolCredits(tool: Pick<ToolRow, "toolType" | "outputModality"
 
 function mapTool(tool: ToolSummary): ToolRow {
   const { note, style } = extractFrontendStyle(tool.configNote)
+  const configuredCapabilities = normalizeLegacyRequiredModelCapabilities(tool.requiredModelCapabilities)
   return {
     id: String(tool.id),
     rawId: tool.id,
@@ -520,6 +461,9 @@ function mapTool(tool: ToolSummary): ToolRow {
     modelConfigName: tool.modelConfigName || null,
     modelName: tool.modelName || null,
     executionHandler: tool.executionHandler ?? null,
+    requiredModelCapabilities: configuredCapabilities.length > 0
+      ? configuredCapabilities
+      : defaultRequiredModelCapabilitiesForTool(tool),
   }
 }
 
@@ -603,6 +547,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
   const [coverDragging, setCoverDragging] = useState(false)
   const [form, setForm] = useState<ToolForm>(initialForm)
   const [formError, setFormError] = useState<string | null>(null)
+  const [modelSelectionNotice, setModelSelectionNotice] = useState<string | null>(null)
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false)
   const [fieldTool, setFieldTool] = useState<ToolRow | null>(null)
   const [fieldJson, setFieldJson] = useState("[]")
@@ -633,7 +578,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       setCategories(cats)
       setProviderCapabilities(
         providers.reduce<Record<string, string[]>>((acc, provider) => {
-          acc[provider.code.trim().toLowerCase()] = provider.capabilities || []
+          acc[provider.code.trim().toLowerCase()] = normalizeModelCapabilities(provider.capabilities)
           return acc
         }, {}),
       )
@@ -833,28 +778,60 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
     ]
   }, [toolList, mode])
 
-  const requiredModelCapability = useMemo(() => {
-    const code = editingTool?.toolCode ?? form.toolCode ?? ""
-    const type = editingTool?.toolType ?? form.toolType
-    const eh = editingTool?.executionHandler ?? null
-    const input = form.inputModality || editingTool?.inputModality
-    const output = form.outputModality || editingTool?.outputModality
-    return executionCapabilityForTool(type, code, eh, input, output)
-  }, [editingTool, form.toolType, form.toolCode, form.inputModality, form.outputModality])
+  const availableRequiredModelCapabilities = useMemo(
+    () => selectableModelCapabilities(providerCapabilities),
+    [providerCapabilities],
+  )
+
+  const requiredModelCapabilities = useMemo(
+    () => normalizeRequiredModelCapabilities(form.requiredModelCapabilities),
+    [form.requiredModelCapabilities],
+  )
+
+  const requiredModelCapabilityLabels = useMemo(
+    () => requiredModelCapabilities.map(capabilityLabel).join("、"),
+    [requiredModelCapabilities],
+  )
+
+  const selectedToolTemplate = useMemo(
+    () => toolTemplates.find((template) => template.templateCode === form.templateCode) || null,
+    [form.templateCode, toolTemplates],
+  )
+
+  const requiredExecutionHandler = useMemo(() => {
+    if (selectedToolTemplate?.executionHandler) return selectedToolTemplate.executionHandler
+    if (
+      editingTool?.executionHandler
+      && editingTool.toolType.toUpperCase() === form.toolType.toUpperCase()
+    ) {
+      return editingTool.executionHandler
+    }
+    return defaultExecutionHandlerForToolType(form.toolType)
+  }, [editingTool, form.toolType, selectedToolTemplate])
 
   const filteredModelConfigs = useMemo(
-    () => modelConfigs.filter((c) => modelConfigSupportsCapability(c, requiredModelCapability, providerCapabilities)),
-    [modelConfigs, providerCapabilities, requiredModelCapability],
+    () => modelConfigs.filter((c) => modelConfigSupportsToolRequirements(
+      c,
+      requiredModelCapabilities,
+      providerCapabilities,
+      requiredExecutionHandler,
+    )),
+    [modelConfigs, providerCapabilities, requiredExecutionHandler, requiredModelCapabilities],
   )
 
   const defaultModelConfig = useMemo(
-    () => modelConfigs.find((config) => config.isDefault) || modelConfigs[0] || null,
+    () => modelConfigs.find((config) => config.isDefault) || null,
     [modelConfigs],
   )
 
   const defaultModelSupportsRequiredCapability = useMemo(
-    () => !defaultModelConfig || modelConfigSupportsCapability(defaultModelConfig, requiredModelCapability, providerCapabilities),
-    [defaultModelConfig, providerCapabilities, requiredModelCapability],
+    () => Boolean(defaultModelConfig && modelConfigSupportsToolRequirements(
+      defaultModelConfig,
+      requiredModelCapabilities,
+      providerCapabilities,
+      requiredExecutionHandler,
+    )),
+    [defaultModelConfig, providerCapabilities, requiredExecutionHandler, requiredModelCapabilities],
   )
 
   const modelSelectValue = form.modelConfigId
@@ -879,10 +856,18 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
   useEffect(() => {
     if (!form.modelConfigId) return
     const selected = modelConfigs.find((config) => String(config.id) === form.modelConfigId)
-    if (selected && !modelConfigSupportsCapability(selected, requiredModelCapability, providerCapabilities)) {
-      updateForm("modelConfigId", "")
+    if (selected && !modelConfigSupportsToolRequirements(
+      selected,
+      requiredModelCapabilities,
+      providerCapabilities,
+      requiredExecutionHandler,
+    )) {
+      setForm((current) => ({ ...current, modelConfigId: "", pricingRulesJson: "[]" }))
+      const notice = `已清除不匹配的模型「${selected.displayName || selected.modelName}」，请重新选择兼容当前执行处理器且同时支持 ${requiredModelCapabilityLabels || "所需能力"} 的模型。`
+      setModelSelectionNotice(notice)
+      toast.warning("已清除不匹配的模型", { description: notice })
     }
-  }, [form.modelConfigId, modelConfigs, providerCapabilities, requiredModelCapability])
+  }, [form.modelConfigId, modelConfigs, providerCapabilities, requiredExecutionHandler, requiredModelCapabilities, requiredModelCapabilityLabels])
 
   async function toggleToolStatus(id: string) {
     const target = toolList.find((tool) => tool.id === id)
@@ -980,8 +965,12 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       ...initialForm,
       categoryId: categories[0] ? String(categories[0].id) : "",
       templateCode: templateCodeByToolType[initialForm.toolType] || "",
+      requiredModelCapabilities: defaultRequiredModelCapabilitiesForTool(
+        { toolType: initialForm.toolType },
+      ),
     })
     setFormError(null)
+    setModelSelectionNotice(null)
     setCoverUploading(false)
     setCoverDragging(false)
     setIsAddDialogOpen(true)
@@ -989,13 +978,19 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
 
   function updateToolType(value: string) {
     const defaults = defaultModalitiesByType[value] || defaultModalitiesByType.TEXT_GENERATION
+    const templateCode = templateCodeByToolType[value] || ""
+    const template = toolTemplates.find((item) => item.templateCode === templateCode)
     setForm((prev) => ({
       ...prev,
       toolType: value,
       inputModality: defaults.input,
       outputModality: defaults.output,
-      templateCode: templateCodeByToolType[value] || prev.templateCode,
+      templateCode,
+      requiredModelCapabilities: defaultRequiredModelCapabilitiesForTool(
+        { toolType: value, executionHandler: template?.executionHandler },
+      ),
     }))
+    setModelSelectionNotice(null)
   }
 
   function applyTemplateToForm(templateCode: string) {
@@ -1008,6 +1003,26 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       inputModality: template.inputModality,
       outputModality: template.outputModality,
       configNote: template.configNote || "",
+      requiredModelCapabilities: defaultRequiredModelCapabilitiesForTool(
+        { toolType: template.toolType, executionHandler: template.executionHandler },
+      ),
+    }))
+    setModelSelectionNotice(null)
+  }
+
+  function toggleRequiredModelCapability(capability: string) {
+    const normalized = normalizeRequiredModelCapabilities(form.requiredModelCapabilities)
+    const selected = normalized.includes(capability)
+    if (selected && normalized.length === 1) {
+      setFormError("请至少保留一种所需模型能力。")
+      return
+    }
+    setFormError(null)
+    setForm((current) => ({
+      ...current,
+      requiredModelCapabilities: selected
+        ? normalized.filter((item) => item !== capability)
+        : [...normalized, capability],
     }))
   }
 
@@ -1035,8 +1050,10 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       pricingRulesJson: "[]",
       modelConfigId: modelId,
       templateCode: "",
+      requiredModelCapabilities: tool.requiredModelCapabilities,
     })
     setFormError(null)
+    setModelSelectionNotice(null)
     setCoverUploading(false)
     setCoverDragging(false)
     setIsAddDialogOpen(true)
@@ -1064,11 +1081,36 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       reportSaveValidationError("消耗算力必须是大于等于 0 的数字。")
       return
     }
+    if (requiredModelCapabilities.length === 0) {
+      reportSaveValidationError("请至少选择一种所需模型能力。")
+      return
+    }
+    const unsupportedRequiredModelCapabilities = requiredModelCapabilities.filter(
+      (capability) => !availableRequiredModelCapabilities.includes(capability),
+    )
+    if (unsupportedRequiredModelCapabilities.length > 0) {
+      reportSaveValidationError(`存在不可选的模型能力：${unsupportedRequiredModelCapabilities.join("、")}，请重新选择。`)
+      return
+    }
     if (!form.modelConfigId && !defaultModelSupportsRequiredCapability) {
-      reportSaveValidationError(`默认模型不支持「${capabilityLabel(requiredModelCapability)}」，请选择一个匹配的模型配置。`)
+      reportSaveValidationError(`默认模型未同时支持「${requiredModelCapabilityLabels}」，请选择一个匹配的模型配置。`)
       return
     }
     if (form.modelConfigId) {
+      const selectedModel = modelConfigs.find((config) => String(config.id) === form.modelConfigId)
+      if (!selectedModel) {
+        reportSaveValidationError("所选模型已停用或不存在，请重新选择。")
+        return
+      }
+      if (!modelConfigSupportsToolRequirements(
+        selectedModel,
+        requiredModelCapabilities,
+        providerCapabilities,
+        requiredExecutionHandler,
+      )) {
+        reportSaveValidationError(`所选模型未同时支持「${requiredModelCapabilityLabels}」或不兼容当前执行处理器，请重新选择。`)
+        return
+      }
       try {
         parsePricingRulesJson(form.pricingRulesJson)
       } catch (err) {
@@ -1110,6 +1152,8 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
         coverUrl: form.coverUrl.trim() || undefined,
         estimatedCreditCost: Math.floor(credits),
         modelConfigId: form.modelConfigId ? Number(form.modelConfigId) : null,
+        executionHandler: requiredExecutionHandler,
+        requiredModelCapabilities,
         templateCode: !editingTool && form.templateCode ? form.templateCode : undefined,
       }
       let saved: ToolSummary
@@ -1130,6 +1174,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       toast.success(successTitle, { id: toastId, description: successDetail })
       setError(null)
       setForm(initialForm)
+      setModelSelectionNotice(null)
       setEditingTool(null)
       setIsAddDialogOpen(false)
     } catch (err) {
@@ -1436,8 +1481,8 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
             </button>
           </Alert>
         ) : null}
-        <div className="flex items-center justify-between gap-4">
-          <div className="relative max-w-md flex-1">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <div className="relative w-full min-w-0 sm:max-w-md sm:flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="搜索工具名称、分类、描述..."
@@ -1446,7 +1491,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
               className="pl-9 bg-secondary border-0"
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
             <Button variant="outline" className="gap-2" onClick={() => setExportDialogOpen(true)} disabled={bundleBusy || loading}>
               <Download className="h-4 w-4" />
               导出
@@ -1514,6 +1559,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                 setForm(initialForm)
                 setEditingTool(null)
                 setFormError(null)
+                setModelSelectionNotice(null)
                 setCoverUploading(false)
                 setCoverDragging(false)
               }
@@ -1521,7 +1567,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
           >
             <DialogContent
               className={cn(
-                "max-h-[92vh] overflow-y-auto border-border bg-card",
+                "max-h-[92vh] overflow-y-auto border-border bg-card [&>*]:min-w-0",
                 integrationPluginId ? "max-w-2xl" : "max-w-lg",
               )}
             >
@@ -1640,7 +1686,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                     <div className="space-y-2 sm:col-span-2">
                       <Label>模型卡片展示</Label>
                       <Select value={form.mediaDisplayMode} onValueChange={(value) => updateForm("mediaDisplayMode", value as "icon" | "effect" | "comparison")}>
-                        <SelectTrigger>
+                        <SelectTrigger className="w-full min-w-0">
                           <SelectValue placeholder="选择模型卡片展示方式" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1784,11 +1830,11 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                     </div>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label>分类</Label>
                     <Select value={form.categoryId} onValueChange={(value) => updateForm("categoryId", value)}>
-                      <SelectTrigger>
+                      <SelectTrigger className="w-full min-w-0">
                         <SelectValue placeholder={categories.length === 0 ? "暂无分类，请先创建分类" : "选择分类"} />
                       </SelectTrigger>
                       <SelectContent>
@@ -1874,7 +1920,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                         applyTemplateToForm(value)
                       }}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className="w-full min-w-0">
                         <SelectValue placeholder="选择蓝图模板" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1888,9 +1934,9 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                   </div>
                 ) : null}
                 <div className="space-y-2 rounded-lg border border-border bg-secondary/30 p-3">
-                  <Label>模型能力类型</Label>
+                  <Label>工具类型</Label>
                   <Select value={form.toolType} onValueChange={updateToolType}>
-                    <SelectTrigger>
+                    <SelectTrigger className="w-full min-w-0">
                       <SelectValue placeholder="选择工具能力" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1905,11 +1951,44 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                     {toolTypeOptions.find((item) => item.value === form.toolType)?.hint}
                   </p>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-3 rounded-lg border border-border bg-secondary/30 p-3">
+                  <Label>所需模型能力</Label>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {availableRequiredModelCapabilities.map((capability) => {
+                      const checked = requiredModelCapabilities.includes(capability)
+                      const capabilityControlId = `required-model-capability-${capability.toLowerCase()}`
+                      return (
+                        <div
+                          key={capability}
+                          className={cn(
+                            "flex min-h-10 items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors",
+                            checked
+                              ? "border-primary/60 bg-primary/10 text-foreground"
+                              : "border-border bg-background text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          <Checkbox
+                            id={capabilityControlId}
+                            checked={checked}
+                            onCheckedChange={() => toggleRequiredModelCapability(capability)}
+                          />
+                          <Label
+                            htmlFor={capabilityControlId}
+                            className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 font-normal"
+                          >
+                            <span className="min-w-0 flex-1">{capabilityLabel(capability)}</span>
+                            <span className="break-all font-mono text-[10px] opacity-70">{capability}</span>
+                          </Label>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label>输入模态</Label>
                     <Select value={form.inputModality} onValueChange={(value) => updateForm("inputModality", value)}>
-                      <SelectTrigger>
+                      <SelectTrigger className="w-full min-w-0">
                         <SelectValue placeholder="选择输入类型" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1924,7 +2003,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                   <div className="space-y-2">
                     <Label>输出模态</Label>
                     <Select value={form.outputModality} onValueChange={(value) => updateForm("outputModality", value)}>
-                      <SelectTrigger>
+                      <SelectTrigger className="w-full min-w-0">
                         <SelectValue placeholder="选择输出类型" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1983,16 +2062,17 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                         onValueChange={(value) => {
                           const next = value === "default" || value === "__select_matching_model" ? "" : value
                           updateForm("modelConfigId", next)
+                          setModelSelectionNotice(null)
                           void loadPricingRulesJson(next)
                         }}
                       >
-                        <SelectTrigger>
+                        <SelectTrigger className="w-full min-w-0">
                           <SelectValue placeholder="选择匹配的模型配置" />
                         </SelectTrigger>
                         <SelectContent>
                           {!defaultModelSupportsRequiredCapability ? (
                             <SelectItem value="__select_matching_model" disabled>
-                              请选择支持「{capabilityLabel(requiredModelCapability)}」的模型
+                              请选择同时支持「{requiredModelCapabilityLabels}」的模型
                             </SelectItem>
                           ) : null}
                           <SelectItem value="default" disabled={!defaultModelSupportsRequiredCapability}>
@@ -2010,7 +2090,10 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                           ) : null}
                         </SelectContent>
                       </Select>
-                      <p className="text-xs text-muted-foreground">需要模型能力：{capabilityLabel(requiredModelCapability)}</p>
+                      <p className="text-xs text-muted-foreground">所需能力：{requiredModelCapabilityLabels || "未选择"}</p>
+                      {modelSelectionNotice ? (
+                        <p role="status" className="text-xs text-amber-700">{modelSelectionNotice}</p>
+                      ) : null}
                     </div>
                   )}
                 </div>
@@ -2061,7 +2144,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                   </div>
                 </div>
                 <CollapsibleContent className="px-4 py-4">
-                  <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
                     {group.tools.map((tool) => (
                       <div
                         key={tool.id}

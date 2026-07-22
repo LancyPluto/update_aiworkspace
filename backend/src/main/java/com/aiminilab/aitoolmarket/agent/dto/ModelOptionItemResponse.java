@@ -1,9 +1,7 @@
 package com.aiminilab.aitoolmarket.agent.dto;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
-import com.aiminilab.aitoolmarket.agent.support.AgentVisionInputSupport;
 import com.aiminilab.aitoolmarket.agent.support.ImageGenerationParameterResolver;
-import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -26,7 +24,7 @@ public record ModelOptionItemResponse(
     public static ModelOptionItemResponse from(AgentModelConfig config,
                                                String vendorCode,
                                                String vendorName,
-                                               ModelCapabilitiesCodec codec,
+                                               List<String> capabilities,
                                                ImageGenerationParameterResolver imageParameterResolver) {
         return new ModelOptionItemResponse(
                 config.getId(),
@@ -37,12 +35,7 @@ public record ModelOptionItemResponse(
                 config.getProvider(),
                 vendorCode,
                 vendorName,
-                AgentVisionInputSupport.withInferredVisionInput(
-                        config.getProvider(),
-                        config.getModelName(),
-                        config.getBaseUrl(),
-                        codec.parse(config.getCapabilities())
-                ),
+                capabilities == null ? List.of() : List.copyOf(capabilities),
                 imageParameterResolver.resolve(config),
                 config.getUnitPrice(),
                 config.getBillingUnit(),

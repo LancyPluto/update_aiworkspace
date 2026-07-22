@@ -38,6 +38,30 @@ class ModelRoutingPolicyTest {
     }
 
     @Test
+    void runtimeCompatibilityUsesToolRequirementsInsteadOfCompleteCapabilityEquality() {
+        ModelCapabilityService capabilityService = mock(ModelCapabilityService.class);
+        AgentModelConfig reference = model(1L, 10L, null, "1.0");
+        AgentModelConfig candidate = model(2L, 20L, null, "1.0");
+        when(capabilityService.resolveCapabilities(reference)).thenReturn(List.of("IMAGE_GENERATION"));
+        when(capabilityService.resolveCapabilities(candidate))
+                .thenReturn(List.of("IMAGE_GENERATION", "VISION_INPUT"));
+
+        assertThat(ModelRoutingPolicy.compatible(
+                reference,
+                candidate,
+                capabilityService,
+                new ObjectMapper(),
+                List.of("IMAGE_GENERATION")
+        )).isTrue();
+        assertThat(ModelRoutingPolicy.compatible(
+                reference,
+                candidate,
+                capabilityService,
+                new ObjectMapper()
+        )).isFalse();
+    }
+
+    @Test
     void choosesWeightedLeastInFlightAndUsesOldestSelectionAsTieBreaker() {
         LocalDateTime now = LocalDateTime.now();
         ModelRoutingPolicy.Candidate highWeight = candidate(1L, 10L, 100, 3, now.minusMinutes(1));

@@ -444,7 +444,7 @@ public class ToolTemplateBootstrap {
                 uiConfigNote(name, subtitle, "effect"),
                 "你是数字人视频生成助手，负责把运营配置和用户输入转成稳定、自然、适合口播的数字人生成参数。",
                 "Avatar: {{referenceImageUrl}}\nScript: {{script}}\nVoice: {{voiceStyle}}\nScene: {{scene}}\nDuration: {{duration}}\nAspect ratio: {{aspectRatio}}\nBrand/product: {{brandName}}",
-                handlerConfig("digitalHuman", code, "effect", "DIGITAL_HUMAN"),
+                handlerConfig("digitalHuman", code, "effect", "VIDEO_GENERATION"),
                 sortOrder,
                 List.of(
                         field("referenceImageUrl", "数字人形象", "image", "上传或填写数字人形象参考图", null, false, 1),

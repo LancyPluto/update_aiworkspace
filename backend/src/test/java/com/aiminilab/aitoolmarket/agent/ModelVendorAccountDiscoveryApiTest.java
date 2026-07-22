@@ -306,6 +306,56 @@ class ModelVendorAccountDiscoveryApiTest {
     }
 
     @Test
+    void discoveryHonorsDatabaseCapabilityOverrides() throws Exception {
+        HttpServer server = modelsServer("""
+                {
+                  "object": "list",
+                  "data": [
+                    {"id": "qwen3.6-plus-metadata-override", "object": "model"}
+                  ]
+                }
+                """);
+        String originalCapabilities = jdbcTemplate.queryForObject(
+                "SELECT capabilities_json FROM model_provider_metadata WHERE provider_code = 'qwen'",
+                String.class
+        );
+        try {
+            jdbcTemplate.update(
+                    "UPDATE model_provider_metadata SET capabilities_json = ? WHERE provider_code = 'qwen'",
+                    "[\"TEXT_GENERATION\"]"
+            );
+            String adminToken = loginAdmin();
+            Long accountId = createVendorAccount(
+                    adminToken,
+                    "qwen",
+                    "Bailian metadata override",
+                    "http://127.0.0.1:%d/compatible-mode/v1".formatted(server.getAddress().getPort())
+            );
+
+            mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/discover-models", accountId)
+                            .header("Authorization", "Bearer " + adminToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.imported").value(1))
+                    .andExpect(jsonPath("$.data.skipped").value(0))
+                    .andExpect(jsonPath("$.data.models[0].provider").value("qwen"))
+                    .andExpect(jsonPath("$.data.models[0].capabilities[0]").value("TEXT_GENERATION"))
+                    .andExpect(jsonPath("$.data.models[0].capabilities[1]").doesNotExist());
+
+            AgentModelConfig model = agentModelConfigMapper.findActiveByVendorAccountAndModelName(
+                    accountId,
+                    "qwen3.6-plus-metadata-override"
+            );
+            assertThat(model.getCapabilities()).isEqualTo("[\"TEXT_GENERATION\"]");
+        } finally {
+            jdbcTemplate.update(
+                    "UPDATE model_provider_metadata SET capabilities_json = ? WHERE provider_code = 'qwen'",
+                    originalCapabilities
+            );
+            server.stop(0);
+        }
+    }
+
+    @Test
     void adminCanDiscoverVolcengineSeedreamWithJsonImageInputDefaults() throws Exception {
         HttpServer server = modelsServer("""
                 {
@@ -338,7 +388,7 @@ class ModelVendorAccountDiscoveryApiTest {
     }
 
     @Test
-    void adminCanDiscoverVolcengineDoubaoSeed2AsVisionAgentModel() throws Exception {
+    void discoveryDoesNotPersistCapabilitiesOutsideTheSelectedProviderContract() throws Exception {
         HttpServer server = modelsServer("""
                 {
                   "object": "list",
@@ -362,11 +412,11 @@ class ModelVendorAccountDiscoveryApiTest {
                     .andExpect(jsonPath("$.data.imported").value(1))
                     .andExpect(jsonPath("$.data.models[0].provider").value("openai_compatible"))
                     .andExpect(jsonPath("$.data.models[0].capabilities[0]").value("TEXT_GENERATION"))
-                    .andExpect(jsonPath("$.data.models[0].capabilities[1]").value("VISION_INPUT"));
+                    .andExpect(jsonPath("$.data.models[0].capabilities[1]").doesNotExist());
 
             AgentModelConfig chat = agentModelConfigMapper.findActiveByVendorAccountAndModelName(accountId, "doubao-seed-2.0-lite");
             assertThat(chat.getProvider()).isEqualTo("openai_compatible");
-            assertThat(chat.getCapabilities()).contains("TEXT_GENERATION", "VISION_INPUT");
+            assertThat(chat.getCapabilities()).isEqualTo("[\"TEXT_GENERATION\"]");
         } finally {
             server.stop(0);
         }

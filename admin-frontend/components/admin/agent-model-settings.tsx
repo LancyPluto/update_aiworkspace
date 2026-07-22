@@ -435,7 +435,7 @@ function capabilityModalities(capabilities: string[]): ModalityFilter[] {
     if (capability.includes("IMAGE")) {
       result.add("IMAGE")
     }
-    if (capability.includes("VIDEO") || capability.includes("DIGITAL_HUMAN")) {
+    if (capability.includes("VIDEO")) {
       result.add("VIDEO")
     }
     if (capability.includes("AUDIO") || capability.includes("SPEECH") || capability.includes("VOICE")) {

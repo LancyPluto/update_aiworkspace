@@ -28,6 +28,7 @@ public class AiTool {
     private Long modelConfigId;
     private Long templateId;
     private String executionHandler;
+    private String requiredModelCapabilities;
     private String executionMode;
     private String billingMode;
     private Boolean agentSurfaceEnabled;
@@ -176,6 +177,14 @@ public class AiTool {
 
     public void setExecutionHandler(String executionHandler) {
         this.executionHandler = executionHandler;
+    }
+
+    public String getRequiredModelCapabilities() {
+        return requiredModelCapabilities;
+    }
+
+    public void setRequiredModelCapabilities(String requiredModelCapabilities) {
+        this.requiredModelCapabilities = requiredModelCapabilities;
     }
 
     public String getExecutionMode() {
