@@ -58,6 +58,8 @@ export interface ToolSummary {
   configNote?: string | null
   /** 任务路由用，未设置时由 toolType 推导 */
   executionHandler?: string | null
+  /** 工具绑定模型必须同时具备的全部能力。 */
+  requiredModelCapabilities?: string[] | null
   status: 'DRAFT' | 'ONLINE' | 'OFFLINE' | string
   /** 工作流工具运行方式与对外可用性，由发布接口原子更新。 */
   executionMode?: 'DIRECT' | 'WORKFLOW' | string | null
@@ -93,6 +95,7 @@ export interface UpsertToolPayload {
   estimatedCreditCost: number
   modelConfigId?: number | null
   executionHandler?: string
+  requiredModelCapabilities?: string[]
   templateCode?: string
 }
 
@@ -660,6 +663,7 @@ export interface UnifiedApiVendorGroup {
   vendorCode: string
   label: string
   iconAsset: string
+  supportedProviders: string[]
   accounts: ModelVendorAccount[]
   models: UnifiedApiModelItem[]
 }

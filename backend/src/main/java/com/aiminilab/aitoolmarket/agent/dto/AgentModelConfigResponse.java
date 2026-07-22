@@ -2,7 +2,6 @@ package com.aiminilab.aitoolmarket.agent.dto;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 
-import com.aiminilab.aitoolmarket.agent.support.AgentVisionInputSupport;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.ModelRoutePreviewResolver;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -147,12 +146,7 @@ public record AgentModelConfigResponse(
                 channelCode,
                 channelLabel,
                 channelIconAsset,
-                AgentVisionInputSupport.withInferredVisionInput(
-                        config.getProvider(),
-                        config.getModelName(),
-                        config.getBaseUrl(),
-                        codec.parse(config.getCapabilities())
-                ),
+                codec.parse(config.getCapabilities()),
                 chatSelectable,
                 providerMetadataVersion == null || providerMetadataVersion.isBlank() ? "manifest" : providerMetadataVersion,
                 pricingPreview(config),

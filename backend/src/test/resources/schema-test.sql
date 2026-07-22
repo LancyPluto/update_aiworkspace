@@ -58,6 +58,7 @@ CREATE TABLE ai_tools (
   model_config_id BIGINT,
   template_id BIGINT,
   execution_handler VARCHAR(32),
+  required_model_capabilities TEXT,
   execution_mode VARCHAR(16) NOT NULL DEFAULT 'DIRECT',
   billing_mode VARCHAR(32) NOT NULL DEFAULT 'FIXED',
   agent_surface_enabled TINYINT NOT NULL DEFAULT 0,

@@ -19,6 +19,7 @@ import com.aiminilab.aitoolmarket.task.routing.entity.AccountModelRouteState;
 import com.aiminilab.aitoolmarket.task.routing.entity.TaskModelRouteAttempt;
 import com.aiminilab.aitoolmarket.task.routing.mapper.AccountModelRouteStateMapper;
 import com.aiminilab.aitoolmarket.task.routing.mapper.TaskModelRouteAttemptMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,6 +40,7 @@ public class ModelRoutingService {
     private static final String SWITCHED = "SWITCHED";
 
     private final TaskMapper taskMapper;
+    private final ToolMapper toolMapper;
     private final AgentModelConfigMapper modelConfigMapper;
     private final ModelVendorAccountMapper accountMapper;
     private final TaskModelRouteAttemptMapper attemptMapper;
@@ -49,6 +51,7 @@ public class ModelRoutingService {
     private final AppProperties appProperties;
 
     public ModelRoutingService(TaskMapper taskMapper,
+                               ToolMapper toolMapper,
                                AgentModelConfigMapper modelConfigMapper,
                                ModelVendorAccountMapper accountMapper,
                                TaskModelRouteAttemptMapper attemptMapper,
@@ -58,6 +61,7 @@ public class ModelRoutingService {
                                ObjectMapper objectMapper,
                                AppProperties appProperties) {
         this.taskMapper = taskMapper;
+        this.toolMapper = toolMapper;
         this.modelConfigMapper = modelConfigMapper;
         this.accountMapper = accountMapper;
         this.attemptMapper = attemptMapper;
@@ -83,7 +87,8 @@ public class ModelRoutingService {
         if (!accountBelongsToPool(sourceAccount, originalModelConfig.getRoutingPoolId())) {
             throw routingUnavailable("routing pool does not match the anchor account");
         }
-        CandidatePool pool = lockCandidatePool(originalModelConfig, sourceAccount);
+        CandidatePool pool = lockCandidatePool(
+                originalModelConfig, sourceAccount, requiredCapabilitiesForTask(task));
         ModelRoutingPolicy.Candidate selected = ModelRoutingPolicy.choose(
                 pool.candidates().stream().filter(this::candidateCanReceiveNewTasks).toList(),
                 LocalDateTime.now()
@@ -190,7 +195,8 @@ public class ModelRoutingService {
             return FailoverDecision.notSwitched("routing_pool_unavailable", currentAttemptId);
         }
 
-        CandidatePool pool = lockCandidatePool(reference, sourceAccount, currentAttempt.getModelConfigId());
+        CandidatePool pool = lockCandidatePool(
+                reference, sourceAccount, requiredCapabilitiesForTask(task), currentAttempt.getModelConfigId());
         Set<Long> attemptedAccounts = new HashSet<>(attemptMapper.findAttemptedVendorAccountIds(taskId));
         ModelRoutingPolicy.Candidate selected = ModelRoutingPolicy.choose(
                 pool.candidates().stream()
@@ -325,6 +331,7 @@ public class ModelRoutingService {
 
     private CandidatePool lockCandidatePool(AgentModelConfig reference,
                                             ModelVendorAccount sourceAccount,
+                                            List<String> requiredCapabilities,
                                             Long... additionalStateModelIds) {
         Long routingPoolId = reference.getRoutingPoolId();
         List<ModelVendorAccount> accounts = accountMapper.findActiveByVendorCode(sourceAccount.getVendorCode())
@@ -346,7 +353,7 @@ public class ModelRoutingService {
                 .filter(candidate -> candidate.getVendorAccountId() != null)
                 .filter(candidate -> accountsById.containsKey(candidate.getVendorAccountId()))
                 .filter(candidate -> ModelRoutingPolicy.compatible(
-                        reference, candidate, capabilityService, objectMapper))
+                        reference, candidate, capabilityService, objectMapper, requiredCapabilities))
                 .toList());
         for (AgentModelConfig candidate : compatible) {
             stateMapper.insertIfAbsent(candidate.getVendorAccountId(), candidate.getId());
@@ -377,6 +384,15 @@ public class ModelRoutingService {
                 .filter(candidate -> candidate.state() != null)
                 .toList();
         return new CandidatePool(candidates, Map.copyOf(statesByModel));
+    }
+
+    private List<String> requiredCapabilitiesForTask(AiTask task) {
+        if (task == null || task.getToolId() == null) {
+            return List.of();
+        }
+        return toolMapper.findById(task.getToolId())
+                .map(capabilityService::resolveRequiredCapabilities)
+                .orElse(List.of());
     }
 
     private boolean candidateCanReceiveNewTasks(ModelRoutingPolicy.Candidate candidate) {

@@ -388,6 +388,7 @@ class ToolApiTest {
     @Test
     void publicToolResponsesDoNotExposeInternalConfigNotesOrEngineSecrets() throws Exception {
         String adminToken = loginAdmin();
+        Long imageModelId = createImageModelConfig(adminToken);
 
         String createResponse = mockMvc.perform(post("/api/admin/v1/tools")
                         .header("Authorization", "Bearer " + adminToken)
@@ -400,10 +401,11 @@ class ToolApiTest {
                                   "description": "safe public description",
                                   "toolType": "IMAGE_GENERATION",
                                   "outputModality": "FILE",
+                                  "modelConfigId": %d,
                                   "estimatedCreditCost": 5,
                                   "configNote": "operator only note\\n\\n<!-- ppt-workflow:{\\"integrationMode\\":\\"PPT_WORKSPACE\\",\\"customUiRoute\\":\\"/tools/public_secret_guard_tool/workspace\\",\\"creationTypes\\":[\\"idea\\"],\\"steps\\":[{\\"code\\":\\"CREATE\\",\\"name\\":\\"Create\\",\\"credits\\":5,\\"enabled\\":true}],\\"engineSecrets\\":{\\"mineru_token\\":\\"secret-token\\"},\\"engineSecretSources\\":{\\"mineru_token\\":\\"manual\\"}} -->"
                                 }
-                                """))
+                                """.formatted(imageModelId)))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()
@@ -429,11 +431,11 @@ class ToolApiTest {
     }
 
     @Test
-    void mediaToolCanSaveAsDraftButRequiresMatchingModelWhenPublishing() throws Exception {
+    void mediaToolRejectsMismatchedModelWhenSavingDraft() throws Exception {
         String adminToken = loginAdmin();
         Long textOnlyModelId = createTextOnlyModelConfig(adminToken);
 
-        String createResponse = mockMvc.perform(post("/api/admin/v1/tools")
+        mockMvc.perform(post("/api/admin/v1/tools")
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -450,19 +452,10 @@ class ToolApiTest {
                                   "estimatedCreditCost": 6
                                 }
                                 """.formatted(textOnlyModelId)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("DRAFT"))
-                .andExpect(jsonPath("$.data.toolKind").value("image"))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-        Long toolId = Long.parseLong(createResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
-
-        mockMvc.perform(post("/api/admin/v1/tools/{toolId}/publish", toolId)
-                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
-                .andExpect(jsonPath("$.message").value("model config does not support execution handler IMAGE_GENERATION"));
+                .andExpect(jsonPath("$.message")
+                        .value("model config does not support required capabilities [IMAGE_GENERATION]"));
     }
 
     @Test
@@ -521,6 +514,34 @@ class ToolApiTest {
                                   "capabilities": ["TEXT_GENERATION"],
                                   "enabled": true,
                                   "agentEnabled": true,
+                                  "isDefault": false
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+
+    private Long createImageModelConfig(String adminToken) throws Exception {
+        String response = mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "Image Model For Public Tool",
+                                  "configCode": "image_for_public_secret_guard",
+                                  "provider": "siliconflow_images",
+                                  "modelName": "Tongyi-MAI/Z-Image-Turbo",
+                                  "baseUrl": "https://api.siliconflow.cn",
+                                  "apiKey": "fake-key",
+                                  "timeoutSeconds": 60,
+                                  "billingUnit": "PER_CALL",
+                                  "unitPrice": 0,
+                                  "capabilities": ["IMAGE_GENERATION"],
+                                  "enabled": true,
+                                  "agentEnabled": false,
                                   "isDefault": false
                                 }
                                 """))

@@ -15,6 +15,9 @@ import com.aiminilab.aitoolmarket.user.entity.User;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
 import com.aiminilab.aitoolmarket.tool.config.ToolTemplateBootstrap;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolCategoryMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -24,6 +27,9 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
 
 @Component
 public class DataInitializer implements CommandLineRunner {
@@ -39,6 +45,7 @@ public class DataInitializer implements CommandLineRunner {
     private final ModelVendorAccountMigrationService modelVendorAccountMigrationService;
     private final ModelProviderRegistry modelProviderRegistry;
     private final AppProperties appProperties;
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     public DataInitializer(UserMapper userMapper, ToolCategoryMapper toolCategoryMapper,
                            SystemSettingMapper systemSettingMapper, SystemSettingVersionMapper systemSettingVersionMapper,
@@ -74,6 +81,7 @@ public class DataInitializer implements CommandLineRunner {
         toolCategoryMapper.retireLegacyCategories();
         seedAgnesTextToVideoTool();
         seedDefaultTextToImageTool();
+        normalizeToolAndModelCapabilities();
         systemSettingMapper.ensureTable();
         systemSettingVersionMapper.ensureTable();
         seedAgentPromptSettings();
@@ -612,7 +620,7 @@ public class DataInitializer implements CommandLineRunner {
 
     private String toJson(Object value) {
         try {
-            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(value);
+            return OBJECT_MAPPER.writeValueAsString(value);
         } catch (Exception exception) {
             return "[]";
         }
@@ -669,6 +677,7 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("ai_tools", "input_modality", "ALTER TABLE ai_tools ADD COLUMN input_modality VARCHAR(32) NOT NULL DEFAULT 'TEXT'");
         ensureColumn("ai_tools", "output_modality", "ALTER TABLE ai_tools ADD COLUMN output_modality VARCHAR(32) NOT NULL DEFAULT 'TEXT'");
         ensureColumn("ai_tools", "config_note", "ALTER TABLE ai_tools ADD COLUMN config_note TEXT NULL");
+        ensureColumn("ai_tools", "required_model_capabilities", "ALTER TABLE ai_tools ADD COLUMN required_model_capabilities TEXT NULL");
         executeSqlIgnore("ALTER TABLE ai_tools MODIFY COLUMN category_id BIGINT NULL");
         ensureColumn("tool_field_schema_items", "execution_required", "ALTER TABLE tool_field_schema_items ADD COLUMN execution_required TINYINT NOT NULL DEFAULT 0");
         ensureColumn("tool_field_schema_items", "user_required", "ALTER TABLE tool_field_schema_items ADD COLUMN user_required TINYINT NOT NULL DEFAULT 0");
@@ -1738,6 +1747,234 @@ public class DataInitializer implements CommandLineRunner {
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to ensure database column " + tableName + "." + columnName, exception);
         }
+    }
+
+    private void normalizeToolAndModelCapabilities() {
+        normalizeDigitalHumanTemplateCapabilities();
+        executeSql("""
+                UPDATE agent_model_configs
+                SET provider = 'seedance',
+                    capabilities = '["VIDEO_GENERATION"]',
+                    execution_task = 'video_generation',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE is_deleted = 0
+                  AND provider = 'volcengine_images'
+                  AND LOWER(model_name) LIKE '%seedance%'
+                """);
+        normalizeStoredCapabilityColumn("agent_model_configs", "capabilities", "provider", false);
+        normalizeStoredCapabilityColumn("model_provider_metadata", "capabilities_json", "provider_code", false);
+        normalizeStoredCapabilityColumn("ai_tools", "required_model_capabilities", null, true);
+        executeSql("""
+                UPDATE ai_tools
+                SET required_model_capabilities = CASE UPPER(COALESCE(
+                      NULLIF(TRIM(execution_handler), ''),
+                      NULLIF(TRIM(tool_type), ''),
+                      'TEXT_GENERATION'
+                    ))
+                      WHEN 'DIGITAL_HUMAN' THEN '["VIDEO_GENERATION"]'
+                      WHEN 'IMAGE_TO_IMAGE' THEN '["IMAGE_GENERATION"]'
+                      WHEN 'IMAGE_UNDERSTANDING' THEN '["TEXT_GENERATION","VISION_INPUT"]'
+                      WHEN 'AGENT' THEN '["TEXT_GENERATION"]'
+                      WHEN 'IMAGE_GENERATION' THEN '["IMAGE_GENERATION"]'
+                      WHEN 'VIDEO_GENERATION' THEN '["VIDEO_GENERATION"]'
+                      WHEN 'MUSIC_GENERATION' THEN '["MUSIC_GENERATION"]'
+                      WHEN 'TEXT_TO_SPEECH' THEN '["TEXT_TO_SPEECH"]'
+                      WHEN 'SPEECH_TO_TEXT' THEN '["SPEECH_TO_TEXT"]'
+                      WHEN 'EMBEDDING' THEN '["EMBEDDING"]'
+                      WHEN 'RERANK' THEN '["RERANK"]'
+                      ELSE '["TEXT_GENERATION"]'
+                    END,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE required_model_capabilities IS NULL
+                   OR TRIM(required_model_capabilities) = ''
+                """);
+        clearIncompatibleDigitalHumanBindings();
+    }
+
+    private void normalizeDigitalHumanTemplateCapabilities() {
+        List<StoredTemplateHandlerConfigRow> rows = jdbcTemplate.query("""
+                SELECT id, handler_config_json
+                FROM tool_templates
+                WHERE UPPER(COALESCE(execution_handler, '')) = 'DIGITAL_HUMAN'
+                  AND handler_config_json IS NOT NULL
+                  AND TRIM(handler_config_json) <> ''
+                """, (result, rowNumber) -> new StoredTemplateHandlerConfigRow(
+                result.getLong("id"),
+                result.getString("handler_config_json")
+        ));
+        for (StoredTemplateHandlerConfigRow row : rows) {
+            String normalized = normalizeDigitalHumanTemplateHandlerConfig(row.handlerConfigJson());
+            if (normalized.equals(row.handlerConfigJson())) {
+                continue;
+            }
+            jdbcTemplate.update("""
+                    UPDATE tool_templates
+                    SET handler_config_json = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """, normalized, row.id());
+        }
+    }
+
+    static String normalizeDigitalHumanTemplateHandlerConfig(String rawJson) {
+        if (rawJson == null || rawJson.isBlank()) {
+            return rawJson;
+        }
+        try {
+            JsonNode decoded = OBJECT_MAPPER.readTree(rawJson);
+            if (!(decoded instanceof ObjectNode objectNode)) {
+                return rawJson;
+            }
+            JsonNode requiredCapability = objectNode.get("requiredCapability");
+            if (requiredCapability == null
+                    || !requiredCapability.isTextual()
+                    || !"DIGITAL_HUMAN".equalsIgnoreCase(requiredCapability.asText().trim())) {
+                return rawJson;
+            }
+            objectNode.put("requiredCapability", "VIDEO_GENERATION");
+            return OBJECT_MAPPER.writeValueAsString(objectNode);
+        } catch (Exception exception) {
+            return rawJson;
+        }
+    }
+
+    private void normalizeStoredCapabilityColumn(String tableName, String columnName,
+                                                 String providerColumn,
+                                                 boolean mapDigitalHumanToVideo) {
+        String providerExpression = providerColumn == null ? "NULL" : providerColumn;
+        String selectSql = "SELECT id, " + columnName + ", " + providerExpression
+                + " AS provider_code FROM " + tableName
+                + " WHERE " + columnName + " IS NOT NULL AND TRIM(" + columnName + ") <> ''";
+        List<StoredCapabilityRow> rows = jdbcTemplate.query(
+                selectSql,
+                (result, rowNumber) -> new StoredCapabilityRow(
+                        result.getLong("id"),
+                        result.getString(columnName),
+                        result.getString("provider_code")
+                )
+        );
+        for (StoredCapabilityRow row : rows) {
+            List<String> normalized = providerColumn == null
+                    ? normalizeLegacyCapabilities(row.capabilitiesJson(), mapDigitalHumanToVideo)
+                    : normalizeLegacyModelCapabilities(row.capabilitiesJson(), row.provider());
+            if (providerColumn == null && requiresToolCapabilityBackfill(normalized)) {
+                jdbcTemplate.update(
+                        "UPDATE " + tableName + " SET " + columnName
+                                + " = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        row.id()
+                );
+                continue;
+            }
+            if (normalized == null) {
+                continue;
+            }
+            String normalizedJson = toJson(normalized);
+            if (normalizedJson.equals(row.capabilitiesJson())) {
+                continue;
+            }
+            jdbcTemplate.update(
+                    "UPDATE " + tableName + " SET " + columnName
+                            + " = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    normalizedJson,
+                    row.id()
+            );
+        }
+    }
+
+    private void clearIncompatibleDigitalHumanBindings() {
+        List<Long> invalidToolIds = jdbcTemplate.query("""
+                SELECT tool.id,
+                       model.provider AS model_provider,
+                       model.capabilities AS model_capabilities,
+                       metadata.capabilities_json AS provider_capabilities
+                FROM ai_tools tool
+                LEFT JOIN agent_model_configs model
+                  ON model.id = tool.model_config_id AND model.is_deleted = 0
+                LEFT JOIN model_provider_metadata metadata
+                  ON metadata.provider_code = model.provider AND metadata.enabled = 1
+                WHERE UPPER(COALESCE(tool.execution_handler, '')) = 'DIGITAL_HUMAN'
+                  AND tool.model_config_id IS NOT NULL
+                """, (result, rowNumber) -> {
+            boolean supportedProvider = isDigitalHumanVideoProvider(result.getString("model_provider"));
+            List<String> capabilities = normalizeLegacyCapabilities(
+                    result.getString("model_capabilities"), false);
+            if (capabilities == null || capabilities.isEmpty()) {
+                capabilities = normalizeLegacyCapabilities(
+                        result.getString("provider_capabilities"), false);
+            }
+            return supportedProvider && capabilities != null && capabilities.contains("VIDEO_GENERATION")
+                    ? null
+                    : result.getLong("id");
+        });
+        invalidToolIds.stream()
+                .filter(java.util.Objects::nonNull)
+                .forEach(toolId -> jdbcTemplate.update("""
+                        UPDATE ai_tools
+                        SET model_config_id = NULL,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                """, toolId));
+    }
+
+    static boolean isDigitalHumanVideoProvider(String provider) {
+        String normalized = provider == null ? "" : provider.trim().toLowerCase(Locale.ROOT);
+        return "seedance".equals(normalized) || "infinitetalk".equals(normalized);
+    }
+
+    static List<String> normalizeLegacyCapabilities(String rawJson, boolean mapDigitalHumanToVideo) {
+        return normalizeLegacyCapabilities(rawJson, mapDigitalHumanToVideo ? "VIDEO_GENERATION" : null);
+    }
+
+    static List<String> normalizeLegacyModelCapabilities(String rawJson, String provider) {
+        String normalizedProvider = provider == null ? "" : provider.trim().toLowerCase(Locale.ROOT);
+        String replacement = switch (normalizedProvider) {
+            case "seedance", "infinitetalk" -> "VIDEO_GENERATION";
+            case "siliconflow", "siliconflow_images" -> "IMAGE_GENERATION";
+            default -> null;
+        };
+        return normalizeLegacyCapabilities(rawJson, replacement);
+    }
+
+    static boolean requiresToolCapabilityBackfill(List<String> normalizedCapabilities) {
+        return normalizedCapabilities == null || normalizedCapabilities.isEmpty();
+    }
+
+    private static List<String> normalizeLegacyCapabilities(String rawJson,
+                                                            String digitalHumanReplacement) {
+        if (rawJson == null || rawJson.isBlank()) {
+            return List.of();
+        }
+        try {
+            Object decoded = OBJECT_MAPPER.readValue(rawJson, Object.class);
+            if (!(decoded instanceof List<?> values)) {
+                return null;
+            }
+            LinkedHashSet<String> normalized = new LinkedHashSet<>();
+            for (Object value : values) {
+                if (value == null) {
+                    continue;
+                }
+                String capability = value.toString().trim().toUpperCase(Locale.ROOT);
+                if (capability.isBlank()) {
+                    continue;
+                }
+                if ("DIGITAL_HUMAN".equals(capability)) {
+                    if (digitalHumanReplacement != null) {
+                        normalized.add(digitalHumanReplacement);
+                    }
+                    continue;
+                }
+                normalized.add(capability);
+            }
+            return List.copyOf(normalized);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private record StoredCapabilityRow(long id, String capabilitiesJson, String provider) {
+    }
+
+    private record StoredTemplateHandlerConfigRow(long id, String handlerConfigJson) {
     }
 
     private void ensureIndex(String tableName, String indexName, String ddl) {

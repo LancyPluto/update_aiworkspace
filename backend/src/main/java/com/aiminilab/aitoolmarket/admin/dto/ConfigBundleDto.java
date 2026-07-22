@@ -118,6 +118,7 @@ public record ConfigBundleDto(
             Integer estimatedCreditCost,
             String modelConfigCode,
             String executionHandler,
+            List<String> requiredModelCapabilities,
             Boolean agentEnabled,
             List<Field> fields,
             List<Prompt> prompts,

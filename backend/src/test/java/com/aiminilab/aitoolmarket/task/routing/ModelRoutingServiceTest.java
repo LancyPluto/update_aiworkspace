@@ -18,6 +18,8 @@ import com.aiminilab.aitoolmarket.task.routing.entity.AccountModelRouteState;
 import com.aiminilab.aitoolmarket.task.routing.entity.TaskModelRouteAttempt;
 import com.aiminilab.aitoolmarket.task.routing.mapper.AccountModelRouteStateMapper;
 import com.aiminilab.aitoolmarket.task.routing.mapper.TaskModelRouteAttemptMapper;
+import com.aiminilab.aitoolmarket.tool.entity.AiTool;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import org.junit.jupiter.api.BeforeEach;
@@ -26,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -41,6 +44,7 @@ import static org.mockito.Mockito.when;
 
 class ModelRoutingServiceTest {
     private TaskMapper taskMapper;
+    private ToolMapper toolMapper;
     private AgentModelConfigMapper modelConfigMapper;
     private ModelVendorAccountMapper accountMapper;
     private TaskModelRouteAttemptMapper attemptMapper;
@@ -52,6 +56,7 @@ class ModelRoutingServiceTest {
     @BeforeEach
     void setUp() {
         taskMapper = mock(TaskMapper.class);
+        toolMapper = mock(ToolMapper.class);
         modelConfigMapper = mock(AgentModelConfigMapper.class);
         accountMapper = mock(ModelVendorAccountMapper.class);
         attemptMapper = mock(TaskModelRouteAttemptMapper.class);
@@ -62,7 +67,7 @@ class ModelRoutingServiceTest {
         properties.getModelRouting().setEnabled(true);
         properties.getModelRouting().setMaxFailovers(2);
         service = new ModelRoutingService(
-                taskMapper, modelConfigMapper, accountMapper, attemptMapper, stateMapper,
+                taskMapper, toolMapper, modelConfigMapper, accountMapper, attemptMapper, stateMapper,
                 capabilityService, snapshotService, new ObjectMapper(), properties
         );
     }
@@ -163,6 +168,42 @@ class ModelRoutingServiceTest {
         assertThat(task.getSelectedModelConfigId()).isEqualTo(2L);
         assertThat(task.getSelectedVendorAccountId()).isEqualTo(20L);
         verify(stateMapper, never()).insertIfAbsent(30L, 3L);
+    }
+
+    @Test
+    void initialRouteAcceptsCandidateWithAdditionalCapabilitiesWhenToolRequirementsMatch() {
+        AiTask task = new AiTask();
+        task.setId(1L);
+        task.setToolId(99L);
+        AiTool tool = new AiTool();
+        tool.setId(99L);
+        AgentModelConfig reference = model(1L, 10L);
+        AgentModelConfig candidate = model(2L, 20L);
+        ModelVendorAccount source = account(10L, 100);
+        ModelVendorAccount target = account(20L, 100);
+        AccountModelRouteState sourceState = state(101L, 1L, 10L);
+        sourceState.setInFlightCount(5);
+        AccountModelRouteState targetState = state(102L, 2L, 20L);
+
+        when(toolMapper.findById(99L)).thenReturn(Optional.of(tool));
+        when(capabilityService.resolveRequiredCapabilities(tool)).thenReturn(List.of("IMAGE_GENERATION"));
+        when(accountMapper.findActiveById(10L)).thenReturn(source);
+        when(accountMapper.findActiveByVendorCode("openai")).thenReturn(List.of(source, target));
+        when(modelConfigMapper.findRoutingCandidates(
+                "openai", "openai_images_gateway", "gpt-image-2"))
+                .thenReturn(List.of(reference, candidate));
+        when(capabilityService.resolveCapabilities(reference)).thenReturn(List.of("IMAGE_GENERATION"));
+        when(capabilityService.resolveCapabilities(candidate))
+                .thenReturn(List.of("IMAGE_GENERATION", "VISION_INPUT"));
+        when(stateMapper.findByModelConfigIdsForUpdate(List.of(1L, 2L)))
+                .thenReturn(List.of(sourceState, targetState));
+        when(stateMapper.reserve(102L, 0)).thenReturn(1);
+        prepareInitialAssignment(2L, 20L, 8L);
+
+        service.assignInitialRoute(task, reference);
+
+        assertThat(task.getSelectedModelConfigId()).isEqualTo(2L);
+        assertThat(task.getSelectedVendorAccountId()).isEqualTo(20L);
     }
 
     @Test

@@ -12,6 +12,8 @@ from providers import registry as provider_registry
 
 
 LOGGER = logging.getLogger(__name__)
+SUPPORTED_VIDEO_PROVIDERS = frozenset({"seedance", "infinitetalk"})
+LEGACY_SILICONFLOW_PROVIDERS = frozenset({"siliconflow", "siliconflow_images"})
 
 
 class DigitalHumanVideoHandler:
@@ -25,7 +27,7 @@ class DigitalHumanVideoHandler:
     ) -> None:
         self.backend_client = backend_client or BackendClient()
         self.video_client = video_client
-        self.seedance_video_client = seedance_video_client or SeedanceVideoClient()
+        self.seedance_video_client = seedance_video_client
         self.infinitetalk_video_client = infinitetalk_video_client
         self.postprocessor = postprocessor or DigitalHumanPostprocessor()
 
@@ -37,10 +39,8 @@ class DigitalHumanVideoHandler:
             context = message.get("__executionContext") or self.backend_client.get_execution_context(task_id)
             self._report(task_id, 8, "任务已启动，正在整理脚本与参数")
             model_config = context.get("modelConfig") or {}
-            provider = str(model_config.get("provider") or context.get("modelProviderCode") or "siliconflow_images").lower()
-            if provider not in {"siliconflow", "siliconflow_images", "seedance", "infinitetalk"}:
-                provider = "siliconflow_images"
-            provider_registry.require_capability(provider, "DIGITAL_HUMAN")
+            provider = self._resolve_video_provider(context, model_config)
+            provider_registry.require_capability(provider, "VIDEO_GENERATION")
             provider_registry.require_worker_ready(provider)
 
             siliconflow_client = self._siliconflow_client(model_config)
@@ -172,8 +172,32 @@ class DigitalHumanVideoHandler:
             api_key=resolve_siliconflow_api_key(model_config if provider.startswith("siliconflow") else None),
         )
 
-    def _video_generation_client(self) -> SeedanceVideoClient:
-        return self.seedance_video_client
+    def _video_generation_client(self, model_config: dict[str, Any]) -> SeedanceVideoClient:
+        if self.seedance_video_client is not None:
+            return self.seedance_video_client
+        configured_provider = str(model_config.get("provider") or "").strip().lower()
+        if configured_provider in LEGACY_SILICONFLOW_PROVIDERS or not configured_provider:
+            return SeedanceVideoClient()
+        return SeedanceVideoClient.from_model_config(model_config)
+
+    @staticmethod
+    def _resolve_video_provider(context: dict[str, Any], model_config: dict[str, Any]) -> str:
+        fallback_provider = str(settings.digital_human_video_provider or "seedance").strip().lower()
+        provider = str(
+            model_config.get("provider")
+            or context.get("modelProviderCode")
+            or fallback_provider
+        ).strip().lower()
+        model_name = str(model_config.get("modelName") or "").strip().lower()
+        if provider in LEGACY_SILICONFLOW_PROVIDERS:
+            provider = "seedance"
+        elif provider == "volcengine_images" and "seedance" in model_name:
+            provider = "seedance"
+        if provider not in SUPPORTED_VIDEO_PROVIDERS:
+            raise provider_registry.ProviderRegistryError(
+                f"provider {provider or '<empty>'} is not supported by digital human video handler"
+            )
+        return provider
 
     def _infinitetalk_client(self, model_config: dict[str, Any]) -> InfiniteTalkVideoClient:
         if self.infinitetalk_video_client is not None:
@@ -210,7 +234,7 @@ class DigitalHumanVideoHandler:
                 source_video=self._optional_string(params.get("sourceVideoUrl") or params.get("referenceVideoUrl")),
                 mode=str(params.get("mode") or "streaming"),
             )
-        return self._video_generation_client().generate_video(
+        return self._video_generation_client(model_config).generate_video(
             **common,
             image_size=self._resolve_image_size(params),
         )
@@ -374,7 +398,17 @@ class DigitalHumanVideoHandler:
         if requested_model:
             return requested_model
         configured_model = str((model_config or {}).get("modelName") or "").strip()
-        if configured_model and provider in {"seedance", "infinitetalk"}:
+        configured_provider = str((model_config or {}).get("provider") or "").strip().lower()
+        legacy_seedance_model = (
+            provider == "seedance"
+            and configured_provider == "volcengine_images"
+            and "seedance" in configured_model.lower()
+        )
+        if (
+            configured_model
+            and provider in {"seedance", "infinitetalk"}
+            and (not configured_provider or configured_provider == provider or legacy_seedance_model)
+        ):
             return configured_model
         return settings.seedance_video_model
 

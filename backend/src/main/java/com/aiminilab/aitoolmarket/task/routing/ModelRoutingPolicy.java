@@ -35,19 +35,42 @@ public final class ModelRoutingPolicy {
         return incompatibilityReason(reference, candidate, capabilityService, objectMapper) == null;
     }
 
+    public static boolean compatible(AgentModelConfig reference,
+                                     AgentModelConfig candidate,
+                                     ModelCapabilityService capabilityService,
+                                     ObjectMapper objectMapper,
+                                     List<String> requiredCapabilities) {
+        return incompatibilityReason(
+                reference, candidate, capabilityService, objectMapper, requiredCapabilities) == null;
+    }
+
     public static String incompatibilityReason(AgentModelConfig reference,
                                                AgentModelConfig candidate,
                                                ModelCapabilityService capabilityService,
                                                ObjectMapper objectMapper) {
+        return incompatibilityReason(reference, candidate, capabilityService, objectMapper, List.of());
+    }
+
+    public static String incompatibilityReason(AgentModelConfig reference,
+                                               AgentModelConfig candidate,
+                                               ModelCapabilityService capabilityService,
+                                               ObjectMapper objectMapper,
+                                               List<String> requiredCapabilities) {
         if (reference == null || candidate == null) {
             return "ROUTE_CONFIG_MISMATCH";
         }
+        List<String> referenceCapabilities = normalizedCapabilities(reference, capabilityService);
+        List<String> candidateCapabilities = normalizedCapabilities(candidate, capabilityService);
+        List<String> normalizedRequirements = normalizedCapabilities(requiredCapabilities);
+        boolean capabilitiesCompatible = normalizedRequirements.isEmpty()
+                ? referenceCapabilities.equals(candidateCapabilities)
+                : referenceCapabilities.containsAll(normalizedRequirements)
+                    && candidateCapabilities.containsAll(normalizedRequirements);
         boolean routeCompatible = normalized(reference.getProvider()).equals(normalized(candidate.getProvider()))
                 && Objects.equals(reference.getModelName(), candidate.getModelName())
                 && normalized(reference.getExecutionTask()).equals(normalized(candidate.getExecutionTask()))
                 && jsonEquivalent(reference.getExecutionOptionsJson(), candidate.getExecutionOptionsJson(), objectMapper)
-                && normalizedCapabilities(reference, capabilityService)
-                    .equals(normalizedCapabilities(candidate, capabilityService));
+                && capabilitiesCompatible;
         if (!routeCompatible) {
             return "ROUTE_CONFIG_MISMATCH";
         }
@@ -136,7 +159,11 @@ public final class ModelRoutingPolicy {
 
     private static List<String> normalizedCapabilities(AgentModelConfig config,
                                                        ModelCapabilityService capabilityService) {
-        return capabilityService.resolveCapabilities(config).stream()
+        return normalizedCapabilities(capabilityService.resolveCapabilities(config));
+    }
+
+    private static List<String> normalizedCapabilities(List<String> capabilities) {
+        return (capabilities == null ? List.<String>of() : capabilities).stream()
                 .filter(value -> value != null && !value.isBlank())
                 .map(value -> value.trim().toUpperCase(Locale.ROOT))
                 .distinct()

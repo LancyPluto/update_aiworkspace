@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.agent.service.impl;
 
 import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
+import com.aiminilab.aitoolmarket.agent.config.ModelProviderDefinition;
 import com.aiminilab.aitoolmarket.agent.dto.UnifiedApiModelItemResponse;
 import com.aiminilab.aitoolmarket.agent.dto.UnifiedApiOverviewResponse;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
@@ -41,6 +42,91 @@ class UnifiedApiOverviewServiceImplTest {
         assertFalse(UnifiedApiOverviewServiceImpl.isNegativeBalance(positive));
         assertFalse(UnifiedApiOverviewServiceImpl.isNegativeBalance(zero));
         assertTrue(UnifiedApiOverviewServiceImpl.isNegativeBalance(negative));
+    }
+
+    @Test
+    void configuredVendorExposesSupportedProvidersForModelCapabilityEditing() {
+        ModelVendorAccountMigrationService migrationService = mock(ModelVendorAccountMigrationService.class);
+        ModelVendorAccountMapper accountMapper = mock(ModelVendorAccountMapper.class);
+        AgentModelConfigMapper modelConfigMapper = mock(AgentModelConfigMapper.class);
+        VendorCodeResolver vendorCodeResolver = mock(VendorCodeResolver.class);
+        ModelProviderRegistry providerRegistry = mock(ModelProviderRegistry.class);
+        ModelCapabilitiesCodec capabilitiesCodec = mock(ModelCapabilitiesCodec.class);
+        ModelCapabilityService capabilityService = mock(ModelCapabilityService.class);
+        AccountModelRouteStateMapper routeStateMapper = mock(AccountModelRouteStateMapper.class);
+        UnifiedApiOverviewServiceImpl service = new UnifiedApiOverviewServiceImpl(
+                migrationService,
+                accountMapper,
+                modelConfigMapper,
+                vendorCodeResolver,
+                providerRegistry,
+                capabilitiesCodec,
+                capabilityService,
+                routeStateMapper,
+                new ObjectMapper()
+        );
+        ModelVendorAccount account = routingAccount(10L, "volcengine");
+        account.setVendorCode("volcengine");
+        AgentModelConfig model = routingModel(1L, 10L, null);
+        model.setProvider("volcengine_images");
+        model.setModelName("doubao-seedream-4-5-251128");
+        when(accountMapper.findAllActive()).thenReturn(List.of(account));
+        when(modelConfigMapper.findAllActive()).thenReturn(List.of(model));
+        when(accountMapper.countActiveModelsByAccountId(anyLong())).thenReturn(1);
+        when(vendorCodeResolver.resolveVendorCode(anyString(), any(), any(), any())).thenReturn("volcengine");
+        when(vendorCodeResolver.vendorLabel("volcengine")).thenReturn("Volcengine");
+        when(vendorCodeResolver.vendorIconAsset("volcengine")).thenReturn("volcengine");
+        when(vendorCodeResolver.vendorCatalog()).thenReturn(Map.of("volcengine", "Volcengine"));
+        when(providerRegistry.listAll()).thenReturn(List.of(
+                provider("volcengine_images", "Volcengine images", List.of("IMAGE_GENERATION")),
+                provider("seedance", "Seedance video", List.of("VIDEO_GENERATION"))
+        ));
+        when(capabilitiesCodec.parse(any())).thenReturn(List.of("IMAGE_GENERATION"));
+
+        UnifiedApiOverviewResponse response = service.overview();
+
+        assertThat(response.vendors()).singleElement().satisfies(vendor ->
+                assertThat(vendor.supportedProviders())
+                        .containsExactly("seedance", "volcengine_images"));
+    }
+
+    @Test
+    void unconfiguredInfiniteTalkVendorExposesItsVideoProvider() {
+        ModelVendorAccountMigrationService migrationService = mock(ModelVendorAccountMigrationService.class);
+        ModelVendorAccountMapper accountMapper = mock(ModelVendorAccountMapper.class);
+        AgentModelConfigMapper modelConfigMapper = mock(AgentModelConfigMapper.class);
+        VendorCodeResolver vendorCodeResolver = mock(VendorCodeResolver.class);
+        ModelProviderRegistry providerRegistry = mock(ModelProviderRegistry.class);
+        ModelCapabilitiesCodec capabilitiesCodec = mock(ModelCapabilitiesCodec.class);
+        ModelCapabilityService capabilityService = mock(ModelCapabilityService.class);
+        AccountModelRouteStateMapper routeStateMapper = mock(AccountModelRouteStateMapper.class);
+        UnifiedApiOverviewServiceImpl service = new UnifiedApiOverviewServiceImpl(
+                migrationService,
+                accountMapper,
+                modelConfigMapper,
+                vendorCodeResolver,
+                providerRegistry,
+                capabilitiesCodec,
+                capabilityService,
+                routeStateMapper,
+                new ObjectMapper()
+        );
+        when(accountMapper.findAllActive()).thenReturn(List.of());
+        when(modelConfigMapper.findAllActive()).thenReturn(List.of());
+        when(vendorCodeResolver.vendorCatalog()).thenReturn(Map.of("infinitetalk", "InfiniteTalk"));
+        when(vendorCodeResolver.resolveVendorCode(anyString(), any(), any(), any()))
+                .thenReturn("infinitetalk");
+        when(vendorCodeResolver.vendorIconAsset("infinitetalk")).thenReturn("infinitetalk");
+        when(providerRegistry.listAll()).thenReturn(List.of(
+                provider("infinitetalk", "InfiniteTalk video", List.of("VIDEO_GENERATION"))
+        ));
+
+        UnifiedApiOverviewResponse response = service.overview();
+
+        assertThat(response.unconfiguredVendors()).singleElement().satisfies(vendor -> {
+            assertThat(vendor.vendorCode()).isEqualTo("infinitetalk");
+            assertThat(vendor.supportedProviders()).containsExactly("infinitetalk");
+        });
     }
 
     @Test
@@ -221,5 +307,27 @@ class UnifiedApiOverviewServiceImplTest {
         state.setCooldownUntil(LocalDateTime.now().plusMinutes(5));
         state.setInFlightCount(0);
         return state;
+    }
+
+    private static ModelProviderDefinition provider(String code, String label, List<String> capabilities) {
+        return new ModelProviderDefinition(
+                code,
+                label,
+                capabilities,
+                "https://ark.cn-beijing.volces.com",
+                "model",
+                "PER_CALL",
+                null,
+                null,
+                null,
+                "accept_only",
+                true,
+                false,
+                null,
+                null,
+                null,
+                null,
+                "test"
+        );
     }
 }

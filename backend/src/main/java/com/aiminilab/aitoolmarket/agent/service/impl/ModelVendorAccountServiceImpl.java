@@ -18,6 +18,7 @@ import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
+import com.aiminilab.aitoolmarket.agent.service.ModelProviderMetadataService;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountService;
 import com.aiminilab.aitoolmarket.agent.support.AgentVisionInputSupport;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
@@ -61,6 +62,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     private final AgentModelConfigMapper agentModelConfigMapper;
     private final VendorCodeResolver vendorCodeResolver;
     private final ModelProviderRegistry providerRegistry;
+    private final ModelProviderMetadataService providerMetadataService;
     private final AgentServiceClient agentServiceClient;
     private final VendorBalanceRefreshService balanceRefreshService;
     private final ModelCapabilitiesCodec capabilitiesCodec;
@@ -72,6 +74,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                                          AgentModelConfigMapper agentModelConfigMapper,
                                          VendorCodeResolver vendorCodeResolver,
                                          ModelProviderRegistry providerRegistry,
+                                         ModelProviderMetadataService providerMetadataService,
                                          AgentServiceClient agentServiceClient,
                                          VendorBalanceRefreshService balanceRefreshService,
                                           ModelCapabilitiesCodec capabilitiesCodec,
@@ -82,6 +85,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.vendorCodeResolver = vendorCodeResolver;
         this.providerRegistry = providerRegistry;
+        this.providerMetadataService = providerMetadataService;
         this.agentServiceClient = agentServiceClient;
         this.balanceRefreshService = balanceRefreshService;
         this.capabilitiesCodec = capabilitiesCodec;
@@ -297,10 +301,15 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         int skipped = 0;
         List<DiscoveredModelConfigResponse> models = new ArrayList<>();
         for (String modelName : modelNames) {
-            List<String> capabilities = inferCapabilities(account, modelName);
-            String primaryCapability = capabilities.get(0);
+            List<String> inferredCapabilities = inferCapabilities(account, modelName);
+            String primaryCapability = inferredCapabilities.get(0);
             String provider = providerForCapability(account, modelName, primaryCapability);
             if (provider == null) {
+                skipped++;
+                continue;
+            }
+            List<String> capabilities = capabilitiesForProvider(provider, inferredCapabilities);
+            if (capabilities.isEmpty()) {
                 skipped++;
                 continue;
             }
@@ -479,6 +488,20 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 account == null ? null : account.getBaseUrl(),
                 List.of(primaryCapability)
         );
+    }
+
+    private List<String> capabilitiesForProvider(String provider, List<String> inferredCapabilities) {
+        Set<String> declared = providerMetadataService.get(provider).capabilities().stream()
+                .filter(capability -> capability != null && !capability.isBlank())
+                .map(capability -> capability.trim().toUpperCase(Locale.ROOT))
+                .filter(capability -> !"DIGITAL_HUMAN".equals(capability))
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        return inferredCapabilities.stream()
+                .filter(capability -> capability != null && !capability.isBlank())
+                .map(capability -> capability.trim().toUpperCase(Locale.ROOT))
+                .filter(declared::contains)
+                .distinct()
+                .toList();
     }
 
     private String providerForCapability(ModelVendorAccount account, String modelName, String capability) {

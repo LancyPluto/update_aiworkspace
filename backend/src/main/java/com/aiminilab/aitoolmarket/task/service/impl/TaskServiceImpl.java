@@ -41,6 +41,7 @@ import com.aiminilab.aitoolmarket.agent.service.AgentAttachmentUrlResolver;
 import com.aiminilab.aitoolmarket.storage.AssetStorageService;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
+import com.aiminilab.aitoolmarket.tool.support.ToolModelCapabilitySupport;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -211,6 +212,9 @@ public class TaskServiceImpl implements TaskService {
 
         AiTool tool = toolMapper.findOnlineByCode(toolCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
+        if (tool.getModelConfigId() != null) {
+            modelCapabilityService.validateToolModelBinding(tool);
+        }
         JsonNode normalizedParams = normalizeTaskParams(userId, params);
         AiTask task = new AiTask();
         task.setTaskNo(generateTaskNo());
@@ -437,6 +441,7 @@ public class TaskServiceImpl implements TaskService {
         AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool, requestedModelConfigId);
         modelCapabilityService.validateExecution(tool, modelConfig);
         ModelExecutionSnapshot modelSnapshot = modelExecutionSnapshotService.create(modelConfig);
+        validateSnapshotCapabilities(tool, modelSnapshot);
         if (chargeTaskCredits) {
             taskCreditDispatchService.ensureDispatchAllowed(userId, tool, modelConfig);
         }
@@ -479,6 +484,20 @@ public class TaskServiceImpl implements TaskService {
             taskOutboxService.enqueueTaskCreated(taskId);
         }
         return TaskStatusResponse.from(findTask(taskId, userId));
+    }
+
+    private void validateSnapshotCapabilities(AiTool tool, ModelExecutionSnapshot snapshot) {
+        List<String> required = ToolModelCapabilitySupport.resolve(tool, objectMapper);
+        List<String> available = snapshot == null
+                ? List.of()
+                : ToolModelCapabilitySupport.normalizeLegacy(snapshot.capabilities());
+        List<String> missing = required.stream()
+                .filter(capability -> !available.contains(capability))
+                .toList();
+        if (!missing.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "model snapshot does not support required capabilities " + missing);
+        }
     }
 
     private AiTask findIdempotentTask(Long userId, String idempotencyKey, String requestedToolCode) {

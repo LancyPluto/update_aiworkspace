@@ -6,6 +6,7 @@ public record UnifiedApiVendorGroupResponse(
         String vendorCode,
         String label,
         String iconAsset,
+        List<String> supportedProviders,
         List<ModelVendorAccountResponse> accounts,
         List<UnifiedApiModelItemResponse> models
 ) {

@@ -7,7 +7,6 @@ import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.agent.support.ImageGenerationParameterResolver;
-import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
 import org.springframework.stereotype.Service;
 
@@ -25,36 +24,46 @@ public class PublicModelOptionService {
     private final AgentModelConfigMapper agentModelConfigMapper;
     private final ModelVendorAccountMapper vendorAccountMapper;
     private final VendorCodeResolver vendorCodeResolver;
-    private final ModelCapabilitiesCodec capabilitiesCodec;
     private final ImageGenerationParameterResolver imageParameterResolver;
+    private final ModelCapabilityService modelCapabilityService;
 
     public PublicModelOptionService(AgentModelConfigMapper agentModelConfigMapper,
                                     ModelVendorAccountMapper vendorAccountMapper,
                                     VendorCodeResolver vendorCodeResolver,
-                                    ModelCapabilitiesCodec capabilitiesCodec,
-                                    ImageGenerationParameterResolver imageParameterResolver) {
+                                    ImageGenerationParameterResolver imageParameterResolver,
+                                    ModelCapabilityService modelCapabilityService) {
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.vendorAccountMapper = vendorAccountMapper;
         this.vendorCodeResolver = vendorCodeResolver;
-        this.capabilitiesCodec = capabilitiesCodec;
         this.imageParameterResolver = imageParameterResolver;
+        this.modelCapabilityService = modelCapabilityService;
     }
 
     public List<ModelOptionGroupResponse> list(String mode) {
         String requiredCapability = capabilityForMode(mode);
+        boolean digitalHumanMode = isDigitalHumanMode(mode);
         List<ModelVendorAccount> accounts = vendorAccountMapper.findAllActive();
         Map<Long, ModelVendorAccount> accountById = accounts.stream()
                 .collect(Collectors.toMap(ModelVendorAccount::getId, account -> account, (a, b) -> a));
         Map<String, List<ModelOptionItemResponse>> grouped = new LinkedHashMap<>();
 
         for (AgentModelConfig config : agentModelConfigMapper.findAgentEnabled()) {
-            if (!supports(config, requiredCapability)) {
+            List<String> capabilities = modelCapabilityService.resolveCapabilities(config);
+            if (!supports(capabilities, requiredCapability)
+                    || (digitalHumanMode
+                        && !modelCapabilityService.isDigitalHumanVideoProvider(config.getProvider()))) {
                 continue;
             }
             String vendorCode = resolveVendorCode(config, accountById);
             String vendorName = vendorCodeResolver.vendorLabel(vendorCode);
             grouped.computeIfAbsent(vendorCode, key -> new ArrayList<>())
-                    .add(ModelOptionItemResponse.from(config, vendorCode, vendorName, capabilitiesCodec, imageParameterResolver));
+                    .add(ModelOptionItemResponse.from(
+                            config,
+                            vendorCode,
+                            vendorName,
+                            capabilities,
+                            imageParameterResolver
+                    ));
         }
 
         return grouped.entrySet().stream()
@@ -69,8 +78,8 @@ public class PublicModelOptionService {
                 .toList();
     }
 
-    private boolean supports(AgentModelConfig config, String requiredCapability) {
-        return capabilitiesCodec.parse(config.getCapabilities()).stream()
+    private boolean supports(List<String> capabilities, String requiredCapability) {
+        return capabilities.stream()
                 .anyMatch(capability -> capability.equalsIgnoreCase(requiredCapability));
     }
 
@@ -111,9 +120,16 @@ public class PublicModelOptionService {
         return switch (normalized) {
             case "image", "picture", "photo" -> "IMAGE_GENERATION";
             case "video" -> "VIDEO_GENERATION";
-            case "digitalhuman", "digital_human", "avatar" -> "DIGITAL_HUMAN";
+            case "digitalhuman", "digital_human", "avatar" -> "VIDEO_GENERATION";
             case "audio", "voice", "speech" -> "TEXT_TO_SPEECH";
             default -> "TEXT_GENERATION";
         };
+    }
+
+    private static boolean isDigitalHumanMode(String mode) {
+        String normalized = mode == null ? "" : mode.trim().toLowerCase(Locale.ROOT);
+        return "digitalhuman".equals(normalized)
+                || "digital_human".equals(normalized)
+                || "avatar".equals(normalized);
     }
 }

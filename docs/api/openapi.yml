@@ -39,6 +39,8 @@ tags:
     description: Admin billing logs and model costs
   - name: AdminModelConfig
     description: Admin model API configuration
+  - name: AdminUnifiedApi
+    description: Admin unified model API overview
   - name: AdminAgentMemory
     description: Admin Agent memory management
   - name: InternalWorker
@@ -1501,6 +1503,21 @@ paths:
               schema:
                 $ref: "#/components/schemas/BillingUsageLogPageApiResponse"
 
+  /api/admin/v1/unified-api/overview:
+    get:
+      tags: [AdminUnifiedApi]
+      summary: Get the configured model vendor, account, and protocol overview
+      operationId: getUnifiedApiOverview
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Unified model API overview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnifiedApiOverviewApiResponse"
+
   /api/admin/v1/model-providers:
     get:
       tags: [AdminModelConfig]
@@ -2362,15 +2379,15 @@ components:
           nullable: true
         toolType:
           type: string
-          enum: [TEXT_GENERATION, IMAGE_GENERATION, MUSIC_GENERATION, VIDEO_GENERATION, AUDIO_GENERATION, DIGITAL_HUMAN]
+          enum: [TEXT_GENERATION, IMAGE_GENERATION, IMAGE_TO_IMAGE, IMAGE_UNDERSTANDING, SPEECH_TO_TEXT, TEXT_TO_SPEECH, MUSIC_GENERATION, VIDEO_GENERATION, EMBEDDING, RERANK, AGENT]
           example: TEXT_GENERATION
         inputModality:
           type: string
-          enum: [TEXT, IMAGE, AUDIO, VIDEO, FILE, MULTIMODAL]
+          enum: [TEXT, IMAGE, AUDIO, VIDEO, JSON, FILE, MULTIMODAL]
           example: TEXT
         outputModality:
           type: string
-          enum: [TEXT, IMAGE, AUDIO, VIDEO, REPORT, JSON]
+          enum: [TEXT, IMAGE, AUDIO, VIDEO, JSON, FILE, MULTIMODAL]
           example: TEXT
         configNote:
           type: string
@@ -2392,8 +2409,17 @@ components:
           example: 1
         executionHandler:
           type: string
+          enum: [TEXT_GENERATION, IMAGE_GENERATION, MUSIC_GENERATION, TEXT_TO_SPEECH, VIDEO_GENERATION, DIGITAL_HUMAN]
           nullable: true
           description: Worker-side execution handler key for this tool.
+        requiredModelCapabilities:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum: [TEXT_GENERATION, VISION_INPUT, IMAGE_GENERATION, VIDEO_GENERATION, TEXT_TO_SPEECH, SPEECH_TO_TEXT, MUSIC_GENERATION, AUDIO_GENERATION, EMBEDDING, RERANK]
+          description: Normalized model capabilities that a bound or automatically selected model must all support.
 
     ToolDetailApiResponse:
       allOf:
@@ -2470,7 +2496,7 @@ components:
 
     UpsertToolRequest:
       type: object
-      required: [toolCode, toolName, categoryId, status, estimatedCreditCost]
+      required: [toolName]
       properties:
         toolCode:
           type: string
@@ -2486,13 +2512,13 @@ components:
           nullable: true
         toolType:
           type: string
-          enum: [TEXT_GENERATION, IMAGE_GENERATION, MUSIC_GENERATION, VIDEO_GENERATION, AUDIO_GENERATION, DIGITAL_HUMAN]
+          enum: [TEXT_GENERATION, IMAGE_GENERATION, IMAGE_TO_IMAGE, IMAGE_UNDERSTANDING, SPEECH_TO_TEXT, TEXT_TO_SPEECH, MUSIC_GENERATION, VIDEO_GENERATION, EMBEDDING, RERANK, AGENT]
         inputModality:
           type: string
-          enum: [TEXT, IMAGE, AUDIO, VIDEO, FILE, MULTIMODAL]
+          enum: [TEXT, IMAGE, AUDIO, VIDEO, JSON, FILE, MULTIMODAL]
         outputModality:
           type: string
-          enum: [TEXT, IMAGE, AUDIO, VIDEO, REPORT, JSON]
+          enum: [TEXT, IMAGE, AUDIO, VIDEO, JSON, FILE, MULTIMODAL]
         configNote:
           type: string
           nullable: true
@@ -2500,11 +2526,22 @@ components:
           type: integer
           format: int64
           nullable: true
-        status:
-          $ref: "#/components/schemas/ToolStatus"
         estimatedCreditCost:
           type: integer
           minimum: 0
+        executionHandler:
+          type: string
+          enum: [TEXT_GENERATION, IMAGE_GENERATION, MUSIC_GENERATION, TEXT_TO_SPEECH, VIDEO_GENERATION, DIGITAL_HUMAN]
+        requiredModelCapabilities:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum: [TEXT_GENERATION, VISION_INPUT, IMAGE_GENERATION, VIDEO_GENERATION, TEXT_TO_SPEECH, SPEECH_TO_TEXT, MUSIC_GENERATION, AUDIO_GENERATION, EMBEDDING, RERANK]
+          description: All capabilities must be supported by the selected or default model. Omit to derive a legacy-compatible default.
+        templateCode:
+          type: string
 
     UpdateToolFieldsRequest:
       type: object
@@ -2891,6 +2928,302 @@ components:
           type: string
           enum: [ACTIVE, DISABLED]
           example: DISABLED
+
+    UnifiedApiOverviewApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/UnifiedApiOverview"
+
+    UnifiedApiOverview:
+      type: object
+      properties:
+        summary:
+          $ref: "#/components/schemas/UnifiedApiSummary"
+        vendors:
+          type: array
+          items:
+            $ref: "#/components/schemas/UnifiedApiVendorGroup"
+        unconfiguredVendors:
+          type: array
+          items:
+            $ref: "#/components/schemas/UnifiedApiUnconfiguredVendor"
+
+    UnifiedApiSummary:
+      type: object
+      properties:
+        vendorCount:
+          type: integer
+        accountCount:
+          type: integer
+        modelCount:
+          type: integer
+        enabledModelCount:
+          type: integer
+        lowBalanceCount:
+          type: integer
+        unhealthyAccountCount:
+          type: integer
+
+    UnifiedApiVendorGroup:
+      type: object
+      properties:
+        vendorCode:
+          type: string
+        label:
+          type: string
+        iconAsset:
+          type: string
+        supportedProviders:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+          description: Provider protocol codes available for models owned by this vendor.
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/UnifiedApiVendorAccount"
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/UnifiedApiModelItem"
+
+    UnifiedApiUnconfiguredVendor:
+      type: object
+      properties:
+        vendorCode:
+          type: string
+        label:
+          type: string
+        iconAsset:
+          type: string
+        supportedProviders:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+          description: Provider protocol codes available when configuring this vendor.
+
+    UnifiedApiVendorAccount:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        vendorCode:
+          type: string
+        vendorLabel:
+          type: string
+        accountName:
+          type: string
+        baseUrl:
+          type: string
+          nullable: true
+        endpointPath:
+          type: string
+          nullable: true
+        apiKeyMasked:
+          type: string
+          nullable: true
+        extraAuthJsonMasked:
+          type: string
+          nullable: true
+        consoleUrl:
+          type: string
+          nullable: true
+        balanceUrl:
+          type: string
+          nullable: true
+        consoleCookieMasked:
+          type: string
+          nullable: true
+        consoleCookieStatus:
+          type: string
+          nullable: true
+        balanceQueryMode:
+          type: string
+        balanceAmount:
+          type: number
+          format: double
+          nullable: true
+        balanceCurrency:
+          type: string
+          nullable: true
+        balanceStatus:
+          type: string
+        balanceLowThreshold:
+          type: number
+          format: double
+          nullable: true
+        balanceUpdatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        balanceErrorMessage:
+          type: string
+          nullable: true
+        healthStatus:
+          type: string
+        healthMessage:
+          type: string
+          nullable: true
+        healthCheckedAt:
+          type: string
+          format: date-time
+          nullable: true
+        loadBalanceEnabled:
+          type: boolean
+        loadBalanceWeight:
+          type: integer
+        routingPoolId:
+          type: integer
+          format: int64
+          nullable: true
+        routingPoolName:
+          type: string
+          nullable: true
+        inFlightCount:
+          type: integer
+        circuitState:
+          type: string
+        circuitOpenUntil:
+          type: string
+          format: date-time
+          nullable: true
+        routingExclusionReason:
+          type: string
+          nullable: true
+        enabled:
+          type: boolean
+        modelCount:
+          type: integer
+        proxyMode:
+          type: string
+          nullable: true
+        proxyUrl:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    UnifiedApiModelItem:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        vendorAccountId:
+          type: integer
+          format: int64
+          nullable: true
+        vendorAccountName:
+          type: string
+          nullable: true
+        routingPoolId:
+          type: integer
+          format: int64
+          nullable: true
+        routingPoolName:
+          type: string
+          nullable: true
+        displayName:
+          type: string
+          nullable: true
+        configCode:
+          type: string
+          nullable: true
+        provider:
+          type: string
+        modelName:
+          type: string
+        baseUrl:
+          type: string
+          nullable: true
+        endpointPath:
+          type: string
+          nullable: true
+        minimaxGroupId:
+          type: string
+          nullable: true
+        consoleUrl:
+          type: string
+          nullable: true
+        balanceUrl:
+          type: string
+          nullable: true
+        docsUrl:
+          type: string
+          nullable: true
+        timeoutSeconds:
+          type: integer
+          nullable: true
+        connectTimeoutSeconds:
+          type: integer
+          nullable: true
+        readTimeoutSeconds:
+          type: integer
+          nullable: true
+        capabilities:
+          type: array
+          items:
+            type: string
+        executionTask:
+          type: string
+          nullable: true
+        executionOptionsJsonMasked:
+          type: string
+          nullable: true
+        routePreview:
+          allOf:
+            - $ref: "#/components/schemas/ModelRoutePreview"
+          nullable: true
+        billingUnit:
+          type: string
+          nullable: true
+        unitPrice:
+          type: number
+          format: double
+          nullable: true
+        inputTokenPricePer1m:
+          type: number
+          format: double
+          nullable: true
+        outputTokenPricePer1m:
+          type: number
+          format: double
+          nullable: true
+        enabled:
+          type: boolean
+        agentEnabled:
+          type: boolean
+          nullable: true
+        isDefault:
+          type: boolean
+          nullable: true
+        routingExclusionReason:
+          type: string
+          nullable: true
+        healthStatus:
+          type: string
+
+    ModelRoutePreview:
+      type: object
+      properties:
+        createPath:
+          type: string
+        resultPath:
+          type: string
+        source:
+          type: string
 
     AgentModelConfigApiResponse:
       allOf:
@@ -3313,13 +3646,13 @@ components:
           type: string
         toolType:
           type: string
-          enum: [TEXT_GENERATION, IMAGE_GENERATION, MUSIC_GENERATION, VIDEO_GENERATION, AUDIO_GENERATION, DIGITAL_HUMAN]
+          enum: [TEXT_GENERATION, IMAGE_GENERATION, IMAGE_TO_IMAGE, IMAGE_UNDERSTANDING, SPEECH_TO_TEXT, TEXT_TO_SPEECH, MUSIC_GENERATION, VIDEO_GENERATION, EMBEDDING, RERANK, AGENT]
         inputModality:
           type: string
-          enum: [TEXT, IMAGE, AUDIO, VIDEO, FILE, MULTIMODAL]
+          enum: [TEXT, IMAGE, AUDIO, VIDEO, JSON, FILE, MULTIMODAL]
         outputModality:
           type: string
-          enum: [TEXT, IMAGE, AUDIO, VIDEO, REPORT, JSON]
+          enum: [TEXT, IMAGE, AUDIO, VIDEO, JSON, FILE, MULTIMODAL]
         params:
           type: object
           additionalProperties: true

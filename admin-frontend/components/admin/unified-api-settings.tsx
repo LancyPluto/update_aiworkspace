@@ -5,6 +5,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   Dialog,
@@ -48,8 +49,11 @@ import { fetchUnifiedApiOverview } from "@/lib/api/unified-api"
 import {
   capabilitiesForModelProvider,
   findModelProvider,
+  modelFormAfterProviderSwitch,
   selectDefaultModelProvider,
+  supportedModelProviders,
 } from "@/lib/model-provider-selection"
+import { normalizeModelCapabilities } from "@/lib/model-capabilities"
 import { buildModelRoutingPools, resolveModelRoutingTarget } from "@/lib/model-routing-target"
 import type {
   AgentModelConfigPayload,
@@ -353,7 +357,6 @@ function capabilityLabel(cap: string) {
     TEXT_TO_SPEECH: "文字转语音",
     SPEECH_TO_TEXT: "语音转文字",
     MUSIC_GENERATION: "文生音乐",
-    DIGITAL_HUMAN: "数字人",
     VISION_INPUT: "图片视觉",
     MULTIMODAL: "多模态输入",
   }
@@ -491,7 +494,7 @@ const executionTaskOptions: Record<string, Array<{ value: string; label: string;
     { value: "omni_image", label: "Omni 生图", capabilities: ["IMAGE_GENERATION"], createPath: "/v1/images/omni-image", resultPath: "/v1/images/omni-image/{task_id}" },
   ],
   seedance: [
-    { value: "video_generation", label: "视频生成", capabilities: ["VIDEO_GENERATION", "DIGITAL_HUMAN"], createPath: "/contents/generations/tasks", resultPath: "/contents/generations/tasks/{task_id}" },
+    { value: "video_generation", label: "视频生成", capabilities: ["VIDEO_GENERATION"], createPath: "/contents/generations/tasks", resultPath: "/contents/generations/tasks/{task_id}" },
   ],
   volcengine_images: [
     { value: "image_generation", label: "图像生成", capabilities: ["IMAGE_GENERATION"], createPath: "/images/generations", resultPath: "/images/generations" },
@@ -688,6 +691,19 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     () => findModelProvider(providers, modelForm.provider) || null,
     [providers, modelForm.provider],
   )
+
+  const currentModelProviderCapabilities = useMemo(
+    () => normalizeModelCapabilities(currentModelProviderMeta?.capabilities),
+    [currentModelProviderMeta],
+  )
+
+  const availableModelProviders = useMemo(() => {
+    const vendor = overview?.vendors.find((item) => item.vendorCode === modelVendorCode)
+    const matches = supportedModelProviders(providers, vendor?.supportedProviders)
+    if (matches.length > 0) return matches
+    const current = findModelProvider(providers, modelForm.provider)
+    return current ? [current] : []
+  }, [modelForm.provider, modelVendorCode, overview, providers])
 
   const allVendorAccounts = useMemo(
     () => overview?.vendors.flatMap((vendor) => vendor.accounts) ?? [],
@@ -1368,9 +1384,10 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
 
   function openCreateModel(vendor: UnifiedApiVendorGroup, accountId: number) {
     const account = vendor.accounts.find((a) => a.id === accountId) || vendor.accounts[0]
-    const meta = selectDefaultModelProvider(providers, vendor.vendorCode, vendor.models[0]?.provider)
-    const defaultProvider = meta?.code || vendor.models[0]?.provider || "openai_compatible"
-    const capabilities = capabilitiesForModelProvider(undefined, meta)
+    const eligibleProviders = supportedModelProviders(providers, vendor.supportedProviders)
+    const meta = selectDefaultModelProvider(eligibleProviders, vendor.vendorCode, vendor.models[0]?.provider)
+    const defaultProvider = meta?.code || vendor.supportedProviders[0] || "openai_compatible"
+    const capabilities = normalizeModelCapabilities(capabilitiesForModelProvider(undefined, meta))
     setModelVendorCode(vendor.vendorCode)
     setModelForm({
       ...emptyModelForm(),
@@ -1386,6 +1403,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       enabled: true,
       agentEnabled: true,
     })
+    setError(null)
     setModelDialogOpen(true)
   }
 
@@ -1416,7 +1434,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       enabled: model.enabled,
       agentEnabled: model.agentEnabled ?? true,
       isDefault: model.isDefault ?? false,
-      capabilities: capabilitiesForModelProvider(model.capabilities, meta),
+      capabilities: normalizeModelCapabilities(capabilitiesForModelProvider(model.capabilities, meta)),
       timeoutSeconds: 60,
       inputTokenPricePer1m: priceFromCny(model.inputTokenPricePer1m, pricingCurrency),
       outputTokenPricePer1m: priceFromCny(model.outputTokenPricePer1m, pricingCurrency),
@@ -1425,16 +1443,35 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       pricingCurrency,
       exchangeRateToCny: currencyRateToCny(pricingCurrency),
     })
+    setError(null)
     setModelDialogOpen(true)
+  }
+
+  function applyModelProvider(value: string) {
+    const next = findModelProvider(availableModelProviders, value)
+    if (!next) return
+    setModelForm((current) => {
+      const previous = findModelProvider(providers, current.provider)
+      const capabilities = normalizeModelCapabilities(next.capabilities)
+      const compatibleTasks = routeTasksForModel(next.code, capabilities)
+      return modelFormAfterProviderSwitch(
+        current,
+        previous,
+        next,
+        capabilities,
+        compatibleTasks[0]?.value || "",
+      )
+    })
+    setError(null)
   }
 
   function toggleModelCapability(capability: string) {
     setModelForm((current) => {
-      const allowed = currentModelProviderMeta?.capabilities?.length
-        ? new Set(currentModelProviderMeta.capabilities.map((item) => item.toUpperCase()))
+      const allowed = currentModelProviderCapabilities.length
+        ? new Set(currentModelProviderCapabilities)
         : null
       const base = allowed
-        ? (current.capabilities || []).filter((item) => allowed.has(item.toUpperCase()) || item.toUpperCase() === VISION_INPUT_CAPABILITY)
+        ? (current.capabilities || []).filter((item) => allowed.has(item.toUpperCase()))
         : current.capabilities || []
       const exists = base.some((item) => item.toUpperCase() === capability.toUpperCase())
       const next = exists
@@ -1445,17 +1482,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         ? current.executionTask
         : compatibleTasks[0]?.value || ""
       return { ...current, capabilities: next, executionTask }
-    })
-  }
-
-  function setModelVisionInput(enabled: boolean) {
-    setModelForm((current) => {
-      const currentCaps = current.capabilities || []
-      const withoutVision = currentCaps.filter((item) => item.toUpperCase() !== VISION_INPUT_CAPABILITY)
-      return {
-        ...current,
-        capabilities: enabled ? [...withoutVision, VISION_INPUT_CAPABILITY] : withoutVision,
-      }
     })
   }
 
@@ -1473,10 +1499,10 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       return
     }
     if (currentModelProviderMeta) {
-      const allowed = new Set(currentModelProviderMeta.capabilities.map((capability) => capability.toUpperCase()))
+      const allowed = new Set(currentModelProviderCapabilities)
       const invalid = modelForm.capabilities.find((capability) => {
         const normalized = capability.toUpperCase()
-        return normalized !== VISION_INPUT_CAPABILITY && !allowed.has(normalized)
+        return !allowed.has(normalized)
       })
       if (invalid) {
         setError(`能力 ${capabilityLabel(invalid)} 不适用于当前供应商 ${currentModelProviderMeta.label}`)
@@ -1927,12 +1953,25 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                         )}
                       </TableCell>
                       <TableCell className="align-middle">
-                        <div className="flex flex-wrap justify-center gap-1">
-                          {(model.capabilities || []).map((cap) => (
-                            <Badge key={cap} variant="secondary" className="text-xs">
-                              {capabilityLabel(cap)}
-                            </Badge>
-                          ))}
+                        <div className="flex items-start justify-center gap-1">
+                          <div className="flex flex-wrap justify-center gap-1">
+                            {normalizeModelCapabilities(model.capabilities).map((cap) => (
+                              <Badge key={cap} variant="secondary" className="text-xs">
+                                {capabilityLabel(cap)}
+                              </Badge>
+                            ))}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0"
+                            aria-label={`配置 ${model.displayName || model.modelName} 的模型能力`}
+                            title="配置模型能力"
+                            onClick={() => openEditModel(model, vendor.vendorCode)}
+                          >
+                            <Settings2 className="h-3.5 w-3.5" />
+                          </Button>
                         </div>
                       </TableCell>
                       <TableCell className="align-middle text-center">
@@ -2039,10 +2078,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
     )
   }
 
-  const unconfiguredVendors = overview?.unconfiguredVendors.filter((vendor) => {
-    const code = vendor.vendorCode.toLowerCase()
-    return code !== "infinite_talk" && code !== "infinitetalk"
-  }) ?? []
+  const unconfiguredVendors = overview?.unconfiguredVendors ?? []
 
   return (
     <div className="space-y-6">
@@ -2438,6 +2474,13 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
             <DialogTitle>{modelForm.id ? "编辑模型" : "添加模型"}</DialogTitle>
             <DialogDescription>使用所属账户的 API 密钥，无需在此重复填写 Key。</DialogDescription>
           </DialogHeader>
+          {error ? (
+            <Alert variant="destructive" role="alert">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>无法保存模型</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
           <div className="grid gap-4 py-2">
             <div className="space-y-2 rounded-md border p-3">
               <div className="flex items-center justify-between gap-3">
@@ -2509,6 +2552,21 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               )}
             </div>
             <div className="space-y-2">
+              <Label htmlFor="model-provider">供应商协议</Label>
+              <Select value={modelForm.provider} onValueChange={applyModelProvider}>
+                <SelectTrigger id="model-provider" className="w-full">
+                  <SelectValue placeholder="选择该厂商支持的协议" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableModelProviders.map((provider) => (
+                    <SelectItem key={provider.code} value={provider.code}>
+                      {provider.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
               <Label>显示名称</Label>
               <Input value={modelForm.displayName || ""} onChange={(e) => setModelForm((f) => ({ ...f, displayName: e.target.value }))} />
             </div>
@@ -2528,48 +2586,41 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 </span>
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
-                {(currentModelProviderMeta?.capabilities?.length
-                  ? currentModelProviderMeta.capabilities
-                  : modelForm.capabilities || ["TEXT_GENERATION"]
+                {(currentModelProviderCapabilities.length
+                  ? currentModelProviderCapabilities
+                  : normalizeModelCapabilities(modelForm.capabilities || ["TEXT_GENERATION"])
                 ).map((capability) => {
                   const checked = (modelForm.capabilities || []).some((item) => item.toUpperCase() === capability.toUpperCase())
+                  const capabilityControlId = `model-capability-${capability.toLowerCase()}`
                   return (
-                    <button
+                    <div
                       key={capability}
-                      type="button"
-                      onClick={() => toggleModelCapability(capability)}
                       className={[
-                        "flex items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition",
+                        "flex min-h-10 items-center gap-2 rounded-md border px-3 py-2 text-sm transition",
                         checked
-                          ? "border-blue-500 bg-blue-500/10 text-blue-100"
+                          ? "border-blue-500 bg-blue-500/10 text-foreground"
                           : "border-border bg-muted/20 text-muted-foreground hover:border-blue-400/60 hover:text-foreground",
                       ].join(" ")}
                     >
-                      <span>{capabilityLabel(capability)}</span>
-                      <span className="text-[11px] font-mono opacity-70">{capability}</span>
-                    </button>
+                      <Checkbox
+                        id={capabilityControlId}
+                        checked={checked}
+                        onCheckedChange={() => toggleModelCapability(capability)}
+                      />
+                      <Label
+                        htmlFor={capabilityControlId}
+                        className="flex min-w-0 flex-1 cursor-pointer items-center justify-between gap-2 font-normal"
+                      >
+                        <span>{capabilityLabel(capability)}</span>
+                        <span className="break-all font-mono text-[11px] opacity-70">{capability}</span>
+                      </Label>
+                    </div>
                   )
                 })}
               </div>
               <p className="text-xs text-muted-foreground">
                 能力决定工具页可绑定范围和 Worker 执行路由；音乐模型请选择“文生音乐”。
               </p>
-            </div>
-            <div className="rounded-md border bg-muted/30 p-3">
-              <div className="flex items-start justify-between gap-4">
-                <div className="space-y-1">
-                  <Label>Agent 图片视觉</Label>
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    写入 <code>{VISION_INPUT_CAPABILITY}</code>。开启后，Agent 在思考和生成提示词前会把本轮 @ 引用图片作为 image_url 发给支持视觉的聊天模型。
-                  </p>
-                </div>
-                <EmbeddedOnOffSwitch
-                  checked={(modelForm.capabilities || []).some((item) => item.toUpperCase() === VISION_INPUT_CAPABILITY)}
-                  disabled={modelForm.agentEnabled === false}
-                  label="Agent 图片视觉"
-                  onCheckedChange={setModelVisionInput}
-                />
-              </div>
             </div>
             <div className="space-y-3 rounded-md border p-3">
               <div className="flex items-center justify-between gap-3">

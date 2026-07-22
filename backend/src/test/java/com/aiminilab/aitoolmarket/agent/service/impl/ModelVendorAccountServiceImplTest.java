@@ -10,6 +10,7 @@ import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountTestResponse;
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
+import com.aiminilab.aitoolmarket.agent.service.ModelProviderMetadataService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
 import com.aiminilab.aitoolmarket.task.routing.mapper.AccountModelRouteStateMapper;
@@ -53,11 +54,13 @@ class ModelVendorAccountServiceImplTest {
     @BeforeEach
     void setUp() {
         ObjectMapper objectMapper = new ObjectMapper();
+        ModelProviderRegistry providerRegistry = new ModelProviderRegistry();
         service = new ModelVendorAccountServiceImpl(
                 vendorAccountMapper,
                 agentModelConfigMapper,
                 vendorCodeResolver,
-                new ModelProviderRegistry(),
+                providerRegistry,
+                new ModelProviderMetadataService(null, providerRegistry, objectMapper),
                 agentServiceClient,
                 balanceRefreshService,
                 new ModelCapabilitiesCodec(objectMapper),

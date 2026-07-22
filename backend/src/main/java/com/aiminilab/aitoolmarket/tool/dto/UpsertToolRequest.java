@@ -3,6 +3,8 @@ package com.aiminilab.aitoolmarket.tool.dto;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 
+import java.util.List;
+
 public record UpsertToolRequest(
         String toolCode,
         @NotBlank String toolName,
@@ -16,6 +18,7 @@ public record UpsertToolRequest(
         @Min(0) Integer estimatedCreditCost,
         Long modelConfigId,
         String executionHandler,
+        List<String> requiredModelCapabilities,
         String templateCode
 ) {
 }

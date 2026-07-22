@@ -582,6 +582,48 @@ class AdminAgentApiTest {
     }
 
     @Test
+    @Transactional
+    void modelUpdateRevalidatesStoredCapabilitiesWhenRequestOmitsTheField() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        jdbcTemplate.update("""
+                INSERT INTO agent_model_configs(
+                  display_name, config_code, provider, model_name, base_url, api_key,
+                  capabilities, enabled, agent_enabled, is_default, is_deleted
+                ) VALUES (
+                  'Legacy invalid capabilities', 'legacy_invalid_capabilities',
+                  'openai_compatible', 'legacy-chat-model', 'https://example.com/v1', 'valid-key',
+                  '["TEXT_GENERATION","VIDEO_GENERATION"]', 1, 1, 0, 0
+                )
+                """);
+        Long modelId = jdbcTemplate.queryForObject(
+                "SELECT id FROM agent_model_configs WHERE config_code = 'legacy_invalid_capabilities'",
+                Long.class
+        );
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(
+                                "/api/admin/v1/agent/model-config/{id}", modelId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "Legacy invalid capabilities",
+                                  "configCode": "legacy_invalid_capabilities",
+                                  "provider": "openai_compatible",
+                                  "modelName": "legacy-chat-model",
+                                  "baseUrl": "https://example.com/v1",
+                                  "enabled": true,
+                                  "agentEnabled": true,
+                                  "isDefault": false
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
+                .andExpect(jsonPath("$.message").value(containsString(
+                        "does not support capability VIDEO_GENERATION")));
+    }
+
+    @Test
     void happyHorseCanSwitchBetweenBailianAccountsButNotToAnotherVendor() throws Exception {
         mockExternalAuthDependencies();
         String adminToken = login("/api/admin/v1/auth/login", "admin");

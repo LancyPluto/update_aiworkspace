@@ -28,7 +28,10 @@ public class ModelCapabilitiesCodec {
             List<String> normalized = new ArrayList<>();
             for (String value : values) {
                 if (value != null && !value.isBlank()) {
-                    normalized.add(value.trim().toUpperCase(Locale.ROOT));
+                    String capability = value.trim().toUpperCase(Locale.ROOT);
+                    if (!normalized.contains(capability)) {
+                        normalized.add(capability);
+                    }
                 }
             }
             return List.copyOf(normalized);

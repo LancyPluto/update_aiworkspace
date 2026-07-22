@@ -50,6 +50,7 @@ import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.WorkflowService;
 import com.aiminilab.aitoolmarket.tool.support.ConfigNoteMergeSupport;
 import com.aiminilab.aitoolmarket.tool.support.ToolFrontendStyleConfig;
+import com.aiminilab.aitoolmarket.tool.support.ToolModelCapabilitySupport;
 import com.aiminilab.aitoolmarket.task.routing.ModelRoutingPolicy;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -407,6 +408,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 tool.estimatedCreditCost(),
                 modelCodesById.get(tool.modelConfigId()),
                 tool.executionHandler(),
+                tool.requiredModelCapabilities(),
                 extension == null ? true : Boolean.TRUE.equals(extension.getAgentEnabled()),
                 fields,
                 prompts,
@@ -1305,7 +1307,11 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                     existing.getConfigNote(), configNote, OBJECT_MAPPER);
         }
 
-        boolean restoreDisabledModelBinding = isDisabledModelConfig(modelConfigId);
+        AgentModelConfig disabledModelConfig = modelConfigId == null
+                ? null
+                : agentModelConfigMapper.findActiveById(modelConfigId);
+        boolean restoreDisabledModelBinding = disabledModelConfig != null
+                && Boolean.FALSE.equals(disabledModelConfig.getEnabled());
         UpsertToolRequest request = new UpsertToolRequest(
                 item.toolCode(),
                 item.toolName(),
@@ -1319,12 +1325,19 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 item.estimatedCreditCost() == null ? 0 : item.estimatedCreditCost(),
                 restoreDisabledModelBinding ? null : modelConfigId,
                 item.executionHandler(),
+                item.requiredModelCapabilities(),
                 null
         );
         ToolSummaryResponse saved = existing == null
                 ? toolService.createTool(request, operatorId)
                 : toolService.updateTool(existing.getId(), request, operatorId);
         if (restoreDisabledModelBinding) {
+            AiTool capabilityCandidate = new AiTool();
+            capabilityCandidate.setToolType(saved.toolType());
+            capabilityCandidate.setExecutionHandler(saved.executionHandler());
+            capabilityCandidate.setRequiredModelCapabilities(
+                    ToolModelCapabilitySupport.serialize(saved.requiredModelCapabilities(), OBJECT_MAPPER));
+            modelCapabilityService.validateToolModelCapabilities(capabilityCandidate, disabledModelConfig);
             toolMapper.updateToolModelConfig(saved.id(), modelConfigId, operatorId);
             warnings.add("Restored disabled model binding for tool " + item.toolCode()
                     + "; enable and test the model before runtime use");
@@ -1392,14 +1405,6 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             }
         }
         return message;
-    }
-
-    private boolean isDisabledModelConfig(Long modelConfigId) {
-        if (modelConfigId == null) {
-            return false;
-        }
-        AgentModelConfig config = agentModelConfigMapper.findActiveById(modelConfigId);
-        return config != null && Boolean.FALSE.equals(config.getEnabled());
     }
 
     private void ensureActiveFieldSchema(Long toolId, Long operatorId, String toolCode, List<String> warnings) {

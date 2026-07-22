@@ -1175,10 +1175,12 @@ class AdminConfigurationApiTest {
                                 {
                                   "displayName": "Doubao Video",
                                   "configCode": "doubao_video_model",
-                                  "provider": "mock",
-                                  "modelName": "doubao-video",
+                                  "provider": "seedance",
+                                  "modelName": "doubao-seedance-1-5-pro-251215",
                                   "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+                                  "apiKey": "fake-key",
                                   "timeoutSeconds": 60,
+                                  "capabilities": ["VIDEO_GENERATION"],
                                   "enabled": true,
                                   "isDefault": false
                                 }

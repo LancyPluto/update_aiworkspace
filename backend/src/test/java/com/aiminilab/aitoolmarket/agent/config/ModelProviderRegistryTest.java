@@ -21,7 +21,7 @@ class ModelProviderRegistryTest {
         assertThat(registry.isSupported("siliconflow_images")).isTrue();
         Optional<ModelProviderDefinition> siliconflow = registry.findByCode("siliconflow_images");
         assertThat(siliconflow).isPresent();
-        assertThat(siliconflow.get().capabilities()).contains("IMAGE_GENERATION", "DIGITAL_HUMAN");
+        assertThat(siliconflow.get().capabilities()).containsExactly("IMAGE_GENERATION");
         Optional<ModelProviderDefinition> localMediaMock = registry.findByCode("local_media_mock");
         assertThat(localMediaMock).isPresent();
         assertThat(localMediaMock.get().capabilities()).containsExactly("IMAGE_GENERATION", "VIDEO_GENERATION");
@@ -57,5 +57,17 @@ class ModelProviderRegistryTest {
         assertThat(video.get().defaultModel()).isEqualTo("agnes-video-v2.0");
         assertThat(video.get().providerProtocol()).isEqualTo("agnes_video");
         assertThat(video.get().capabilities()).containsExactly("VIDEO_GENERATION");
+    }
+
+    @Test
+    void loadsInfiniteTalkAsWorkerReadyVideoProvider() {
+        Optional<ModelProviderDefinition> infiniteTalk = registry.findByCode("infinitetalk");
+
+        assertThat(infiniteTalk).isPresent();
+        assertThat(infiniteTalk.get().capabilities()).containsExactly("VIDEO_GENERATION");
+        assertThat(infiniteTalk.get().defaultBaseUrl()).isEqualTo("http://host.docker.internal:7860");
+        assertThat(infiniteTalk.get().defaultModel()).isEqualTo("MeiGen-AI/InfiniteTalk");
+        assertThat(infiniteTalk.get().billingDefault()).isEqualTo("PER_CALL");
+        assertThat(infiniteTalk.get().workerReady()).isTrue();
     }
 }

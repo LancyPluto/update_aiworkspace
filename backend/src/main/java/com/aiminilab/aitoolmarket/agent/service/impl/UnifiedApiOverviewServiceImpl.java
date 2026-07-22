@@ -125,6 +125,7 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
                         vendorCode,
                         vendorCodeResolver.vendorLabel(vendorCode),
                         vendorCodeResolver.vendorIconAsset(vendorCode),
+                        providersForVendor(vendorCode),
                         sortAccounts(accountsByVendor.getOrDefault(vendorCode, List.of())),
                         sortModels(modelsByVendor.getOrDefault(vendorCode, List.of()))
                 ))
@@ -132,8 +133,6 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
 
         List<UnifiedApiUnconfiguredVendorResponse> unconfigured = vendorCodeResolver.vendorCatalog().entrySet().stream()
                 .filter(entry -> !"openai_gateway".equals(entry.getKey()))
-                .filter(entry -> !"infinite_talk".equalsIgnoreCase(entry.getKey()))
-                .filter(entry -> !"infinitetalk".equalsIgnoreCase(entry.getKey()))
                 .filter(entry -> !configuredVendors.contains(canonicalVendorCode(entry.getKey())))
                 .filter(entry -> !"mock".equals(entry.getKey()))
                 .sorted(Map.Entry.comparingByValue())
