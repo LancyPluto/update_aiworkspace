@@ -28,7 +28,6 @@ import {
   Check,
   Gift,
   Zap,
-  Clapperboard,
   BookOpen,
 } from "lucide-vue-next"
 import { ref, onMounted, onUnmounted, computed, watch } from "vue"
@@ -147,7 +146,6 @@ const navSections: NavSection[] = [
         icon: Wrench,
         active: (path) => path === "/marketplace" || path.startsWith("/chat/"),
       },
-      { type: "link", href: "/agents/comic-projects", label: "漫剧项目", icon: Clapperboard },
       { type: "link", href: "/library", label: "资产", icon: Package },
       { type: "link", href: "/community", label: "社区", icon: Compass },
       { type: "link", href: "/community/inspirations", label: "灵感收藏", icon: Lightbulb },

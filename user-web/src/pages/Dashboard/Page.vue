@@ -803,7 +803,7 @@ async function handleComposerMediaUpload(event: Event) {
     }
     await nextTick()
     resizePromptTextarea()
-    updateComposerClearance()
+    updateComposerDockInset()
   } catch (error) {
     submitError.value = (error as Error).message || "媒体上传失败"
   } finally {
