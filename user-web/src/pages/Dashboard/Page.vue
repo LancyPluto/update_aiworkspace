@@ -2936,7 +2936,7 @@ onUnmounted(() => {
 
         <div
           ref="composerRootRef"
-          class="pointer-events-none fixed bottom-6 left-[calc(var(--app-sidebar-width,268px)+(100vw-var(--app-sidebar-width,268px))/2)] z-50 grid w-[min(980px,calc(100vw-2rem))] -translate-x-1/2 transition-[left]"
+          class="dashboard-composer-dock pointer-events-none fixed bottom-6 left-[calc(var(--app-sidebar-width,268px)+(100vw-var(--app-sidebar-width,268px))/2)] z-50 grid w-[min(980px,calc(100vw-2rem))] -translate-x-1/2 transition-[left]"
         >
           <div
             v-show="!composerOpen"
@@ -4497,6 +4497,12 @@ onUnmounted(() => {
 .dashboard-pollo-chip:hover {
   background: rgb(255 255 255 / 0.1);
   color: white;
+}
+
+@media (max-width: 1023px) {
+  .dashboard-composer-dock {
+    left: 50%;
+  }
 }
 
 .dashboard-pollo-at-button {

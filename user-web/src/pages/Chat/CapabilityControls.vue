@@ -317,7 +317,10 @@ function isReferenceComposerField(field: ToolField): boolean {
 }
 
 function isComposerImageReferenceField(field: ToolField): boolean {
-  return field.fieldType === "image" || field.fieldType === "image_upload" || field.fieldType === "multi_image"
+  return field.fieldType === "image"
+    || field.fieldType === "image_upload"
+    || field.fieldType === "multi_image"
+    || (field.fieldType === "file" && materialKindForField(field) === "image")
 }
 
 function shouldShowComposerReferenceUpload(field: ToolField): boolean {
@@ -377,6 +380,7 @@ function shouldShowComposerMediaSlot(field: ToolField): boolean {
   if (presentation === "media_card") {
     if (field.fieldType === "video_upload") return true
     if (field.fieldType === "multi_video") return true
+    if (field.fieldType === "file" && (kind === "video" || kind === "audio")) return true
     const role = (parseFieldMeta(field).uiRole || "").toLowerCase()
     if (role === "motion_video") return true
     if (field.required || field.executionRequired || field.userRequired) return true
@@ -761,11 +765,25 @@ function imagePreviewUrl(field: ToolField): string {
 function materialKindForField(field: ToolField): MaterialKind {
   if (field.fieldType === "video_upload" || field.fieldType === "multi_video" || field.fieldType === "omni_video_list") return "video"
   if (field.fieldType === "image" || field.fieldType === "image_upload" || field.fieldType === "multi_image") return "image"
+  const acceptedKinds = materialKindsFromAccept(parseFieldMeta(field).accept)
+  if (acceptedKinds.size === 1) return [...acceptedKinds][0]!
   const text = `${field.fieldKey} ${field.fieldName} ${field.placeholder || ""}`.toLowerCase()
   if (/image|img|picture|photo|frame|cover|avatar|poster|图片|图像|照片|帧|封面|首图/.test(text)) return "image"
   if (/audio|voice|sound|speech|music|音频|语音|声音|音乐/.test(text)) return "audio"
   if (/video|clip|movie|视频|短片|影片/.test(text)) return "video"
   return "file"
+}
+
+function materialKindsFromAccept(accept?: string): Set<MaterialKind> {
+  const kinds = new Set<MaterialKind>()
+  for (const rawToken of String(accept || "").toLowerCase().split(",")) {
+    const token = rawToken.trim()
+    if (!token) continue
+    if (token.startsWith("image/") || /^\.(png|jpe?g|webp|gif|bmp|avif|heic|heif)$/.test(token)) kinds.add("image")
+    if (token.startsWith("video/") || /^\.(mp4|mov|webm|m4v|mkv)$/.test(token)) kinds.add("video")
+    if (token.startsWith("audio/") || /^\.(mp3|wav|m4a|flac|ogg|aac)$/.test(token)) kinds.add("audio")
+  }
+  return kinds
 }
 
 function materialKindFromValue(value?: string | null): MaterialKind {
@@ -1182,11 +1200,33 @@ async function deleteUploadHistoryItem(item: UploadHistoryItem) {
 }
 
 function uploadAccept(field: ToolField): string | undefined {
+  const configured = parseFieldMeta(field).accept?.trim()
+  if (configured) return configured
   const kind = materialKindForField(field)
   if (kind === "image") return "image/*"
   if (kind === "video") return "video/*"
   if (kind === "audio") return "audio/*"
   return undefined
+}
+
+function fileMatchesAccept(file: File, accept?: string): boolean {
+  const tokens = String(accept || "")
+    .toLowerCase()
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+  if (tokens.length === 0 || tokens.includes("*/*")) return true
+  const fileName = file.name.toLowerCase()
+  const contentType = file.type.toLowerCase()
+  const nameKind = materialKindFromValue(fileName)
+  return tokens.some((token) => {
+    if (token.startsWith(".")) return fileName.endsWith(token)
+    if (token.endsWith("/*")) {
+      const kind = token.slice(0, -2)
+      return contentType.startsWith(`${kind}/`) || nameKind === kind
+    }
+    return Boolean(contentType) && contentType === token
+  })
 }
 
 function formatTaskTime(value?: string | null): string {
@@ -1438,8 +1478,15 @@ function getComposerMediaUploadAccept(preferredFieldKey?: string): string {
   const slots = preferredFieldKey
     ? composerUploadSlots(undefined, true).filter((slot) => slot.fieldKey === preferredFieldKey)
     : composerUploadSlots(undefined, true)
-  const kinds = new Set(slots.map((slot) => slot.kind))
-  return [kinds.has("image") ? "image/*" : "", kinds.has("video") ? "video/*" : ""]
+  const accepts = new Set(
+    slots
+      .map((slot) => (props.fields || []).find((field) => field.fieldKey === slot.fieldKey))
+      .filter((field): field is ToolField => Boolean(field))
+      .flatMap((field) => String(uploadAccept(field) || "").split(","))
+      .map((item) => item.trim())
+      .filter(Boolean),
+  )
+  return [...accepts]
     .filter(Boolean)
     .join(",")
 }
@@ -1457,19 +1504,26 @@ async function uploadComposerMediaFiles(
       continue
     }
 
-    const preferredSlot = preferredKey
-      ? composerUploadSlots(kind, true).find((slot) => slot.fieldKey === preferredKey)
-      : undefined
-    const targetSlot = preferredSlot || (!preferredKey ? composerUploadSlots(kind, true)[0] : undefined)
+    const availableSlots = composerUploadSlots(kind, true)
+    const preferredSlot = preferredKey ? availableSlots.find((slot) => slot.fieldKey === preferredKey) : undefined
+    const targetSlot = preferredSlot || (!preferredKey
+      ? availableSlots.find((slot) => {
+          const field = (props.fields || []).find((item) => item.fieldKey === slot.fieldKey)
+          return Boolean(field && fileMatchesAccept(file, uploadAccept(field)))
+        })
+      : undefined)
     if (!targetSlot) {
       const preferredTarget = preferredKey
         ? composerMediaSlots.value.find((slot) => slot.fieldKey === preferredKey)
         : undefined
       const supported = composerUploadSlots(kind).length > 0
+      const formatRejected = !preferredKey && availableSlots.length > 0
       result.rejected.push({
         name: file.name,
         reason: preferredTarget && preferredTarget.kind !== kind
           ? `该输入位仅支持${preferredTarget.kind === "image" ? "图片" : "视频"}`
+          : formatRejected
+          ? "文件格式不符合当前模型字段要求"
           : supported
           ? `${kind === "image" ? "图片" : "视频"}输入数量已满`
           : `当前模型不支持${kind === "image" ? "图片" : "视频"}输入`,
@@ -1481,6 +1535,10 @@ async function uploadComposerMediaFiles(
     const field = (props.fields || []).find((item) => item.fieldKey === targetSlot.fieldKey)
     if (!field) {
       result.rejected.push({ name: file.name, reason: "未找到对应的模型输入字段" })
+      continue
+    }
+    if (!fileMatchesAccept(file, uploadAccept(field))) {
+      result.rejected.push({ name: file.name, reason: `文件格式不符合“${field.fieldName}”要求` })
       continue
     }
 
@@ -1654,6 +1712,7 @@ function getRequestParams(): Record<string, unknown> {
   if (codeCapability.value && state.value.language) params.language = state.value.language
 
   for (const field of requestFields.value) {
+    if (parseFieldMeta(field).submitPolicy === "ui_only") continue
     const value = state.value.fields[field.fieldKey]
     if (field.fieldType === "checkbox") {
       params[field.fieldKey] = Boolean(value)
