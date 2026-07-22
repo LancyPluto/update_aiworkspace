@@ -5,6 +5,8 @@
 - `ci-isolated` 仅运行 CI，无生产凭据，并阻断生产地址与本地 LAN。
 - `production-deploy` 仅运行生产 CD，生产连接凭据只保存在该 WSL 的本地文件中。
 
+两个 WSL 发行版共享同一个网络命名空间，因此 Runner 必须使用不同的宿主 UID：CI 为 `1000`，CD 为 `1100`。CI 出口规则使用 `iptables -m owner --uid-owner 1000`，禁止改回不带 UID 的全局规则，否则会同时阻断 CD。
+
 ## 工作流
 
 | 文件 | 触发 | 行为 |
@@ -133,7 +135,8 @@ CI 绿灯 **不等于** 浏览器立刻看到与本地 Vite 完全一致的效�
 ## 安全说明
 
 - 密码只存在于 CD WSL 的 `0600` 本地 `.env` 与生产服务器，不进入仓库或 workflow 日志。
-- `production-deploy` Runner 应放入仅允许本工作流 `dev` ref 的组织级 Runner Group；仅靠自定义标签不是权限边界。
+- `production-deploy` Runner 位于组织级 `ai-tool-market-production-deploy` Runner Group；该组仅允许 `AI-miniLab/ai-tool-market/.github/workflows/dev-delivery.yml@refs/heads/dev`。仅靠自定义标签不是权限边界。
+- Windows 的 `.wslconfig` 必须设置 `vmIdleTimeout=-1`，并在 Administrator 登录后启动两个 WSL 保活任务，否则空闲回收会让 Runner 离线。
 - SSH 必须使用固定的 `known_hosts` 和 `StrictHostKeyChecking=yes`。
 - 部署 **保留** 服务器 `/root/ai_tool_market/.env`。
 - 建议限制 SSH 来源 IP；长期可改为 SSH 密钥。
