@@ -19,6 +19,7 @@ from providers import registry as provider_registry
 from handlers.digital_human_postprocessor import DigitalHumanPostprocessError, DigitalHumanPostprocessor
 from handlers.digital_human_video_handler import DigitalHumanVideoHandler
 from handlers.generated_image_persister import GeneratedImagePersister
+from utils.model_contract import parse_response_mapping
 from handlers.generated_audio_persister import GeneratedAudioPersister
 from handlers.generated_video_persister import GeneratedVideoPersister
 from storage.asset_storage import asset_storage
@@ -456,6 +457,7 @@ class WorkflowStepHandler:
                 api_key=model_config.get("apiKey"),
                 timeout_seconds=max(180, int(model_config.get("timeoutSeconds") or 0)),
                 max_tokens=12000,
+                response_mapping=parse_response_mapping(model_config),
             )
             _accumulate_usage(usage_total, _provider_call_usage(call_usage, model_config))
             parsed = _extract_json(previous)
@@ -575,6 +577,7 @@ class WorkflowStepHandler:
                 api_key=model_config.get("apiKey"),
                 timeout_seconds=max(180, int(model_config.get("timeoutSeconds") or 0)),
                 max_tokens=min(16000, max(5000, 700 * requested_shots)),
+                response_mapping=parse_response_mapping(model_config),
             )
             _accumulate_usage(usage_total, _provider_call_usage(call_usage, model_config))
             parsed = _extract_json(previous)
@@ -1270,6 +1273,7 @@ class WorkflowStepHandler:
                     api_key=model_config.get("apiKey"),
                     timeout_seconds=max(180, int(model_config.get("timeoutSeconds") or 0)),
                     max_tokens=min(16000, max(5000, 900 * scene_count)),
+                    response_mapping=parse_response_mapping(model_config),
                 )
                 _accumulate_usage(usage_total, _provider_call_usage(call_usage, model_config))
             except ModelClientError:

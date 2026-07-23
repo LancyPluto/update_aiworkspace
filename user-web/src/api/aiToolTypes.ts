@@ -1,4 +1,4 @@
-import type { ToolCardMedia, ToolField, ToolFrontendStyle } from "./types"
+import type { ToolCardMedia, ToolField, ToolFrontendStyle, ToolSupportedModel } from "./types"
 
 export type CapabilityType =
   | "imageGeneration"
@@ -46,6 +46,8 @@ export interface AITool {
   categoryName?: string | null
   toolKind?: "text" | "image" | "video" | "digitalHuman" | "audio" | "agent" | "other" | string | null
   fields?: ToolField[]
+  supportedModels?: ToolSupportedModel[]
+  defaultModelConfigId?: number | null
   estimatedCreditCost?: number
   /** 工作流类工具：按每次实际调用模型成本 ×1.2 动态计费 */
   variableCreditPricing?: boolean | null

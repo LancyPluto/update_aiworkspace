@@ -1,4 +1,4 @@
-import type { ApiResponse } from './types'
+import type { ApiErrorCode, ApiResponse } from './types'
 
 const TOKEN_STORAGE_KEY = 'admin_access_token'
 const USER_STORAGE_KEY = 'admin_user_profile'
@@ -16,14 +16,34 @@ function normalizeApiBaseUrl(raw: string): string {
 }
 
 export class ApiError extends Error {
-  code: string
-  status?: number
-  traceId?: string | null
-  responseBody?: unknown
-  constructor(message: string, code: string, status?: number, traceId?: string | null, responseBody?: unknown) {
+  readonly errorCode: ApiErrorCode
+  /** Compatibility alias for existing error-code branches. */
+  readonly code: ApiErrorCode
+  readonly httpStatus?: number
+  /** Compatibility alias used by existing admin screens. */
+  readonly status?: number
+  readonly userMessage?: string
+  readonly developerMessage?: string
+  readonly traceId?: string | null
+  readonly responseBody?: unknown
+
+  constructor(
+    message: string,
+    errorCode: ApiErrorCode,
+    httpStatus?: number,
+    traceId?: string | null,
+    responseBody?: unknown,
+    userMessage?: string,
+    developerMessage?: string,
+  ) {
     super(message)
-    this.code = code
-    this.status = status
+    this.name = 'ApiError'
+    this.errorCode = errorCode
+    this.code = errorCode
+    this.httpStatus = httpStatus
+    this.status = httpStatus
+    this.userMessage = userMessage
+    this.developerMessage = developerMessage
     this.traceId = traceId
     this.responseBody = responseBody
   }
@@ -92,6 +112,87 @@ interface RequestOptions {
 }
 
 type HttpMethod = NonNullable<RequestOptions['method']>
+type JsonRecord = Record<string, unknown>
+
+function asRecord(payload: unknown): JsonRecord | undefined {
+  return payload !== null && typeof payload === 'object' && !Array.isArray(payload)
+    ? (payload as JsonRecord)
+    : undefined
+}
+
+function nonBlankString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const normalized = value.trim()
+  return normalized || undefined
+}
+
+function isSuccessResponse(payload: unknown): payload is JsonRecord & { code: 'SUCCESS'; data: unknown } {
+  const record = asRecord(payload)
+  return record?.code === 'SUCCESS' && 'data' in record
+}
+
+function isErrorResponse(payload: unknown): boolean {
+  const record = asRecord(payload)
+  if (!record) return false
+  if (nonBlankString(record.errorCode)) return true
+  const legacyCode = nonBlankString(record.code)
+  return Boolean(legacyCode && legacyCode !== 'SUCCESS')
+}
+
+function toAdminApiError(payload: unknown, httpStatus?: number, fallbackMessage?: string): ApiError {
+  const record = asRecord(payload)
+  const envelopeCode = nonBlankString(record?.errorCode)
+  const legacyCode = nonBlankString(record?.code)
+  const errorCode = (envelopeCode || (legacyCode !== 'SUCCESS' ? legacyCode : undefined) || 'HTTP_ERROR') as ApiErrorCode
+  const userMessage = nonBlankString(record?.userMessage)
+  const legacyMessage = nonBlankString(record?.message)
+  const developerMessage = nonBlankString(record?.developerMessage)
+  const traceId = nonBlankString(record?.traceId) ?? nonBlankString(record?.requestId) ?? null
+  const message = developerMessage ?? userMessage ?? legacyMessage ?? fallbackMessage ?? `请求失败 (${httpStatus ?? 'unknown'})`
+
+  return new ApiError(
+    message,
+    errorCode,
+    httpStatus,
+    traceId,
+    payload,
+    userMessage,
+    developerMessage ?? legacyMessage,
+  )
+}
+
+function redirectToLoginPage(): void {
+  if (typeof window === 'undefined' || window.location.pathname.startsWith('/login')) return
+  const basePath = (process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || '').replace(/\/$/, '')
+  window.location.href = `${basePath}/login`
+}
+
+async function unwrapResponse<T>(response: Response, options?: { skipAuthRedirect?: boolean }): Promise<T> {
+  let payload: ApiResponse<T> | null = null
+  try {
+    payload = (await response.json()) as ApiResponse<T>
+  } catch {
+    // The normalized error below handles empty and non-JSON response bodies.
+  }
+
+  if (response.status === 401 && !options?.skipAuthRedirect) {
+    clearSession()
+    redirectToLoginPage()
+  }
+
+  const fallbackMessage = response.status === 403
+    ? '请求被拒绝（403）。请确认通过 https://wlcloudai.com/admin 访问，或使用管理员账号登录。'
+    : `请求失败 (${response.status})`
+
+  if (!response.ok || isErrorResponse(payload)) {
+    throw toAdminApiError(payload, response.status, fallbackMessage)
+  }
+  if (!isSuccessResponse(payload)) {
+    throw toAdminApiError(payload, response.status, `无效响应 (${response.status})`)
+  }
+
+  return payload.data as T
+}
 
 function buildUrl(path: string, query?: RequestOptions['query']): string {
   const baseUrl = getBaseUrl()
@@ -145,36 +246,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     throw new ApiError('网络异常，请检查后端服务是否启动', 'NETWORK_ERROR')
   }
 
-  if ((response.status === 401 || response.status === 403) && !options.skipAuthRedirect) {
-    clearSession()
-    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
-      const basePath = (process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || '').replace(/\/$/, '')
-      window.location.href = `${basePath}/login`
-    }
-    throw new ApiError('登录已过期，请重新登录', 'UNAUTHORIZED', 401)
-  }
-
-  let payload: ApiResponse<T> | null = null
-  try {
-    payload = (await response.json()) as ApiResponse<T>
-  } catch {
-    // ignore JSON parse error
-  }
-
-  if (!response.ok || !payload) {
-    let message = payload?.message || `请求失败 (${response.status})`
-    if (response.status === 403 && !payload?.message) {
-      message = '请求被拒绝（403）。请确认通过 https://wlcloudai.com/admin 访问，或使用管理员账号登录。'
-    }
-    const code = payload?.code || 'HTTP_ERROR'
-    throw new ApiError(message, code, response.status, payload?.traceId || payload?.requestId || null, payload)
-  }
-
-  if (payload.code && payload.code !== 'SUCCESS') {
-    throw new ApiError(payload.message || payload.code, payload.code, response.status, payload.traceId || payload.requestId || null, payload)
-  }
-
-  return payload.data
+  return unwrapResponse<T>(response, { skipAuthRedirect: options.skipAuthRedirect })
 }
 
 export const http = {
@@ -212,35 +284,6 @@ export const http = {
       throw new ApiError('Network error, please check backend service.', 'NETWORK_ERROR')
     }
 
-    if (response.status === 401 || response.status === 403) {
-      clearSession()
-      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
-        const basePath = (process.env.NEXT_PUBLIC_ADMIN_BASE_PATH || '').replace(/\/$/, '')
-        window.location.href = `${basePath}/login`
-      }
-      throw new ApiError('Login expired, please sign in again.', 'UNAUTHORIZED', 401)
-    }
-
-    let payload: ApiResponse<T> | null = null
-    try {
-      payload = (await response.json()) as ApiResponse<T>
-    } catch {
-      // ignore JSON parse error
-    }
-
-  if (!response.ok || !payload) {
-    let message = payload?.message || `请求失败 (${response.status})`
-    if (response.status === 403 && !payload?.message) {
-      message = '请求被拒绝（403）。请确认通过 https://wlcloudai.com/admin 访问，或使用管理员账号登录。'
-    }
-    const code = payload?.code || 'HTTP_ERROR'
-    throw new ApiError(message, code, response.status, payload?.traceId || payload?.requestId || null, payload)
-  }
-
-  if (payload.code && payload.code !== 'SUCCESS') {
-      throw new ApiError(payload.message || payload.code, payload.code, response.status, payload.traceId || payload.requestId || null, payload)
-    }
-
-    return payload.data
+    return unwrapResponse<T>(response)
   },
 }

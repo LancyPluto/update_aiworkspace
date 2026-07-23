@@ -19,6 +19,8 @@ public record PublicToolDetailResponse(
         Integer estimatedCreditCost,
         Boolean variableCreditPricing,
         String modelDisplayName,
+        Long defaultModelConfigId,
+        List<ToolSupportedModelResponse> supportedModels,
         List<PublicToolFieldResponse> fields,
         PublicToolFrontendStyleResponse frontendStyle
 ) {
@@ -26,6 +28,16 @@ public record PublicToolDetailResponse(
             PublicToolCompactResponse compact,
             List<PublicToolFieldResponse> fields,
             PublicToolFrontendStyleResponse frontendStyle
+    ) {
+        return of(compact, fields, frontendStyle, null, List.of());
+    }
+
+    public static PublicToolDetailResponse of(
+            PublicToolCompactResponse compact,
+            List<PublicToolFieldResponse> fields,
+            PublicToolFrontendStyleResponse frontendStyle,
+            Long defaultModelConfigId,
+            List<ToolSupportedModelResponse> supportedModels
     ) {
         return new PublicToolDetailResponse(
                 compact.toolCode(),
@@ -41,6 +53,8 @@ public record PublicToolDetailResponse(
                 compact.estimatedCreditCost(),
                 compact.variableCreditPricing(),
                 compact.modelDisplayName(),
+                defaultModelConfigId,
+                supportedModels == null ? List.of() : supportedModels,
                 fields,
                 frontendStyle
         );

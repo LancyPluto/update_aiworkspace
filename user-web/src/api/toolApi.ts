@@ -50,6 +50,18 @@ function capabilitiesFromTool(tool: ToolCompact): Capability[] {
   return capabilities
 }
 
+function normalizedSupportedModels(tool: ToolSummary | ToolDetail) {
+  if (!("supportedModels" in tool) || !Array.isArray(tool.supportedModels)) return undefined
+  return tool.supportedModels
+    .map((model) => {
+      const modelConfigId = Number(model.modelConfigId ?? model.id)
+      return Number.isFinite(modelConfigId) && modelConfigId > 0
+        ? { ...model, modelConfigId }
+        : null
+    })
+    .filter((model): model is NonNullable<typeof model> => model !== null)
+}
+
 export function mapToolToAITool(tool: ToolSummary | ToolDetail, order = 0): AITool {
   const style = "frontendStyle" in tool ? tool.frontendStyle || {} : {}
   const cardMedia = "cardMedia" in tool ? tool.cardMedia : null
@@ -83,6 +95,8 @@ export function mapToolToAITool(tool: ToolSummary | ToolDetail, order = 0): AITo
     categoryCode: tool.categoryCode,
     categoryName: tool.categoryName,
     fields: "fields" in tool ? tool.fields : undefined,
+    supportedModels: normalizedSupportedModels(tool),
+    defaultModelConfigId: "defaultModelConfigId" in tool ? tool.defaultModelConfigId : undefined,
     estimatedCreditCost: tool.estimatedCreditCost ?? undefined,
     modelConfigName: tool.modelDisplayName,
   }

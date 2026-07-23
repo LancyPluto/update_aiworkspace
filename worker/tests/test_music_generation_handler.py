@@ -8,7 +8,7 @@ WORKER_ROOT = Path(__file__).resolve().parents[1]
 if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
-from client.suno_music_client import SunoGenerationResult, SunoMusicError, SunoTrack
+from client.suno_music_client import SunoGenerationResult, SunoMusicError, SunoMusicInputError, SunoTrack
 from handlers.music_generation_handler import MusicGenerationHandler
 from task_queue.task_handler_router import TaskHandlerRouter
 
@@ -157,6 +157,87 @@ class MusicGenerationHandlerTest(unittest.TestCase):
 
         self.assertEqual(handled["status"], "FAILED")
         self.assertEqual(backend.failures[0][1]["errorCode"], "MODEL_CALL_FAILED")
+
+    def test_handler_applies_model_request_mapping(self):
+        context = {
+            "taskId": 204,
+            "status": "QUEUED",
+            "toolType": "MUSIC_GENERATION",
+            "params": {"lyricsInput": "mapped sunrise lyrics"},
+            "modelConfig": {
+                "provider": "suno_music",
+                "modelName": "V5",
+                "apiKey": "secret",
+                "requestMappingJson": '{"version":"1","fieldMap":{"lyricsInput":"prompt"}}',
+            },
+        }
+        generation = SunoGenerationResult(
+            task_id="mapped-task",
+            tracks=[SunoTrack(audio_url="https://cdn.example/mapped.mp3")],
+        )
+        backend = FakeBackend(context)
+        music_client = FakeMusicClient(result=generation)
+        handler = MusicGenerationHandler(
+            backend_client=backend,
+            music_client=music_client,
+            audio_persister=FakePersister(),
+        )
+
+        handled = handler.handle({"taskId": 204})
+
+        self.assertEqual(handled["status"], "SUCCESS")
+        self.assertEqual(music_client.calls[0]["prompt"], "mapped sunrise lyrics")
+
+    def test_invalid_model_request_mapping_is_a_parameter_error(self):
+        context = {
+            "taskId": 205,
+            "status": "QUEUED",
+            "toolType": "MUSIC_GENERATION",
+            "params": {"prompt": "ambient piano"},
+            "modelConfig": {
+                "provider": "suno_music",
+                "modelName": "V5",
+                "apiKey": "secret",
+                "requestMappingJson": "{invalid",
+            },
+        }
+        backend = FakeBackend(context)
+        music_client = FakeMusicClient()
+        handler = MusicGenerationHandler(
+            backend_client=backend,
+            music_client=music_client,
+            audio_persister=FakePersister(),
+        )
+
+        handled = handler.handle({"taskId": 205})
+
+        self.assertEqual(handled["errorCode"], "INVALID_TASK_PARAMS")
+        self.assertEqual(music_client.calls, [])
+
+    def test_suno_input_error_is_a_parameter_error(self):
+        context = {
+            "taskId": 206,
+            "status": "QUEUED",
+            "toolType": "MUSIC_GENERATION",
+            "params": {"generationMode": "replace_section", "prompt": "replace chorus"},
+            "modelConfig": {
+                "provider": "suno_music",
+                "modelName": "V5_5",
+                "apiKey": "secret",
+            },
+        }
+        backend = FakeBackend(context)
+        music_client = FakeMusicClient(error=SunoMusicInputError("Suno request requires taskId"))
+        handler = MusicGenerationHandler(
+            backend_client=backend,
+            music_client=music_client,
+            audio_persister=FakePersister(),
+        )
+
+        handled = handler.handle({"taskId": 206})
+
+        self.assertEqual(handled["errorCode"], "INVALID_TASK_PARAMS")
+        self.assertEqual(backend.failures[0][1]["errorCode"], "INVALID_TASK_PARAMS")
 
     def test_router_sends_music_generation_tool_type_to_music_handler(self):
         context = {

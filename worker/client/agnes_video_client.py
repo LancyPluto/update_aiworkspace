@@ -24,15 +24,24 @@ from client.provider_error import (
     response_provider_error_code,
 )
 from config import settings
+from utils.model_contract import parse_response_mapping, read_response_value, response_mapping_has
 
 
 LOGGER = logging.getLogger(__name__)
 SUCCESS_STATUSES = {"succeeded", "succeed", "success", "completed", "done", "finish", "finished"}
 FAILED_STATUSES = {"failed", "fail", "failure", "error", "cancelled", "canceled", "timeout", "timed_out"}
 POLL_REQUEST_ATTEMPTS = 3
+TEXT_TO_VIDEO = "text_to_video"
+IMAGE_TO_VIDEO = "image_to_video"
+KEYFRAMES = "keyframes"
+AGNES_GENERATION_MODES = {TEXT_TO_VIDEO, IMAGE_TO_VIDEO, KEYFRAMES}
 
 
 class AgnesVideoError(ProviderCallError):
+    pass
+
+
+class AgnesVideoInputError(AgnesVideoError):
     pass
 
 
@@ -69,6 +78,7 @@ class AgnesVideoClient:
         poll_interval_seconds: float | None = None,
         timeout_seconds: int | None = None,
         extra_auth_json: str | None = None,
+        model_config: dict[str, Any] | None = None,
     ) -> None:
         self.extra_auth = self._parse_json(extra_auth_json)
         self.base_url = self._normalize_base_url(base_url or "https://apihub.agnes-ai.com")
@@ -96,6 +106,7 @@ class AgnesVideoClient:
         )
         self.max_input_image_bytes = max(1, _as_int(self.extra_auth.get("maxInputImageBytes"), 20 * 1024 * 1024))
         self.session = requests.Session()
+        self.response_mapping = parse_response_mapping(model_config)
 
     def generate_video(
         self,
@@ -112,6 +123,9 @@ class AgnesVideoClient:
         aspect_ratio: str = "",
         resolution: str = "",
         mode: str = "",
+        generation_mode: str = "",
+        num_frames: int | None = None,
+        frame_rate: int | None = None,
         progress_callback: Callable[[int], None] | None = None,
         resume: dict[str, Any] | None = None,
         submitted_callback: Callable[[dict[str, Any]], None] | None = None,
@@ -152,6 +166,9 @@ class AgnesVideoClient:
                 aspect_ratio=aspect_ratio,
                 resolution=resolution,
                 mode=mode,
+                generation_mode=generation_mode,
+                num_frames=num_frames,
+                frame_rate=frame_rate,
             )
             LOGGER.info(
                 "agnes video create path=%s model=%s size=%sx%s hasImage=%s",
@@ -162,12 +179,12 @@ class AgnesVideoClient:
                 bool(payload.get("image") or payload.get("extra_body")),
             )
             created = self._request("POST", self.create_endpoint_path, json_payload=payload)
-            task_id = self._extract_task_id(created)
+            task_id = self._response_task_id(created)
             request_id = task_id
             video_id = self._extract_video_id(created) or task_id
             if submitted_callback:
                 submitted_callback({"taskId": task_id, "videoId": video_id, "requestId": request_id})
-            if self._extract_video_url_or_empty(created):
+            if self._response_video_url_or_empty(created):
                 finished = created
             else:
                 finished = self.wait_for_video(
@@ -178,8 +195,8 @@ class AgnesVideoClient:
                 )
         return {
             "requestId": request_id,
-            "status": self._extract_status(finished),
-            "videoUrl": self._extract_video_url(finished),
+            "status": self._response_status(finished),
+            "videoUrl": self._response_video_url(finished),
             "reason": str(finished.get("reason") or finished.get("message") or ""),
             "seed": seed,
             "timings": {},
@@ -206,14 +223,14 @@ class AgnesVideoClient:
                 model=model,
                 deadline=deadline,
             )
-            if self._extract_video_url_or_empty(last_payload):
+            if self._response_video_url_or_empty(last_payload):
                 return last_payload
             progress = self._extract_progress_percent(last_payload)
             if progress is not None and progress != last_progress:
                 last_progress = progress
                 if progress_callback:
                     progress_callback(progress)
-            status = self._extract_status(last_payload).lower()
+            status = self._response_status(last_payload).lower()
             if status in SUCCESS_STATUSES:
                 raise AgnesVideoError(
                     self._describe_response_problem(
@@ -232,10 +249,48 @@ class AgnesVideoClient:
         raise AgnesVideoTimeoutError(
             self._describe_response_problem(
                 f"Agnes video generation timed out, taskId={task_id}, videoId={video_id}, "
-                f"lastStatus={self._extract_status(last_payload)}",
+                f"lastStatus={self._response_status(last_payload)}",
                 last_payload,
             )
         )
+
+    def _response_task_id(self, payload: dict[str, Any]) -> str:
+        if not response_mapping_has(self.response_mapping, "requestIdPath", "requestIdPaths"):
+            return self._extract_task_id(payload)
+        value = read_response_value(payload, self.response_mapping, "requestIdPath", "requestIdPaths")
+        task_id = str(value or "").strip()
+        if not task_id:
+            raise AgnesVideoError("Agnes video create response missing mapped task id")
+        return task_id
+
+    def _response_status(self, payload: dict[str, Any]) -> str:
+        if not response_mapping_has(self.response_mapping, "statusPath", "statusPaths"):
+            return self._extract_status(payload)
+        value = read_response_value(payload, self.response_mapping, "statusPath", "statusPaths")
+        return str(value or "processing").strip()
+
+    def _response_video_url(self, payload: dict[str, Any]) -> str:
+        url = self._response_video_url_or_empty(payload)
+        if url:
+            return url
+        raise AgnesVideoError(self._describe_response_problem("Agnes video response missing mapped video url", payload))
+
+    def _response_video_url_or_empty(self, payload: dict[str, Any]) -> str:
+        if not response_mapping_has(
+            self.response_mapping,
+            "videoUrlPath",
+            "urlPath",
+            "urlPaths",
+        ):
+            return self._extract_video_url_or_empty(payload)
+        value = read_response_value(
+            payload,
+            self.response_mapping,
+            "videoUrlPath",
+            "urlPath",
+            "urlPaths",
+        )
+        return str(value or "").strip()
 
     def _request_result_with_retry(
         self,
@@ -329,17 +384,29 @@ class AgnesVideoClient:
         aspect_ratio: str,
         resolution: str,
         mode: str,
+        generation_mode: str = "",
+        num_frames: int | None = None,
+        frame_rate: int | None = None,
     ) -> dict[str, Any]:
         width, height = _parse_size(image_size, aspect_ratio=aspect_ratio)
-        frame_rate = max(1, _as_int(self.extra_auth.get("defaultFrameRate"), 24))
-        num_frames = self._num_frames(duration=duration, frame_rate=frame_rate)
+        resolved_frame_rate = max(
+            1,
+            int(frame_rate) if frame_rate is not None else _as_int(self.extra_auth.get("defaultFrameRate"), 24),
+        )
+        resolved_num_frames = (
+            int(num_frames)
+            if num_frames is not None
+            else self._num_frames(duration=duration, frame_rate=resolved_frame_rate)
+        )
+        if resolved_num_frames < 1 or (resolved_num_frames - 1) % 8 != 0:
+            raise AgnesVideoError("Agnes num_frames must satisfy 8n+1")
         payload: dict[str, Any] = {
             "model": model,
             "prompt": prompt.strip(),
             "height": height,
             "width": width,
-            "num_frames": num_frames,
-            "frame_rate": frame_rate,
+            "num_frames": resolved_num_frames,
+            "frame_rate": resolved_frame_rate,
         }
         if negative_prompt.strip():
             payload["negative_prompt"] = negative_prompt.strip()
@@ -348,21 +415,51 @@ class AgnesVideoClient:
         if resolution.strip():
             payload["resolution"] = resolution.strip()
 
-        raw_images = [value for value in (images or []) if isinstance(value, str) and value.strip()]
-        if not raw_images:
-            raw_images = [value for value in (image, image_tail) if value and value.strip()]
+        explicit_generation_mode = self._normalize_generation_mode(generation_mode)
+        mode_generation_mode = self._normalize_generation_mode(mode, allow_empty=True)
+        if explicit_generation_mode or mode_generation_mode:
+            raw_images = _dedupe_texts([image, *(images or []), image_tail])
+        else:
+            raw_images = [value for value in (images or []) if isinstance(value, str) and value.strip()]
+            if not raw_images:
+                raw_images = [value for value in (image, image_tail) if value and value.strip()]
+        resolved_generation_mode = (
+            explicit_generation_mode
+            or mode_generation_mode
+            or (KEYFRAMES if len(raw_images) >= 2 else IMAGE_TO_VIDEO if raw_images else TEXT_TO_VIDEO)
+        )
+        self._validate_generation_inputs(resolved_generation_mode, raw_images)
         model_images = [self._image_to_model_input(value.strip()) for value in raw_images]
-        mode = mode.strip()
-        if len(model_images) > 1:
-            extra_body: dict[str, Any] = {"image": model_images}
-            if mode:
-                extra_body["mode"] = mode
-            payload["extra_body"] = extra_body
-        elif model_images:
+        legacy_mode = mode.strip() if not mode_generation_mode else ""
+        if resolved_generation_mode == KEYFRAMES:
+            payload["extra_body"] = {"image": model_images, "mode": KEYFRAMES}
+        elif resolved_generation_mode == IMAGE_TO_VIDEO:
             payload["image"] = model_images[0]
-        elif mode:
-            payload["extra_body"] = {"mode": mode}
+        elif legacy_mode:
+            payload["extra_body"] = {"mode": legacy_mode}
         return payload
+
+    @staticmethod
+    def _normalize_generation_mode(value: Any, *, allow_empty: bool = False) -> str:
+        normalized = str(value or "").strip().lower().replace("-", "_")
+        if not normalized and allow_empty:
+            return ""
+        if not normalized:
+            return ""
+        if normalized not in AGNES_GENERATION_MODES:
+            if allow_empty:
+                return ""
+            raise AgnesVideoInputError(f"unsupported Agnes generationMode: {value}")
+        return normalized
+
+    @staticmethod
+    def _validate_generation_inputs(generation_mode: str, images: list[str]) -> None:
+        if generation_mode == TEXT_TO_VIDEO and images:
+            raise AgnesVideoInputError("Agnes text_to_video does not accept image inputs")
+        if generation_mode == IMAGE_TO_VIDEO and len(images) != 1:
+            raise AgnesVideoInputError("Agnes image_to_video requires exactly one image")
+        if generation_mode == KEYFRAMES and len(images) < 2:
+            raise AgnesVideoInputError("Agnes keyframes requires at least two images")
 
     def _image_to_model_input(self, value: str) -> str:
         raw = value.strip()
@@ -741,6 +838,19 @@ def _duration_seconds(duration: str) -> int | None:
     if not digits:
         return None
     return max(1, int(digits))
+
+
+def _dedupe_texts(values: list[Any]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        text = value.strip()
+        if text and text not in seen:
+            seen.add(text)
+            result.append(text)
+    return result
 
 
 def _ensure_leading_slash(value: str) -> str:

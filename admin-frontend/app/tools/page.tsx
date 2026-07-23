@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
@@ -73,7 +74,6 @@ import {
   normalizeModelCapabilities,
   normalizeRequiredModelCapabilities,
   resolveIntegrationPluginId,
-  resolvedModelCapabilities,
   selectableModelCapabilities,
 } from "@/lib/model-capabilities"
 import {
@@ -87,6 +87,7 @@ import {
   createTool,
   deleteTool,
   fetchAdminToolCategories,
+  fetchAdminToolDetail,
   fetchAllAdminTools,
   fetchAgentSkill,
   fetchToolFields,
@@ -151,6 +152,8 @@ interface ToolRow {
   status: boolean
   rawStatus: string
   modelConfigId: number | null
+  modelConfigIds: number[]
+  defaultModelConfigId: number | null
   modelConfigName: string | null
   modelName: string | null
   executionHandler?: string | null
@@ -204,7 +207,8 @@ interface ToolForm {
   afterVideoUrl: string
   estimatedCreditCost: string
   pricingRulesJson: string
-  modelConfigId: string
+  modelConfigIds: string[]
+  defaultModelConfigId: string
   templateCode: string
   requiredModelCapabilities: string[]
 }
@@ -228,7 +232,8 @@ const initialForm: ToolForm = {
   afterVideoUrl: "",
   estimatedCreditCost: "5",
   pricingRulesJson: "[]",
-  modelConfigId: "",
+  modelConfigIds: [],
+  defaultModelConfigId: "",
   templateCode: "text_generation_default",
   requiredModelCapabilities: ["TEXT_GENERATION"],
 }
@@ -429,6 +434,25 @@ function shouldShowToolCredits(tool: Pick<ToolRow, "toolType" | "outputModality"
 function mapTool(tool: ToolSummary): ToolRow {
   const { note, style } = extractFrontendStyle(tool.configNote)
   const configuredCapabilities = normalizeLegacyRequiredModelCapabilities(tool.requiredModelCapabilities)
+  const legacyModelConfigId = tool.modelConfigId ?? null
+  const modelConfigIds = Array.from(new Set(
+    (tool.modelConfigIds && tool.modelConfigIds.length > 0
+      ? tool.modelConfigIds
+      : tool.supportedModels && tool.supportedModels.length > 0
+        ? tool.supportedModels.map((model) => model.id)
+        : legacyModelConfigId != null
+          ? [legacyModelConfigId]
+          : [])
+      .filter((id): id is number => Number.isInteger(id) && id > 0),
+  ))
+  const supportedDefaultModelConfigId = tool.supportedModels?.find((model) => model.isDefault)?.id ?? null
+  const defaultModelConfigId = tool.defaultModelConfigId != null && modelConfigIds.includes(tool.defaultModelConfigId)
+    ? tool.defaultModelConfigId
+    : supportedDefaultModelConfigId != null && modelConfigIds.includes(supportedDefaultModelConfigId)
+      ? supportedDefaultModelConfigId
+      : legacyModelConfigId != null && modelConfigIds.includes(legacyModelConfigId)
+        ? legacyModelConfigId
+        : modelConfigIds[0] ?? null
   return {
     id: String(tool.id),
     rawId: tool.id,
@@ -453,7 +477,9 @@ function mapTool(tool: ToolSummary): ToolRow {
     credits: tool.estimatedCreditCost ?? 0,
     status: isToolAvailableToUsers(tool),
     rawStatus: tool.status,
-    modelConfigId: tool.modelConfigId ?? null,
+    modelConfigId: defaultModelConfigId,
+    modelConfigIds,
+    defaultModelConfigId,
     modelConfigName: tool.modelConfigName || null,
     modelName: tool.modelName || null,
     executionHandler: tool.executionHandler ?? null,
@@ -511,6 +537,14 @@ function modelVendorLabel(key: string, config?: AgentModelConfig | null) {
     other: "其他厂商",
   }
   return labels[key] || key
+}
+
+function modelContractStatus(config: Pick<AgentModelConfig, "contractStatus">) {
+  return (config.contractStatus || "DOCS_PENDING").trim().toUpperCase()
+}
+
+function isModelContractReady(config: Pick<AgentModelConfig, "contractStatus">) {
+  return modelContractStatus(config) === "READY"
 }
 
 type ToolManagementMode = "models" | "agents"
@@ -815,33 +849,11 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
     [modelConfigs, providerCapabilities, requiredExecutionHandler, requiredModelCapabilities],
   )
 
-  const defaultModelConfig = useMemo(
-    () => modelConfigs.find((config) => config.isDefault) || null,
-    [modelConfigs],
-  )
-
-  const defaultModelSupportsRequiredCapability = useMemo(
-    () => Boolean(defaultModelConfig && modelConfigSupportsToolRequirements(
-      defaultModelConfig,
-      requiredModelCapabilities,
-      providerCapabilities,
-      requiredExecutionHandler,
-    )),
-    [defaultModelConfig, providerCapabilities, requiredExecutionHandler, requiredModelCapabilities],
-  )
-
-  const modelSelectValue = form.modelConfigId
-    ? form.modelConfigId
-    : defaultModelSupportsRequiredCapability
-      ? "default"
-      : "__select_matching_model"
-
-  const configuredModelRows = useMemo(
-    () => modelConfigs.map((config) => ({
-      config,
-      capabilities: resolvedModelCapabilities(config, providerCapabilities),
-    })),
-    [modelConfigs, providerCapabilities],
+  const selectedModelConfigs = useMemo(
+    () => form.modelConfigIds
+      .map((id) => modelConfigs.find((config) => String(config.id) === id))
+      .filter((config): config is AgentModelConfig => Boolean(config)),
+    [form.modelConfigIds, modelConfigs],
   )
 
   const integrationPluginId = useMemo(
@@ -850,20 +862,34 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
   )
 
   useEffect(() => {
-    if (!form.modelConfigId) return
-    const selected = modelConfigs.find((config) => String(config.id) === form.modelConfigId)
-    if (selected && !modelConfigSupportsToolRequirements(
-      selected,
-      requiredModelCapabilities,
-      providerCapabilities,
-      requiredExecutionHandler,
-    )) {
-      setForm((current) => ({ ...current, modelConfigId: "", pricingRulesJson: "[]" }))
-      const notice = `已清除不匹配的模型「${selected.displayName || selected.modelName}」，请重新选择兼容当前执行处理器且同时支持 ${requiredModelCapabilityLabels || "所需能力"} 的模型。`
+    if (form.modelConfigIds.length === 0) return
+    const validIds = form.modelConfigIds.filter((id) => {
+      const selected = modelConfigs.find((config) => String(config.id) === id)
+      return Boolean(selected && modelConfigSupportsToolRequirements(
+        selected,
+        requiredModelCapabilities,
+        providerCapabilities,
+        requiredExecutionHandler,
+      ))
+    })
+    if (validIds.length !== form.modelConfigIds.length) {
+      const nextDefault = validIds.includes(form.defaultModelConfigId)
+        ? form.defaultModelConfigId
+        : validIds.find((id) => {
+          const config = modelConfigs.find((item) => String(item.id) === id)
+          return Boolean(config && isModelContractReady(config))
+        }) || validIds[0] || ""
+      setForm((current) => ({
+        ...current,
+        modelConfigIds: validIds,
+        defaultModelConfigId: nextDefault,
+        pricingRulesJson: nextDefault === current.defaultModelConfigId ? current.pricingRulesJson : "[]",
+      }))
+      const notice = `已清除不匹配的模型，请重新选择兼容当前执行处理器且同时支持 ${requiredModelCapabilityLabels || "所需能力"} 的模型。`
       setModelSelectionNotice(notice)
       toast.warning("已清除不匹配的模型", { description: notice })
     }
-  }, [form.modelConfigId, modelConfigs, providerCapabilities, requiredExecutionHandler, requiredModelCapabilities, requiredModelCapabilityLabels])
+  }, [form.defaultModelConfigId, form.modelConfigIds, modelConfigs, providerCapabilities, requiredExecutionHandler, requiredModelCapabilities, requiredModelCapabilityLabels])
 
   async function toggleToolStatus(id: string) {
     const target = toolList.find((tool) => tool.id === id)
@@ -895,6 +921,43 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
+  function toggleToolModelConfig(config: AgentModelConfig) {
+    const id = String(config.id)
+    const selected = form.modelConfigIds.includes(id)
+    if (!selected && !isModelContractReady(config)) return
+
+    if (selected) {
+      const modelConfigIds = form.modelConfigIds.filter((currentId) => currentId !== id)
+      const defaultModelConfigId = form.defaultModelConfigId === id
+        ? modelConfigIds.find((currentId) => {
+          const candidate = modelConfigs.find((item) => String(item.id) === currentId)
+          return Boolean(candidate && isModelContractReady(candidate))
+        }) || modelConfigIds[0] || ""
+        : form.defaultModelConfigId
+      setForm((current) => ({
+        ...current,
+        modelConfigIds,
+        defaultModelConfigId,
+        pricingRulesJson: defaultModelConfigId === current.defaultModelConfigId ? current.pricingRulesJson : "[]",
+      }))
+      if (defaultModelConfigId !== form.defaultModelConfigId) void loadPricingRulesJson(defaultModelConfigId)
+      return
+    }
+
+    const modelConfigIds = [...form.modelConfigIds, id]
+    const defaultModelConfigId = form.defaultModelConfigId || id
+    setForm((current) => ({ ...current, modelConfigIds, defaultModelConfigId }))
+    if (!form.defaultModelConfigId) void loadPricingRulesJson(id)
+  }
+
+  function selectDefaultToolModel(modelConfigId: string) {
+    const config = modelConfigs.find((item) => String(item.id) === modelConfigId)
+    if (!config || !form.modelConfigIds.includes(modelConfigId) || !isModelContractReady(config)) return
+    setForm((current) => ({ ...current, defaultModelConfigId: modelConfigId, pricingRulesJson: "[]" }))
+    setModelSelectionNotice(null)
+    void loadPricingRulesJson(modelConfigId)
+  }
+
   async function loadPricingRulesJson(modelConfigId: string) {
     if (!modelConfigId) {
       updateForm("pricingRulesJson", "[]")
@@ -924,9 +987,9 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
   }
 
   function selectedModelName(): string {
-    const selected = form.modelConfigId
-      ? modelConfigs.find((config) => String(config.id) === form.modelConfigId)
-      : defaultModelConfig
+    const selected = form.defaultModelConfigId
+      ? modelConfigs.find((config) => String(config.id) === form.defaultModelConfigId)
+      : null
     return selected?.displayName || selected?.modelName || ""
   }
 
@@ -1022,38 +1085,48 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
     }))
   }
 
-  function openEditDialog(tool: ToolRow) {
-    setEditingTool(tool)
-    const modelId = tool.modelConfigId ? String(tool.modelConfigId) : ""
+  async function openEditDialog(tool: ToolRow) {
+    let resolvedTool = tool
+    try {
+      resolvedTool = mapTool(await fetchAdminToolDetail(tool.rawId))
+    } catch (err) {
+      toast.warning("未能加载完整模型绑定", {
+        description: err instanceof ApiError ? err.message : "将按列表中的默认模型继续编辑。",
+      })
+    }
+    setEditingTool(resolvedTool)
+    const modelIds = resolvedTool.modelConfigIds.map(String)
+    const defaultModelId = resolvedTool.defaultModelConfigId ? String(resolvedTool.defaultModelConfigId) : modelIds[0] || ""
     setForm({
-      toolCode: tool.toolCode,
-      toolName: tool.name,
-      description: tool.description === "暂无描述" ? "" : tool.description,
-      categoryId: tool.categoryId ? String(tool.categoryId) : "",
-      toolType: tool.toolType,
-      inputModality: tool.inputModality,
-      outputModality: tool.outputModality,
-      configNote: tool.configNote || "",
-      coverUrl: tool.coverUrl || "",
-      mediaDisplayMode: tool.mediaDisplayMode || "icon",
-      modelIconUrl: tool.modelIconUrl || "",
-      comparisonOriginalUrl: tool.comparisonOriginalUrl || "",
-      comparisonEffectUrl: tool.comparisonEffectUrl || "",
-      audioPreviewUrl: tool.audioPreviewUrl || "",
-      beforeVideoUrl: tool.beforeVideoUrl || "",
-      afterVideoUrl: tool.afterVideoUrl || "",
-      estimatedCreditCost: String(tool.credits),
+      toolCode: resolvedTool.toolCode,
+      toolName: resolvedTool.name,
+      description: resolvedTool.description === "暂无描述" ? "" : resolvedTool.description,
+      categoryId: resolvedTool.categoryId ? String(resolvedTool.categoryId) : "",
+      toolType: resolvedTool.toolType,
+      inputModality: resolvedTool.inputModality,
+      outputModality: resolvedTool.outputModality,
+      configNote: resolvedTool.configNote || "",
+      coverUrl: resolvedTool.coverUrl || "",
+      mediaDisplayMode: resolvedTool.mediaDisplayMode || "icon",
+      modelIconUrl: resolvedTool.modelIconUrl || "",
+      comparisonOriginalUrl: resolvedTool.comparisonOriginalUrl || "",
+      comparisonEffectUrl: resolvedTool.comparisonEffectUrl || "",
+      audioPreviewUrl: resolvedTool.audioPreviewUrl || "",
+      beforeVideoUrl: resolvedTool.beforeVideoUrl || "",
+      afterVideoUrl: resolvedTool.afterVideoUrl || "",
+      estimatedCreditCost: String(resolvedTool.credits),
       pricingRulesJson: "[]",
-      modelConfigId: modelId,
+      modelConfigIds: modelIds,
+      defaultModelConfigId: defaultModelId,
       templateCode: "",
-      requiredModelCapabilities: tool.requiredModelCapabilities,
+      requiredModelCapabilities: resolvedTool.requiredModelCapabilities,
     })
     setFormError(null)
     setModelSelectionNotice(null)
     setCoverUploading(false)
     setCoverDragging(false)
     setIsAddDialogOpen(true)
-    if (modelId) void loadPricingRulesJson(modelId)
+    if (defaultModelId) void loadPricingRulesJson(defaultModelId)
   }
 
   function reportSaveValidationError(message: string) {
@@ -1088,14 +1161,19 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
       reportSaveValidationError(`存在不可选的模型能力：${unsupportedRequiredModelCapabilities.join("、")}，请重新选择。`)
       return
     }
-    if (!form.modelConfigId && !defaultModelSupportsRequiredCapability) {
-      reportSaveValidationError(`默认模型未同时支持「${requiredModelCapabilityLabels}」，请选择一个匹配的模型配置。`)
+    if (form.modelConfigIds.length === 0) {
+      reportSaveValidationError(`请至少绑定一个同时支持「${requiredModelCapabilityLabels}」的契约就绪模型。`)
       return
     }
-    if (form.modelConfigId) {
-      const selectedModel = modelConfigs.find((config) => String(config.id) === form.modelConfigId)
+    const existingModelConfigIds = new Set((editingTool?.modelConfigIds || []).map(String))
+    const existingDefaultModelConfigId = String(editingTool?.defaultModelConfigId || "")
+    const selectionChanged = existingModelConfigIds.size !== form.modelConfigIds.length
+      || form.modelConfigIds.some((modelConfigId) => !existingModelConfigIds.has(modelConfigId))
+      || existingDefaultModelConfigId !== form.defaultModelConfigId
+    for (const modelConfigId of form.modelConfigIds) {
+      const selectedModel = modelConfigs.find((config) => String(config.id) === modelConfigId)
       if (!selectedModel) {
-        reportSaveValidationError("所选模型不可用或不存在，请重新选择。")
+        reportSaveValidationError(`模型 #${modelConfigId} 不可用或不存在，请重新选择。`)
         return
       }
       if (!modelConfigSupportsToolRequirements(
@@ -1104,15 +1182,39 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
         providerCapabilities,
         requiredExecutionHandler,
       )) {
-        reportSaveValidationError(`所选模型未同时支持「${requiredModelCapabilityLabels}」或不兼容当前执行处理器，请重新选择。`)
+        reportSaveValidationError(`模型「${selectedModel.displayName || selectedModel.modelName}」未同时支持「${requiredModelCapabilityLabels}」或不兼容当前执行处理器。`)
         return
       }
-      try {
-        parsePricingRulesJson(form.pricingRulesJson)
-      } catch (err) {
-        reportSaveValidationError(err instanceof Error ? err.message : "定价规则 JSON 格式无效")
+      if (!isModelContractReady(selectedModel) && !existingModelConfigIds.has(modelConfigId)) {
+        reportSaveValidationError(`模型「${selectedModel.displayName || selectedModel.modelName}」的 API 文档待补，暂不能新增绑定。`)
         return
       }
+      if (!isModelContractReady(selectedModel) && selectionChanged) {
+        reportSaveValidationError(`模型「${selectedModel.displayName || selectedModel.modelName}」仍处于文档待补；修改绑定前请先将它移出当前工具。`)
+        return
+      }
+    }
+    if (!form.defaultModelConfigId || !form.modelConfigIds.includes(form.defaultModelConfigId)) {
+      reportSaveValidationError("请从已绑定模型中指定一个默认模型。")
+      return
+    }
+    const defaultModel = modelConfigs.find((config) => String(config.id) === form.defaultModelConfigId)
+    if (!defaultModel) {
+      reportSaveValidationError("默认模型不可用或不存在，请重新选择。")
+      return
+    }
+    if (
+      !isModelContractReady(defaultModel)
+      && existingDefaultModelConfigId !== form.defaultModelConfigId
+    ) {
+      reportSaveValidationError(`模型「${defaultModel.displayName || defaultModel.modelName}」的 API 文档待补，不能设为新的默认模型。`)
+      return
+    }
+    try {
+      parsePricingRulesJson(form.pricingRulesJson)
+    } catch (err) {
+      reportSaveValidationError(err instanceof Error ? err.message : "定价规则 JSON 格式无效")
+      return
     }
     if (form.mediaDisplayMode === "comparison" && (!form.comparisonOriginalUrl.trim() || !form.comparisonEffectUrl.trim())) {
       reportSaveValidationError("选择「效果对比」时，请同时配置原图和模型效果图。")
@@ -1147,7 +1249,9 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
         configNote: serializeConfigNote(form.configNote, style, preservedMarkers),
         coverUrl: form.coverUrl.trim() || undefined,
         estimatedCreditCost: Math.floor(credits),
-        modelConfigId: form.modelConfigId ? Number(form.modelConfigId) : null,
+        modelConfigId: Number(form.defaultModelConfigId),
+        modelConfigIds: form.modelConfigIds.map(Number),
+        defaultModelConfigId: Number(form.defaultModelConfigId),
         executionHandler: requiredExecutionHandler,
         requiredModelCapabilities,
         templateCode: !editingTool && form.templateCode ? form.templateCode : undefined,
@@ -1160,9 +1264,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
         saved = await createTool(payload)
         setToolList((prev) => [mapTool(saved), ...prev])
       }
-      if (form.modelConfigId) {
-        await syncModelPricingRules(Number(form.modelConfigId), form.pricingRulesJson)
-      }
+      await syncModelPricingRules(Number(form.defaultModelConfigId), form.pricingRulesJson)
       const successTitle = editingTool ? "工具已保存" : "工具已创建"
       const successDetail = `「${saved.toolName}」的资料已保存；是否对用户开放，以列表中的上线开关为准。`
       setNotice(successDetail)
@@ -1852,7 +1954,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                     <p className="text-xs text-muted-foreground">无法按模型计价时的静态兜底；有参数规则时以前端实时预估为准。</p>
                   </div>
                 </div>
-                {form.modelConfigId ? (
+                {form.defaultModelConfigId ? (
                   <div className="space-y-2 rounded-lg border border-border bg-secondary/20 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <Label>参数定价规则 JSON</Label>
@@ -1903,7 +2005,7 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    选择具体模型配置后，可在此编辑参数倍率 JSON（resolution / duration 等）；使用「默认模型」时无法绑定规则。
+                    指定默认模型后，可在此编辑该模型的参数倍率 JSON（resolution / duration 等）。
                   </p>
                 )}
                 {!editingTool ? (
@@ -2052,41 +2154,86 @@ export function ToolManagementPage({ mode = "models" }: { mode?: ToolManagementM
                       />
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      <Select
-                        value={modelSelectValue}
-                        onValueChange={(value) => {
-                          const next = value === "default" || value === "__select_matching_model" ? "" : value
-                          updateForm("modelConfigId", next)
-                          setModelSelectionNotice(null)
-                          void loadPricingRulesJson(next)
-                        }}
-                      >
-                        <SelectTrigger className="w-full min-w-0">
-                          <SelectValue placeholder="选择匹配的模型配置" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {!defaultModelSupportsRequiredCapability ? (
-                            <SelectItem value="__select_matching_model" disabled>
-                              请选择同时支持「{requiredModelCapabilityLabels}」的模型
-                            </SelectItem>
-                          ) : null}
-                          <SelectItem value="default" disabled={!defaultModelSupportsRequiredCapability}>
-                            使用默认模型配置
-                          </SelectItem>
-                          {filteredModelConfigs.map((config) => (
-                            <SelectItem key={config.id} value={String(config.id)}>
-                              {config.displayName || config.modelName} · {config.provider}
-                            </SelectItem>
-                          ))}
-                          {filteredModelConfigs.length === 0 ? (
-                            <SelectItem value="__no_matching_models" disabled>
-                              暂无匹配模型配置
-                            </SelectItem>
-                          ) : null}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">所需能力：{requiredModelCapabilityLabels || "未选择"}</p>
+                    <div className="space-y-3 rounded-md border border-border p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-medium">绑定模型</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">所需能力：{requiredModelCapabilityLabels || "未选择"}</p>
+                        </div>
+                        <Badge variant="outline">已选 {form.modelConfigIds.length}</Badge>
+                      </div>
+                      {filteredModelConfigs.length > 0 ? (
+                        <ScrollArea className="h-56 rounded-md border bg-background">
+                          <div className="divide-y">
+                            {filteredModelConfigs.map((config) => {
+                              const id = String(config.id)
+                              const checked = form.modelConfigIds.includes(id)
+                              const ready = isModelContractReady(config)
+                              const disabled = !ready && !checked
+                              const controlId = `tool-model-${config.id}`
+                              return (
+                                <div
+                                  key={config.id}
+                                  className={cn(
+                                    "flex min-h-14 items-center gap-3 px-3 py-2",
+                                    checked ? "bg-primary/5" : "hover:bg-muted/40",
+                                    disabled && "opacity-60",
+                                  )}
+                                >
+                                  <Checkbox
+                                    id={controlId}
+                                    checked={checked}
+                                    disabled={disabled}
+                                    onCheckedChange={() => {
+                                      toggleToolModelConfig(config)
+                                      setModelSelectionNotice(null)
+                                    }}
+                                  />
+                                  <Label htmlFor={controlId} className={cn("min-w-0 flex-1", disabled ? "cursor-not-allowed" : "cursor-pointer")}>
+                                    <span className="block truncate text-sm font-medium">{config.displayName || config.modelName}</span>
+                                    <span className="mt-0.5 block truncate text-xs font-normal text-muted-foreground">
+                                      {config.provider} · {config.modelName}
+                                    </span>
+                                  </Label>
+                                  {ready ? (
+                                    <Badge variant="outline" className="shrink-0 border-emerald-200 bg-emerald-50 text-emerald-700">可绑定</Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="shrink-0 border-amber-200 bg-amber-50 text-amber-800">文档待补</Badge>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </ScrollArea>
+                      ) : (
+                        <div className="rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+                          暂无匹配模型配置
+                        </div>
+                      )}
+                      {selectedModelConfigs.length > 0 ? (
+                        <div className="space-y-2 border-t pt-3">
+                          <Label>默认模型</Label>
+                          <RadioGroup
+                            value={form.defaultModelConfigId}
+                            onValueChange={selectDefaultToolModel}
+                            className="grid gap-2 sm:grid-cols-2"
+                          >
+                            {selectedModelConfigs.map((config) => {
+                              const id = String(config.id)
+                              const ready = isModelContractReady(config)
+                              const controlId = `tool-default-model-${config.id}`
+                              return (
+                                <div key={config.id} className="flex min-w-0 items-center gap-2 rounded-md border px-3 py-2">
+                                  <RadioGroupItem id={controlId} value={id} disabled={!ready} />
+                                  <Label htmlFor={controlId} className={cn("min-w-0 flex-1 truncate font-normal", ready ? "cursor-pointer" : "cursor-not-allowed text-muted-foreground")}>
+                                    {config.displayName || config.modelName}
+                                  </Label>
+                                </div>
+                              )
+                            })}
+                          </RadioGroup>
+                        </div>
+                      ) : null}
                       {modelSelectionNotice ? (
                         <p role="status" className="text-xs text-amber-700">{modelSelectionNotice}</p>
                       ) : null}

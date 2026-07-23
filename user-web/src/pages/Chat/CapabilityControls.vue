@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 import type { Capability } from "@/api/aiToolTypes"
-import type { TaskDetail, ToolField, UserUploadAsset } from "@/api/types"
+import type { ModelRequestSchemaRequiresAnyGroup, TaskDetail, ToolField, UserUploadAsset } from "@/api/types"
 import { deleteUploadAsset, uploadToolFile } from "@/api/toolApi"
 import { resolveCommunityDerivativeUrl } from "@/utils/communityPostMedia"
 import { normalizeMediaFieldValue, normalizeMediaUrl, isValidImagePreviewUrl } from "@/utils/toolCoverMedia"
@@ -14,9 +14,13 @@ import {
   defaultFieldValue as resolveDefaultFieldValue,
   fieldOptionsFromMeta,
   groupVisibleFields,
+  isFieldRequired,
   isFieldVisible,
   parseFieldMeta,
   resolveMaxLength,
+  validateRequiresAnyGroups,
+  type FieldOptionValue,
+  type FieldUiOption,
 } from "@/utils/fieldUiMeta"
 import {
   isMediaListField,
@@ -62,7 +66,7 @@ export interface CapabilityState {
   fields: Record<string, unknown>
 }
 
-type FieldOption = string | { label: string; value: string }
+type FieldOption = FieldUiOption
 type AspectRatioOption = { label: string; value: string }
 type MaterialKind = "image" | "video" | "audio" | "file"
 
@@ -133,6 +137,7 @@ const props = defineProps<{
   outputModality?: string | null
   inputModality?: string | null
   retainUploadHistory?: boolean
+  requiresAnyGroups?: ModelRequestSchemaRequiresAnyGroup[] | null
 }>()
 
 const emit = defineEmits<{
@@ -385,7 +390,7 @@ function shouldShowComposerMediaSlot(field: ToolField): boolean {
     if (role === "motion_video") return true
     if (field.required || field.executionRequired || field.userRequired) return true
     if (isExplicitComposerReferenceField(field)) return true
-    if (kind === "audio") return field.required || field.executionRequired || field.userRequired
+    if (kind === "audio") return Boolean(field.required || field.executionRequired || field.userRequired)
     return false
   }
   return shouldShowComposerReferenceUpload(field)
@@ -477,6 +482,7 @@ const composerSlotFieldKeys = computed(() => new Set(composerMediaSlots.value.ma
 
 const configuredFields = computed(() =>
   (props.fields || [])
+    .filter((field) => parseFieldMeta(field).uiHidden !== true)
     .filter((field) => !(field.fieldKey === props.coreFieldKey || parseFieldMeta(field).core))
     .filter((field) => field !== primaryReferenceField.value)
     .filter((field) => !composerSlotFieldKeys.value.has(field.fieldKey))
@@ -504,7 +510,9 @@ const customModeValue = computed(() => {
 
 const aspectRatioOptions = computed<AspectRatioOption[]>(() => {
   const config = imageCapability.value?.config
-  const toolOptions = ratioField.value ? fieldOptions(ratioField.value) : []
+  const toolOptions = ratioField.value
+    ? fieldOptions(ratioField.value).map((option) => ({ label: option.label, value: String(option.value) }))
+    : []
   const genericRatios = Array.isArray(config?.aspectRatios) ? config.aspectRatios : []
   return buildAspectRatioOptions(toolOptions, genericRatios, normalizeAspectRatio)
 })
@@ -540,11 +548,15 @@ const codeLanguages = computed(() => {
 const showWebSearch = computed(() => webSearchCapability.value?.config?.enabled !== false)
 
 function optionLabel(option: FieldOption): string {
-  return typeof option === "string" ? option : option.label
+  return option.label
 }
 
-function optionValue(option: FieldOption): string {
-  return typeof option === "string" ? option : option.value
+function optionValue(option: FieldOption): FieldOptionValue {
+  return option.value
+}
+
+function optionValueText(option: FieldOption): string {
+  return String(option.value)
 }
 
 function fieldOptions(field: ToolField): FieldOption[] {
@@ -554,10 +566,12 @@ function fieldOptions(field: ToolField): FieldOption[] {
 function isSegmentedOptionField(field: ToolField): boolean {
   if (!(field.fieldType === "select" || field.fieldType === "radio")) return false
   const count = fieldOptions(field).length
+  if (field.fieldKey === "generationMode") return field.fieldType === "radio" && count > 0 && count <= 4
   return count > 0 && count <= SEGMENTED_OPTION_LIMIT
 }
 
 function isSelectOptionField(field: ToolField): boolean {
+  if (field.fieldKey === "generationMode") return field.fieldType === "select" && fieldOptions(field).length > 0
   return (field.fieldType === "select" || field.fieldType === "radio") && fieldOptions(field).length > SEGMENTED_OPTION_LIMIT
 }
 
@@ -567,15 +581,15 @@ function toggleSelectDropdown(key: string) {
   openSelectKey.value = openSelectKey.value === key ? null : key
 }
 
-function selectDropdownOption(key: string, value: string) {
-  if (key === "sound" && value !== "off" && hasAnyOmniVideoReferences()) return
+function selectDropdownOption(key: string, value: FieldOptionValue) {
+  if (key === "sound" && String(value) !== "off" && hasAnyOmniVideoReferences()) return
   setField(key, value)
   openSelectKey.value = null
 }
 
 function selectedOptionLabel(field: ToolField): string {
   const current = strField(field.fieldKey)
-  const match = fieldOptions(field).find((option) => optionValue(option) === current)
+  const match = fieldOptions(field).find((option) => optionValueText(option) === current)
   if (match) return optionLabel(match)
   return field.placeholder || "请选择"
 }
@@ -643,7 +657,7 @@ function resetState() {
 }
 
 watch(
-  () => [props.capabilities, props.fields, props.coreFieldKey, props.initialParams],
+  () => [props.capabilities, props.fields, props.initialParams],
   () => resetState(),
   { immediate: true, deep: true },
 )
@@ -764,6 +778,7 @@ function imagePreviewUrl(field: ToolField): string {
 
 function materialKindForField(field: ToolField): MaterialKind {
   if (field.fieldType === "video_upload" || field.fieldType === "multi_video" || field.fieldType === "omni_video_list") return "video"
+  if (field.fieldType === "audio_upload" || field.fieldType === "multi_audio") return "audio"
   if (field.fieldType === "image" || field.fieldType === "image_upload" || field.fieldType === "multi_image") return "image"
   const acceptedKinds = materialKindsFromAccept(parseFieldMeta(field).accept)
   if (acceptedKinds.size === 1) return [...acceptedKinds][0]!
@@ -897,6 +912,8 @@ function shortPlaceholder(field: ToolField): string {
 }
 
 function fieldHelpText(field: ToolField): string {
+  const configured = parseFieldMeta(field).helpText?.trim()
+  if (configured) return configured
   const raw = field.placeholder?.trim() || ""
   return raw.length > 18 ? raw : ""
 }
@@ -908,10 +925,11 @@ function syncCustomModeField(open: boolean) {
   else setField(field.fieldKey, open ? "true" : "false")
 }
 
-function setCustomModeValue(value: string) {
+function setCustomModeValue(value: FieldOptionValue) {
   const field = customModeField.value
   if (!field) return
-  const enabled = value === "true" || value === "1"
+  const text = String(value).toLowerCase()
+  const enabled = value === true || text === "true" || text === "1"
   if (field.fieldType === "checkbox") setField(field.fieldKey, enabled)
   else setField(field.fieldKey, value)
   if (!isComposerLayout.value) advancedOpen.value = enabled
@@ -1380,13 +1398,13 @@ async function confirmPickerSelection() {
   const selectedCount = pickerSelectedUrls.value.length
   fieldUploads.value = {
     ...fieldUploads.value,
-    [field.fieldKey]: { uploading: true, fileName: `${selectedCount} 张参考图` },
+    [field.fieldKey]: { uploading: true, fileName: `${selectedCount} ${mediaListUnitLabel(field)}` },
   }
   const selectedUrls = await resolveMaterialSelectionUrls(field, pickerSelectedUrls.value)
   setMultiImageValues(field, selectedUrls)
   fieldUploads.value = {
     ...fieldUploads.value,
-    [field.fieldKey]: { uploading: false, fileName: `${selectedUrls.length} 张参考图` },
+    [field.fieldKey]: { uploading: false, fileName: `${selectedUrls.length} ${mediaListUnitLabel(field)}` },
   }
   if (uploadHistoryOpen.value) closeUploadHistoryPicker()
   if (materialPickerOpen.value) closeMaterialPicker()
@@ -1609,7 +1627,7 @@ function removeComposerSlotAt(fieldKey: string, index = 0) {
     setMultiImageValues(field, next)
     fieldUploads.value = {
       ...fieldUploads.value,
-      [field.fieldKey]: { uploading: false, fileName: next.length > 0 ? `${next.length} 张参考图` : undefined },
+      [field.fieldKey]: { uploading: false, fileName: next.length > 0 ? `${next.length} ${mediaListUnitLabel(field)}` : undefined },
     }
     return
   }
@@ -1636,13 +1654,53 @@ function onNumberInput(key: string, event: Event) {
   setField(key, value === "" ? "" : Number(value))
 }
 
-function validate(): { valid: boolean; message?: string } {
+function numberInputMin(field: ToolField): number | undefined {
+  return parseFieldMeta(field).minValue
+}
+
+function numberInputMax(field: ToolField): number | undefined {
+  return parseFieldMeta(field).maxValue
+}
+
+function numberInputStep(field: ToolField): number | undefined {
+  return parseFieldMeta(field).step
+}
+
+function hasSubmittedFieldValue(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length > 0
+  return value !== undefined && value !== null && String(value).trim() !== ""
+}
+
+function validate(additionalValues: Record<string, unknown> = {}): { valid: boolean; message?: string } {
+  const validationValues = { ...state.value.fields, ...additionalValues }
   for (const field of requestFields.value) {
     if (parseFieldMeta(field).submitPolicy === "ui_only") continue
     const value = state.value.fields[field.fieldKey]
+    const required = isFieldRequired(field, validationValues)
+    const requiresAnyFields = parseFieldMeta(field).requiresAnyFields
+    if (
+      hasSubmittedFieldValue(value)
+      && Array.isArray(requiresAnyFields)
+      && requiresAnyFields.length > 0
+      && !requiresAnyFields.some((key) => hasSubmittedFieldValue(validationValues[String(key)]))
+    ) {
+      const labels = requiresAnyFields
+        .map((key) => (props.fields || []).find((item) => item.fieldKey === key)?.fieldName || String(key))
+      return { valid: false, message: `${field.fieldName} 需同时提供${labels.join("或")}` }
+    }
     const maxLength = resolveMaxLength(field, state.value.fields)
     if (maxLength !== undefined && typeof value === "string" && value.length > maxLength) {
       return { valid: false, message: `${field.fieldName} 超出 ${maxLength} 字限制` }
+    }
+    if ((field.fieldType === "number" || field.fieldType === "slider") && value !== "" && value !== undefined && value !== null) {
+      const numeric = Number(value)
+      const meta = parseFieldMeta(field)
+      if (typeof meta.minValue === "number" && numeric < meta.minValue) {
+        return { valid: false, message: `${field.fieldName} 不能小于 ${meta.minValue}` }
+      }
+      if (typeof meta.maxValue === "number" && numeric > meta.maxValue) {
+        return { valid: false, message: `${field.fieldName} 不能大于 ${meta.maxValue}` }
+      }
     }
     if (uploadState(field.fieldKey).uploading) {
       return { valid: false, message: `${field.fieldName} 上传中，请稍后提交` }
@@ -1661,7 +1719,7 @@ function validate(): { valid: boolean; message?: string } {
       const items = parseSubjectElementEditorItems(state.value.fields[field.fieldKey], subjectElementMax(field))
       const check = validateSubjectElementItems(items, {
         ...field,
-        required: field.required,
+        required,
       })
       if (!check.valid) return check
     }
@@ -1669,11 +1727,11 @@ function validate(): { valid: boolean; message?: string } {
       const items = omniVideoItems(field)
       const check = validateKlingOmniVideoItems(items, {
         ...field,
-        required: field.required,
+        required,
       })
       if (!check.valid) return check
     }
-    if (!field.required) continue
+    if (!required) continue
     if (field.fieldType === "checkbox") continue
     if (isMultiImageField(field)) {
       const minCount = Math.max(1, mediaListMin(field))
@@ -1699,7 +1757,7 @@ function validate(): { valid: boolean; message?: string } {
       return { valid: false, message: `请填写：${field.fieldName}` }
     }
   }
-  return { valid: true }
+  return validateRequiresAnyGroups(props.requiresAnyGroups, validationValues, props.fields || [])
 }
 
 function getRequestParams(): Record<string, unknown> {
@@ -1851,11 +1909,11 @@ defineExpose({
             <div class="inline-flex rounded-full border border-white/10 bg-white/[0.04] p-0.5">
               <button
                 v-for="option in customModeOptions"
-                :key="optionValue(option)"
+                :key="optionValueText(option)"
                 type="button"
                 class="h-7 rounded-full px-3 text-xs font-medium transition"
                 :class="
-                  customModeValue === optionValue(option).toLowerCase()
+                  customModeValue === optionValueText(option).toLowerCase()
                     ? 'bg-purple-500/20 text-purple-200 shadow-[0_0_0_1px_rgb(168_85_247_/_0.25)]'
                     : 'text-white/42 hover:bg-white/[0.06] hover:text-white/78'
                 "
@@ -1895,14 +1953,14 @@ defineExpose({
         >
           <button
             v-for="option in fieldOptions(field)"
-            :key="optionValue(option)"
+            :key="optionValueText(option)"
             type="button"
             class="min-h-8 rounded-full border px-3 py-1 text-xs font-medium transition"
-            :disabled="isSoundLockedField(field) && optionValue(option) !== 'off'"
+            :disabled="isSoundLockedField(field) && optionValueText(option) !== 'off'"
             :class="
-              strField(field.fieldKey) === optionValue(option)
+              strField(field.fieldKey) === optionValueText(option)
                 ? 'border-purple-500/30 bg-purple-500/10 text-purple-300'
-                : isSoundLockedField(field) && optionValue(option) !== 'off'
+                : isSoundLockedField(field) && optionValueText(option) !== 'off'
                   ? 'cursor-not-allowed border-transparent bg-white/[0.03] text-white/25'
                   : 'border-transparent bg-white/[0.04] text-white/40 hover:bg-white/10 hover:text-white/80'
             "
@@ -1934,14 +1992,14 @@ defineExpose({
           >
             <button
               v-for="option in fieldOptions(field)"
-              :key="optionValue(option)"
+              :key="optionValueText(option)"
               type="button"
               class="flex w-full items-center rounded-lg px-3 py-2 text-left text-xs transition"
-              :disabled="isSoundLockedField(field) && optionValue(option) !== 'off'"
+              :disabled="isSoundLockedField(field) && optionValueText(option) !== 'off'"
               :class="
-                strField(field.fieldKey) === optionValue(option)
+                strField(field.fieldKey) === optionValueText(option)
                   ? 'bg-purple-500/20 text-purple-200'
-                  : isSoundLockedField(field) && optionValue(option) !== 'off'
+                  : isSoundLockedField(field) && optionValueText(option) !== 'off'
                     ? 'cursor-not-allowed text-white/25'
                     : 'text-white/72 hover:bg-white/[0.06] hover:text-white'
               "
@@ -1969,6 +2027,9 @@ defineExpose({
           v-else-if="field.fieldType === 'number'"
           type="number"
           :value="strField(field.fieldKey)"
+          :min="numberInputMin(field)"
+          :max="numberInputMax(field)"
+          :step="numberInputStep(field)"
           :placeholder="shortPlaceholder(field)"
           class="h-7 w-full rounded-lg border border-border/60 bg-background px-2 text-xs"
           @input="onNumberInput(field.fieldKey, $event)"
@@ -2007,12 +2068,27 @@ defineExpose({
               :key="url"
               class="group relative h-16 w-16 overflow-hidden rounded-xl border border-border bg-muted"
             >
-              <img v-if="field.fieldType !== 'multi_video'" :src="normalizeMediaUrl(url)" alt="" class="h-full w-full object-cover" />
-              <video v-else :src="normalizeMediaUrl(url)" class="h-full w-full object-cover" muted playsinline preload="metadata" />
+              <img
+                v-if="materialKindForField(field) === 'image'"
+                :src="normalizeMediaUrl(url)"
+                alt=""
+                class="h-full w-full object-cover"
+              />
+              <video
+                v-else-if="materialKindForField(field) === 'video'"
+                :src="normalizeMediaUrl(url)"
+                class="h-full w-full object-cover"
+                muted
+                playsinline
+                preload="metadata"
+              />
+              <span v-else class="flex h-full w-full items-center justify-center text-muted-foreground">
+                <FileAudio class="h-5 w-5" />
+              </span>
               <button
                 type="button"
                 class="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white opacity-0 transition group-hover:opacity-100"
-                aria-label="移除参考图"
+                :aria-label="`移除${materialKindLabel(materialKindForField(field))}`"
                 @click="removeMultiImageUrl(field, url)"
               >
                 <X class="h-3 w-3" />
@@ -2242,11 +2318,11 @@ defineExpose({
             <div class="inline-flex max-w-full flex-wrap rounded-xl border border-white/10 bg-white/[0.04] p-0.5">
               <button
                 v-for="option in customModeOptions"
-                :key="optionValue(option)"
+                :key="optionValueText(option)"
                 type="button"
                 class="h-8 rounded-lg px-3 text-xs font-medium transition"
                 :class="
-                  customModeValue === optionValue(option).toLowerCase()
+                  customModeValue === optionValueText(option).toLowerCase()
                     ? 'bg-purple-500/20 text-purple-200'
                     : 'text-white/42 hover:bg-white/[0.06] hover:text-white/78'
                 "
@@ -2264,12 +2340,12 @@ defineExpose({
             <div v-if="isSegmentedOptionField(field)" class="flex flex-wrap gap-2">
               <button
                 v-for="option in fieldOptions(field)"
-                :key="optionValue(option)"
+                :key="optionValueText(option)"
                 type="button"
                 class="min-h-8 rounded-full border px-3 py-1 text-xs font-medium transition"
-                :disabled="isSoundLockedField(field) && optionValue(option) !== 'off'"
+                :disabled="isSoundLockedField(field) && optionValueText(option) !== 'off'"
                 :class="
-                  strField(field.fieldKey) === optionValue(option)
+                  strField(field.fieldKey) === optionValueText(option)
                     ? 'border-purple-500/30 bg-purple-500/10 text-purple-200'
                     : 'border-transparent bg-white/[0.04] text-white/42 hover:bg-white/[0.06] hover:text-white/78'
                 "
@@ -2293,7 +2369,7 @@ defineExpose({
               >
                 <button
                   v-for="option in fieldOptions(field)"
-                  :key="optionValue(option)"
+                  :key="optionValueText(option)"
                   type="button"
                   class="flex w-full items-center rounded-lg px-3 py-2 text-left text-xs text-white/72 hover:bg-white/[0.06]"
                   @click="selectDropdownOption(field.fieldKey, optionValue(option))"
@@ -2332,6 +2408,9 @@ defineExpose({
               v-else-if="field.fieldType === 'number'"
               type="number"
               :value="strField(field.fieldKey)"
+              :min="numberInputMin(field)"
+              :max="numberInputMax(field)"
+              :step="numberInputStep(field)"
               class="h-9 w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 text-xs text-white/78"
               @input="onNumberInput(field.fieldKey, $event)"
             />

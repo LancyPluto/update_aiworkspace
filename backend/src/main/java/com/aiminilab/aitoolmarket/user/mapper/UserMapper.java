@@ -15,6 +15,53 @@ public interface UserMapper extends BaseMapper<User> {
         return Optional.ofNullable(selectById(id));
     }
 
+    @Select("SELECT * FROM users WHERE id = #{id} LIMIT 1")
+    User selectAnyById(@Param("id") Long id);
+
+    default Optional<User> findAnyById(Long id) {
+        return Optional.ofNullable(selectAnyById(id));
+    }
+
+    @Select("SELECT * FROM users WHERE public_code = #{publicCode} AND is_deleted = 0 LIMIT 1")
+    User selectByPublicCode(@Param("publicCode") String publicCode);
+
+    default Optional<User> findByPublicCode(String publicCode) {
+        return Optional.ofNullable(selectByPublicCode(publicCode));
+    }
+
+    @Select("SELECT * FROM users WHERE public_code = #{publicCode} LIMIT 1")
+    User selectAnyByPublicCode(@Param("publicCode") String publicCode);
+
+    default Optional<User> findAnyByPublicCode(String publicCode) {
+        return Optional.ofNullable(selectAnyByPublicCode(publicCode));
+    }
+
+    @Select("SELECT * FROM users WHERE public_code IS NULL OR public_code = '' ORDER BY id")
+    List<User> findUsersMissingPublicCode();
+
+    @Update("UPDATE users SET public_code = #{publicCode} WHERE id = #{userId} AND (public_code IS NULL OR public_code = '')")
+    int updatePublicCodeIfMissing(@Param("userId") Long userId, @Param("publicCode") String publicCode);
+
+    @Select("SELECT * FROM users WHERE referral_code = #{referralCode} AND is_deleted = 0 LIMIT 1")
+    User selectByReferralCode(@Param("referralCode") String referralCode);
+
+    default Optional<User> findByReferralCode(String referralCode) {
+        return Optional.ofNullable(selectByReferralCode(referralCode));
+    }
+
+    @Select("SELECT * FROM users WHERE referral_code = #{referralCode} LIMIT 1")
+    User selectAnyByReferralCode(@Param("referralCode") String referralCode);
+
+    default Optional<User> findAnyByReferralCode(String referralCode) {
+        return Optional.ofNullable(selectAnyByReferralCode(referralCode));
+    }
+
+    @Select("SELECT * FROM users WHERE referral_code IS NULL OR referral_code = '' ORDER BY id")
+    List<User> findUsersMissingReferralCode();
+
+    @Update("UPDATE users SET referral_code = #{referralCode} WHERE id = #{userId} AND (referral_code IS NULL OR referral_code = '')")
+    int updateReferralCodeIfMissing(@Param("userId") Long userId, @Param("referralCode") String referralCode);
+
     @Select("""
             <script>
             SELECT *

@@ -1,5 +1,7 @@
 CREATE TABLE users (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  public_code CHAR(5) UNIQUE,
+  referral_code CHAR(6) UNIQUE,
   username VARCHAR(64) UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
   phone VARCHAR(32) UNIQUE,
@@ -68,6 +70,17 @@ CREATE TABLE ai_tools (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   is_deleted TINYINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE tool_model_bindings (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  tool_id BIGINT NOT NULL,
+  model_config_id BIGINT NOT NULL,
+  is_default TINYINT NOT NULL DEFAULT 0,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(tool_id, model_config_id)
 );
 
 CREATE TABLE tool_templates (
@@ -161,6 +174,11 @@ CREATE TABLE ai_tasks (
   max_retry_count INT NOT NULL DEFAULT 1,
   error_code VARCHAR(64),
   error_message TEXT,
+  user_message VARCHAR(255),
+  developer_message TEXT,
+  failure_trace_id VARCHAR(64),
+  provider_error_code VARCHAR(128),
+  provider_request_id VARCHAR(128),
   claimed_by VARCHAR(128),
   claim_token VARCHAR(128),
   lease_until DATETIME,
@@ -176,6 +194,7 @@ CREATE TABLE ai_tasks (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT uk_ai_tasks_user_idempotency UNIQUE (user_id, idempotency_key)
 );
+CREATE INDEX idx_ai_tasks_failure_trace ON ai_tasks(failure_trace_id);
 
 CREATE TABLE task_model_route_attempts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -525,6 +544,9 @@ CREATE TABLE agent_runs (
   consumed_credits INT NOT NULL DEFAULT 0,
   error_code VARCHAR(64),
   error_message CLOB,
+  user_message VARCHAR(255),
+  developer_message CLOB,
+  failure_trace_id VARCHAR(64),
   started_at DATETIME,
   finished_at DATETIME,
   parent_run_id BIGINT,
@@ -541,6 +563,7 @@ CREATE UNIQUE INDEX uk_agent_runs_user_client ON agent_runs (user_id, client_req
 CREATE INDEX idx_agent_runs_session_user_id ON agent_runs (session_id, user_id, id);
 CREATE INDEX idx_agent_runs_model_config ON agent_runs (model_config_id);
 CREATE INDEX idx_agent_runs_context_snapshot ON agent_runs (context_snapshot_id);
+CREATE INDEX idx_agent_runs_failure_trace ON agent_runs (failure_trace_id);
 CREATE INDEX idx_agent_messages_session_active ON agent_messages (session_id, status, id);
 
 CREATE TABLE agent_context_snapshots (
@@ -587,6 +610,9 @@ CREATE TABLE agent_tool_calls (
   result_json JSON,
   error_code VARCHAR(64),
   error_message CLOB,
+  user_message VARCHAR(255),
+  developer_message CLOB,
+  failure_trace_id VARCHAR(64),
   started_at DATETIME,
   finished_at DATETIME,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -848,6 +874,14 @@ CREATE TABLE agent_model_configs (
   base_url VARCHAR(512),
   api_key VARCHAR(512),
   extra_auth_json TEXT,
+  execution_task VARCHAR(64),
+  execution_options_json TEXT,
+  request_schema_json TEXT,
+  request_mapping_json TEXT,
+  response_mapping_json TEXT,
+  api_contract_version VARCHAR(64),
+  contract_status VARCHAR(32) NOT NULL DEFAULT 'DOCS_PENDING',
+  contract_verified_at DATETIME,
   minimax_group_id VARCHAR(128),
   console_url VARCHAR(512),
   balance_url VARCHAR(512),

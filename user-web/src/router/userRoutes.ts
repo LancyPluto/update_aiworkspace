@@ -59,8 +59,8 @@ export const userRoutes = {
   get profile() {
     return { name: "Profile" }
   },
-  publicProfile(userId: string | number) {
-    return { name: "PublicProfile", params: { userId: String(userId) } }
+  publicProfile(publicCode: string | number) {
+    return { name: "PublicProfile", params: { publicCode: String(publicCode) } }
   },
   get billing() {
     return { name: "Billing" }

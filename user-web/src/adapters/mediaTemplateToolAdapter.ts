@@ -1,4 +1,9 @@
 import type { ToolDetail, ToolField, ToolFrontendStyle } from "@/api/types"
+import {
+  canonicalFieldOptionValue,
+  defaultFieldValue as resolveConfiguredDefault,
+  isFieldVisible,
+} from "@/utils/fieldUiMeta"
 
 export type ToolKind = "text" | "image" | "video" | "digitalHuman" | "audio" | "agent" | "other"
 
@@ -90,6 +95,9 @@ export function compactMediaOptionFields(tool: Pick<ToolDetail, "fields"> | Part
 
 export function defaultMediaFieldValue(field: ToolField): unknown {
   if (field.defaultValue !== undefined && field.defaultValue !== null && field.defaultValue !== "") return field.defaultValue
+  if (field.options && typeof field.options === "object" && !Array.isArray(field.options)) {
+    return resolveConfiguredDefault(field)
+  }
   if ((field.fieldType === "select" || field.fieldType === "radio") && Array.isArray(field.options) && field.options.length) {
     const option = field.options[0]
     return typeof option === "string" ? option : option.value
@@ -116,11 +124,14 @@ export function buildMediaTemplateTaskParams(
   const mediaField = primaryMediaField(tool, kind)
   const mediaKey = mediaField?.fieldKey || (kind === "image" ? "sourceImageUrl" : "sourceVideoUrl")
   const params: Record<string, unknown> = { [mediaKey]: uploadedMediaUrl }
+  const visibilityValues = { ...optionValues, ...params }
 
   for (const field of compactMediaOptionFields(tool, kind)) {
+    if (!isFieldVisible(field, visibilityValues)) continue
     const value = optionValues[field.fieldKey]
     const fallback = defaultMediaFieldValue(field)
-    const resolved = value === undefined || value === null || value === "" ? fallback : value
+    const raw = value === undefined || value === null || value === "" ? fallback : value
+    const resolved = canonicalFieldOptionValue(field, raw)
     if (resolved !== undefined && resolved !== null && resolved !== "") params[field.fieldKey] = resolved
   }
 

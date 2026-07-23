@@ -1,4 +1,4 @@
-from handlers.text_task_handler import TextTaskHandler
+from handlers.text_task_handler import TextTaskHandler, _select_model_request_params
 
 
 class DummyModelClient:
@@ -62,3 +62,31 @@ def test_social_media_comment_insights_uses_report_budget():
 
     assert context["modelMaxTokens"] == 4096
     assert context["modelTimeoutSeconds"] == 180
+
+
+def test_text_model_params_only_include_schema_fields_and_mapped_targets():
+    selected = _select_model_request_params(
+        {
+            "prompt": "hello",
+            "temperature": 0.4,
+            "topP": 0.8,
+            "top_p": 0.8,
+            "responseFormat": "MARKDOWN",
+        },
+        {
+            "requestSchemaJson": (
+                '{"version":"1","fields":['
+                '{"key":"prompt","type":"string"},'
+                '{"key":"temperature","type":"number"},'
+                '{"key":"topP","type":"number"}]}'
+            ),
+            "requestMappingJson": '{"version":"1","fieldMap":{"topP":"top_p"}}',
+        },
+    )
+
+    assert selected == {
+        "prompt": "hello",
+        "temperature": 0.4,
+        "topP": 0.8,
+        "top_p": 0.8,
+    }

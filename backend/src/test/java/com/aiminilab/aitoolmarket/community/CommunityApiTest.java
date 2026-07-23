@@ -256,6 +256,8 @@ class CommunityApiTest {
 
         mockMvc.perform(get("/api/v1/community/posts/{postId}", postId))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.userId").doesNotExist())
+                .andExpect(jsonPath("$.data.ownedByCurrentUser").value(false))
                 .andExpect(jsonPath("$.data.liked").value(false))
                 .andExpect(jsonPath("$.data.favorited").value(false));
 
@@ -272,6 +274,8 @@ class CommunityApiTest {
         mockMvc.perform(get("/api/v1/community/posts/{postId}", postId)
                         .header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.userId").doesNotExist())
+                .andExpect(jsonPath("$.data.ownedByCurrentUser").value(true))
                 .andExpect(jsonPath("$.data.liked").value(true))
                 .andExpect(jsonPath("$.data.favorited").value(true));
 
@@ -288,28 +292,38 @@ class CommunityApiTest {
     @Test
     void publicCommunityResponsesDoNotExposePhoneLikeUsernames() throws Exception {
         String phone = "18800188000";
-        long userId = insertLegacyPhoneUsernameUser(phone);
+        String publicCode = "54321";
+        long userId = insertLegacyPhoneUsernameUser(phone, publicCode);
         long postId = insertPostForUser(userId, "PUBLISHED", "APPROVED", "历史手机号用户作品", true);
-        String fallbackName = "用户" + userId;
+        String fallbackName = "用户" + publicCode;
 
-        mockMvc.perform(get("/api/v1/community/users/{userId}", userId))
+        mockMvc.perform(get("/api/v1/community/users/{publicCode}", publicCode))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.username").value(fallbackName))
-                .andExpect(jsonPath("$.data.username").value(not(phone)))
+                .andExpect(jsonPath("$.data.id").doesNotExist())
+                .andExpect(jsonPath("$.data.username").doesNotExist())
+                .andExpect(jsonPath("$.data.publicCode").value(publicCode))
                 .andExpect(jsonPath("$.data.nickname").value(fallbackName))
                 .andExpect(jsonPath("$.data.nickname").value(not(phone)));
 
-        mockMvc.perform(get("/api/v1/community/users/{userId}/posts", userId)
+        mockMvc.perform(get("/api/v1/community/users/{publicCode}/posts", publicCode)
                         .param("pageSize", "20"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].id").value((int) postId))
+                .andExpect(jsonPath("$.data.list[0].userId").doesNotExist())
+                .andExpect(jsonPath("$.data.list[0].authorPublicCode").value(publicCode))
                 .andExpect(jsonPath("$.data.list[0].authorNickname").value(fallbackName))
                 .andExpect(jsonPath("$.data.list[0].authorNickname").value(not(phone)));
 
         mockMvc.perform(get("/api/v1/community/posts/{postId}", postId))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.userId").doesNotExist())
+                .andExpect(jsonPath("$.data.authorPublicCode").value(publicCode))
                 .andExpect(jsonPath("$.data.authorNickname").value(fallbackName))
                 .andExpect(jsonPath("$.data.authorNickname").value(not(phone)));
+
+        mockMvc.perform(get("/api/v1/community/users/{legacyInternalId}", userId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
 
     @Test
@@ -485,13 +499,13 @@ class CommunityApiTest {
         return insertPostForUser(2L, status, auditStatus, title, promptVisible);
     }
 
-    private long insertLegacyPhoneUsernameUser(String phone) {
+    private long insertLegacyPhoneUsernameUser(String phone, String publicCode) {
         jdbcTemplate.update("""
                 INSERT INTO users (
-                  username, password_hash, phone, nickname, user_type, status, is_deleted
+                  public_code, username, password_hash, phone, nickname, user_type, status, is_deleted
                 )
-                VALUES (?, 'legacy-password-hash', ?, NULL, 'USER', 'ACTIVE', 0)
-                """, phone, phone);
+                VALUES (?, ?, 'legacy-password-hash', ?, NULL, 'USER', 'ACTIVE', 0)
+                """, publicCode, phone, phone);
         return jdbcTemplate.queryForObject("SELECT MAX(id) FROM users", Long.class);
     }
 

@@ -26,6 +26,7 @@ providers:
     label: OpenAI compatible
     capabilities:
       - TEXT_GENERATION
+      - VISION_INPUT
     defaultBaseUrl: https://api.openai.com/v1
     defaultModel: gpt-4o-mini
     billingDefault: TOKEN_PER_M
@@ -38,7 +39,7 @@ providers:
     capabilities:
       - TEXT_GENERATION
     defaultBaseUrl: https://api.deepseek.com
-    defaultModel: deepseek-chat
+    defaultModel: deepseek-v4-flash
     billingDefault: TOKEN_PER_M
     testStrategy: agent_service
     workerReady: true
@@ -62,7 +63,7 @@ providers:
     description: Alibaba Cloud Model Studio Bailian Qwen OpenAI-compatible Chat Completions endpoint. Use qwen3.6-plus with VISION_INPUT for Agent image understanding.
 
   - code: dashscope_qwen_tts
-    label: Alibaba Cloud Qwen3 TTS
+    label: Alibaba Cloud Qwen Audio TTS
     capabilities:
       - TEXT_TO_SPEECH
     defaultBaseUrl: https://dashscope.aliyuncs.com
@@ -77,13 +78,14 @@ providers:
     adapterKey: dashscope_qwen_tts
     metadataVersion: dashscope_qwen_tts.v1
     authSchemaJson: '{"fields":[{"key":"apiKey","label":"DASHSCOPE_API_KEY","type":"password","required":true},{"key":"baseUrl","label":"Base URL","type":"url","required":false,"placeholder":"https://dashscope.aliyuncs.com"}]}'
-    modelParamSchemaJson: '{"models":["qwen3-tts-flash"],"fields":[{"key":"modelName","label":"模型名称","type":"text","required":true},{"key":"billingUnit","label":"计费单位","type":"select","options":["PER_CHARACTER"],"required":true},{"key":"capabilities","label":"能力","type":"multi_select","options":["TEXT_TO_SPEECH"],"required":true}]}'
-    description: Alibaba Cloud Model Studio Qwen3 text-to-speech through the DashScope multimodal generation protocol.
+    modelParamSchemaJson: '{"models":["qwen3-tts-flash","qwen-audio-3.0-tts-plus"],"fields":[{"key":"modelName","label":"模型名称","type":"text","required":true},{"key":"billingUnit","label":"计费单位","type":"select","options":["PER_CHARACTER"],"required":true},{"key":"capabilities","label":"能力","type":"multi_select","options":["TEXT_TO_SPEECH"],"required":true}]}'
+    description: Alibaba Cloud Model Studio TTS; the adapter selects the multimodal-generation or SpeechSynthesizer protocol by model name.
 
   - code: anthropic_compatible
     label: Anthropic compatible
     capabilities:
       - TEXT_GENERATION
+      - VISION_INPUT
     defaultBaseUrl: https://api.minimaxi.com/anthropic
     defaultModel: MiniMax-M2.7
     billingDefault: TOKEN_PER_M
@@ -181,7 +183,7 @@ providers:
     defaultModel: TeleAI/TeleSpeechASR
     billingDefault: PER_CALL
     testStrategy: accept_only
-    workerReady: true
+    workerReady: false
     description: SiliconFlow speech recognition model reserved for subtitle alignment and speech-to-text workflows.
 
   - code: seedance
@@ -268,6 +270,7 @@ providers:
     label: Agnes AI chat
     capabilities:
       - TEXT_GENERATION
+      - VISION_INPUT
     defaultBaseUrl: https://apihub.agnes-ai.com/v1
     defaultModel: agnes-2.0-flash
     billingDefault: TOKEN_PER_M

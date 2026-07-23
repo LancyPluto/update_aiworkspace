@@ -20,6 +20,7 @@ from client.provider_error import (
 )
 from utils.outbound_http import OutboundRequestsClient
 from utils.input_image import InputImageError, decode_reference_image_data_url
+from utils.model_contract import parse_response_mapping, read_response_value
 from volcengine_model import resolve_volcengine_images_paths
 from requests.exceptions import (
     ChunkedEncodingError,
@@ -69,6 +70,8 @@ class OpenAIImagesClient:
     ) -> None:
         self.base_url = (base_url or "").rstrip("/")
         self.api_key = (api_key or "").strip()
+        self.provider = str((model_config or {}).get("provider") or "").strip().lower()
+        self.response_mapping = parse_response_mapping(model_config)
         self.extra_auth = self._parse_json(extra_auth_json)
         self.timeout = self._resolve_timeout(timeout_seconds)
         endpoint_value = str(endpoint_path or self.extra_auth.get("endpointPath") or "/images/generations")
@@ -98,6 +101,7 @@ class OpenAIImagesClient:
         prompt: str,
         model: str | None = None,
         image_size: str = "1024x1024",
+        aspect_ratio: str | None = None,
         batch_size: int = 1,
         quality: str | None = None,
         style: str | None = None,
@@ -133,6 +137,7 @@ class OpenAIImagesClient:
                     prompt=prompt,
                     model=model,
                     image_size=image_size,
+                    aspect_ratio=aspect_ratio,
                     batch_size=batch_size,
                     quality=quality,
                     style=style,
@@ -142,8 +147,9 @@ class OpenAIImagesClient:
                     sequential_image_generation=sequential_image_generation,
                     max_images=max_images,
                     optimize_prompt_mode=optimize_prompt_mode,
+                    has_reference_images=True,
                 )
-                payload["image"] = reference_images
+                self._apply_json_image_input(payload, reference_images, model)
                 LOGGER.info(
                     "openai images json-image request endpoint=%s model=%s n=%s size=%s referenceImages=%s response_format=%s",
                     self.endpoint_path,
@@ -227,6 +233,7 @@ class OpenAIImagesClient:
                 prompt=prompt,
                 model=model,
                 image_size=image_size,
+                aspect_ratio=aspect_ratio,
                 batch_size=batch_size,
                 quality=quality,
                 style=style,
@@ -315,6 +322,7 @@ class OpenAIImagesClient:
         prompt: str,
         model: str,
         image_size: str,
+        aspect_ratio: str | None = None,
         batch_size: int,
         quality: str | None,
         style: str | None,
@@ -324,13 +332,18 @@ class OpenAIImagesClient:
         sequential_image_generation: str | None = None,
         max_images: Any | None = None,
         optimize_prompt_mode: str | None = None,
+        has_reference_images: bool = False,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": model,
             "prompt": prompt,
-            "n": max(1, min(10, int(batch_size or 1))),
             "size": _normalize_size(image_size),
         }
+        if not self._uses_agnes_images_contract(model):
+            payload["n"] = max(1, min(10, int(batch_size or 1)))
+        resolved_aspect_ratio = str(aspect_ratio or "").strip()
+        if resolved_aspect_ratio and self._uses_agnes_images_contract(model):
+            payload["ratio"] = resolved_aspect_ratio
         resolved_quality = self._resolve_quality(quality)
         if resolved_quality:
             payload["quality"] = resolved_quality
@@ -342,7 +355,12 @@ class OpenAIImagesClient:
             payload["output_format"] = resolved_output_format
         resolved_response_format = (response_format or self.extra_auth.get("responseFormat") or "").strip()
         if resolved_response_format:
-            self._apply_response_format(payload, resolved_response_format)
+            self._apply_response_format(
+                payload,
+                resolved_response_format,
+                model,
+                has_reference_images=has_reference_images,
+            )
         if _is_volcengine_ark_base_url(self.base_url):
             payload.setdefault("response_format", "url")
             payload.setdefault("stream", False)
@@ -407,7 +425,7 @@ class OpenAIImagesClient:
             "model": self._resolve_edit_model(model),
             "prompt": prompt,
             "n": str(max(1, min(10, int(batch_size or 1)))),
-            "size": self._resolve_edit_size(image_size),
+            "size": self._resolve_edit_size(image_size, model),
             "quality": resolved_quality,
         }
         resolved_output_format = self._resolve_output_format(output_format, model)
@@ -593,12 +611,14 @@ class OpenAIImagesClient:
             raise last_error
         raise OpenAIImagesError("openai images edit failed")
 
-    def _resolve_edit_size(self, image_size: str) -> str:
+    def _resolve_edit_size(self, image_size: str, model: str = "") -> str:
         override = str(self.extra_auth.get("editSize") or "").strip()
         if override:
             return override
         if "ofox.ai" in self.base_url.lower():
             return "auto"
+        if _is_gpt_image_model(model):
+            return _normalize_gpt_image_edit_size(image_size)
         return _normalize_size(image_size)
 
     def _edit_model_candidates(self, model: str) -> list[str]:
@@ -917,18 +937,33 @@ class OpenAIImagesClient:
         )
 
     def _extract_image_urls(self, payload: dict[str, Any]) -> list[str]:
-        data = payload.get("data")
+        data = read_response_value(
+            payload,
+            self.response_mapping,
+            "itemsPath",
+            fallback_paths=("data",),
+        )
         if not isinstance(data, list):
-            raise OpenAIImagesError("openai images response missing data")
+            raise OpenAIImagesError("openai images response missing mapped image items")
         urls: list[str] = []
         for item in data:
             if not isinstance(item, dict):
                 continue
-            url = item.get("url")
+            url = read_response_value(
+                item,
+                self.response_mapping,
+                "urlPath",
+                fallback_paths=("url",),
+            )
             if isinstance(url, str) and url.strip():
                 urls.append(url.strip())
                 continue
-            b64_json = item.get("b64_json")
+            b64_json = read_response_value(
+                item,
+                self.response_mapping,
+                "base64Path",
+                fallback_paths=("b64_json",),
+            )
             if isinstance(b64_json, str) and b64_json.strip():
                 urls.append(f"data:image/png;base64,{b64_json.strip()}")
         if not urls:
@@ -936,7 +971,12 @@ class OpenAIImagesClient:
         return urls
 
     def _resolve_usage(self, response: dict[str, Any], payload: dict[str, Any], image_count: int) -> dict[str, int]:
-        usage = response.get("usage")
+        usage = read_response_value(
+            response,
+            self.response_mapping,
+            "usagePath",
+            fallback_paths=("usage",),
+        )
         if isinstance(usage, dict):
             input_tokens = _as_int(usage.get("input_tokens") or usage.get("prompt_tokens"))
             output_tokens = _as_int(usage.get("output_tokens") or usage.get("completion_tokens"))
@@ -1027,14 +1067,49 @@ class OpenAIImagesClient:
         backoff = base * (2 ** max(0, retry_index - 1))
         return min(cap, backoff)
 
-    def _apply_response_format(self, payload: dict[str, Any], response_format: str) -> None:
+    def _apply_response_format(
+        self,
+        payload: dict[str, Any],
+        response_format: str,
+        model: str | None = None,
+        *,
+        has_reference_images: bool = False,
+    ) -> None:
         location = str(self.extra_auth.get("responseFormatLocation") or "").strip()
-        if _normalized_option(location) == "extrabody":
+        if (
+            self._uses_agnes_images_contract(model)
+            and _normalized_option(response_format) == "b64json"
+            and not has_reference_images
+        ):
+            payload["return_base64"] = True
+            return
+        if self._uses_agnes_images_contract(model) or _normalized_option(location) == "extrabody":
             extra_body = payload.setdefault("extra_body", {})
             if isinstance(extra_body, dict):
                 extra_body["response_format"] = response_format
                 return
         payload["response_format"] = response_format
+
+    def _apply_json_image_input(
+        self,
+        payload: dict[str, Any],
+        reference_images: list[str],
+        model: str | None,
+    ) -> None:
+        location = _normalized_option(self.extra_auth.get("imageInputLocation"))
+        if self._uses_agnes_images_contract(model) or location == "extrabody":
+            extra_body = payload.setdefault("extra_body", {})
+            if isinstance(extra_body, dict):
+                extra_body["image"] = reference_images
+                return
+        payload["image"] = reference_images
+
+    def _uses_agnes_images_contract(self, model: str | None) -> bool:
+        return (
+            self.provider == "agnes_images"
+            or "agnes-ai.com" in self.base_url.lower()
+            or _normalized_model_name(model).startswith("agnesimage")
+        )
 
     def _resolve_output_format(self, output_format: str | None, model: str | None) -> str:
         resolved = (output_format or self.extra_auth.get("outputFormat") or "").strip()
@@ -1056,6 +1131,8 @@ class OpenAIImagesClient:
         if mode in {"multipart", "editmultipart", "openai"}:
             return False
         if mode in {"jsonarray", "jsonimagearray"}:
+            return True
+        if self.provider == "agnes_images" or "agnes-ai.com" in self.base_url.lower():
             return True
         return _is_volcengine_ark_base_url(self.base_url)
 
@@ -1218,6 +1295,21 @@ def _normalize_size(value: str) -> str:
             "3:4": "768x1024",
         }.get(size, "1024x1024")
     return size
+
+
+def _is_gpt_image_model(value: str) -> bool:
+    model_name = str(value or "").strip().lower().rsplit("/", 1)[-1]
+    return model_name.startswith("gpt-image-")
+
+
+def _normalize_gpt_image_edit_size(value: str) -> str:
+    raw = str(value or "").strip().lower()
+    allowed = {"1024x1024", "1536x1024", "1024x1536"}
+    if not raw or raw == "auto":
+        return "auto"
+    if raw in allowed:
+        return raw
+    return "auto"
 
 
 def _parse_size(value: str) -> tuple[int, int]:

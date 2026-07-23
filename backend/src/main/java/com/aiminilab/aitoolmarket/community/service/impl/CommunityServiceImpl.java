@@ -30,6 +30,7 @@ import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import com.aiminilab.aitoolmarket.user.entity.User;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
+import com.aiminilab.aitoolmarket.user.service.PublicUserIdentityService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -82,6 +83,7 @@ public class CommunityServiceImpl implements CommunityService {
     private final CommunityPostReportMapper reportMapper;
     private final TaskMapper taskMapper;
     private final UserMapper userMapper;
+    private final PublicUserIdentityService publicUserIdentityService;
     private final ObjectMapper objectMapper;
     private final AssetStorageService assetStorageService;
     // DB row locks are released before afterCommit, so serialize OSS moves in this instance through afterCompletion.
@@ -90,13 +92,15 @@ public class CommunityServiceImpl implements CommunityService {
     public CommunityServiceImpl(CommunityPostMapper postMapper, CommunityCollectionMapper collectionMapper,
                                 CommunityEventMapper eventMapper, CommunityPostReportMapper reportMapper,
                                 TaskMapper taskMapper, UserMapper userMapper, ObjectMapper objectMapper,
-                                AssetStorageService assetStorageService) {
+                                AssetStorageService assetStorageService,
+                                PublicUserIdentityService publicUserIdentityService) {
         this.postMapper = postMapper;
         this.collectionMapper = collectionMapper;
         this.eventMapper = eventMapper;
         this.reportMapper = reportMapper;
         this.taskMapper = taskMapper;
         this.userMapper = userMapper;
+        this.publicUserIdentityService = publicUserIdentityService;
         this.objectMapper = objectMapper;
         this.assetStorageService = assetStorageService;
     }
@@ -235,14 +239,15 @@ public class CommunityServiceImpl implements CommunityService {
     }
 
     @Override
-    public PublicUserProfileResponse publicUser(Long userId) {
-        User user = userMapper.findById(userId)
-                .filter(u -> u.getDeleted() == null || !u.getDeleted())
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "User not found"));
+    public PublicUserProfileResponse publicUser(String publicCode) {
+        return publicUser(publicUserIdentityService.requirePublicUser(publicCode));
+    }
+
+    private PublicUserProfileResponse publicUser(User user) {
+        Long userId = user.getId();
         return new PublicUserProfileResponse(
-                user.getId(),
-                publicUserName(user.getUsername(), userId),
-                resolveAuthorNickname(user, userId),
+                user.getPublicCode(),
+                resolveAuthorNickname(user),
                 user.getAvatarUrl(),
                 user.getBio(),
                 postMapper.countPublicByUserId(userId, null),
@@ -306,8 +311,10 @@ public class CommunityServiceImpl implements CommunityService {
     }
 
     @Override
-    public CommunityCreatorResponse creator(Long userId, Long viewerId) {
-        PublicUserProfileResponse profile = publicUser(userId);
+    public CommunityCreatorResponse creator(String publicCode, Long viewerId) {
+        User user = publicUserIdentityService.requirePublicUser(publicCode);
+        Long userId = user.getId();
+        PublicUserProfileResponse profile = publicUser(user);
         List<CommunityPostResponse> featured = responseBatch(postMapper.findFeaturedByUserId(userId, 6), viewerId);
         List<CommunityPostResponse> recent = responseBatch(postMapper.findPublicByUserId(userId, null, 12, 0), viewerId);
         return new CommunityCreatorResponse(
@@ -320,9 +327,10 @@ public class CommunityServiceImpl implements CommunityService {
     }
 
     @Override
-    public PageResponse<CommunityPostResponse> publicPosts(Long userId, String modality, Long viewerId,
+    public PageResponse<CommunityPostResponse> publicPosts(String publicCode, String modality, Long viewerId,
                                                            Integer pageNo, Integer pageSize) {
-        publicUser(userId);
+        User user = publicUserIdentityService.requirePublicUser(publicCode);
+        Long userId = user.getId();
         int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
         int offset = PageResponse.offset(pageNo, pageSize);
         List<CommunityPostDiscoverRow> rows = postMapper.findPublicByUserIdWithAuthor(
@@ -983,15 +991,17 @@ public class CommunityServiceImpl implements CommunityService {
                         String authorAvatarUrl = row.getAuthorAvatarUrl();
                         if (authorNickname == null || authorNickname.isBlank()) {
                             User user = fallbackUsers.get(row.getUserId());
-                            authorNickname = resolveAuthorNickname(user, row.getUserId());
+                            authorNickname = resolveAuthorNickname(user);
                             if (authorAvatarUrl == null && user != null) {
                                 authorAvatarUrl = user.getAvatarUrl();
                             }
                         } else {
-                            authorNickname = normalizeAuthorNickname(authorNickname, row.getUserId());
+                            authorNickname = normalizeAuthorNickname(
+                                    authorNickname, row.getUserId(), row.getAuthorPublicCode());
                         }
                         return buildResponseBatch(row, likedIds, favoritedIds, tagsByPost,
-                                firstResultByTaskId, tasksByIdForPrompt, authorNickname, authorAvatarUrl);
+                                firstResultByTaskId, tasksByIdForPrompt, authorNickname, authorAvatarUrl,
+                                row.getAuthorPublicCode(), viewerId);
                     })
                     .toList();
         }
@@ -1010,8 +1020,10 @@ public class CommunityServiceImpl implements CommunityService {
                     User author = usersById.get(post.getUserId());
                     return buildResponseBatch(post, likedIds, favoritedIds, tagsByPost,
                             firstResultByTaskId, tasksByIdForPrompt,
-                            resolveAuthorNickname(author, post.getUserId()),
-                            author == null ? null : author.getAvatarUrl());
+                            resolveAuthorNickname(author),
+                            author == null ? null : author.getAvatarUrl(),
+                            author == null ? null : author.getPublicCode(),
+                            viewerId);
                 })
                 .toList();
     }
@@ -1020,23 +1032,27 @@ public class CommunityServiceImpl implements CommunityService {
         return buildResponse(
                 post,
                 viewerId,
-                resolveAuthorNickname(author, post.getUserId()),
-                author == null ? null : author.getAvatarUrl()
+                resolveAuthorNickname(author),
+                author == null ? null : author.getAvatarUrl(),
+                author == null ? null : author.getPublicCode()
         );
     }
 
     private CommunityPostResponse buildResponse(CommunityPost post,
                                               Long viewerId,
                                               String authorNickname,
-                                              String authorAvatarUrl) {
+                                              String authorAvatarUrl,
+                                              String authorPublicCode) {
         boolean liked = viewerId != null && postMapper.countLike(post.getId(), viewerId) > 0;
         boolean favorited = viewerId != null && postMapper.countFavorite(post.getId(), viewerId) > 0;
         String promptSnapshot = resolvePromptSnapshot(post);
-        CommunityPostResponse resp = CommunityPostResponse.from(
+        CommunityPostResponse resp = CommunityPostResponse.publicFrom(
                 post,
                 liked,
                 favorited,
                 postMapper.findTags(post.getId()),
+                authorPublicCode,
+                viewerId != null && viewerId.equals(post.getUserId()),
                 authorNickname,
                 authorAvatarUrl,
                 promptSnapshot,
@@ -1052,14 +1068,18 @@ public class CommunityServiceImpl implements CommunityService {
                                                      Map<Long, String> firstResultByTaskId,
                                                      Map<Long, AiTask> tasksByIdForPrompt,
                                                      String authorNickname,
-                                                     String authorAvatarUrl) {
+                                                     String authorAvatarUrl,
+                                                     String authorPublicCode,
+                                                     Long viewerId) {
         boolean liked = likedIds.contains(post.getId());
         boolean favorited = favoritedIds.contains(post.getId());
         List<String> tags = tagsByPost.getOrDefault(post.getId(), List.of());
         String promptSnapshot = resolvePromptSnapshotBatch(post, tasksByIdForPrompt);
         List<String> mediaUrls = resolvePostMediaUrlsBatch(post, firstResultByTaskId);
-        CommunityPostResponse resp = CommunityPostResponse.from(
-                post, liked, favorited, tags, authorNickname, authorAvatarUrl, promptSnapshot, mediaUrls
+        CommunityPostResponse resp = CommunityPostResponse.publicFrom(
+                post, liked, favorited, tags, authorPublicCode,
+                viewerId != null && viewerId.equals(post.getUserId()),
+                authorNickname, authorAvatarUrl, promptSnapshot, mediaUrls
         );
         return rewriteResponseUrls(resp, false);
     }
@@ -1236,7 +1256,8 @@ public class CommunityServiceImpl implements CommunityService {
         CommunityPostResponse resp = CommunityPostResponse.adminFrom(
                 post,
                 postMapper.findTags(post.getId()),
-                resolveAuthorNickname(user, post.getUserId()),
+                user == null ? null : user.getPublicCode(),
+                resolveAuthorNickname(user),
                 user == null ? null : user.getAvatarUrl(),
                 resolvePromptSnapshot(post)
         );
@@ -1271,7 +1292,8 @@ public class CommunityServiceImpl implements CommunityService {
             CommunityPostResponse resp = CommunityPostResponse.adminFrom(
                     post,
                     tagsByPost.getOrDefault(post.getId(), List.of()),
-                    resolveAuthorNickname(user, post.getUserId()),
+                    user == null ? null : user.getPublicCode(),
+                    resolveAuthorNickname(user),
                     user == null ? null : user.getAvatarUrl(),
                     resolvePromptSnapshotBatch(post, tasksByIdForPrompt)
             );
@@ -1292,26 +1314,14 @@ public class CommunityServiceImpl implements CommunityService {
         );
     }
 
-    private String resolveAuthorNickname(User user, Long userId) {
-        if (user != null) {
-            String nickname = safePublicDisplayName(user.getNickname());
-            if (nickname != null) return nickname;
-            String username = safePublicDisplayName(user.getUsername());
-            if (username != null) return username;
-        }
-        return defaultPublicDisplayName(userId);
+    private String resolveAuthorNickname(User user) {
+        return publicUserIdentityService.resolveDisplayName(user);
     }
 
-    private String normalizeAuthorNickname(String nickname, Long userId) {
+    private String normalizeAuthorNickname(String nickname, Long userId, String publicCode) {
         String safeName = safePublicDisplayName(nickname);
-        if (safeName != null) return safeName;
-        return defaultPublicDisplayName(userId);
-    }
-
-    private String publicUserName(String username, Long userId) {
-        String safeName = safePublicDisplayName(username);
-        if (safeName != null) return safeName;
-        return defaultPublicDisplayName(userId);
+        if (safeName != null && (userId == null || !safeName.equals("用户" + userId))) return safeName;
+        return publicCode == null ? "用户" : publicUserIdentityService.fallbackDisplayName(publicCode);
     }
 
     private String safePublicDisplayName(String value) {
@@ -1320,13 +1330,6 @@ public class CommunityServiceImpl implements CommunityService {
         }
         String trimmed = value.trim();
         return isPhoneLike(trimmed) ? null : trimmed;
-    }
-
-    private String defaultPublicDisplayName(Long userId) {
-        if (userId != null) {
-            return "用户" + userId;
-        }
-        return null;
     }
 
     private boolean isPhoneLike(String value) {

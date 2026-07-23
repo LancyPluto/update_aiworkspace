@@ -255,6 +255,61 @@ function modelHealthBadge(model: UnifiedApiModelItem) {
   return <Badge variant="outline" className="text-[10px]">模型未探活</Badge>
 }
 
+function normalizedContractStatus(value?: string | null) {
+  return (value || "DOCS_PENDING").trim().toUpperCase()
+}
+
+function modelContractBadge(model: Pick<UnifiedApiModelItem, "contractStatus">) {
+  if (normalizedContractStatus(model.contractStatus) === "READY") {
+    return <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700">契约就绪</Badge>
+  }
+  return <Badge variant="outline" className="border-amber-200 bg-amber-50 text-[10px] text-amber-800">文档待补</Badge>
+}
+
+function toDateTimeLocalValue(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value.slice(0, 16)
+  const offset = date.getTimezoneOffset() * 60_000
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16)
+}
+
+function toContractVerifiedAt(value?: string | null) {
+  const raw = (value || "").trim()
+  if (!raw) return ""
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(raw) ? `${raw}:00` : raw
+}
+
+function jsonObjectValidationError(value: string | undefined, label: string) {
+  const raw = (value || "").trim()
+  if (!raw) return `${label}不能为空`
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return `${label}必须是 JSON 对象`
+    }
+  } catch {
+    return `${label}不是合法 JSON`
+  }
+  return null
+}
+
+function requestSchemaValidationError(value: string | undefined) {
+  const objectError = jsonObjectValidationError(value, "请求 Schema JSON")
+  if (objectError) return objectError
+  const parsed = JSON.parse(value || "{}") as Record<string, unknown>
+  if (parsed.version == null || String(parsed.version).trim() === "") {
+    return "请求 Schema JSON 必须包含 version"
+  }
+  if (!Array.isArray(parsed.fields)) {
+    return "请求 Schema JSON 的 fields 必须是数组"
+  }
+  if (parsed.fields.some((field) => !field || typeof field !== "object" || Array.isArray(field))) {
+    return "请求 Schema JSON 的 fields 每一项都必须是对象"
+  }
+  return null
+}
+
 function accountCardTone(account: ModelVendorAccount) {
   if (!account.enabled) return ""
   if (isWarningStatus(account.healthStatus)) return "border-amber-200 bg-amber-50/70"
@@ -470,6 +525,12 @@ const emptyModelForm = (): ModelFormState => ({
   docsUrl: "",
   executionTask: "",
   executionOptionsJson: "",
+  requestSchemaJson: '{\n  "version": "1",\n  "fields": []\n}',
+  requestMappingJson: "{}",
+  responseMappingJson: "{}",
+  contractStatus: "DOCS_PENDING",
+  apiContractVersion: "",
+  contractVerifiedAt: "",
   timeoutSeconds: 60,
   inputTokenPricePer1m: 0,
   outputTokenPricePer1m: 0,
@@ -1322,6 +1383,12 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       capabilities,
       executionTask: routeTasksForModel(defaultProvider, capabilities)[0]?.value || "",
       executionOptionsJson: "",
+      requestSchemaJson: '{\n  "version": "1",\n  "fields": []\n}',
+      requestMappingJson: "{}",
+      responseMappingJson: "{}",
+      contractStatus: "DOCS_PENDING",
+      apiContractVersion: "",
+      contractVerifiedAt: "",
       billingUnit: (meta?.billingDefault as AgentModelConfigPayload["billingUnit"]) || "TOKEN_PER_M",
       enabled: true,
       agentEnabled: true,
@@ -1354,6 +1421,12 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       docsUrl: model.docsUrl || "",
       executionTask: model.executionTask || "",
       executionOptionsJson: "",
+      requestSchemaJson: model.requestSchemaJson || "{}",
+      requestMappingJson: model.requestMappingJson || "{}",
+      responseMappingJson: model.responseMappingJson || "{}",
+      contractStatus: normalizedContractStatus(model.contractStatus),
+      apiContractVersion: model.apiContractVersion || "",
+      contractVerifiedAt: toDateTimeLocalValue(model.contractVerifiedAt),
       enabled: true,
       agentEnabled: model.agentEnabled ?? true,
       isDefault: model.isDefault ?? false,
@@ -1432,6 +1505,29 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
         return
       }
     }
+    const contractJsonError = [
+      requestSchemaValidationError(modelForm.requestSchemaJson),
+      jsonObjectValidationError(modelForm.requestMappingJson, "请求映射 JSON"),
+      jsonObjectValidationError(modelForm.responseMappingJson, "响应映射 JSON"),
+    ].find(Boolean)
+    if (contractJsonError) {
+      setError(contractJsonError)
+      return
+    }
+    if (normalizedContractStatus(modelForm.contractStatus) === "READY") {
+      if (!modelForm.docsUrl?.trim()) {
+        setError("契约设为就绪前，请填写真实 API 文档地址")
+        return
+      }
+      if (!modelForm.apiContractVersion?.trim()) {
+        setError("契约设为就绪前，请填写 API 契约版本")
+        return
+      }
+      if (!modelForm.contractVerifiedAt?.trim()) {
+        setError("契约设为就绪前，请填写文档核验时间")
+        return
+      }
+    }
     setModelSaving(true)
     setError(null)
     try {
@@ -1440,6 +1536,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       delete modelPayload.endpointPath
       delete modelPayload.pricingCurrency
       delete modelPayload.exchangeRateToCny
+      modelPayload.contractVerifiedAt = toContractVerifiedAt(modelPayload.contractVerifiedAt)
       const payload: AgentModelConfigPayload = {
         ...modelPayload,
         apiKey: "",
@@ -1799,7 +1896,10 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                               {model.isDefault ? <Star className="ml-1 inline h-3 w-3 text-amber-500" /> : null}
                             </div>
                             <p className="truncate font-mono text-xs text-muted-foreground">{model.modelName}</p>
-                            <div className="mt-1">{modelHealthBadge(model)}</div>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {modelHealthBadge(model)}
+                              {modelContractBadge(model)}
+                            </div>
                             {model.routingExclusionReason ? (
                               <p
                                 className="mt-1 line-clamp-2 text-[11px] text-amber-800"
@@ -1898,22 +1998,27 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                         </div>
                       </TableCell>
                       <TableCell className="align-middle text-center">
-                        {model.docsUrl ? (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 px-2 text-xs"
-                            asChild
-                          >
-                            <a href={model.docsUrl} target="_blank" rel="noreferrer" title={model.docsUrl}>
-                              <ExternalLink className="mr-1 h-3 w-3" />
-                              API 文档
-                            </a>
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">未配置</span>
-                        )}
+                        <div className="grid justify-items-center gap-1">
+                          {model.docsUrl ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 px-2 text-xs"
+                              asChild
+                            >
+                              <a href={model.docsUrl} target="_blank" rel="noreferrer" title={model.docsUrl}>
+                                <ExternalLink className="mr-1 h-3 w-3" />
+                                API 文档
+                              </a>
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">未配置</span>
+                          )}
+                          <span className="max-w-[110px] truncate text-[10px] text-muted-foreground" title={model.apiContractVersion || undefined}>
+                            {model.apiContractVersion || "未核验"}
+                          </span>
+                        </div>
                       </TableCell>
                       <TableCell className="align-middle">
                         <div className="space-y-1 text-center text-xs text-muted-foreground">
@@ -2381,7 +2486,7 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
       </Dialog>
 
       <Dialog open={modelDialogOpen} onOpenChange={setModelDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>{modelForm.id ? "编辑模型" : "添加模型"}</DialogTitle>
             <DialogDescription>使用所属账户的 API 密钥，无需在此重复填写 Key。</DialogDescription>
@@ -2611,6 +2716,85 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
               </div>
               <p className="text-xs text-muted-foreground">
                 用于记录该模型的官方 API 文档，方便按文档调整参数表单、计费和限制。
+              </p>
+            </div>
+            <div className="space-y-4 rounded-md border p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <Label>模型 API 契约</Label>
+                  <p className="mt-1 text-xs text-muted-foreground">请求参数、上游字段映射和响应提取规则均保存在模型行。</p>
+                </div>
+                {modelContractBadge({ contractStatus: modelForm.contractStatus })}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="model-contract-status">契约状态</Label>
+                  <Select
+                    value={normalizedContractStatus(modelForm.contractStatus)}
+                    onValueChange={(value) => setModelForm((form) => ({ ...form, contractStatus: value }))}
+                  >
+                    <SelectTrigger id="model-contract-status">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="DOCS_PENDING">文档待补</SelectItem>
+                      <SelectItem value="READY">契约就绪</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="model-contract-version">契约版本</Label>
+                  <Input
+                    id="model-contract-version"
+                    value={modelForm.apiContractVersion || ""}
+                    placeholder="v1 / 2026-07-10"
+                    onChange={(event) => setModelForm((form) => ({ ...form, apiContractVersion: event.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="model-contract-verified-at">核验时间</Label>
+                  <Input
+                    id="model-contract-verified-at"
+                    type="datetime-local"
+                    value={modelForm.contractVerifiedAt || ""}
+                    onChange={(event) => setModelForm((form) => ({ ...form, contractVerifiedAt: event.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="model-request-schema">请求 Schema JSON</Label>
+                <Textarea
+                  id="model-request-schema"
+                  className="min-h-44 font-mono text-xs"
+                  value={modelForm.requestSchemaJson || ""}
+                  placeholder='{"version":"1","fields":[{"key":"generationMode","label":"生成方式","type":"string","control":"segmented","required":true,"enum":[]}]}'
+                  onChange={(event) => setModelForm((form) => ({ ...form, requestSchemaJson: event.target.value }))}
+                />
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="model-request-mapping">请求映射 JSON</Label>
+                  <Textarea
+                    id="model-request-mapping"
+                    className="min-h-36 font-mono text-xs"
+                    value={modelForm.requestMappingJson || ""}
+                    placeholder={'{"fields":{"prompt":"prompt"}}'}
+                    onChange={(event) => setModelForm((form) => ({ ...form, requestMappingJson: event.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="model-response-mapping">响应映射 JSON</Label>
+                  <Textarea
+                    id="model-response-mapping"
+                    className="min-h-36 font-mono text-xs"
+                    value={modelForm.responseMappingJson || ""}
+                    placeholder={'{"taskId":"id","mediaUrl":"data.url"}'}
+                    onChange={(event) => setModelForm((form) => ({ ...form, responseMappingJson: event.target.value }))}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                这些 JSON 不包含密钥，编辑时会完整回显；实际 API Key、AK/SK 仍只保存在账户卡片。
               </p>
             </div>
             <div className="grid gap-3 rounded-md border p-3 md:grid-cols-[180px_minmax(0,1fr)]">

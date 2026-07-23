@@ -2,7 +2,7 @@ import { ApiBusinessError, apiRequest } from "./client"
 import { fetchTaskById } from "./taskApi"
 import type { CommunityCollection, CommunityCreator, CommunityPost, CommunityTopic, PageResult, PublicUserProfile } from "./types"
 import {
-  collectMissingAuthorUserIds,
+  collectMissingAuthorPublicCodes,
   getCachedCommunityAuthorProfile,
   mergeCommunityPostAuthor,
   normalizeCommunityPost,
@@ -14,13 +14,13 @@ async function enrichCommunityPostsWithAuthors(
   posts: CommunityPost[],
   options?: { token?: string | null },
 ): Promise<CommunityPost[]> {
-  const missingUserIds = collectMissingAuthorUserIds(posts)
-  if (!missingUserIds.length) return posts
+  const missingPublicCodes = collectMissingAuthorPublicCodes(posts)
+  if (!missingPublicCodes.length) return posts
 
   await Promise.all(
-    missingUserIds.map(async (userId) => {
+    missingPublicCodes.map(async (publicCode) => {
       try {
-        const profile = await fetchPublicUser(userId, options)
+        const profile = await fetchPublicUser(publicCode, options)
         rememberCommunityAuthorProfile(profile)
       } catch {
         // Cards can still render with the post-level fallback author label.
@@ -28,7 +28,7 @@ async function enrichCommunityPostsWithAuthors(
     }),
   )
 
-  return posts.map((post) => mergeCommunityPostAuthor(post, getCachedCommunityAuthorProfile(post.userId)))
+  return posts.map((post) => mergeCommunityPostAuthor(post, getCachedCommunityAuthorProfile(post.authorPublicCode)))
 }
 
 function normalizeCommunityPage(page: PageResult<CommunityPost>, options?: { token?: string | null }) {
@@ -136,8 +136,8 @@ export async function fetchCommunityTopics(options?: { token?: string | null; li
   }
 }
 
-export function fetchCommunityCreator(userId: number | string, options?: { token?: string | null }) {
-  return apiRequest<CommunityCreator>("GET", `/api/v1/community/creators/${encodeURIComponent(String(userId))}`, {
+export function fetchCommunityCreator(publicCode: string, options?: { token?: string | null }) {
+  return apiRequest<CommunityCreator>("GET", `/api/v1/community/creators/${encodeURIComponent(publicCode)}`, {
     token: options?.token,
   })
 }
@@ -227,8 +227,8 @@ export function removeCommunityCollectionItem(
   )
 }
 
-export function fetchPublicUser(userId: number | string, options?: { token?: string | null }) {
-  return apiRequest<PublicUserProfile>("GET", `/api/v1/community/users/${encodeURIComponent(String(userId))}`, {
+export function fetchPublicUser(publicCode: string, options?: { token?: string | null }) {
+  return apiRequest<PublicUserProfile>("GET", `/api/v1/community/users/${encodeURIComponent(publicCode)}`, {
     token: options?.token,
   }).then((profile) => {
     rememberCommunityAuthorProfile(profile)
@@ -237,12 +237,12 @@ export function fetchPublicUser(userId: number | string, options?: { token?: str
 }
 
 export function fetchPublicUserPosts(
-  userId: number | string,
+  publicCode: string,
   options?: { token?: string | null; query?: { pageNo?: number; pageSize?: number; modality?: string } },
 ) {
   return apiRequest<PageResult<CommunityPost>>(
     "GET",
-    `/api/v1/community/users/${encodeURIComponent(String(userId))}/posts`,
+    `/api/v1/community/users/${encodeURIComponent(publicCode)}/posts`,
     {
       token: options?.token,
       query: options?.query,
@@ -284,7 +284,7 @@ export function unpublishCommunityPost(postId: number | string, options?: { toke
 
 export async function resolvePublishedCommunityPostId(
   taskId: number,
-  options?: { token?: string | null; userId?: number | null; hint?: number | null },
+  options?: { token?: string | null; publicCode?: string | null; hint?: number | null },
 ): Promise<number | null> {
   if (options?.hint) return options.hint
 
@@ -297,9 +297,9 @@ export async function resolvePublishedCommunityPostId(
     }
   }
 
-  if (options?.token && options.userId) {
+  if (options?.token && options.publicCode) {
     try {
-      const page = await fetchPublicUserPosts(options.userId, {
+      const page = await fetchPublicUserPosts(options.publicCode, {
         token: options.token,
         query: { pageNo: 1, pageSize: 200 },
       })

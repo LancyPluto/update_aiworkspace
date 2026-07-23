@@ -25,6 +25,7 @@ import com.aiminilab.aitoolmarket.workflow.entity.WorkflowRun;
 import com.aiminilab.aitoolmarket.workflow.entity.WorkflowRunStep;
 import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowRunMapper;
 import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowRunStepMapper;
+import com.aiminilab.aitoolmarket.workflow.support.WorkflowFailureContract;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -274,8 +275,11 @@ public class WorkflowExecutionService {
         if (step == null || !STEP_FAILED.equals(step.getStatus())) {
             return;
         }
-        String errorMessage = request.errorMessage() == null ? "Workflow step failed" : request.errorMessage();
-        failRun(step.getRunId(), errorMessage);
+        failRun(step.getRunId(), WorkflowFailureContract.from(
+                request.errorCode(),
+                request.errorMessage(),
+                request.developerMessage()
+        ));
     }
 
     public boolean isWorkflowStepTask(JsonNode params) {
@@ -453,7 +457,7 @@ public class WorkflowExecutionService {
         }
     }
 
-    private void failRun(Long runId, String errorMessage) {
+    private void failRun(Long runId, WorkflowFailureContract failure) {
         WorkflowRun run = requireRun(runId);
         if (TERMINAL_RUN_STATUSES.contains(run.getStatus()) || RUN_CANCELLING.equals(run.getStatus())) {
             return;
@@ -462,7 +466,11 @@ public class WorkflowExecutionService {
             throw new IllegalStateException("Workflow run cannot fail from status: " + run.getStatus());
         }
         String expectedStatus = run.getStatus();
-        run.setErrorMessage(limit(errorMessage, 1900));
+        run.setErrorCode(failure.errorCode());
+        run.setErrorMessage(failure.developerMessage());
+        run.setUserMessage(failure.userMessage());
+        run.setDeveloperMessage(failure.developerMessage());
+        run.setFailureTraceId(failure.failureTraceId());
         run.setFinishedAt(LocalDateTime.now());
         persistRunState(run, expectedStatus, RUN_FAILED);
         comicWorkflowResultProjector.projectFailed(run.getId());
@@ -474,12 +482,15 @@ public class WorkflowExecutionService {
                 rootTask.getId(),
                 rootTask.getEstimatedCreditCost()
         );
-        if (taskMapper.markFailed(
+        if (taskMapper.markFailedWithContract(
                 rootTask.getId(),
                 TaskStatus.FAILED.name(),
-                ErrorCode.MODEL_CALL_FAILED.name(),
-                limit("工作流失败：" + (errorMessage == null ? "" : errorMessage), 240),
-                limit(errorMessage, 4000),
+                failure.errorCode(),
+                failure.userMessage(),
+                failure.developerMessage(),
+                failure.failureTraceId(),
+                null,
+                null,
                 List.of(
                         TaskStatus.QUEUED.name(),
                         TaskStatus.PROCESSING.name(),
@@ -508,7 +519,11 @@ public class WorkflowExecutionService {
             throw new IllegalStateException("Workflow run cannot succeed from status: " + run.getStatus());
         }
         run.setFinishedAt(LocalDateTime.now());
+        run.setErrorCode(null);
         run.setErrorMessage(null);
+        run.setUserMessage(null);
+        run.setDeveloperMessage(null);
+        run.setFailureTraceId(null);
         persistRunState(run, RUN_RUNNING, RUN_SUCCESS);
         return true;
     }
@@ -725,14 +740,17 @@ public class WorkflowExecutionService {
 
     private void persistRunState(WorkflowRun run, String expectedStatus, String nextStatus) {
         long expectedRevision = run.getRevision() == null ? 0L : run.getRevision();
-        if (workflowRunMapper.updateRunState(
+        if (workflowRunMapper.updateRunStateWithContract(
                 run.getId(),
                 expectedRevision,
                 expectedStatus,
                 nextStatus,
                 run.getContextJson(),
                 run.getCurrentNodeId(),
-                run.getErrorMessage(),
+                run.getErrorCode(),
+                run.getUserMessage(),
+                run.getDeveloperMessage(),
+                run.getFailureTraceId(),
                 run.getFinishedAt()
         ) != 1) {
             throw new IllegalStateException("Workflow run state compare-and-set failed: " + run.getId());
@@ -746,7 +764,7 @@ public class WorkflowExecutionService {
                                           String nextStatus,
                                           String inputJson) {
         long expectedRevision = run.getRevision() == null ? 0L : run.getRevision();
-        if (workflowRunMapper.updateRunStateWithInput(
+        if (workflowRunMapper.updateRunStateWithInputContract(
                 run.getId(),
                 expectedRevision,
                 expectedStatus,
@@ -754,7 +772,10 @@ public class WorkflowExecutionService {
                 inputJson,
                 run.getContextJson(),
                 run.getCurrentNodeId(),
-                run.getErrorMessage(),
+                run.getErrorCode(),
+                run.getUserMessage(),
+                run.getDeveloperMessage(),
+                run.getFailureTraceId(),
                 run.getFinishedAt()
         ) != 1) {
             throw new IllegalStateException("Workflow run input compare-and-set failed: " + run.getId());

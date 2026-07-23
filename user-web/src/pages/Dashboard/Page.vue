@@ -5,6 +5,7 @@ import {
   AtSign,
   ArrowRight,
   Bot,
+  Check,
   ChevronDown,
   Clock,
   Download,
@@ -60,7 +61,7 @@ import type { AudioTrackItem, ResultBlock } from "@/types/result"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { buildTaskResultBlocks, formatAudioDuration, resolveAudioTracks } from "@/utils/taskResultBlocks"
-import { isCoreField } from "@/utils/fieldUiMeta"
+import { isFieldRequired, resolveVisibleCoreField } from "@/utils/fieldUiMeta"
 import { consumeDashboardPendingAsset } from "@/utils/assetReplay"
 import { cleanToolDisplayText, toolDisplayDescription } from "@/utils/toolDisplayText"
 import { recommendToolsForAsset as recommendAssetTools } from "@/utils/assetToolRecommendations"
@@ -81,6 +82,13 @@ import { isWorkflowToolCode } from "@/adapters/toolPresentationAdapter"
 import { taskFailureHint, taskProgressMessage } from "@/utils/taskStatusLabels"
 import { buildTaskProgressView } from "@/utils/taskProgressView"
 import { inferTaskAspectRatio } from "@/utils/taskAspectRatio"
+import {
+  buildEffectiveToolFields,
+  generationModeValue,
+  parseModelRequestSchema,
+  prepareModelParams,
+  resolveDefaultModelConfigId,
+} from "@/utils/modelRequestSchema"
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -99,8 +107,15 @@ const selectedModality = ref("IMAGE")
 const selectedToolCode = ref<string | null>(null)
 const promptText = ref("")
 const modelPickerOpen = ref(false)
+const modelConfigPickerOpen = ref(false)
 const modelSearch = ref("")
 const selectedChatTool = ref<AITool | null>(null)
+const selectedModelConfigId = ref<number | null>(null)
+const activeGenerationMode = ref("")
+const capabilityRenderVersion = ref(0)
+const capabilityParamBuckets = new Map<string, Record<string, unknown>>()
+const capabilityPromptBuckets = new Map<string, string>()
+const pendingReplayModelConfigId = ref<number | null>(null)
 const selectedToolDetailLoading = ref(false)
 let selectedToolDetailRequestVersion = 0
 const capabilityRef = ref<InstanceType<typeof CapabilityControls> | null>(null)
@@ -255,10 +270,46 @@ const selectedTool = computed(() => {
     : currentTools.value[0] || null
 })
 
-const coreField = computed(() => {
-  const fields = selectedChatTool.value?.fields || []
-  return fields.find((field) => isCoreField(field)) || null
+const supportedModels = computed(() => selectedChatTool.value?.supportedModels || [])
+
+const selectedSupportedModel = computed(() =>
+  supportedModels.value.find((model) => model.modelConfigId === selectedModelConfigId.value) || null,
+)
+
+const selectedModelLabel = computed(() =>
+  selectedSupportedModel.value?.displayName
+  || selectedTool.value?.modelDisplayName
+  || "默认模型",
+)
+
+const effectiveFields = computed(() =>
+  buildEffectiveToolFields(selectedChatTool.value?.fields || [], selectedSupportedModel.value),
+)
+
+const selectedRequestSchema = computed(() =>
+  parseModelRequestSchema(selectedSupportedModel.value?.requestSchemaJson),
+)
+
+const effectiveCapabilities = computed(() => {
+  const capabilities = selectedChatTool.value?.capabilities || []
+  return selectedRequestSchema.value
+    ? capabilities.filter((capability) => capability.type !== "imageGeneration")
+    : capabilities
 })
+
+const coreField = computed(() => resolveVisibleCoreField(effectiveFields.value, capabilityParams.value))
+const coreInputRequired = computed(() =>
+  coreField.value
+    ? isFieldRequired(coreField.value, capabilityParams.value)
+    : !selectedRequestSchema.value,
+)
+
+const capabilityControlKey = computed(() => [
+  selectedChatTool.value?.id || "none",
+  selectedModelConfigId.value ?? "legacy",
+  activeGenerationMode.value || "default",
+  capabilityRenderVersion.value,
+].join(":"))
 
 const coreFieldPlaceholder = computed(() => {
   const field = coreField.value
@@ -315,11 +366,15 @@ const estimateInput = computed<UseTaskEstimateInput | null>(() => {
   if (content) {
     const key = coreField.value?.fieldKey
     if (key) params[key] = content
-    else if (!("prompt" in params)) params.prompt = content
+    else if (!selectedRequestSchema.value && !("prompt" in params)) {
+      params.prompt = content
+      params.text = content
+    }
   }
   return {
     toolCode: tool.toolCode,
     params,
+    modelConfigId: selectedModelConfigId.value,
     skip: usesVariableWorkflowCredits(tool),
   }
 })
@@ -628,15 +683,19 @@ function selectModality(key: string) {
   featuredToolsExpanded.value = false
   modelSearch.value = ""
   modelPickerOpen.value = false
+  modelConfigPickerOpen.value = false
   replayParams.value = null
+  pendingReplayModelConfigId.value = null
   void reloadTasksForCurrentModality()
 }
 
 function selectTool(tool: ToolSummary) {
   selectedToolCode.value = tool.toolCode
   modelPickerOpen.value = false
+  modelConfigPickerOpen.value = false
   expandComposer()
   replayParams.value = null
+  pendingReplayModelConfigId.value = null
   submitError.value = ""
   submitNotice.value = ""
 }
@@ -644,6 +703,10 @@ function selectTool(tool: ToolSummary) {
 function selectToolByCode(toolCode: string, openComposer = false) {
   const tool = tools.value.find((item) => item.toolCode === toolCode)
   if (!tool) return
+  if (selectedToolCode.value !== tool.toolCode) {
+    replayParams.value = null
+    pendingReplayModelConfigId.value = null
+  }
   selectedModality.value = resolveDashboardModality(tool)
   selectedToolCode.value = tool.toolCode
   if (openComposer) expandComposer()
@@ -756,8 +819,83 @@ function closeComposerMediaPreview() {
   if (focusTarget?.isConnected) void nextTick(() => focusTarget.focus({ preventScroll: true }))
 }
 
+function capabilityBucketKey(modelConfigId: number | null, generationMode: string) {
+  return [
+    selectedChatTool.value?.id || selectedToolCode.value || "unknown",
+    modelConfigId ?? "legacy",
+    generationMode || "default",
+  ].join(":")
+}
+
+function persistCurrentCapabilityBucket(params = capabilityParams.value) {
+  if (!selectedChatTool.value) return
+  const mode = activeGenerationMode.value || generationModeValue(effectiveFields.value, params)
+  const key = capabilityBucketKey(selectedModelConfigId.value, mode)
+  capabilityParamBuckets.set(key, { ...params })
+  capabilityPromptBuckets.set(key, promptText.value)
+}
+
+function activateModelContext(
+  modelConfigId: number | null,
+  source: Record<string, unknown> | null,
+  preferStored = true,
+) {
+  const model = supportedModels.value.find((item) => item.modelConfigId === modelConfigId) || null
+  const fields = buildEffectiveToolFields(selectedChatTool.value?.fields || [], model)
+  const prepared = prepareModelParams(fields, source)
+  const mode = generationModeValue(fields, prepared)
+  const key = capabilityBucketKey(modelConfigId, mode)
+  const stored = capabilityParamBuckets.get(key)
+  const initial = preferStored && stored ? prepareModelParams(fields, stored) : prepared
+  if (mode) initial.generationMode = mode
+  if (preferStored && capabilityPromptBuckets.has(key)) {
+    promptText.value = capabilityPromptBuckets.get(key) || ""
+  }
+
+  selectedModelConfigId.value = modelConfigId
+  activeGenerationMode.value = mode
+  capabilityParams.value = { ...initial }
+  replayParams.value = { ...initial }
+  capabilityRenderVersion.value += 1
+}
+
+function selectModelConfig(modelConfigId: number) {
+  if (modelConfigId === selectedModelConfigId.value) {
+    modelConfigPickerOpen.value = false
+    return
+  }
+  const previous = { ...capabilityParams.value }
+  persistCurrentCapabilityBucket(previous)
+  activateModelContext(modelConfigId, previous)
+  modelConfigPickerOpen.value = false
+  submitError.value = ""
+}
+
 function onCapabilityParamsChange(params: Record<string, unknown>) {
-  capabilityParams.value = params
+  const nextMode = generationModeValue(effectiveFields.value, params)
+  if (nextMode !== activeGenerationMode.value) {
+    persistCurrentCapabilityBucket()
+    const nextKey = capabilityBucketKey(selectedModelConfigId.value, nextMode)
+    const stored = capabilityParamBuckets.get(nextKey)
+    const storedPrompt = capabilityPromptBuckets.get(nextKey)
+    const next = stored
+      ? prepareModelParams(effectiveFields.value, stored)
+      : prepareModelParams(effectiveFields.value, params)
+    if (nextMode) next.generationMode = nextMode
+    if (storedPrompt !== undefined) promptText.value = storedPrompt
+    activeGenerationMode.value = nextMode
+    capabilityParams.value = { ...next }
+    replayParams.value = { ...next }
+    capabilityParamBuckets.set(nextKey, { ...next })
+    if (storedPrompt === undefined) capabilityPromptBuckets.set(nextKey, promptText.value)
+    capabilityRenderVersion.value += 1
+    return
+  }
+  capabilityParams.value = { ...params }
+  capabilityParamBuckets.set(
+    capabilityBucketKey(selectedModelConfigId.value, activeGenerationMode.value),
+    { ...params },
+  )
 }
 
 function openComposerMediaUpload(fieldKey?: string) {
@@ -837,6 +975,7 @@ function collapseComposerForPreview(manual = true) {
   if (manual) composerManuallyClosed.value = true
   composerOpen.value = false
   modelPickerOpen.value = false
+  modelConfigPickerOpen.value = false
   capabilityRef.value?.closeComposerPopovers?.()
 }
 
@@ -874,18 +1013,24 @@ async function createWithSelectedTool() {
     submitError.value = "工具配置加载失败，请重新选择模型"
     return
   }
+  if (supportedModels.value.length > 0 && selectedModelConfigId.value == null) {
+    submitError.value = "请选择要使用的模型"
+    return
+  }
   if (capabilityRef.value?.hasPendingUploads()) {
     submitError.value = "文件上传中，请稍候"
     return
   }
-  const check = capabilityRef.value?.validate()
+  const content = promptText.value.trim()
+  const check = capabilityRef.value?.validate(
+    coreField.value ? { [coreField.value.fieldKey]: content } : {},
+  )
   if (check && !check.valid) {
     submitError.value = check.message || "请完善必填项"
     return
   }
 
-  const content = promptText.value.trim()
-  if (!content) {
+  if (!content && coreInputRequired.value) {
     submitError.value = "请输入创作提示词"
     return
   }
@@ -895,6 +1040,7 @@ async function createWithSelectedTool() {
     prompt: content,
     params,
     coreFieldKey: coreField.value?.fieldKey,
+    includePromptAliases: !selectedRequestSchema.value,
     attachments,
   })
   attribution.value = mergePendingAssetAttribution(dashboardAttributionFromRoute(route), pendingAssetReplay.value)
@@ -906,6 +1052,7 @@ async function createWithSelectedTool() {
       {
         toolCode: tool.toolCode,
         params: taskParams,
+        modelConfigId: selectedModelConfigId.value,
         clientRequestId: randomUUID(),
         sourcePostId,
       },
@@ -919,6 +1066,8 @@ async function createWithSelectedTool() {
       params: taskParams,
       selectedModality: selectedModality.value,
       userId: auth.user?.id ?? 0,
+      modelConfigId: selectedModelConfigId.value,
+      modelConfigName: selectedSupportedModel.value?.displayName,
     })
     shouldScrollHistoryFeedToBottom.value = true
     upsertTask(optimisticTask, true)
@@ -1183,7 +1332,7 @@ function canCancelTask(status?: TaskStatus): boolean {
 
 function taskProgressSubtitle(task: TaskDetail, runningFallback: string): string {
   if (canRetryTask(task.status)) {
-    return taskFailureHint(task.status, [task.progressMessage]) || runningFallback
+    return taskFailureHint(task.status, [task.userMessage, task.errorMessage, task.progressMessage]) || runningFallback
   }
   return taskProgressMessage(task.status, task.progressMessage) || runningFallback
 }
@@ -1709,13 +1858,23 @@ function useAssetWithTool(tool: AssetPreviewRecommendation, asset: AssetPreviewI
   selectedToolCode.value = tool.toolCode
   promptText.value = asset.prompt || promptText.value
   pendingAssetReplay.value = asset
-  replayParams.value = buildAssetReplayParams(selectedChatTool.value?.fields || [], asset)
+  if (selectedChatTool.value?.id === tool.toolCode) {
+    activateModelContext(
+      selectedModelConfigId.value,
+      buildAssetReplayParams(effectiveFields.value, asset),
+      false,
+    )
+  } else {
+    replayParams.value = null
+  }
   previewAsset.value = null
   expandComposer()
 }
 
 function materialKindForField(field: ToolField): AssetPreviewItem["kind"] | "file" {
-  if (field.fieldType === "image") return "image"
+  if (["image", "image_upload", "multi_image"].includes(field.fieldType)) return "image"
+  if (["video_upload", "multi_video"].includes(field.fieldType)) return "video"
+  if (["audio_upload", "multi_audio"].includes(field.fieldType)) return "audio"
   const text = `${field.fieldKey} ${field.fieldName} ${field.placeholder || ""}`.toLowerCase()
   if (/image|img|picture|photo|frame|cover|avatar|poster|图片|图像|照片|帧|封面|首图/.test(text)) return "image"
   if (/video|clip|movie|视频|短片|影片/.test(text)) return "video"
@@ -1731,13 +1890,24 @@ function buildAssetReplayParams(fields: ToolField[], asset: AssetPreviewItem): R
   }
   if (!asset.url) return params
 
-  const mediaFields = fields.filter((field) => field.fieldType === "image" || field.fieldType === "file")
+  const mediaFields = fields.filter((field) => [
+    "image",
+    "image_upload",
+    "video_upload",
+    "audio_upload",
+    "multi_image",
+    "multi_video",
+    "multi_audio",
+    "file",
+  ].includes(field.fieldType))
   const exact = mediaFields.find((field) => materialKindForField(field) === asset.kind)
   const fallback =
     exact ||
     mediaFields.find((field) => materialKindForField(field) === "file") ||
     mediaFields[0]
-  if (fallback) params[fallback.fieldKey] = asset.url
+  if (fallback) {
+    params[fallback.fieldKey] = fallback.fieldType.startsWith("multi_") ? [asset.url] : asset.url
+  }
   return params
 }
 
@@ -1816,10 +1986,20 @@ function formatTaskTime(value?: string | null): string {
 
 function replayTask(task: TaskDetail) {
   const modality = normalizeModality(task.outputModality)
+  const normalizedParams = normalizeReplayParams(task.params || {})
   selectedModality.value = modality
   selectedToolCode.value = task.toolCode
   promptText.value = taskPrompt(task)
-  replayParams.value = normalizeReplayParams(task.params || {})
+  pendingReplayModelConfigId.value = task.modelConfigId ?? null
+  if (selectedChatTool.value?.id === task.toolCode) {
+    const requestedModelId = supportedModels.value.some((model) => model.modelConfigId === task.modelConfigId)
+      ? task.modelConfigId ?? null
+      : resolveDefaultModelConfigId(supportedModels.value, selectedChatTool.value.defaultModelConfigId)
+    activateModelContext(requestedModelId, normalizedParams, false)
+    pendingReplayModelConfigId.value = null
+  } else {
+    replayParams.value = normalizedParams
+  }
   expandComposer()
 }
 
@@ -1856,6 +2036,10 @@ function looksLikeStoredMediaUrl(value: string): boolean {
 
 function resetSelectedToolPresentation() {
   selectedChatTool.value = null
+  selectedModelConfigId.value = null
+  activeGenerationMode.value = ""
+  modelConfigPickerOpen.value = false
+  capabilityRenderVersion.value += 1
   composerMediaSlots.value = []
   capabilityParams.value = {}
   primaryReferenceInfo.value = {
@@ -1883,14 +2067,24 @@ async function loadSelectedToolDetail(toolCode: string) {
     const detail = await fetchAIToolById(toolCode, { token: auth.token })
     if (requestVersion !== selectedToolDetailRequestVersion || selectedToolCode.value !== toolCode) return
     selectedChatTool.value = detail
-    const subjectReplay = buildSubjectReplayParams(detail.fields || [])
+    const models = detail.supportedModels || []
+    const requestedModelId = pendingReplayModelConfigId.value
+    const initialModelId = requestedModelId != null && models.some((model) => model.modelConfigId === requestedModelId)
+      ? requestedModelId
+      : resolveDefaultModelConfigId(models, detail.defaultModelConfigId)
+    const initialModel = models.find((model) => model.modelConfigId === initialModelId) || null
+    const fields = buildEffectiveToolFields(detail.fields || [], initialModel)
+    const subjectReplay = buildSubjectReplayParams(fields)
+    let initialParams = replayParams.value
     if (subjectReplay) {
-      replayParams.value = subjectReplay
+      initialParams = subjectReplay
       expandComposer()
     } else if (pendingAssetReplay.value) {
-      replayParams.value = buildAssetReplayParams(detail.fields || [], pendingAssetReplay.value)
+      initialParams = buildAssetReplayParams(fields, pendingAssetReplay.value)
       if (pendingAssetReplay.value.prompt) promptText.value = pendingAssetReplay.value.prompt
     }
+    activateModelContext(initialModelId, initialParams, initialParams == null)
+    pendingReplayModelConfigId.value = null
   } finally {
     if (requestVersion === selectedToolDetailRequestVersion) selectedToolDetailLoading.value = false
   }
@@ -3211,7 +3405,7 @@ onUnmounted(() => {
                   <button
                     type="button"
                     class="dashboard-pollo-chip dashboard-pollo-chip--model"
-                    @click="modelPickerOpen = !modelPickerOpen"
+                    @click="modelPickerOpen = !modelPickerOpen; modelConfigPickerOpen = false"
                   >
                     <span class="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md bg-white/8 text-primary">
                       <video
@@ -3332,14 +3526,61 @@ onUnmounted(() => {
                   </div>
                 </div>
 
+                <div v-if="supportedModels.length > 1" class="relative min-w-0">
+                  <button
+                    type="button"
+                    class="dashboard-pollo-chip min-w-0 max-w-56"
+                    aria-haspopup="listbox"
+                    :aria-expanded="modelConfigPickerOpen"
+                    title="选择生成模型"
+                    @click.stop="modelConfigPickerOpen = !modelConfigPickerOpen; modelPickerOpen = false"
+                  >
+                    <span class="min-w-0 truncate">{{ selectedModelLabel }}</span>
+                    <ChevronDown
+                      class="h-3.5 w-3.5 shrink-0 text-white/50 transition"
+                      :class="modelConfigPickerOpen ? 'rotate-180' : ''"
+                    />
+                  </button>
+                  <div
+                    v-if="modelConfigPickerOpen"
+                    class="absolute bottom-full left-0 z-40 mb-2 max-h-72 w-[min(320px,calc(100vw-48px))] overflow-y-auto rounded-xl border border-white/12 bg-[#08090d] p-1.5 shadow-[0_20px_52px_rgb(0_0_0_/_0.62)]"
+                    role="listbox"
+                    aria-label="生成模型"
+                    data-capability-overlay
+                  >
+                    <button
+                      v-for="model in supportedModels"
+                      :key="model.modelConfigId"
+                      type="button"
+                      role="option"
+                      :aria-selected="model.modelConfigId === selectedModelConfigId"
+                      class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition hover:bg-white/8"
+                      :class="model.modelConfigId === selectedModelConfigId ? 'bg-white/8 text-white' : 'text-white/65'"
+                      @click.stop="selectModelConfig(model.modelConfigId)"
+                    >
+                      <span class="min-w-0 flex-1">
+                        <span class="block truncate">{{ model.displayName }}</span>
+                        <span v-if="model.provider" class="mt-0.5 block truncate text-[11px] text-white/38">
+                          {{ model.provider }}
+                        </span>
+                      </span>
+                      <Check
+                        v-if="model.modelConfigId === selectedModelConfigId"
+                        class="h-4 w-4 shrink-0 text-primary"
+                      />
+                    </button>
+                  </div>
+                </div>
+
                 <CapabilityControls
                   v-if="selectedChatTool && selectedChatTool.id === selectedToolCode"
-                  :key="selectedChatTool.id"
+                  :key="capabilityControlKey"
                   ref="capabilityRef"
                   layout="composer"
-                  :capabilities="selectedChatTool.capabilities || []"
-                  :fields="selectedChatTool.fields || []"
+                  :capabilities="effectiveCapabilities"
+                  :fields="effectiveFields"
                   :core-field-key="coreField?.fieldKey"
+                  :requires-any-groups="selectedRequestSchema?.requiresAnyGroups"
                   :output-modality="selectedTool?.outputModality"
                   :input-modality="selectedTool?.inputModality"
                   :tool-id="selectedChatTool.id"
@@ -3375,7 +3616,7 @@ onUnmounted(() => {
                   type="button"
                   class="dashboard-pollo-generate ml-auto shrink-0"
                   :class="{ 'dashboard-pollo-generate--insufficient': creditInsufficient }"
-                  :disabled="!selectedTool || submitting || selectedToolDetailLoading"
+                  :disabled="!selectedTool || submitting || selectedToolDetailLoading || (supportedModels.length > 0 && selectedModelConfigId == null)"
                   @click.stop="createWithSelectedTool"
                 >
                   <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />

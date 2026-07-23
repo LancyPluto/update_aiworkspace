@@ -1,6 +1,8 @@
-import type { ApiErrorCode, ApiResponse } from "./types"
 import { SESSION_TOKEN_STORAGE_KEY } from "@/constants/authStorage"
 import { clearSessionBearerJwt } from "./sessionBearer"
+import { ApiBusinessError, isErrorResponse, isSuccessResponse, parseJsonBody, toUserApiError } from "./apiError"
+
+export { ApiBusinessError } from "./apiError"
 
 /**
  * 后端 Origin，不含路径。例如 http://localhost:8080
@@ -27,22 +29,6 @@ export function getRequestBaseUrl(): string {
     return raw
   }
   return typeof window !== "undefined" ? window.location.origin : "http://localhost"
-}
-
-export class ApiBusinessError extends Error {
-  readonly code: ApiErrorCode
-  readonly traceId?: string
-
-  constructor(code: ApiErrorCode, message: string, traceId?: string) {
-    super(message)
-    this.name = "ApiBusinessError"
-    this.code = code
-    this.traceId = traceId
-  }
-
-  get requestId(): string | undefined {
-    return this.traceId
-  }
 }
 
 export interface RequestOptions {
@@ -89,6 +75,17 @@ function redirectToLoginPage(): void {
   window.location.assign(`${window.location.origin}${loginPath}?redirect=${encodeURIComponent(full)}`)
 }
 
+export async function apiErrorFromResponse(
+  response: Response,
+  options?: { fallbackMessage?: string; skipAuthRedirect?: boolean },
+): Promise<ApiBusinessError> {
+  const payload = parseJsonBody(await response.text())
+  if (response.status === 401 && !options?.skipAuthRedirect) {
+    redirectToLoginPage()
+  }
+  return toUserApiError(payload, response.status, options?.fallbackMessage)
+}
+
 /**
  * 统一解析契约响应壳；code !== SUCCESS 时抛 ApiBusinessError。
  * credentials + Cookie；Authorization 仅使用 options.token（脚本/调试兼容）。
@@ -132,34 +129,20 @@ export async function apiRequest<T>(
         ? `请确认后端已启动（默认 ${getApiOrigin() || `${window.location.origin}/api`} → 8080）`
         : "请确认后端已启动"
     const message = error instanceof TypeError ? `无法连接服务器（${error.message}）。${hint}` : String(error)
-    throw new ApiBusinessError("SYSTEM_ERROR", message, undefined)
+    throw new ApiBusinessError({ errorCode: "SYSTEM_ERROR", userMessage: message })
   }
 
   const rawText = await res.text()
-  let json: ApiResponse<T>
-  try {
-    json = (rawText ? JSON.parse(rawText) : {}) as ApiResponse<T>
-  } catch {
-    if (res.status === 401 && !options?.skipAuthRedirect) {
-      redirectToLoginPage()
-      throw new ApiBusinessError("UNAUTHORIZED", "登录已失效，请重新登录", undefined)
-    }
-    if (res.status === 401) {
-      throw new ApiBusinessError("UNAUTHORIZED", "登录已失效，请重新登录", undefined)
-    }
-    throw new ApiBusinessError("SYSTEM_ERROR", `无效响应 (${res.status})`, undefined)
+  const payload = parseJsonBody(rawText)
+  if (res.status === 401 && !options?.skipAuthRedirect) {
+    redirectToLoginPage()
+  }
+  if (!res.ok || isErrorResponse(payload)) {
+    throw toUserApiError(payload, res.status, `请求失败 (${res.status})`)
+  }
+  if (!isSuccessResponse(payload)) {
+    throw toUserApiError(payload, res.status, `无效响应 (${res.status})`)
   }
 
-  if (res.status === 401 || json.code === "UNAUTHORIZED") {
-    if (!options?.skipAuthRedirect) {
-      redirectToLoginPage()
-    }
-    throw new ApiBusinessError(json.code ?? "UNAUTHORIZED", json.message ?? "登录已失效，请重新登录", json.requestId)
-  }
-
-  if (json.code !== "SUCCESS") {
-    throw new ApiBusinessError(json.code, json.message ?? json.code, json.traceId ?? json.requestId)
-  }
-
-  return json.data as T
+  return payload.data as T
 }

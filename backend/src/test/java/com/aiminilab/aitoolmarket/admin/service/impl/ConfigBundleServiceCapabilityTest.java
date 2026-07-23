@@ -23,9 +23,11 @@ import com.aiminilab.aitoolmarket.tool.dto.ToolSummaryResponse;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.entity.ToolCategory;
+import com.aiminilab.aitoolmarket.tool.entity.ToolModelBinding;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolCategoryMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldSchemaMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolModelBindingMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptVersionMapper;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.WorkflowService;
@@ -58,6 +60,7 @@ class ConfigBundleServiceCapabilityTest {
     private final ToolService toolService = mock(ToolService.class);
     private final WorkflowService workflowService = mock(WorkflowService.class);
     private final ToolMapper toolMapper = mock(ToolMapper.class);
+    private final ToolModelBindingMapper toolModelBindingMapper = mock(ToolModelBindingMapper.class);
     private final ToolFieldSchemaMapper fieldSchemaMapper = mock(ToolFieldSchemaMapper.class);
     private final ToolCategoryMapper categoryMapper = mock(ToolCategoryMapper.class);
     private final ModelVendorAccountMapper vendorAccountMapper = mock(ModelVendorAccountMapper.class);
@@ -75,6 +78,7 @@ class ConfigBundleServiceCapabilityTest {
                 toolService,
                 workflowService,
                 toolMapper,
+                toolModelBindingMapper,
                 fieldSchemaMapper,
                 categoryMapper,
                 mock(ToolPromptVersionMapper.class),
@@ -129,6 +133,59 @@ class ConfigBundleServiceCapabilityTest {
     }
 
     @Test
+    void selectedToolBundle_roundTripsOrderedModelBindingsAndDefault() {
+        ToolCategoryResponse category = new ToolCategoryResponse(3L, "media", "Media", 0, "ACTIVE");
+        when(toolService.adminCategories()).thenReturn(List.of(category));
+        ToolSummaryResponse summary = summary(List.of("VIDEO_GENERATION"));
+        when(toolService.adminTools(null, null, null, 1, 200))
+                .thenReturn(new PageResponse<>(List.of(summary), 1, 1, 200, false));
+        when(toolService.adminFields(10L)).thenReturn(List.of());
+        when(toolService.prompts(10L)).thenReturn(List.of());
+
+        AgentModelConfigResponse firstResponse = mock(AgentModelConfigResponse.class);
+        when(firstResponse.id()).thenReturn(44L);
+        when(firstResponse.configCode()).thenReturn("video_model_a");
+        AgentModelConfigResponse secondResponse = mock(AgentModelConfigResponse.class);
+        when(secondResponse.id()).thenReturn(45L);
+        when(secondResponse.configCode()).thenReturn("video_model_b");
+        when(agentModelConfigService.adminList()).thenReturn(List.of(firstResponse, secondResponse));
+        when(toolModelBindingMapper.findByToolId(10L)).thenReturn(List.of(
+                binding(10L, 45L, true, 1),
+                binding(10L, 44L, false, 0)
+        ));
+
+        ConfigBundleDto exported = service.exportBundle(7L, false, List.of("capability_tool"), true);
+
+        ConfigBundleDto.Tool exportedTool = exported.tools().get(0);
+        assertThat(exportedTool.modelConfigCode()).isEqualTo("video_model_b");
+        assertThat(exportedTool.modelConfigCodes()).containsExactly("video_model_a", "video_model_b");
+        assertThat(exportedTool.defaultModelConfigCode()).isEqualTo("video_model_b");
+
+        ToolCategory categoryEntity = new ToolCategory();
+        categoryEntity.setId(3L);
+        categoryEntity.setCategoryCode("media");
+        when(categoryMapper.selectList(any())).thenReturn(List.of(categoryEntity));
+        AgentModelConfig first = readyModel(44L);
+        AgentModelConfig second = readyModel(45L);
+        when(agentModelConfigMapper.findActiveById(44L)).thenReturn(first);
+        when(agentModelConfigMapper.findActiveById(45L)).thenReturn(second);
+        when(modelCapabilityService.isContractReady(first)).thenReturn(true);
+        when(modelCapabilityService.isContractReady(second)).thenReturn(true);
+        when(toolService.createTool(any(), eq(7L))).thenReturn(summary);
+        ArgumentCaptor<UpsertToolRequest> requestCaptor = ArgumentCaptor.forClass(UpsertToolRequest.class);
+        ConfigBundleDto roundTrip = new ConfigBundleDto(
+                exported.format(), exported.version(), exported.exportedAt(), exported.exportedBy(),
+                exported.exportScope(), exported.secretsRedacted(), Map.of(), List.of(), List.of(),
+                exported.categories(), exported.tools());
+
+        service.importBundle(roundTrip, 7L);
+
+        verify(toolService).createTool(requestCaptor.capture(), eq(7L));
+        assertThat(requestCaptor.getValue().modelConfigIds()).containsExactly(44L, 45L);
+        assertThat(requestCaptor.getValue().defaultModelConfigId()).isEqualTo(45L);
+    }
+
+    @Test
     void import_doesNotRestoreDisabledModelBindingWhenCapabilitiesDoNotMatch() {
         ToolCategoryResponse category = new ToolCategoryResponse(3L, "media", "Media", 0, "ACTIVE");
         when(toolService.adminCategories()).thenReturn(List.of(category));
@@ -177,6 +234,27 @@ class ConfigBundleServiceCapabilityTest {
         return ToolSummaryResponse.from(tool);
     }
 
+    private static ToolModelBinding binding(Long toolId,
+                                            Long modelConfigId,
+                                            boolean isDefault,
+                                            int sortOrder) {
+        ToolModelBinding binding = new ToolModelBinding();
+        binding.setToolId(toolId);
+        binding.setModelConfigId(modelConfigId);
+        binding.setDefault(isDefault);
+        binding.setSortOrder(sortOrder);
+        return binding;
+    }
+
+    private static AgentModelConfig readyModel(Long id) {
+        AgentModelConfig model = new AgentModelConfig();
+        model.setId(id);
+        model.setEnabled(true);
+        model.setContractStatus("READY");
+        model.setRequestSchemaJson("{\"version\":\"1\",\"fields\":[]}");
+        return model;
+    }
+
     private static ConfigBundleDto bundle(ConfigBundleDto.Tool tool) {
         return new ConfigBundleDto(
                 "ai-tool-market-config-bundle",
@@ -207,6 +285,8 @@ class ConfigBundleServiceCapabilityTest {
                 "DRAFT",
                 0,
                 modelCode,
+                null,
+                null,
                 "VIDEO_GENERATION",
                 capabilities,
                 false,

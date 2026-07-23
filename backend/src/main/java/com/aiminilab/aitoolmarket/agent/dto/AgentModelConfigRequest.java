@@ -5,6 +5,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public record AgentModelConfigRequest(
@@ -20,6 +21,12 @@ public record AgentModelConfigRequest(
         String extraAuthJson,
         String executionTask,
         String executionOptionsJson,
+        String requestSchemaJson,
+        String requestMappingJson,
+        String responseMappingJson,
+        String apiContractVersion,
+        String contractStatus,
+        LocalDateTime contractVerifiedAt,
         String minimaxGroupId,
         String consoleUrl,
         String balanceUrl,

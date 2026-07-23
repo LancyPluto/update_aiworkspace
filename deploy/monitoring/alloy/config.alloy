@@ -38,6 +38,43 @@ loki.source.docker "docker_containers" {
 loki.process "docker_containers" {
   forward_to = [loki.write.default.receiver]
 
+  // Phase 1 accepts both structured JSON logs and the current text/logfmt output.
+  stage.json {
+    expressions = {
+      level      = "level",
+      trace_id   = "traceId",
+      error_code = "errorCode",
+    }
+  }
+
+  stage.logfmt {
+    mapping = {
+      level      = "level",
+      trace_id   = "traceId",
+      error_code = "errorCode",
+    }
+  }
+
+  stage.regex {
+    expression = "(?i)(?:traceId|trace_id)[=:][\\\" ]*(?P<trace_id>[A-Za-z0-9_-]{1,64})"
+  }
+
+  stage.regex {
+    expression = "(?i)(?:errorCode|error_code)[=:][\\\" ]*(?P<error_code>[A-Z][A-Z0-9_]{2,63})"
+  }
+
+  stage.regex {
+    expression = "(?:^|[ ]+)(?P<level>TRACE|DEBUG|INFO|WARN|ERROR)(?:[ ]+|$)"
+  }
+
+  // trace_id remains extracted data instead of a label because it is high-cardinality.
+  stage.labels {
+    values = {
+      level      = "",
+      error_code = "",
+    }
+  }
+
   stage.label_drop {
     values = ["filename"]
   }

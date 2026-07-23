@@ -109,7 +109,7 @@ class TaskHandlerRouter:
             if active_claim_token
             else nullcontext()
         )
-        with backend_claim_context(active_claim_token), lease_context, task_timer(context):
+        with backend_claim_context(active_claim_token), lease_context, task_timer(context) as task_outcome:
             failover_count = 0
             while True:
                 try:
@@ -117,7 +117,10 @@ class TaskHandlerRouter:
                     with backend_route_context(
                         int(route_attempt_id) if route_attempt_id is not None else None
                     ):
-                        return self._dispatch(routed_message, context)
+                        result = self._dispatch(routed_message, context)
+                        if isinstance(result, dict):
+                            task_outcome.update(result)
+                        return result
                 except RouteFailoverRequested as failover:
                     failover_count += 1
                     if failover_count > 2:

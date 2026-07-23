@@ -13,6 +13,7 @@ import com.aiminilab.aitoolmarket.storage.AssetStorageService;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
+import com.aiminilab.aitoolmarket.user.service.PublicUserIdentityService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -61,10 +62,11 @@ class CommunityServiceImplTest {
                 mock(CommunityEventMapper.class),
                 mock(CommunityPostReportMapper.class),
                 taskMapper,
-                mock(UserMapper.class),
-                new ObjectMapper(),
-                assetStorageService
-        );
+                 mock(UserMapper.class),
+                 new ObjectMapper(),
+                 assetStorageService,
+                 mock(PublicUserIdentityService.class)
+         );
     }
 
     @Test

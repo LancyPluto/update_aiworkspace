@@ -1,3 +1,5 @@
+import pytest
+
 from providers import registry
 
 
@@ -32,3 +34,9 @@ def test_dashscope_qwen_tts_is_worker_ready_for_text_to_speech():
     registry.require_capability("dashscope_qwen_tts", "TEXT_TO_SPEECH")
     registry.require_worker_ready("dashscope_qwen_tts")
     assert registry.provider_protocol("dashscope_qwen_tts") == "dashscope_qwen_tts"
+
+
+def test_siliconflow_asr_is_declared_but_not_worker_ready():
+    registry.require_capability("siliconflow_asr", "SPEECH_TO_TEXT")
+    with pytest.raises(registry.ProviderRegistryError, match="worker executor is not ready"):
+        registry.require_worker_ready("siliconflow_asr")

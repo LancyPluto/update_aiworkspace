@@ -1,5 +1,5 @@
 from client.seedance_video_client import SeedanceVideoTimeoutError
-from handlers.video_generation_handler import VideoGenerationHandler
+from handlers.video_generation_handler import VideoGenerationHandler, _build_video_request
 
 
 class FakeBackendClient:
@@ -109,6 +109,107 @@ class FakeVideoPersister:
         return {"url": f"/generated/video/{task_id}/video-1.mp4", "sourceUrl": source_url}
 
 
+def test_seedance_request_preserves_generation_mode_and_reference_lists() -> None:
+    request = _build_video_request(
+        {
+            "generationMode": "multimodal_reference",
+            "referenceImages": ["https://cdn.example/ref-1.png"],
+            "referenceVideos": ["https://cdn.example/ref-1.mp4", "https://cdn.example/ref-2.mp4"],
+            "referenceAudios": ["https://cdn.example/ref-1.mp3"],
+        },
+        "doubao-seedance-2-0-260128",
+        "seedance",
+    )
+
+    assert request["mode"] == "multimodal_reference"
+    assert request["images"] == ["https://cdn.example/ref-1.png"]
+    assert request["video_urls"] == [
+        "https://cdn.example/ref-1.mp4",
+        "https://cdn.example/ref-2.mp4",
+    ]
+    assert request["audio_urls"] == ["https://cdn.example/ref-1.mp3"]
+
+
+def test_agnes_request_preserves_generation_mode_and_keyframe_images() -> None:
+    request = _build_video_request(
+        {
+            "prompt": "transition between frames",
+            "generationMode": "keyframes",
+            "referenceImages": [
+                "https://cdn.example/start.png",
+                "https://cdn.example/end.png",
+            ],
+        },
+        "agnes-video-v2.0",
+        "agnes_video",
+    )
+
+    assert request["generation_mode"] == "keyframes"
+    assert request["num_frames"] is None
+    assert request["frame_rate"] is None
+    assert request["images"] == [
+        "https://cdn.example/start.png",
+        "https://cdn.example/end.png",
+    ]
+
+    frame_request = _build_video_request(
+        {
+            "prompt": "transition between frames",
+            "generationMode": "keyframes",
+            "firstFrameImage": "https://cdn.example/first.png",
+            "lastFrameImage": "https://cdn.example/last.png",
+        },
+        "agnes-video-v2.0",
+        "agnes_video",
+    )
+    assert frame_request["image"] == "https://cdn.example/first.png"
+    assert frame_request["image_tail"] == "https://cdn.example/last.png"
+
+    configured_request = _build_video_request(
+        {
+            "prompt": "animate",
+            "generationMode": "text_to_video",
+            "numFrames": 81,
+            "frameRate": 30,
+        },
+        "agnes-video-v2.0",
+        "agnes_video",
+    )
+    assert configured_request["num_frames"] == 81
+    assert configured_request["frame_rate"] == 30
+
+
+def test_kling_omni_generation_modes_build_documented_media_roles() -> None:
+    frame_request = _build_video_request(
+        {
+            "prompt": "transition",
+            "generationMode": "first_last_frame_to_video",
+            "firstFrameImage": "https://cdn.example/first.png",
+            "lastFrameImage": "https://cdn.example/last.png",
+        },
+        "kling-v3-omni",
+        "kling_video",
+    )
+    assert frame_request["image"] == ""
+    assert frame_request["image_list"] == [
+        {"image_url": "https://cdn.example/first.png", "type": "first_frame"},
+        {"image_url": "https://cdn.example/last.png", "type": "end_frame"},
+    ]
+
+    edit_request = _build_video_request(
+        {
+            "prompt": "restyle",
+            "generationMode": "video_edit",
+            "sourceVideo": "https://cdn.example/source.mp4",
+        },
+        "kling-v3-omni",
+        "kling_video",
+    )
+    assert edit_request["video_list"] == [
+        {"video_url": "https://cdn.example/source.mp4", "refer_type": "base"},
+    ]
+
+
 def test_seedance_video_handler_uses_params_model_override() -> None:
     backend = FakeBackendClient()
     backend.get_execution_context = lambda task_id, trace_id=None: {
@@ -137,6 +238,33 @@ def test_seedance_video_handler_uses_params_model_override() -> None:
     assert result["status"] == "SUCCESS"
     assert seedance.request is not None
     assert seedance.request["model"] == "doubao-seedance-1-0-pro-fast-251015"
+
+
+def test_video_generation_handler_applies_model_request_mapping() -> None:
+    backend = FakeBackendClient()
+    backend.get_execution_context = lambda task_id, trace_id=None: {
+        "traceId": trace_id,
+        "status": "QUEUED",
+        "params": {"creativeBrief": "mapped video prompt", "duration": 3},
+        "modelConfig": {
+            "provider": "seedance",
+            "modelName": "doubao-seedance-1-5-pro-251215",
+            "requestMappingJson": (
+                '{"version":"1","fieldMap":{"creativeBrief":"prompt"}}'
+            ),
+        },
+    }
+    seedance = StrictSeedanceClient()
+    handler = VideoGenerationHandler(
+        backend_client=backend,
+        seedance_client=seedance,
+        video_persister=FakeVideoPersister(),
+    )
+
+    result = handler.handle({"taskId": 133, "traceId": "trace-video-contract"})
+
+    assert result["status"] == "SUCCESS"
+    assert seedance.request["prompt"] == "mapped video prompt"
 
 
 def test_seedance_video_handler_omits_tail_frame_protocol_field() -> None:

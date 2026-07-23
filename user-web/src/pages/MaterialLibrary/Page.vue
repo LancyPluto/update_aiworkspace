@@ -325,7 +325,7 @@ async function unpublishMaterialAsset(asset: AssetPreviewItem) {
   try {
     const postId = await resolvePublishedCommunityPostId(asset.taskId, {
       token: auth.token,
-      userId: auth.user?.id ?? tasks.value.find((task) => task.taskId === asset.taskId)?.userId,
+      publicCode: auth.user?.publicCode,
       hint: asset.communityPostId,
     })
     if (!postId) return
@@ -355,7 +355,7 @@ async function removeMaterial(item: MaterialItem) {
     const communityPostId = auth.token
       ? await resolvePublishedCommunityPostId(item.task.taskId, {
           token: auth.token,
-          userId: auth.user?.id ?? item.task.userId,
+          publicCode: auth.user?.publicCode,
           hint: item.task.communityPostId,
         })
       : null

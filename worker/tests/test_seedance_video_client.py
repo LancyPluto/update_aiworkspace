@@ -1,7 +1,7 @@
 import pytest
 import requests
 
-from client.seedance_video_client import SeedanceVideoClient, SeedanceVideoTimeoutError
+from client.seedance_video_client import SeedanceVideoClient, SeedanceVideoError, SeedanceVideoTimeoutError
 
 
 class FakeResponse:
@@ -125,7 +125,7 @@ def test_seedance_payload_includes_audio_and_watermark_flags() -> None:
     assert payload["watermark"] is False
 
 
-def test_seedance_payload_supports_multi_reference_images_video_and_camera_fixed() -> None:
+def test_seedance_2_payload_uses_official_multimodal_reference_roles() -> None:
     client = SeedanceVideoClient(api_key="test-key")
 
     payload = client._build_payload(
@@ -142,6 +142,7 @@ def test_seedance_payload_supports_multi_reference_images_video_and_camera_fixed
         aspect_ratio="adaptive",
         resolution="4k",
         camera_fixed=True,
+        mode="multimodal_reference",
     )
 
     image_items = [item for item in payload["content"] if item["type"] == "image_url"]
@@ -151,9 +152,56 @@ def test_seedance_payload_supports_multi_reference_images_video_and_camera_fixed
         "video_url": {"url": "https://cdn.example.com/ref.mov"},
         "role": "reference_video",
     }
-    assert payload["content"][4] == {"type": "audio_url", "audio_url": {"url": "https://cdn.example.com/ref.mp3"}}
+    assert payload["content"][4] == {
+        "type": "audio_url",
+        "audio_url": {"url": "https://cdn.example.com/ref.mp3"},
+        "role": "reference_audio",
+    }
     assert payload["ratio"] == "adaptive"
-    assert payload["camera_fixed"] is True
+    assert "camera_fixed" not in payload
+    assert "seed" not in payload
+    assert "size" not in payload
+    assert "image_size" not in payload
+    assert "duration_seconds" not in payload
+    assert "aspect_ratio" not in payload
+
+
+def test_seedance_2_first_last_frame_mode_uses_mutually_exclusive_roles() -> None:
+    client = SeedanceVideoClient(api_key="test-key")
+
+    payload = client._build_payload(
+        prompt="",
+        image_size="auto",
+        negative_prompt="",
+        model="doubao-seedance-2-0-260128",
+        image="https://cdn.example.com/first.png",
+        image_tail="https://cdn.example.com/last.png",
+        duration="-1",
+        aspect_ratio="adaptive",
+        resolution="720p",
+        mode="first_last_frame_to_video",
+    )
+
+    assert payload["duration"] == -1
+    assert [item["role"] for item in payload["content"]] == ["first_frame", "last_frame"]
+
+
+def test_seedance_2_multimodal_reference_rejects_audio_only() -> None:
+    client = SeedanceVideoClient(api_key="test-key")
+
+    with pytest.raises(SeedanceVideoError, match="at least one image or video"):
+        client._build_payload(
+            prompt="",
+            image_size="auto",
+            negative_prompt="",
+            model="doubao-seedance-2-0-260128",
+            image="",
+            audio_urls=["data:audio/mpeg;base64,ZmFrZQ=="],
+            duration="5",
+            aspect_ratio="16:9",
+            resolution="720p",
+            mode="multimodal_reference",
+        )
 
 
 def test_seedance_async_poll_does_not_repeat_create_request() -> None:

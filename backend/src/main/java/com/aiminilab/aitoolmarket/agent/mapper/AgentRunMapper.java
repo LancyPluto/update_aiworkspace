@@ -1,12 +1,15 @@
 package com.aiminilab.aitoolmarket.agent.mapper;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentRun;
+import com.aiminilab.aitoolmarket.agent.support.AgentFailureMessage;
+import com.aiminilab.aitoolmarket.common.error.ErrorMessageSanitizer;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
+import org.slf4j.MDC;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -19,10 +22,12 @@ public interface AgentRunMapper extends BaseMapper<AgentRun> {
     @Insert("""
             INSERT INTO agent_runs(session_id, user_id, status, intent, model_config_id, model_provider_code, model_name,
                                    estimated_credits, consumed_credits, error_code, error_message,
+                                   user_message, developer_message, failure_trace_id,
                                    started_at, finished_at, parent_run_id, source_user_message_id, context_snapshot_id, client_request_id,
                                    preferred_tool_code, created_at, updated_at)
             VALUES(#{run.sessionId}, #{run.userId}, #{run.status}, #{run.intent}, #{run.modelConfigId}, #{run.modelProviderCode}, #{run.modelName},
                    #{run.estimatedCredits}, #{run.consumedCredits}, #{run.errorCode}, #{run.errorMessage},
+                   #{run.userMessage}, #{run.developerMessage}, #{run.failureTraceId},
                    #{run.startedAt}, #{run.finishedAt}, #{run.parentRunId}, #{run.sourceUserMessageId}, #{run.contextSnapshotId}, #{run.clientRequestId},
                    #{run.preferredToolCode}, #{run.createdAt}, #{run.updatedAt})
             """)
@@ -65,7 +70,7 @@ public interface AgentRunMapper extends BaseMapper<AgentRun> {
                    r.estimated_credits,
                    r.consumed_credits,
                    r.error_code,
-                   r.error_message,
+                   COALESCE(r.developer_message, r.error_message) AS error_message,
                    (SELECT COUNT(*) FROM agent_run_events e WHERE e.run_id = r.id) AS event_count,
                    (SELECT COUNT(*) FROM agent_tool_calls c WHERE c.run_id = r.id) AS tool_call_count,
                    r.started_at,
@@ -242,30 +247,71 @@ public interface AgentRunMapper extends BaseMapper<AgentRun> {
                     @Param("consumedCredits") int consumedCredits,
                     @Param("now") LocalDateTime now);
 
+    default int markFailed(Long runId,
+                           String errorCode,
+                           String errorMessage,
+                           LocalDateTime now) {
+        String userMessage = ErrorMessageSanitizer.sanitizeUserMessage(
+                AgentFailureMessage.userMessage(errorCode),
+                "Agent 执行失败，请稍后重试"
+        );
+        String developerMessage = ErrorMessageSanitizer.sanitizeDeveloperMessage(
+                errorMessage,
+                "Agent run failed"
+        );
+        return markFailedWithContract(runId, errorCode, userMessage, developerMessage, currentTraceId(), now);
+    }
+
     @Update("""
             UPDATE agent_runs
-            SET status = 'FAILED', error_code = #{errorCode}, error_message = #{errorMessage},
+            SET status = 'FAILED', error_code = #{errorCode}, error_message = #{developerMessage},
+                user_message = #{userMessage}, developer_message = #{developerMessage},
+                failure_trace_id = #{failureTraceId},
                 finished_at = #{now}, updated_at = #{now}
             WHERE id = #{runId}
               AND status NOT IN ('SUCCESS', 'FAILED', 'CANCELLED', 'TIMEOUT')
             """)
-    int markFailed(@Param("runId") Long runId,
-                   @Param("errorCode") String errorCode,
-                   @Param("errorMessage") String errorMessage,
-                   @Param("now") LocalDateTime now);
+    int markFailedWithContract(@Param("runId") Long runId,
+                               @Param("errorCode") String errorCode,
+                               @Param("userMessage") String userMessage,
+                               @Param("developerMessage") String developerMessage,
+                               @Param("failureTraceId") String failureTraceId,
+                               @Param("now") LocalDateTime now);
+
+    default int markFailedWithConsumedCredits(Long runId,
+                                              String errorCode,
+                                              String errorMessage,
+                                              int consumedCredits,
+                                              LocalDateTime now) {
+        String userMessage = ErrorMessageSanitizer.sanitizeUserMessage(
+                AgentFailureMessage.userMessage(errorCode),
+                "Agent 执行失败，请稍后重试"
+        );
+        String developerMessage = ErrorMessageSanitizer.sanitizeDeveloperMessage(
+                errorMessage,
+                "Agent run failed"
+        );
+        return markFailedWithConsumedCreditsContract(
+                runId, errorCode, userMessage, developerMessage, currentTraceId(), consumedCredits, now
+        );
+    }
 
     @Update("""
             UPDATE agent_runs
-            SET status = 'FAILED', error_code = #{errorCode}, error_message = #{errorMessage},
+            SET status = 'FAILED', error_code = #{errorCode}, error_message = #{developerMessage},
+                user_message = #{userMessage}, developer_message = #{developerMessage},
+                failure_trace_id = #{failureTraceId},
                 consumed_credits = #{consumedCredits}, finished_at = #{now}, updated_at = #{now}
             WHERE id = #{runId}
               AND status NOT IN ('SUCCESS', 'FAILED', 'CANCELLED', 'TIMEOUT')
             """)
-    int markFailedWithConsumedCredits(@Param("runId") Long runId,
-                                      @Param("errorCode") String errorCode,
-                                      @Param("errorMessage") String errorMessage,
-                                      @Param("consumedCredits") int consumedCredits,
-                                      @Param("now") LocalDateTime now);
+    int markFailedWithConsumedCreditsContract(@Param("runId") Long runId,
+                                              @Param("errorCode") String errorCode,
+                                              @Param("userMessage") String userMessage,
+                                              @Param("developerMessage") String developerMessage,
+                                              @Param("failureTraceId") String failureTraceId,
+                                              @Param("consumedCredits") int consumedCredits,
+                                              @Param("now") LocalDateTime now);
 
     @Update("""
             UPDATE agent_runs
@@ -284,4 +330,13 @@ public interface AgentRunMapper extends BaseMapper<AgentRun> {
             LIMIT #{limit}
             """)
     List<AgentRun> findStaleActiveRuns(@Param("cutoff") LocalDateTime cutoff, @Param("limit") int limit);
+
+    private static String currentTraceId() {
+        String traceId = MDC.get("traceId");
+        if (traceId == null || traceId.isBlank()) {
+            return null;
+        }
+        String normalized = traceId.strip();
+        return normalized.length() <= 64 ? normalized : normalized.substring(0, 64);
+    }
 }

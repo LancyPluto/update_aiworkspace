@@ -21,6 +21,7 @@ import com.aiminilab.aitoolmarket.task.metrics.TaskMetrics;
 import com.aiminilab.aitoolmarket.task.routing.ModelRoutingService;
 import com.aiminilab.aitoolmarket.task.service.TaskCreditDispatchService;
 import com.aiminilab.aitoolmarket.task.service.TaskOutboxService;
+import com.aiminilab.aitoolmarket.task.service.ModelRequestSchemaService;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowRunMapper;
@@ -65,6 +66,7 @@ class TaskServiceImplCapabilityTest {
                 mock(AgentToolCallMapper.class),
                 capabilityService,
                 snapshotService,
+                mock(ModelRequestSchemaService.class),
                 mock(CreditService.class),
                 objectMapper,
                 mock(TaskOutboxService.class),

@@ -1,9 +1,11 @@
 package com.aiminilab.aitoolmarket.task.mapper;
 
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
+import com.aiminilab.aitoolmarket.common.error.ErrorMessageSanitizer;
 import com.aiminilab.aitoolmarket.task.dto.TaskResultResponse;
 import com.aiminilab.aitoolmarket.task.entity.AiResultResource;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
+import com.aiminilab.aitoolmarket.task.support.TaskFailureMessage;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Arg;
 import org.apache.ibatis.annotations.ConstructorArgs;
@@ -11,6 +13,7 @@ import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
+import org.slf4j.MDC;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -558,11 +561,32 @@ public interface TaskMapper extends BaseMapper<AiTask> {
                            @Param("claimToken") String claimToken,
                            @Param("expectedStatuses") List<String> expectedStatuses);
 
+    default int markFailed(Long taskId,
+                           String status,
+                           String errorCode,
+                           String progressMessage,
+                           String errorMessage,
+                           List<String> expectedStatuses) {
+        String userMessage = ErrorMessageSanitizer.sanitizeUserMessage(
+                TaskFailureMessage.userFacingProgressMessage(errorCode, progressMessage),
+                "任务执行失败，请稍后重试"
+        );
+        String developerMessage = ErrorMessageSanitizer.sanitizeDeveloperMessage(
+                errorMessage,
+                "Task execution failed"
+        );
+        return markFailedWithContract(taskId, status, errorCode, userMessage, developerMessage,
+                MDC.get("traceId"), null, null, expectedStatuses);
+    }
+
     @Update("""
             <script>
             UPDATE ai_tasks
-            SET status = #{status}, progress = 100, progress_message = #{progressMessage},
-                error_code = #{errorCode}, error_message = #{errorMessage},
+            SET status = #{status}, progress = 100, progress_message = #{userMessage},
+                error_code = #{errorCode}, error_message = #{developerMessage},
+                user_message = #{userMessage}, developer_message = #{developerMessage},
+                failure_trace_id = #{failureTraceId}, provider_error_code = #{providerErrorCode},
+                provider_request_id = #{providerRequestId},
                 claimed_by = NULL, claim_token = NULL, lease_until = NULL,
                 claimed_at = NULL, lease_renewed_at = NULL,
                 finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
@@ -573,18 +597,24 @@ public interface TaskMapper extends BaseMapper<AiTask> {
               </foreach>
             </script>
             """)
-    int markFailed(@Param("taskId") Long taskId,
-                   @Param("status") String status,
-                   @Param("errorCode") String errorCode,
-                   @Param("progressMessage") String progressMessage,
-                   @Param("errorMessage") String errorMessage,
-                   @Param("expectedStatuses") List<String> expectedStatuses);
+    int markFailedWithContract(@Param("taskId") Long taskId,
+                               @Param("status") String status,
+                               @Param("errorCode") String errorCode,
+                               @Param("userMessage") String userMessage,
+                               @Param("developerMessage") String developerMessage,
+                               @Param("failureTraceId") String failureTraceId,
+                               @Param("providerErrorCode") String providerErrorCode,
+                               @Param("providerRequestId") String providerRequestId,
+                               @Param("expectedStatuses") List<String> expectedStatuses);
 
     @Update("""
             <script>
             UPDATE ai_tasks
-            SET status = #{status}, progress = 100, progress_message = #{progressMessage},
-                error_code = #{errorCode}, error_message = #{errorMessage},
+            SET status = #{status}, progress = 100, progress_message = #{userMessage},
+                error_code = #{errorCode}, error_message = #{developerMessage},
+                user_message = #{userMessage}, developer_message = #{developerMessage},
+                failure_trace_id = #{failureTraceId}, provider_error_code = #{providerErrorCode},
+                provider_request_id = #{providerRequestId},
                 claimed_by = NULL, claim_token = NULL, lease_until = NULL,
                 claimed_at = NULL, lease_renewed_at = NULL,
                 finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
@@ -596,19 +626,23 @@ public interface TaskMapper extends BaseMapper<AiTask> {
               </foreach>
             </script>
             """)
-    int markFailedGuarded(@Param("taskId") Long taskId,
-                          @Param("claimToken") String claimToken,
-                          @Param("status") String status,
-                          @Param("errorCode") String errorCode,
-                          @Param("progressMessage") String progressMessage,
-                          @Param("errorMessage") String errorMessage,
-                          @Param("expectedStatuses") List<String> expectedStatuses);
+    int markFailedGuardedWithContract(@Param("taskId") Long taskId,
+                                      @Param("claimToken") String claimToken,
+                                      @Param("status") String status,
+                                      @Param("errorCode") String errorCode,
+                                      @Param("userMessage") String userMessage,
+                                      @Param("developerMessage") String developerMessage,
+                                      @Param("failureTraceId") String failureTraceId,
+                                      @Param("providerErrorCode") String providerErrorCode,
+                                      @Param("providerRequestId") String providerRequestId,
+                                      @Param("expectedStatuses") List<String> expectedStatuses);
 
     @Update("""
             <script>
             UPDATE ai_tasks
             SET status = 'QUEUED', progress = 0, progress_message = '任务已重新排队',
-                error_code = NULL, error_message = NULL,
+                error_code = NULL, error_message = NULL, user_message = NULL, developer_message = NULL,
+                failure_trace_id = NULL, provider_error_code = NULL, provider_request_id = NULL,
                 retry_count = retry_count + 1,
                 claimed_by = NULL, claim_token = NULL, lease_until = NULL,
                 claimed_at = NULL, lease_renewed_at = NULL,
@@ -628,7 +662,8 @@ public interface TaskMapper extends BaseMapper<AiTask> {
             <script>
             UPDATE ai_tasks
             SET status = 'RETRYING', progress = 0, progress_message = '任务正在重试',
-                error_code = NULL, error_message = NULL,
+                error_code = NULL, error_message = NULL, user_message = NULL, developer_message = NULL,
+                failure_trace_id = NULL, provider_error_code = NULL, provider_request_id = NULL,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{taskId}
               AND status IN

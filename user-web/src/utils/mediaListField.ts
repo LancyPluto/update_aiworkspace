@@ -1,18 +1,21 @@
 import type { ToolField } from "@/api/types"
 import { parseFieldMeta } from "@/utils/fieldUiMeta"
 
-export type MediaListFieldType = "multi_image" | "multi_video"
+export type MediaListFieldType = "multi_image" | "multi_video" | "multi_audio"
 
 export function isMediaListField(field: Pick<ToolField, "fieldType">): boolean {
-  return field.fieldType === "multi_image" || field.fieldType === "multi_video"
+  return field.fieldType === "multi_image" || field.fieldType === "multi_video" || field.fieldType === "multi_audio"
 }
 
-export function mediaListFieldKind(field: Pick<ToolField, "fieldType">): "image" | "video" {
-  return field.fieldType === "multi_video" ? "video" : "image"
+export function mediaListFieldKind(field: Pick<ToolField, "fieldType">): "image" | "video" | "audio" {
+  if (field.fieldType === "multi_video") return "video"
+  if (field.fieldType === "multi_audio") return "audio"
+  return "image"
 }
 
 export function mediaListMax(field: Pick<ToolField, "options">): number {
-  return parseFieldMeta(field).maxCount ?? (mediaListFieldKind(field as ToolField) === "video" ? 4 : 8)
+  const kind = mediaListFieldKind(field as ToolField)
+  return parseFieldMeta(field).maxCount ?? (kind === "image" ? 8 : 4)
 }
 
 export function mediaListMin(field: Pick<ToolField, "options">): number {
@@ -22,7 +25,10 @@ export function mediaListMin(field: Pick<ToolField, "options">): number {
 export function mediaListAccept(field: Pick<ToolField, "fieldType" | "options">): string {
   const meta = parseFieldMeta(field)
   if (meta.accept) return meta.accept
-  return mediaListFieldKind(field) === "video" ? "video/*" : "image/*"
+  const kind = mediaListFieldKind(field)
+  if (kind === "video") return "video/*"
+  if (kind === "audio") return "audio/*"
+  return "image/*"
 }
 
 export function mediaListLibraryEnabled(field: Pick<ToolField, "options">): boolean {
@@ -36,7 +42,10 @@ export function mediaListLibraryKind(field: Pick<ToolField, "fieldType" | "optio
 }
 
 export function mediaListUnitLabel(field: Pick<ToolField, "fieldType">): string {
-  return mediaListFieldKind(field) === "video" ? "个参考视频" : "张参考图"
+  const kind = mediaListFieldKind(field)
+  if (kind === "video") return "个参考视频"
+  if (kind === "audio") return "段参考音频"
+  return "张参考图"
 }
 
 export function parseMediaListValue(value: unknown, limit: number): string[] {

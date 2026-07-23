@@ -27,6 +27,10 @@ public class WorkflowRun {
     private String contextJson;
     private String currentNodeId;
     private Long currentStepId;
+    private String errorCode;
+    private String userMessage;
+    private String developerMessage;
+    private String failureTraceId;
     private String billingStatus;
     private BigDecimal providerCostReservedCny;
     private String errorMessage;
@@ -67,6 +71,14 @@ public class WorkflowRun {
     public void setCurrentNodeId(String currentNodeId) { this.currentNodeId = currentNodeId; }
     public Long getCurrentStepId() { return currentStepId; }
     public void setCurrentStepId(Long currentStepId) { this.currentStepId = currentStepId; }
+    public String getErrorCode() { return errorCode; }
+    public void setErrorCode(String errorCode) { this.errorCode = errorCode; }
+    public String getUserMessage() { return userMessage; }
+    public void setUserMessage(String userMessage) { this.userMessage = userMessage; }
+    public String getDeveloperMessage() { return developerMessage; }
+    public void setDeveloperMessage(String developerMessage) { this.developerMessage = developerMessage; }
+    public String getFailureTraceId() { return failureTraceId; }
+    public void setFailureTraceId(String failureTraceId) { this.failureTraceId = failureTraceId; }
     public String getBillingStatus() { return billingStatus; }
     public void setBillingStatus(String billingStatus) { this.billingStatus = billingStatus; }
     public BigDecimal getProviderCostReservedCny() { return providerCostReservedCny; }

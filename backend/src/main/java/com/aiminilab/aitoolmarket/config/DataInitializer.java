@@ -11,8 +11,10 @@ import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountMigrationService;
 import com.aiminilab.aitoolmarket.common.enums.UserStatus;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
+import com.aiminilab.aitoolmarket.credit.service.ReferralCodeService;
 import com.aiminilab.aitoolmarket.user.entity.User;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
+import com.aiminilab.aitoolmarket.user.service.PublicUserIdentityService;
 import com.aiminilab.aitoolmarket.tool.config.ToolTemplateBootstrap;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolCategoryMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -35,6 +37,8 @@ import java.util.Locale;
 public class DataInitializer implements CommandLineRunner {
 
     private final UserMapper userMapper;
+    private final PublicUserIdentityService publicUserIdentityService;
+    private final ReferralCodeService referralCodeService;
     private final ToolCategoryMapper toolCategoryMapper;
     private final SystemSettingMapper systemSettingMapper;
     private final SystemSettingVersionMapper systemSettingVersionMapper;
@@ -47,7 +51,9 @@ public class DataInitializer implements CommandLineRunner {
     private final AppProperties appProperties;
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    public DataInitializer(UserMapper userMapper, ToolCategoryMapper toolCategoryMapper,
+    public DataInitializer(UserMapper userMapper, PublicUserIdentityService publicUserIdentityService,
+                           ReferralCodeService referralCodeService,
+                           ToolCategoryMapper toolCategoryMapper,
                            SystemSettingMapper systemSettingMapper, SystemSettingVersionMapper systemSettingVersionMapper,
                            PasswordEncoder passwordEncoder,
                            JdbcTemplate jdbcTemplate, ToolTemplateBootstrap toolTemplateBootstrap,
@@ -55,6 +61,8 @@ public class DataInitializer implements CommandLineRunner {
                            ModelProviderRegistry modelProviderRegistry,
                            AppProperties appProperties) {
         this.userMapper = userMapper;
+        this.publicUserIdentityService = publicUserIdentityService;
+        this.referralCodeService = referralCodeService;
         this.toolCategoryMapper = toolCategoryMapper;
         this.systemSettingMapper = systemSettingMapper;
         this.systemSettingVersionMapper = systemSettingVersionMapper;
@@ -70,6 +78,8 @@ public class DataInitializer implements CommandLineRunner {
     @Override
     public void run(String... args) {
         ensureSchemaCompatibility();
+        publicUserIdentityService.backfillMissingCodes();
+        referralCodeService.backfillMissingCodes();
         seedModelProviderMetadata();
         modelVendorAccountMigrationService.migrateIfNeeded();
         seedGptImageApiKeysFromEnv();
@@ -672,6 +682,10 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("users", "bio", "ALTER TABLE users ADD COLUMN bio VARCHAR(280) NULL");
         ensureColumn("users", "auto_publish_assets", "ALTER TABLE users ADD COLUMN auto_publish_assets TINYINT NOT NULL DEFAULT 1");
         ensureColumn("users", "prompt_public_by_default", "ALTER TABLE users ADD COLUMN prompt_public_by_default TINYINT NOT NULL DEFAULT 0");
+        ensureColumn("users", "public_code", "ALTER TABLE users ADD COLUMN public_code CHAR(5) NULL");
+        ensureIndex("users", "uk_users_public_code", "CREATE UNIQUE INDEX uk_users_public_code ON users(public_code)");
+        ensureColumn("users", "referral_code", "ALTER TABLE users ADD COLUMN referral_code CHAR(6) NULL");
+        ensureIndex("users", "uk_users_referral_code", "CREATE UNIQUE INDEX uk_users_referral_code ON users(referral_code)");
         ensureColumn("ai_tools", "model_config_id", "ALTER TABLE ai_tools ADD COLUMN model_config_id BIGINT NULL");
         ensureColumn("ai_tools", "tool_type", "ALTER TABLE ai_tools ADD COLUMN tool_type VARCHAR(32) NOT NULL DEFAULT 'TEXT_GENERATION'");
         ensureColumn("ai_tools", "input_modality", "ALTER TABLE ai_tools ADD COLUMN input_modality VARCHAR(32) NOT NULL DEFAULT 'TEXT'");
@@ -701,6 +715,12 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("ai_tasks", "current_route_attempt_id", "ALTER TABLE ai_tasks ADD COLUMN current_route_attempt_id BIGINT NULL");
         ensureIndex("ai_tasks", "idx_ai_tasks_selected_route", "CREATE INDEX idx_ai_tasks_selected_route ON ai_tasks(selected_vendor_account_id, status, id)");
         ensureColumn("ai_tasks", "model_snapshot_json", "ALTER TABLE ai_tasks ADD COLUMN model_snapshot_json TEXT NULL");
+        ensureColumn("ai_tasks", "user_message", "ALTER TABLE ai_tasks ADD COLUMN user_message VARCHAR(255) NULL");
+        ensureColumn("ai_tasks", "developer_message", "ALTER TABLE ai_tasks ADD COLUMN developer_message TEXT NULL");
+        ensureColumn("ai_tasks", "failure_trace_id", "ALTER TABLE ai_tasks ADD COLUMN failure_trace_id VARCHAR(64) NULL");
+        ensureColumn("ai_tasks", "provider_error_code", "ALTER TABLE ai_tasks ADD COLUMN provider_error_code VARCHAR(128) NULL");
+        ensureColumn("ai_tasks", "provider_request_id", "ALTER TABLE ai_tasks ADD COLUMN provider_request_id VARCHAR(128) NULL");
+        ensureIndex("ai_tasks", "idx_ai_tasks_failure_trace", "CREATE INDEX idx_ai_tasks_failure_trace ON ai_tasks(failure_trace_id)");
         ensureColumn("ai_tasks", "claimed_by", "ALTER TABLE ai_tasks ADD COLUMN claimed_by VARCHAR(128) NULL");
         ensureColumn("ai_tasks", "claim_token", "ALTER TABLE ai_tasks ADD COLUMN claim_token VARCHAR(128) NULL");
         ensureColumn("ai_tasks", "lease_until", "ALTER TABLE ai_tasks ADD COLUMN lease_until DATETIME NULL");
@@ -737,6 +757,33 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("agent_model_configs", "extra_auth_json", "ALTER TABLE agent_model_configs ADD COLUMN extra_auth_json TEXT NULL");
         ensureColumn("agent_model_configs", "execution_task", "ALTER TABLE agent_model_configs ADD COLUMN execution_task VARCHAR(64) NULL");
         ensureColumn("agent_model_configs", "execution_options_json", "ALTER TABLE agent_model_configs ADD COLUMN execution_options_json TEXT NULL");
+        ensureColumn("agent_model_configs", "request_schema_json", "ALTER TABLE agent_model_configs ADD COLUMN request_schema_json MEDIUMTEXT NULL");
+        ensureColumn("agent_model_configs", "request_mapping_json", "ALTER TABLE agent_model_configs ADD COLUMN request_mapping_json MEDIUMTEXT NULL");
+        ensureColumn("agent_model_configs", "response_mapping_json", "ALTER TABLE agent_model_configs ADD COLUMN response_mapping_json MEDIUMTEXT NULL");
+        ensureColumn("agent_model_configs", "api_contract_version", "ALTER TABLE agent_model_configs ADD COLUMN api_contract_version VARCHAR(64) NULL");
+        ensureColumn("agent_model_configs", "contract_status", "ALTER TABLE agent_model_configs ADD COLUMN contract_status VARCHAR(32) NOT NULL DEFAULT 'DOCS_PENDING'");
+        ensureColumn("agent_model_configs", "contract_verified_at", "ALTER TABLE agent_model_configs ADD COLUMN contract_verified_at DATETIME NULL");
+        ensureTable("tool_model_bindings", """
+                CREATE TABLE tool_model_bindings (
+                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  tool_id BIGINT NOT NULL,
+                  model_config_id BIGINT NOT NULL,
+                  is_default TINYINT NOT NULL DEFAULT 0,
+                  sort_order INT NOT NULL DEFAULT 0,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  UNIQUE KEY uk_tool_model_binding(tool_id, model_config_id),
+                  KEY idx_tool_model_binding_default(tool_id, is_default, sort_order, id),
+                  KEY idx_tool_model_binding_model(model_config_id, tool_id)
+                )
+                """);
+        executeSql("""
+                INSERT IGNORE INTO tool_model_bindings(tool_id, model_config_id, is_default, sort_order)
+                SELECT id, model_config_id, 1, 0
+                FROM ai_tools
+                WHERE is_deleted = 0
+                  AND model_config_id IS NOT NULL
+                """);
         executeSql("""
                 UPDATE agent_model_configs
                 SET execution_task = CASE
@@ -1380,11 +1427,18 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("agent_runs", "context_snapshot_id", "ALTER TABLE agent_runs ADD COLUMN context_snapshot_id BIGINT NULL");
         ensureColumn("agent_runs", "client_request_id", "ALTER TABLE agent_runs ADD COLUMN client_request_id VARCHAR(64) NULL");
         ensureColumn("agent_runs", "preferred_tool_code", "ALTER TABLE agent_runs ADD COLUMN preferred_tool_code VARCHAR(64) NULL");
+        ensureColumn("agent_runs", "user_message", "ALTER TABLE agent_runs ADD COLUMN user_message VARCHAR(255) NULL");
+        ensureColumn("agent_runs", "developer_message", "ALTER TABLE agent_runs ADD COLUMN developer_message TEXT NULL");
+        ensureColumn("agent_runs", "failure_trace_id", "ALTER TABLE agent_runs ADD COLUMN failure_trace_id VARCHAR(64) NULL");
         ensureIndex("agent_runs", "uk_agent_runs_user_client", "CREATE UNIQUE INDEX uk_agent_runs_user_client ON agent_runs(user_id, client_request_id)");
         ensureIndex("agent_runs", "idx_agent_runs_session_user_id", "CREATE INDEX idx_agent_runs_session_user_id ON agent_runs(session_id, user_id, id)");
         ensureIndex("agent_runs", "idx_agent_runs_model_config", "CREATE INDEX idx_agent_runs_model_config ON agent_runs(model_config_id)");
         ensureIndex("agent_runs", "idx_agent_runs_context_snapshot", "CREATE INDEX idx_agent_runs_context_snapshot ON agent_runs(context_snapshot_id)");
+        ensureIndex("agent_runs", "idx_agent_runs_failure_trace", "CREATE INDEX idx_agent_runs_failure_trace ON agent_runs(failure_trace_id)");
         ensureColumn("agent_tool_calls", "task_id", "ALTER TABLE agent_tool_calls ADD COLUMN task_id BIGINT NULL");
+        ensureColumn("agent_tool_calls", "user_message", "ALTER TABLE agent_tool_calls ADD COLUMN user_message VARCHAR(255) NULL");
+        ensureColumn("agent_tool_calls", "developer_message", "ALTER TABLE agent_tool_calls ADD COLUMN developer_message TEXT NULL");
+        ensureColumn("agent_tool_calls", "failure_trace_id", "ALTER TABLE agent_tool_calls ADD COLUMN failure_trace_id VARCHAR(64) NULL");
         ensureIndex("agent_tool_calls", "idx_agent_tool_calls_task_id", "CREATE INDEX idx_agent_tool_calls_task_id ON agent_tool_calls(task_id)");
         ensureIndex("agent_tool_calls", "idx_agent_tool_calls_context_recent", "CREATE INDEX idx_agent_tool_calls_context_recent ON agent_tool_calls(user_id, status, id)");
         ensureColumn("agent_workspace_memory_items", "source_message_id", "ALTER TABLE agent_workspace_memory_items ADD COLUMN source_message_id BIGINT NULL");
@@ -2146,6 +2200,8 @@ public class DataInitializer implements CommandLineRunner {
             return;
         }
         User user = new User();
+        publicUserIdentityService.assignPublicCode(user);
+        referralCodeService.assignReferralCode(user);
         user.setUsername(username);
         user.setPasswordHash(passwordEncoder.encode(password));
         user.setNickname(nickname);

@@ -169,7 +169,14 @@ function pollDelayMs(s: TaskStatus): number {
 const failureHint = computed(() => {
   if (!statusData.value) return ""
   const d = taskDetailFail.value
-  return taskFailureHint(statusData.value.status, [d?.progressMessage, statusData.value.progressMessage])
+  return taskFailureHint(statusData.value.status, [
+    d?.userMessage,
+    statusData.value.userMessage,
+    d?.errorMessage,
+    statusData.value.errorMessage,
+    d?.progressMessage,
+    statusData.value.progressMessage,
+  ])
 })
 
 let pollTimer: ReturnType<typeof setTimeout> | null = null

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
-import { User } from "lucide-vue-next"
 import { getApiOrigin } from "@/api/client"
+
+const DEFAULT_AVATAR_URL = "/assets/default-user-avatar.svg"
 
 const props = withDefaults(
   defineProps<{
@@ -33,7 +34,7 @@ const sizeClass = computed(() => {
 })
 
 const avatarSrc = computed(() => {
-  if (!props.src || failed.value) return ""
+  if (!props.src || failed.value) return DEFAULT_AVATAR_URL
   if (/^https?:\/\//i.test(props.src)) return props.src
   if (props.src.startsWith("/assets/")) return props.src
   const origin = getApiOrigin()
@@ -41,11 +42,6 @@ const avatarSrc = computed(() => {
   return props.src
 })
 
-const initials = computed(() => {
-  const value = (props.name || "").trim()
-  if (!value) return ""
-  return Array.from(value)[0]?.toUpperCase() || ""
-})
 </script>
 
 <template>
@@ -62,7 +58,5 @@ const initials = computed(() => {
       class="h-full w-full object-cover"
       @error="failed = true"
     />
-    <span v-else-if="initials">{{ initials }}</span>
-    <User v-else class="h-1/2 w-1/2 text-white/65" aria-hidden="true" />
   </span>
 </template>

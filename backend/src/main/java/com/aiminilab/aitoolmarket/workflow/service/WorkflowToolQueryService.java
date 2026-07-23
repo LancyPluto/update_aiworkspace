@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.workflow.service;
 
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
+import com.aiminilab.aitoolmarket.common.error.ErrorMessageSanitizer;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
@@ -28,6 +29,7 @@ import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowRunStepMapper;
 import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowStepChargeMapper;
 import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowToolSurfaceMapper;
 import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowToolSurfaceRow;
+import com.aiminilab.aitoolmarket.workflow.support.WorkflowFailureContract;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -216,8 +218,13 @@ public class WorkflowToolQueryService {
                 run.getStartedAt(),
                 run.getUpdatedAt(),
                 run.getFinishedAt(),
-                task.getErrorCode(),
-                run.getErrorMessage() == null ? task.getErrorMessage() : run.getErrorMessage(),
+                firstNonBlank(run.getErrorCode(), task.getErrorCode()),
+                safeUserStatusMessage(
+                        run.getStatus(),
+                        firstNonBlank(run.getErrorCode(), task.getErrorCode()),
+                        firstNonBlank(run.getUserMessage(), task.getUserMessage()),
+                        run.getErrorMessage() != null || task.getErrorMessage() != null
+                ),
                 stepResponses,
                 artifacts,
                 cost,
@@ -311,11 +318,21 @@ public class WorkflowToolQueryService {
                 step.getNodeDefType(),
                 step.getStatus(),
                 progress,
-                step.getErrorMessage(),
+                safeUserStatusMessage(
+                        step.getStatus(),
+                        step.getErrorCode(),
+                        step.getUserMessage(),
+                        step.getErrorMessage() != null
+                ),
                 step.getStartedAt(),
                 step.getFinishedAt(),
-                null,
-                step.getErrorMessage(),
+                step.getErrorCode(),
+                safeUserStatusMessage(
+                        step.getStatus(),
+                        step.getErrorCode(),
+                        step.getUserMessage(),
+                        step.getErrorMessage() != null
+                ),
                 artifacts,
                 charges.stream().map(this::toCharge).toList()
         );
@@ -387,6 +404,31 @@ public class WorkflowToolQueryService {
             return null;
         }
         return value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private String safeUserStatusMessage(String status,
+                                         String errorCode,
+                                         String storedUserMessage,
+                                         boolean hasLegacyFailure) {
+        if ("AWAITING_FUNDS".equals(status)) {
+            return "可用算力不足，请充值后继续";
+        }
+        if ("CANCELLED".equals(status) || "CANCELLING".equals(status)) {
+            return "工作流已取消";
+        }
+        boolean failed = "FAILED".equals(status)
+                || "TIMEOUT".equals(status)
+                || errorCode != null
+                || hasLegacyFailure;
+        if (!failed) {
+            return null;
+        }
+        String fallback = WorkflowFailureContract.userMessage(errorCode);
+        return ErrorMessageSanitizer.sanitizeUserMessage(storedUserMessage, fallback);
+    }
+
+    private String firstNonBlank(String first, String second) {
+        return first != null && !first.isBlank() ? first : second;
     }
 
     private boolean isVariablePricing(AiTool tool) {

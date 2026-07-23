@@ -64,7 +64,9 @@ import com.aiminilab.aitoolmarket.agent.service.AgentRunService;
 import com.aiminilab.aitoolmarket.agent.service.AgentSkillBundleService;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolDescriptorService;
 import com.aiminilab.aitoolmarket.agent.service.AgentToolPreferenceService;
+import com.aiminilab.aitoolmarket.agent.support.AgentFailureMessage;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
+import com.aiminilab.aitoolmarket.common.error.ErrorMessageSanitizer;
 import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
@@ -83,6 +85,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import java.io.IOException;
 import java.net.SocketTimeoutException;
@@ -378,7 +381,13 @@ public class AgentRunServiceImpl implements AgentRunService {
         if (agentRunMapper.markCancelled(runId, now) == 0) {
             return AgentRunResponse.from(findRun(runId, userId));
         }
-        failOpenToolCalls(runId, userId, "RUN_CANCELLED", "Agent 运行已取消", now);
+        failOpenToolCalls(
+                runId,
+                userId,
+                "RUN_CANCELLED",
+                failureContract("RUN_CANCELLED", "Agent 运行已取消", null, null),
+                now
+        );
         creditService.release(userId, CreditSourceType.AGENT_RUN, runId, Math.max(0, run.getEstimatedCredits()));
         agentRateLimitService.decrementActiveRun(userId, runId);
         appendEventInternal(runId, userId, "run.failed", "Agent 运行已取消", "{\"status\":\"CANCELLED\"}", now);
@@ -402,7 +411,13 @@ public class AgentRunServiceImpl implements AgentRunService {
             if (agentRunMapper.markCancelled(runId, now) == 0) {
                 return AgentRunResponse.from(findRun(runId, userId));
             }
-            failOpenToolCalls(runId, userId, "TOOL_CONFIRMATION_REJECTED", "用户取消工具调用", now);
+            failOpenToolCalls(
+                    runId,
+                    userId,
+                    "TOOL_CONFIRMATION_REJECTED",
+                    failureContract("TOOL_CONFIRMATION_REJECTED", "用户取消工具调用", null, null),
+                    now
+            );
             creditService.release(userId, CreditSourceType.AGENT_RUN, runId, Math.max(0, run.getEstimatedCredits()));
             agentRateLimitService.decrementActiveRun(userId, runId);
             appendEventInternal(runId, userId, "run.failed", "用户取消工具调用", "{\"status\":\"CANCELLED\"}", now);
@@ -1080,7 +1095,17 @@ public class AgentRunServiceImpl implements AgentRunService {
         }
         AgentRun run = findRun(call.getRunId());
         if (TERMINAL_STATUSES.contains(run.getStatus())) {
-            agentToolCallMapper.markFailed(toolCallId, "RUN_ALREADY_TERMINATED", "Agent 运行已结束", LocalDateTime.now());
+            FailureContract failure = failureContract(
+                    "RUN_ALREADY_TERMINATED", "Agent run already terminated", null, null
+            );
+            agentToolCallMapper.markFailedWithContract(
+                    toolCallId,
+                    "RUN_ALREADY_TERMINATED",
+                    failure.userMessage(),
+                    failure.developerMessage(),
+                    failure.failureTraceId(),
+                    LocalDateTime.now()
+            );
             return AgentToolCallResponse.from(findToolCall(toolCallId));
         }
         LocalDateTime now = LocalDateTime.now();
@@ -1108,8 +1133,17 @@ public class AgentRunServiceImpl implements AgentRunService {
             return AgentToolCallResponse.from(call);
         }
         LocalDateTime now = LocalDateTime.now();
-        String errorMessage = errorMessagePreview(request.errorMessage());
-        int updated = agentToolCallMapper.markFailed(toolCallId, request.errorCode(), errorMessage, now);
+        FailureContract failure = failureContract(
+                request.errorCode(), request.errorMessage(), request.developerMessage(), request.failureTraceId()
+        );
+        int updated = agentToolCallMapper.markFailedWithContract(
+                toolCallId,
+                request.errorCode(),
+                failure.userMessage(),
+                failure.developerMessage(),
+                failure.failureTraceId(),
+                now
+        );
         if (updated == 0) {
             return AgentToolCallResponse.from(findToolCall(toolCallId));
         }
@@ -1117,8 +1151,10 @@ public class AgentRunServiceImpl implements AgentRunService {
                 call.getRunId(),
                 call.getUserId(),
                 "tool.finished",
-                errorMessage,
-                toJson(toolFinishedEventJson(call, "FAILED", null, request.errorCode(), errorMessage)),
+                failure.userMessage(),
+                toJson(toolFinishedEventJson(
+                        call, "FAILED", null, request.errorCode(), failure.userMessage()
+                )),
                 now
         );
         agentMetrics.recordToolCallOutcome(call.getToolCode(), "FAILED", firstNonNull(call.getStartedAt(), call.getCreatedAt()), now);
@@ -1225,13 +1261,23 @@ public class AgentRunServiceImpl implements AgentRunService {
         return AgentRunResponse.from(findRun(runId));
     }
 
-    private void failOpenToolCalls(Long runId, Long userId, String errorCode, String errorMessage, LocalDateTime now) {
-        String limitedErrorMessage = errorMessagePreview(errorMessage);
+    private void failOpenToolCalls(Long runId,
+                                   Long userId,
+                                   String errorCode,
+                                   FailureContract failure,
+                                   LocalDateTime now) {
         agentToolCallMapper.findByRunId(runId)
                 .stream()
                 .filter(call -> "RUNNING".equals(call.getStatus()))
                 .forEach(call -> {
-                    int updated = agentToolCallMapper.markFailed(call.getId(), errorCode, limitedErrorMessage, now);
+                    int updated = agentToolCallMapper.markFailedWithContract(
+                            call.getId(),
+                            errorCode,
+                            failure.userMessage(),
+                            failure.developerMessage(),
+                            failure.failureTraceId(),
+                            now
+                    );
                     if (updated == 0) {
                         return;
                     }
@@ -1239,8 +1285,10 @@ public class AgentRunServiceImpl implements AgentRunService {
                             runId,
                             userId,
                             "tool.finished",
-                            limitedErrorMessage,
-                            toJson(toolFinishedEventJson(call, "FAILED", null, errorCode, limitedErrorMessage)),
+                            failure.userMessage(),
+                            toJson(toolFinishedEventJson(
+                                    call, "FAILED", null, errorCode, failure.userMessage()
+                            )),
                             now
                     );
                     agentMetrics.recordToolCallOutcome(call.getToolCode(), "FAILED", firstNonNull(call.getStartedAt(), call.getCreatedAt()), now);
@@ -1276,11 +1324,21 @@ public class AgentRunServiceImpl implements AgentRunService {
         AgentModelConfig modelConfig = resolveModelConfigEntityForRun(run);
         int estimatedCredits = run.getEstimatedCredits() == null ? 0 : Math.max(0, run.getEstimatedCredits());
         int consumedCredits = resolveConsumedCredits(request.consumedCredits(), request.promptTokens(), request.completionTokens(), modelConfig, estimatedCredits);
-        String errorMessage = errorMessagePreview(request.errorMessage());
-        if (agentRunMapper.markFailedWithConsumedCredits(runId, request.errorCode(), errorMessage, consumedCredits, now) == 0) {
+        FailureContract failure = failureContract(
+                request.errorCode(), request.errorMessage(), request.developerMessage(), request.failureTraceId()
+        );
+        if (agentRunMapper.markFailedWithConsumedCreditsContract(
+                runId,
+                request.errorCode(),
+                failure.userMessage(),
+                failure.developerMessage(),
+                failure.failureTraceId(),
+                consumedCredits,
+                now
+        ) == 0) {
             return AgentRunResponse.from(findRun(runId));
         }
-        failOpenToolCalls(runId, run.getUserId(), request.errorCode(), errorMessage, now);
+        failOpenToolCalls(runId, run.getUserId(), request.errorCode(), failure, now);
         if (consumedCredits > 0) {
             creditService.settle(run.getUserId(), CreditSourceType.AGENT_RUN, runId, consumedCredits);
         }
@@ -1293,10 +1351,10 @@ public class AgentRunServiceImpl implements AgentRunService {
                 runId,
                 run.getUserId(),
                 "run.failed",
-                errorMessage,
+                failure.userMessage(),
                 toJson(new FailAgentRunRequest(
                         request.errorCode(),
-                        errorMessage,
+                        failure.userMessage(),
                         request.consumedCredits(),
                         request.promptTokens(),
                         request.completionTokens()
@@ -1380,22 +1438,34 @@ public class AgentRunServiceImpl implements AgentRunService {
                 now
         );
         if (!connectivity.success()) {
-            String errorMessage = errorMessagePreview(messageOrDefault(connectivity.message(), "Agent model connectivity check failed"));
-            agentRunMapper.markFailed(run.getId(), "MODEL_CALL_FAILED", errorMessage, now);
+            FailureContract failure = failureContract(
+                    "MODEL_CALL_FAILED",
+                    messageOrDefault(connectivity.message(), "Agent model connectivity check failed"),
+                    null,
+                    null
+            );
+            agentRunMapper.markFailedWithContract(
+                    run.getId(),
+                    "MODEL_CALL_FAILED",
+                    failure.userMessage(),
+                    failure.developerMessage(),
+                    failure.failureTraceId(),
+                    now
+            );
             appendEventInternal(
                     run.getId(),
                     userId,
                     "model.preflight_failed",
-                    errorMessage,
+                    failure.userMessage(),
                     toJson(Map.of(
                             "provider", connectivity.config().provider(),
                             "modelName", connectivity.config().modelName(),
-                            "message", errorMessage
+                            "message", failure.userMessage()
                     )),
                     now
             );
             agentSessionMapper.touch(sessionId, now);
-            throw new BusinessException(ErrorCode.MODEL_CALL_FAILED, errorMessage);
+            throw new BusinessException(ErrorCode.MODEL_CALL_FAILED, failure.userMessage());
         }
 
         AgentContextSnapshot snapshot = createContextSnapshot(run, session, userMessage, connectivity.config(), now);
@@ -2425,6 +2495,36 @@ public class AgentRunServiceImpl implements AgentRunService {
         return errorMessage.substring(0, contentLength) + EVENT_TEXT_TRUNCATED_SUFFIX;
     }
 
+    private FailureContract failureContract(String errorCode,
+                                            String legacyErrorMessage,
+                                            String developerMessage,
+                                            String failureTraceId) {
+        String userMessage = ErrorMessageSanitizer.sanitizeUserMessage(
+                AgentFailureMessage.userMessage(errorCode),
+                "Agent 执行失败，请稍后重试"
+        );
+        String developerSource = developerMessage == null || developerMessage.isBlank()
+                ? legacyErrorMessage
+                : developerMessage;
+        String sanitizedDeveloperMessage = ErrorMessageSanitizer.sanitizeDeveloperMessage(
+                developerSource,
+                "Agent execution failed"
+        );
+        String normalizedTraceId = normalizeFailureTraceId(failureTraceId);
+        if (normalizedTraceId == null) {
+            normalizedTraceId = normalizeFailureTraceId(MDC.get("traceId"));
+        }
+        return new FailureContract(userMessage, sanitizedDeveloperMessage, normalizedTraceId);
+    }
+
+    private String normalizeFailureTraceId(String traceId) {
+        if (traceId == null || traceId.isBlank()) {
+            return null;
+        }
+        String normalized = traceId.strip();
+        return normalized.length() <= 64 ? normalized : normalized.substring(0, 64);
+    }
+
     private Map<String, Object> toolFinishedEventJson(AgentToolCall call,
                                                       String status,
                                                       Object resultJson,
@@ -2512,22 +2612,12 @@ public class AgentRunServiceImpl implements AgentRunService {
 
     private String toolEventJson(AgentToolCall call) {
         try {
-            return objectMapper.writeValueAsString(new AgentToolCallResponse(
-                    call.getId(),
-                    call.getRunId(),
-                    call.getToolCode(),
-                    call.getTaskId(),
-                    call.getStatus(),
-                    call.getArgumentsJson(),
-                    call.getResultJson(),
-                    call.getErrorCode(),
-                    call.getErrorMessage(),
-                    call.getStartedAt(),
-                    call.getFinishedAt(),
-                    call.getCreatedAt()
-            ));
+            return objectMapper.writeValueAsString(AgentToolCallResponse.from(call));
         } catch (JsonProcessingException exception) {
             return "{}";
         }
+    }
+
+    private record FailureContract(String userMessage, String developerMessage, String failureTraceId) {
     }
 }

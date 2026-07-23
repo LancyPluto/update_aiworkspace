@@ -19,13 +19,13 @@ public interface CommunityService {
     CommunityPostResponse publish(Long userId, PublishPostRequest request);
     CommunityPostResponse update(Long userId, Long postId, UpdateCommunityPostRequest request);
     void unpublish(Long userId, Long postId);
-    PublicUserProfileResponse publicUser(Long userId);
+    PublicUserProfileResponse publicUser(String publicCode);
     PageResponse<CommunityPostResponse> discover(String modality, String tag, String topic, String sort, Boolean featured, Long viewerId, Integer pageNo, Integer pageSize);
     PageResponse<CommunityPostResponse> search(String keyword, String modality, String tag, String topic, String toolCode, String sort, Boolean featured, Long viewerId, Integer pageNo, Integer pageSize);
     java.util.List<CommunityTopicResponse> topics(Integer limit);
     PageResponse<CommunityPostResponse> topicPosts(String topic, String modality, String sort, Long viewerId, Integer pageNo, Integer pageSize);
-    CommunityCreatorResponse creator(Long userId, Long viewerId);
-    PageResponse<CommunityPostResponse> publicPosts(Long userId, String modality, Long viewerId, Integer pageNo, Integer pageSize);
+    CommunityCreatorResponse creator(String publicCode, Long viewerId);
+    PageResponse<CommunityPostResponse> publicPosts(String publicCode, String modality, Long viewerId, Integer pageNo, Integer pageSize);
     CommunityPostResponse detail(Long postId, Long viewerId);
     URI downloadPostMedia(Long postId, Integer index);
     void recordEvent(Long userId, CommunityEventRequest request);

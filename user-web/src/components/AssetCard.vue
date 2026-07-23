@@ -7,6 +7,7 @@ import { getApiOrigin } from "@/api/client"
 import ImageStackPreview from "@/components/ImageStackPreview.vue"
 import OptimizedImage from "@/components/OptimizedImage.vue"
 import UserAvatar from "@/components/UserAvatar.vue"
+import { userRoutes } from "@/router/userRoutes"
 import type { AssetPreviewItem } from "@/types/assetPreview"
 
 const props = withDefaults(
@@ -46,9 +47,9 @@ const isImageStack = computed(() => props.asset.kind === "image" && imageStackUr
 const coverUrl = computed(() => normalizeMediaUrl(props.asset.coverUrl))
 const showFeaturedBadge = computed(() => Boolean(props.asset.featured || props.asset.pinned))
 const featuredBadgeText = computed(() => (props.asset.pinned ? "置顶" : "精选"))
-const showCreator = computed(() => Boolean(props.gallery && props.source === "community" && props.asset.authorUserId))
+const showCreator = computed(() => Boolean(props.gallery && props.source === "community" && props.asset.authorPublicCode))
 const creatorName = computed(
-  () => props.asset.authorName?.trim() || (props.asset.authorUserId ? `用户${props.asset.authorUserId}` : ""),
+  () => props.asset.authorName?.trim() || (props.asset.authorPublicCode ? `用户${props.asset.authorPublicCode}` : "用户"),
 )
 const subtitle = computed(() => props.asset.subtitle || props.asset.toolName || props.asset.toolCode || "")
 const previewText = computed(() => {
@@ -88,8 +89,8 @@ function formatTime(value?: string | null) {
 }
 
 function openAuthorProfile() {
-  if (!props.asset.authorUserId) return
-  router.push(`/u/${props.asset.authorUserId}`)
+  if (!props.asset.authorPublicCode) return
+  router.push(userRoutes.publicProfile(props.asset.authorPublicCode))
 }
 </script>
 

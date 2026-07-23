@@ -37,22 +37,22 @@ public class CommunityController {
         this.communityService = communityService;
     }
 
-    @GetMapping("/users/{userId}")
-    public ApiResponse<PublicUserProfileResponse> user(@PathVariable Long userId) {
-        return ApiResponse.success(communityService.publicUser(userId));
+    @GetMapping("/users/{publicCode}")
+    public ApiResponse<PublicUserProfileResponse> user(@PathVariable String publicCode) {
+        return ApiResponse.success(communityService.publicUser(publicCode));
     }
 
-    @GetMapping("/users/{userId}/posts")
-    public ApiResponse<PageResponse<CommunityPostResponse>> userPosts(@PathVariable Long userId,
+    @GetMapping("/users/{publicCode}/posts")
+    public ApiResponse<PageResponse<CommunityPostResponse>> userPosts(@PathVariable String publicCode,
                                                                       @RequestParam(required = false) String modality,
                                                                       @RequestParam(required = false) Integer pageNo,
                                                                       @RequestParam(required = false) Integer pageSize) {
-        return ApiResponse.success(communityService.publicPosts(userId, modality, currentUserIdOrNull(), pageNo, pageSize));
+        return ApiResponse.success(communityService.publicPosts(publicCode, modality, currentUserIdOrNull(), pageNo, pageSize));
     }
 
-    @GetMapping("/creators/{userId}")
-    public ApiResponse<CommunityCreatorResponse> creator(@PathVariable Long userId) {
-        return ApiResponse.success(communityService.creator(userId, currentUserIdOrNull()));
+    @GetMapping("/creators/{publicCode}")
+    public ApiResponse<CommunityCreatorResponse> creator(@PathVariable String publicCode) {
+        return ApiResponse.success(communityService.creator(publicCode, currentUserIdOrNull()));
     }
 
     @GetMapping("/posts")

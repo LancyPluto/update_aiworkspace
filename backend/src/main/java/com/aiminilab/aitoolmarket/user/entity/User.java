@@ -12,6 +12,8 @@ public class User {
 
     @TableId
     private Long id;
+    private String publicCode;
+    private String referralCode;
     private String username;
     private String passwordHash;
     private String phone;
@@ -35,6 +37,22 @@ public class User {
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public String getPublicCode() {
+        return publicCode;
+    }
+
+    public void setPublicCode(String publicCode) {
+        this.publicCode = publicCode;
+    }
+
+    public String getReferralCode() {
+        return referralCode;
+    }
+
+    public void setReferralCode(String referralCode) {
+        this.referralCode = referralCode;
     }
 
     public String getUsername() {

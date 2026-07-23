@@ -10,6 +10,7 @@ from client.provider_error import (
     transport_failure_metadata,
 )
 from config import settings
+from utils.model_contract import parse_response_mapping, read_response_value, response_mapping_has
 
 
 class SiliconFlowVideoError(ProviderCallError):
@@ -21,9 +22,16 @@ class SiliconFlowVideoTimeoutError(SiliconFlowVideoError):
 
 
 class SiliconFlowVideoClient:
-    def __init__(self, *, base_url: str | None = None, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        model_config: dict[str, Any] | None = None,
+    ) -> None:
         self.base_url = (base_url or settings.siliconflow_base_url).rstrip("/")
         self.api_key = api_key if api_key is not None else settings.siliconflow_api_key
+        self.response_mapping = parse_response_mapping(model_config)
         self.poll_interval_seconds = 5
         self.timeout_seconds = 600
         self.timeout = (5, 60)
@@ -254,20 +262,22 @@ class SiliconFlowVideoClient:
             raise SiliconFlowVideoError("siliconflow success response missing video url")
         return video_url.strip()
 
-    @staticmethod
-    def _extract_image_url(payload: dict[str, Any]) -> str:
-        urls = SiliconFlowVideoClient._extract_image_urls(payload)
+    def _extract_image_url(self, payload: dict[str, Any]) -> str:
+        urls = self._extract_image_urls(payload)
         if not urls:
             raise SiliconFlowVideoError("siliconflow image response missing image url")
         return urls[0]
 
-    @staticmethod
-    def _extract_image_urls(payload: dict[str, Any]) -> list[str]:
-        containers = []
-        for key in ("images", "data"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                containers.append(value)
+    def _extract_image_urls(self, payload: dict[str, Any]) -> list[str]:
+        if response_mapping_has(self.response_mapping, "itemsPath"):
+            mapped_items = read_response_value(payload, self.response_mapping, "itemsPath")
+            containers = [mapped_items] if isinstance(mapped_items, list) else []
+        else:
+            containers = []
+            for key in ("images", "data"):
+                value = payload.get(key)
+                if isinstance(value, list):
+                    containers.append(value)
         urls: list[str] = []
         for container in containers:
             if not container:
@@ -275,7 +285,12 @@ class SiliconFlowVideoClient:
             for item in container:
                 if not isinstance(item, dict):
                     continue
-                url = item.get("url") or item.get("image_url")
+                url = read_response_value(
+                    item,
+                    self.response_mapping,
+                    "urlPath",
+                    fallback_paths=("url", "image_url"),
+                )
                 if isinstance(url, str) and url.strip():
                     urls.append(url.strip())
         if urls:

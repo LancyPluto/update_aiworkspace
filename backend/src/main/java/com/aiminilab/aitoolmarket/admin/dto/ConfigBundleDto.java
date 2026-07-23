@@ -60,6 +60,12 @@ public record ConfigBundleDto(
             String extraAuthJson,
             String executionTask,
             String executionOptionsJson,
+            String requestSchemaJson,
+            String requestMappingJson,
+            String responseMappingJson,
+            String apiContractVersion,
+            String contractStatus,
+            java.time.LocalDateTime contractVerifiedAt,
             Boolean secretsRedacted,
             String minimaxGroupId,
             String consoleUrl,
@@ -117,6 +123,8 @@ public record ConfigBundleDto(
             String status,
             Integer estimatedCreditCost,
             String modelConfigCode,
+            List<String> modelConfigCodes,
+            String defaultModelConfigCode,
             String executionHandler,
             List<String> requiredModelCapabilities,
             Boolean agentEnabled,
@@ -124,6 +132,25 @@ public record ConfigBundleDto(
             List<Prompt> prompts,
             Workflow workflow
     ) {
+        public List<String> resolvedModelConfigCodes() {
+            if (modelConfigCodes != null) {
+                return modelConfigCodes;
+            }
+            return modelConfigCode == null || modelConfigCode.isBlank()
+                    ? List.of()
+                    : List.of(modelConfigCode);
+        }
+
+        public String resolvedDefaultModelConfigCode() {
+            if (defaultModelConfigCode != null && !defaultModelConfigCode.isBlank()) {
+                return defaultModelConfigCode;
+            }
+            if (modelConfigCode != null && !modelConfigCode.isBlank()) {
+                return modelConfigCode;
+            }
+            List<String> codes = resolvedModelConfigCodes();
+            return codes.isEmpty() ? null : codes.get(0);
+        }
     }
 
     public record Field(

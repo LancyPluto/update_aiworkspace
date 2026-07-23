@@ -26,7 +26,7 @@ class FakeBackendClient:
             },
             "modelConfig": {
                 "provider": "bailian_happyhorse",
-                "modelName": "happyhorse-1.0-r2v",
+                "modelName": "happyhorse-1.1-r2v",
                 "baseUrl": "https://dashscope.aliyuncs.com",
                 "apiKey": "fake-key",
                 "timeoutSeconds": 30,
@@ -97,11 +97,12 @@ def test_happyhorse_handler_builds_multi_reference_payload_and_bills_seconds() -
     assert content["dashscopeTaskId"] == "task-1"
     assert content["videos"][0]["url"] == "/generated/video/12001/video-1.mp4"
     assert dashscope.payload is not None
-    assert dashscope.payload["model"] == "happyhorse-1.0-r2v"
-    assert dashscope.payload["input"]["reference_images"] == [
-        "data:image/png;base64,ZmFrZS0x",
-        "data:image/png;base64,ZmFrZS0y",
+    assert dashscope.payload["model"] == "happyhorse-1.1-r2v"
+    assert dashscope.payload["input"]["media"] == [
+        {"type": "reference_image", "url": "data:image/png;base64,ZmFrZS0x"},
+        {"type": "reference_image", "url": "data:image/png;base64,ZmFrZS0y"},
     ]
+    assert "reference_images" not in dashscope.payload["input"]
     assert dashscope.payload["parameters"]["duration"] == 6
     assert dashscope.payload["parameters"]["ratio"] == "16:9"
 
@@ -125,6 +126,8 @@ def test_happyhorse_video_edit_maps_audio_setting_and_omits_unsupported_params()
     assert "ratio" not in payload["parameters"]
     assert "duration" not in payload["parameters"]
     assert payload["input"]["media"][0]["type"] == "video"
+    assert "video_url" not in payload["input"]
+    assert "source_video_url" not in payload["input"]
 
     mute_payload = video_generation_handler._build_happyhorse_payload(
         {"prompt": "edit", "sourceVideo": "https://example.com/source.mp4", "audioSetting": "mute"},
@@ -163,9 +166,35 @@ def test_happyhorse_handler_converts_reference_images_to_base64_data_urls(monkey
 
     assert result["status"] == "SUCCESS"
     assert dashscope.payload is not None
-    references = dashscope.payload["input"]["reference_images"]
-    assert references == [
-        "data:image/png;base64,7265662d312e706e67",
-        "data:image/png;base64,7265662d322e706e67",
+    media = dashscope.payload["input"]["media"]
+    assert media == [
+        {"type": "reference_image", "url": "data:image/png;base64,7265662d312e706e67"},
+        {"type": "reference_image", "url": "data:image/png;base64,7265662d322e706e67"},
     ]
-    assert all(not item.startswith("http://backend:8080/generated/") for item in references)
+    assert all(not item["url"].startswith("http://backend:8080/generated/") for item in media)
+
+
+def test_current_happyhorse_i2v_uses_media_without_legacy_img_url(monkeypatch) -> None:
+    monkeypatch.setattr(video_generation_handler, "_resolve_happyhorse_image_data_url", lambda value, _field: value)
+
+    payload = video_generation_handler._build_happyhorse_payload(
+        {"prompt": "animate", "firstFrameImage": "https://example.com/first.png"},
+        "happyhorse-1.1-i2v",
+    )
+
+    assert payload["input"]["media"] == [
+        {"type": "first_frame", "url": "https://example.com/first.png"}
+    ]
+    assert "img_url" not in payload["input"]
+
+
+def test_unknown_legacy_happyhorse_model_keeps_compatibility_fields(monkeypatch) -> None:
+    monkeypatch.setattr(video_generation_handler, "_resolve_happyhorse_image_data_url", lambda value, _field: value)
+
+    payload = video_generation_handler._build_happyhorse_payload(
+        {"prompt": "animate", "firstFrameImage": "https://example.com/first.png"},
+        "happyhorse-legacy-i2v",
+    )
+
+    assert payload["input"]["media"][0]["type"] == "first_frame"
+    assert payload["input"]["img_url"] == "https://example.com/first.png"

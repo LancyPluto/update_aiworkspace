@@ -51,6 +51,13 @@ const artifacts = computed<WorkflowArtifact[]>(() => {
 })
 const emptyArtifacts = computed(() => artifacts.value.length === 0)
 const legacy = computed(() => pageState.value === "404")
+const runFailureMessage = computed(() => {
+  if (!run.value || !["FAILED", "TIMEOUT", "CANCELLED"].includes(run.value.status)) return ""
+  return run.value.userMessage?.trim()
+    || run.value.errorMessage?.trim()
+    || run.value.progressMessage?.trim()
+    || ""
+})
 
 function formatTimestamp(value?: string | null): string {
   if (!value) return "--"
@@ -306,7 +313,7 @@ onBeforeUnmount(() => {
           <span class="inline-flex items-center gap-1.5"><Clock3 class="h-3.5 w-3.5" /> 创建于 {{ formatTimestamp(run.createdAt) }}</span>
         </div>
         <p v-if="refreshError" class="mt-3 text-xs text-warning">{{ refreshError }}</p>
-        <p v-if="run.errorMessage" class="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{{ run.errorMessage }}</p>
+        <p v-if="runFailureMessage" class="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{{ runFailureMessage }}</p>
       </header>
 
       <WorkflowRunActions

@@ -27,7 +27,8 @@ export interface AssetPreviewItem {
   pinned?: boolean
   authorName?: string
   authorAvatarUrl?: string | null
-  authorUserId?: number
+  authorPublicCode?: string | null
+  ownedByCurrentUser?: boolean
   stats?: {
     views?: number
     likes?: number

@@ -129,6 +129,31 @@ def test_openai_images_with_reference_uses_requests_multipart_by_default() -> No
     assert posted["files"]["image"][1] == b"fake", posted
 
 
+@pytest.mark.parametrize(
+    "model,size,expected",
+    [
+        ("gpt-image-2", "1280x720", "auto"),
+        ("openai/gpt-image-2", "720x1280", "auto"),
+        ("openai/gpt-image-2", "1536x1024", "1536x1024"),
+        ("gpt-image-1", "not-a-size", "auto"),
+    ],
+)
+def test_gpt_image_edit_size_uses_only_official_sizes(model, size, expected) -> None:
+    client = OpenAIImagesClient(base_url="https://sub2api.wlcloudai.com/v1", api_key="fake-key")
+
+    assert client._resolve_edit_size(size, model) == expected
+
+
+def test_openai_image_edit_size_override_has_highest_priority() -> None:
+    client = OpenAIImagesClient(
+        base_url="https://sub2api.wlcloudai.com/v1",
+        api_key="fake-key",
+        extra_auth_json='{"editSize":"custom-provider-size"}',
+    )
+
+    assert client._resolve_edit_size("1280x720", "openai/gpt-image-2") == "custom-provider-size"
+
+
 def test_openai_images_edit_does_not_top_up_by_default_when_gateway_returns_fewer_than_requested() -> None:
     class FakeResponse:
         status_code = 200
@@ -349,21 +374,48 @@ def test_openai_images_can_place_response_format_inside_extra_body(monkeypatch):
     urls = client.generate_images(
         prompt="a tidy product photo",
         model="agnes-image-2.1-flash",
-        image_size="1024x1024",
+        image_size="2K",
+        aspect_ratio="16:9",
         response_format="url",
     )
 
     assert urls == ["https://cdn.example/out.png"]
     assert captured["path"] == "/images/generations"
+    assert captured["payload"]["size"] == "2K"
+    assert captured["payload"]["ratio"] == "16:9"
+    assert "n" not in captured["payload"]
     assert "response_format" not in captured["payload"]
     assert captured["payload"]["extra_body"] == {"response_format": "url"}
+
+
+def test_agnes_text_to_image_base64_uses_return_base64(monkeypatch):
+    client = OpenAIImagesClient(
+        base_url="https://apihub.agnes-ai.com/v1",
+        api_key="test-key",
+    )
+    captured = {}
+
+    def fake_post(path, payload):
+        captured["payload"] = payload
+        return {"data": [{"b64_json": "ZmFrZQ=="}]}
+
+    monkeypatch.setattr(client, "_post", fake_post)
+
+    client.generate_images(
+        prompt="a tidy product photo",
+        model="agnes-image-2.1-flash",
+        image_size="1K",
+        response_format="b64_json",
+    )
+
+    assert captured["payload"]["return_base64"] is True
+    assert "extra_body" not in captured["payload"]
 
 
 def test_openai_images_can_send_source_images_as_json_array(monkeypatch):
     client = OpenAIImagesClient(
         base_url="https://apihub.agnes-ai.com/v1",
         api_key="test-key",
-        extra_auth_json='{"imageInputMode": "json_array", "responseFormatLocation": "extra_body"}',
     )
     captured = {}
 
@@ -388,8 +440,11 @@ def test_openai_images_can_send_source_images_as_json_array(monkeypatch):
 
     assert urls == ["https://cdn.example/out.png"]
     assert captured["path"] == "/images/generations"
-    assert captured["payload"]["image"] == ["https://storage.example/input.png"]
-    assert captured["payload"]["extra_body"] == {"response_format": "url"}
+    assert "image" not in captured["payload"]
+    assert captured["payload"]["extra_body"] == {
+        "image": ["https://storage.example/input.png"],
+        "response_format": "url",
+    }
 
 
 def test_volcengine_images_reference_defaults_to_generation_json(monkeypatch):

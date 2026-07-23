@@ -1,8 +1,9 @@
 package com.aiminilab.aitoolmarket.workflow.controller;
 
-import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
+import com.aiminilab.aitoolmarket.common.error.ErrorContractResponseFactory;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -14,10 +15,24 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice(assignableTypes = WorkflowRunController.class)
 public class WorkflowRunApiExceptionHandler {
 
+    private final ErrorContractResponseFactory responseFactory;
+
+    public WorkflowRunApiExceptionHandler(ErrorContractResponseFactory responseFactory) {
+        this.responseFactory = responseFactory;
+    }
+
     @ExceptionHandler(BusinessException.class)
-    public ResponseEntity<ApiResponse<Object>> handleBusinessException(BusinessException exception) {
-        return ResponseEntity.status(status(exception.getErrorCode()))
-                .body(ApiResponse.fail(exception.getErrorCode(), exception.getMessage(), exception.getData()));
+    public ResponseEntity<Object> handleBusinessException(BusinessException exception,
+                                                           HttpServletRequest request) {
+        return responseFactory.errorResponse(
+                request,
+                exception.getErrorDefinition(),
+                exception.getErrorDefinition().defaultUserMessage(),
+                exception.getDeveloperMessage(),
+                exception.getErrorCode(),
+                exception.getData(),
+                status(exception.getErrorCode())
+        );
     }
 
     private HttpStatus status(ErrorCode errorCode) {

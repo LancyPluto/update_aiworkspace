@@ -13,6 +13,7 @@ import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowStepAttemptMapper;
 import com.aiminilab.aitoolmarket.workflow.metrics.WorkflowMetrics;
 import com.aiminilab.aitoolmarket.workflow.model.WorkflowStepStatus;
 import com.aiminilab.aitoolmarket.workflow.model.WorkflowAttemptStatus;
+import com.aiminilab.aitoolmarket.workflow.support.WorkflowFailureContract;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -163,11 +164,18 @@ public class WorkflowAttemptRecoveryService {
         int attemptNo = attempt.getAttemptNo() == null ? 0 : attempt.getAttemptNo();
         int maxAttempts = step.getMaxAttempts() == null ? 1 : Math.max(1, step.getMaxAttempts());
         if (attemptNo >= maxAttempts) {
-            if (stepMapper.failActiveAttempt(
+            WorkflowFailureContract failure = WorkflowFailureContract.from(
+                    "ATTEMPT_LEASE_EXPIRED",
+                    LEASE_EXPIRED_MESSAGE
+            );
+            if (stepMapper.failActiveAttemptWithContract(
                     step.getId(),
                     revision(step),
                     attempt.getId(),
-                    LEASE_EXPIRED_MESSAGE,
+                    failure.errorCode(),
+                    failure.userMessage(),
+                    failure.developerMessage(),
+                    failure.failureTraceId(),
                     ACTIVE_STEP_STATUSES
             ) != 1) {
                 throw conflict("Exhausted step failure", attempt.getId());

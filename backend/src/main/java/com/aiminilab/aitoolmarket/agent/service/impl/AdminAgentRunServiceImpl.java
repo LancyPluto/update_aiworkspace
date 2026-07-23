@@ -69,10 +69,10 @@ public class AdminAgentRunServiceImpl implements AdminAgentRunService {
         List<AgentRunEvent> events = loadRecentEvents(runId, totalEventCount);
         var context = run.getContextSnapshotId() == null ? null : contextSnapshotMapper.selectById(run.getContextSnapshotId());
         return new AdminAgentRunDetailResponse(
-                AgentRunResponse.from(run),
+                AgentRunResponse.fromAdmin(run),
                 events.stream().map(AgentRunEventResponse::from).toList(),
                 agentToolCallMapper.findByRunId(runId).stream()
-                        .map(AgentToolCallResponse::from)
+                        .map(AgentToolCallResponse::fromAdmin)
                         .toList(),
                 AdminAgentRunContextSnapshotResponse.from(context, objectMapper),
                 totalEventCount > events.size(),

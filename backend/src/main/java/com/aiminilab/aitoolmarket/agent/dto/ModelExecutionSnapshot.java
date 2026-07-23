@@ -17,6 +17,12 @@ public record ModelExecutionSnapshot(
         String extraAuthJson,
         String executionTask,
         String executionOptionsJson,
+        String requestSchemaJson,
+        String requestMappingJson,
+        String responseMappingJson,
+        String apiContractVersion,
+        String contractStatus,
+        java.time.LocalDateTime contractVerifiedAt,
         String minimaxGroupId,
         Integer timeoutSeconds,
         BigDecimal inputTokenPricePer1k,
@@ -49,6 +55,12 @@ public record ModelExecutionSnapshot(
                 config.getExtraAuthJson(),
                 config.getExecutionTask(),
                 config.getExecutionOptionsJson(),
+                config.getRequestSchemaJson(),
+                config.getRequestMappingJson(),
+                config.getResponseMappingJson(),
+                config.getApiContractVersion(),
+                config.getContractStatus(),
+                config.getContractVerifiedAt(),
                 config.getMinimaxGroupId(),
                 config.getTimeoutSeconds(),
                 config.getInputTokenPricePer1k(),
@@ -76,6 +88,12 @@ public record ModelExecutionSnapshot(
         config.setExtraAuthJson(extraAuthJson);
         config.setExecutionTask(executionTask);
         config.setExecutionOptionsJson(executionOptionsJson);
+        config.setRequestSchemaJson(requestSchemaJson);
+        config.setRequestMappingJson(requestMappingJson);
+        config.setResponseMappingJson(responseMappingJson);
+        config.setApiContractVersion(apiContractVersion);
+        config.setContractStatus(contractStatus);
+        config.setContractVerifiedAt(contractVerifiedAt);
         config.setMinimaxGroupId(minimaxGroupId);
         config.setTimeoutSeconds(timeoutSeconds);
         config.setInputTokenPricePer1k(inputTokenPricePer1k);

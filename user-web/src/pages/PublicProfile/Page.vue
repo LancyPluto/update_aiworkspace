@@ -35,9 +35,11 @@ const hasNext = ref(false)
 const headerCompact = ref(false)
 const scrollOffset = ref(0)
 
-const userId = computed(() => String(route.params.userId || ""))
+const publicCode = computed(() => String(route.params.publicCode || ""))
 const displayName = computed(
-  () => safeDisplayName(profile.value?.nickname) || safeDisplayName(profile.value?.username) || defaultUserDisplayName(userId.value),
+  () =>
+    safeDisplayName(profile.value?.nickname, profile.value?.publicCode || publicCode.value) ||
+    defaultUserDisplayName(profile.value?.publicCode || publicCode.value),
 )
 const featuredCount = computed(() => creator.value?.featuredCount ?? creator.value?.featuredPosts?.length ?? 0)
 
@@ -46,8 +48,8 @@ const { offsetX, offsetY } = useProfileParallax(pageRoot)
 let heroObserver: IntersectionObserver | null = null
 
 function applyTheme() {
-  if (!pageRoot.value || !userId.value) return
-  const themeId = resolveProfileThemeId(userId.value, auth.user?.id)
+  if (!pageRoot.value || !publicCode.value) return
+  const themeId = resolveProfileThemeId(publicCode.value, auth.user?.publicCode)
   applyProfileThemeToElement(pageRoot.value, themeId)
 }
 
@@ -68,7 +70,7 @@ function setupHeroObserver() {
 }
 
 async function load(reset = true) {
-  if (!userId.value) return
+  if (!publicCode.value) return
   if (reset) {
     loading.value = true
     pageNo.value = 1
@@ -80,8 +82,8 @@ async function load(reset = true) {
   try {
     const currentPage = reset ? 1 : pageNo.value
     const [user, page] = await Promise.all([
-      reset ? fetchCommunityCreator(userId.value, { token: auth.token }) : Promise.resolve(creator.value),
-      fetchPublicUserPosts(userId.value, {
+      reset ? fetchCommunityCreator(publicCode.value, { token: auth.token }) : Promise.resolve(creator.value),
+      fetchPublicUserPosts(publicCode.value, {
         token: auth.token,
         query: { pageNo: currentPage, pageSize: 12 },
       }),
@@ -109,7 +111,7 @@ function goBack() {
   }
 }
 
-watch(userId, () => {
+watch(publicCode, () => {
   applyTheme()
   void load(true)
 })

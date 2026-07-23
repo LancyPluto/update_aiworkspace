@@ -41,10 +41,12 @@ import com.aiminilab.aitoolmarket.tool.dto.UpsertWorkflowRequest;
 import com.aiminilab.aitoolmarket.tool.dto.WorkflowResponse;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.entity.ToolCategory;
+import com.aiminilab.aitoolmarket.tool.entity.ToolModelBinding;
 import com.aiminilab.aitoolmarket.tool.entity.ToolPromptVersion;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolCategoryMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldSchemaMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolModelBindingMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptVersionMapper;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import com.aiminilab.aitoolmarket.tool.service.WorkflowService;
@@ -159,6 +161,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
     private final ToolService toolService;
     private final WorkflowService workflowService;
     private final ToolMapper toolMapper;
+    private final ToolModelBindingMapper toolModelBindingMapper;
     private final ToolFieldSchemaMapper toolFieldSchemaMapper;
     private final ToolCategoryMapper toolCategoryMapper;
     private final ToolPromptVersionMapper toolPromptVersionMapper;
@@ -178,6 +181,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                                    ToolService toolService,
                                    WorkflowService workflowService,
                                    ToolMapper toolMapper,
+                                   ToolModelBindingMapper toolModelBindingMapper,
                                    ToolFieldSchemaMapper toolFieldSchemaMapper,
                                    ToolCategoryMapper toolCategoryMapper,
                                    ToolPromptVersionMapper toolPromptVersionMapper,
@@ -196,6 +200,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         this.toolService = toolService;
         this.workflowService = workflowService;
         this.toolMapper = toolMapper;
+        this.toolModelBindingMapper = toolModelBindingMapper;
         this.toolFieldSchemaMapper = toolFieldSchemaMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.toolPromptVersionMapper = toolPromptVersionMapper;
@@ -241,7 +246,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         Set<String> exportedModelCodes = exportedTools.stream()
-                .map(ConfigBundleDto.Tool::modelConfigCode)
+                .flatMap(tool -> tool.resolvedModelConfigCodes().stream())
                 .filter(code -> !isBlank(code))
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         exportedTools.stream()
@@ -394,6 +399,7 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 .map(this::exportPrompt)
                 .toList();
         WorkflowResponse workflow = workflowService.getWorkflow(tool.id());
+        ExportedToolModelSelection modelSelection = exportToolModelSelection(tool, modelCodesById);
         return new ConfigBundleDto.Tool(
                 tool.toolCode(),
                 tool.toolName(),
@@ -406,7 +412,9 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 exportConfigNote(tool.configNote(), includeMediaAssets),
                 tool.status(),
                 tool.estimatedCreditCost(),
-                modelCodesById.get(tool.modelConfigId()),
+                modelSelection.defaultModelConfigCode(),
+                modelSelection.modelConfigCodes(),
+                modelSelection.defaultModelConfigCode(),
                 tool.executionHandler(),
                 tool.requiredModelCapabilities(),
                 extension == null ? true : Boolean.TRUE.equals(extension.getAgentEnabled()),
@@ -414,6 +422,39 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 prompts,
                 exportWorkflow(workflow)
         );
+    }
+
+    private ExportedToolModelSelection exportToolModelSelection(
+            ToolSummaryResponse tool,
+            Map<Long, String> modelCodesById
+    ) {
+        List<ToolModelBinding> bindings = safeList(toolModelBindingMapper.findByToolId(tool.id())).stream()
+                .sorted(java.util.Comparator
+                        .comparing((ToolModelBinding binding) -> binding.getSortOrder() == null
+                                ? Integer.MAX_VALUE : binding.getSortOrder())
+                        .thenComparing(binding -> binding.getId() == null ? Long.MAX_VALUE : binding.getId()))
+                .toList();
+        if (bindings.isEmpty()) {
+            String legacyCode = modelCodesById.get(tool.modelConfigId());
+            return new ExportedToolModelSelection(
+                    legacyCode == null ? List.of() : List.of(legacyCode),
+                    legacyCode
+            );
+        }
+
+        List<String> modelConfigCodes = bindings.stream()
+                .map(ToolModelBinding::getModelConfigId)
+                .map(modelCodesById::get)
+                .filter(Objects::nonNull)
+                .toList();
+        String defaultModelConfigCode = bindings.stream()
+                .filter(binding -> Boolean.TRUE.equals(binding.getDefault()))
+                .map(ToolModelBinding::getModelConfigId)
+                .map(modelCodesById::get)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(modelConfigCodes.isEmpty() ? null : modelConfigCodes.get(0));
+        return new ExportedToolModelSelection(modelConfigCodes, defaultModelConfigCode);
     }
 
     private List<ToolSummaryResponse> exportAllTools() {
@@ -594,6 +635,12 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 modelExtraAuth,
                 config.executionTask(),
                 executionOptionsJson,
+                config.requestSchemaJson(),
+                config.requestMappingJson(),
+                config.responseMappingJson(),
+                config.apiContractVersion(),
+                config.contractStatus(),
+                config.contractVerifiedAt(),
                 !includeSecrets,
                 config.minimaxGroupId(),
                 config.consoleUrl(),
@@ -948,6 +995,12 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 secretsRedacted ? null : cleanExtraAuthJson(config.extraAuthJson(), null, "model config " + config.configCode()),
                 config.executionTask(),
                 config.executionOptionsJson(),
+                config.requestSchemaJson(),
+                config.requestMappingJson(),
+                config.responseMappingJson(),
+                config.apiContractVersion(),
+                config.contractStatus(),
+                config.contractVerifiedAt(),
                 config.minimaxGroupId(),
                 config.consoleUrl(),
                 config.balanceUrl(),
@@ -1283,10 +1336,8 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             warnings.add("Skipped tool " + item.toolCode() + ": categoryCode not found: " + item.categoryCode());
             return null;
         }
-        Long modelConfigId = isBlank(item.modelConfigCode()) ? null : modelIdsByCode.get(item.modelConfigCode());
-        if (!isBlank(item.modelConfigCode()) && modelConfigId == null) {
-            warnings.add("Tool " + item.toolCode() + " imported without model binding; modelConfigCode not found: " + item.modelConfigCode());
-        }
+        ImportedToolModelSelection modelSelection = resolveImportedToolModelSelection(
+                item, modelIdsByCode);
 
         AiTool existing = findImportTargetTool(item.toolCode(), operatorId, warnings).orElse(null);
         String coverUrl = importedCoverUrl(item, existing, warnings);
@@ -1296,11 +1347,9 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                     existing.getConfigNote(), configNote, OBJECT_MAPPER);
         }
 
-        AgentModelConfig disabledModelConfig = modelConfigId == null
-                ? null
-                : agentModelConfigMapper.findActiveById(modelConfigId);
-        boolean restoreDisabledModelBinding = disabledModelConfig != null
-                && Boolean.FALSE.equals(disabledModelConfig.getEnabled());
+        boolean restoreNonSelectableBindings = modelSelection.managed()
+                && modelSelection.modelConfigs().stream().anyMatch(config ->
+                Boolean.FALSE.equals(config.getEnabled()) || !modelCapabilityService.isContractReady(config));
         UpsertToolRequest request = new UpsertToolRequest(
                 item.toolCode(),
                 item.toolName(),
@@ -1312,7 +1361,11 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
                 item.outputModality(),
                 configNote,
                 item.estimatedCreditCost() == null ? 0 : item.estimatedCreditCost(),
-                restoreDisabledModelBinding ? null : modelConfigId,
+                restoreNonSelectableBindings ? null : modelSelection.defaultModelConfigId(),
+                modelSelection.managed()
+                        ? restoreNonSelectableBindings ? List.of() : modelSelection.modelConfigIds()
+                        : null,
+                restoreNonSelectableBindings ? null : modelSelection.defaultModelConfigId(),
                 item.executionHandler(),
                 item.requiredModelCapabilities(),
                 null
@@ -1320,16 +1373,10 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
         ToolSummaryResponse saved = existing == null
                 ? toolService.createTool(request, operatorId)
                 : toolService.updateTool(existing.getId(), request, operatorId);
-        if (restoreDisabledModelBinding) {
-            AiTool capabilityCandidate = new AiTool();
-            capabilityCandidate.setToolType(saved.toolType());
-            capabilityCandidate.setExecutionHandler(saved.executionHandler());
-            capabilityCandidate.setRequiredModelCapabilities(
-                    ToolModelCapabilitySupport.serialize(saved.requiredModelCapabilities(), OBJECT_MAPPER));
-            modelCapabilityService.validateToolModelCapabilities(capabilityCandidate, disabledModelConfig);
-            toolMapper.updateToolModelConfig(saved.id(), modelConfigId, operatorId);
-            warnings.add("Restored disabled model binding for tool " + item.toolCode()
-                    + "; enable and test the model before runtime use");
+        if (restoreNonSelectableBindings) {
+            restoreExactModelBindings(saved, modelSelection, operatorId);
+            warnings.add("Restored non-selectable model bindings for tool " + item.toolCode()
+                    + "; enable the models and complete READY contracts before runtime use");
         }
         counter.tools++;
         if (item.agentEnabled() != null) {
@@ -1368,6 +1415,79 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             toolService.offlineTool(saved.id(), operatorId);
         }
         return null;
+    }
+
+    private ImportedToolModelSelection resolveImportedToolModelSelection(
+            ConfigBundleDto.Tool item,
+            Map<String, Long> modelIdsByCode
+    ) {
+        boolean managed = item.modelConfigCodes() != null || !isBlank(item.modelConfigCode());
+        if (!managed) {
+            return ImportedToolModelSelection.unmanaged();
+        }
+        List<String> codes = item.resolvedModelConfigCodes().stream()
+                .filter(code -> code != null && !code.isBlank())
+                .map(String::trim)
+                .toList();
+        if (new LinkedHashSet<>(codes).size() != codes.size()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "tool modelConfigCodes cannot contain duplicates: " + item.toolCode());
+        }
+        String defaultCode = item.resolvedDefaultModelConfigCode();
+        defaultCode = defaultCode == null ? null : defaultCode.trim();
+        if (codes.isEmpty()) {
+            if (!isBlank(defaultCode)) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR,
+                        "defaultModelConfigCode requires modelConfigCodes: " + item.toolCode());
+            }
+            return ImportedToolModelSelection.managedEmpty();
+        }
+        if (isBlank(defaultCode)) {
+            defaultCode = codes.get(0);
+        }
+        if (!codes.contains(defaultCode)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "defaultModelConfigCode must belong to modelConfigCodes: " + item.toolCode());
+        }
+
+        List<Long> ids = new ArrayList<>();
+        List<AgentModelConfig> configs = new ArrayList<>();
+        for (String code : codes) {
+            Long id = modelIdsByCode.get(code);
+            AgentModelConfig config = id == null ? null : agentModelConfigMapper.findActiveById(id);
+            if (id == null || config == null) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR,
+                        "modelConfigCode not found for tool " + item.toolCode() + ": " + code);
+            }
+            ids.add(id);
+            configs.add(config);
+        }
+        Long defaultId = modelIdsByCode.get(defaultCode);
+        return new ImportedToolModelSelection(true, List.copyOf(ids), defaultId, List.copyOf(configs));
+    }
+
+    private void restoreExactModelBindings(ToolSummaryResponse saved,
+                                           ImportedToolModelSelection selection,
+                                           Long operatorId) {
+        AiTool capabilityCandidate = new AiTool();
+        capabilityCandidate.setToolType(saved.toolType());
+        capabilityCandidate.setExecutionHandler(saved.executionHandler());
+        capabilityCandidate.setRequiredModelCapabilities(
+                ToolModelCapabilitySupport.serialize(saved.requiredModelCapabilities(), OBJECT_MAPPER));
+        selection.modelConfigs().forEach(config ->
+                modelCapabilityService.validateToolModelCapabilities(capabilityCandidate, config));
+
+        toolModelBindingMapper.deleteByToolId(saved.id());
+        toolMapper.updateToolModelConfig(saved.id(), selection.defaultModelConfigId(), operatorId);
+        for (int index = 0; index < selection.modelConfigIds().size(); index++) {
+            Long modelConfigId = selection.modelConfigIds().get(index);
+            toolModelBindingMapper.insertBinding(
+                    saved.id(),
+                    modelConfigId,
+                    Objects.equals(modelConfigId, selection.defaultModelConfigId()),
+                    index
+            );
+        }
     }
 
     private String importedCoverUrl(ConfigBundleDto.Tool item, AiTool existing, List<String> warnings) {
@@ -1776,6 +1896,27 @@ public class ConfigBundleServiceImpl implements ConfigBundleService {
             Map<String, Long> accountIdsByRef,
             Map<String, Long> poolIdsByVendorAndName
     ) {
+    }
+
+    private record ExportedToolModelSelection(
+            List<String> modelConfigCodes,
+            String defaultModelConfigCode
+    ) {
+    }
+
+    private record ImportedToolModelSelection(
+            boolean managed,
+            List<Long> modelConfigIds,
+            Long defaultModelConfigId,
+            List<AgentModelConfig> modelConfigs
+    ) {
+        private static ImportedToolModelSelection unmanaged() {
+            return new ImportedToolModelSelection(false, List.of(), null, List.of());
+        }
+
+        private static ImportedToolModelSelection managedEmpty() {
+            return new ImportedToolModelSelection(true, List.of(), null, List.of());
+        }
     }
 
     private record RoutingExportClosure(

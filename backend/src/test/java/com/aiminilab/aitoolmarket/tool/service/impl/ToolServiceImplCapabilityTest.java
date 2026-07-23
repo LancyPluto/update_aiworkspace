@@ -18,10 +18,12 @@ import com.aiminilab.aitoolmarket.tool.dto.UpsertToolRequest;
 import com.aiminilab.aitoolmarket.tool.dto.ApplyToolTemplateRequest;
 import com.aiminilab.aitoolmarket.tool.dto.WorkflowResponse;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
+import com.aiminilab.aitoolmarket.tool.entity.ToolModelBinding;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolCategoryMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldSchemaMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolModelBindingMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptVersionMapper;
 import com.aiminilab.aitoolmarket.tool.service.ToolTemplateService;
@@ -39,6 +41,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -51,6 +55,7 @@ import static org.mockito.Mockito.when;
 class ToolServiceImplCapabilityTest {
 
     private final ToolMapper toolMapper = mock(ToolMapper.class);
+    private final ToolModelBindingMapper toolModelBindingMapper = mock(ToolModelBindingMapper.class);
     private final ToolFieldSchemaMapper toolFieldSchemaMapper = mock(ToolFieldSchemaMapper.class);
     private final ToolFieldItemMapper toolFieldItemMapper = mock(ToolFieldItemMapper.class);
     private final AgentModelConfigMapper agentModelConfigMapper = mock(AgentModelConfigMapper.class);
@@ -75,10 +80,13 @@ class ToolServiceImplCapabilityTest {
                 metadataService,
                 new ModelCapabilitiesCodec(objectMapper),
                 agentModelConfigMapper,
-                credentialResolver
+                credentialResolver,
+                toolModelBindingMapper
         );
         toolService = new ToolServiceImpl(
                 toolMapper,
+                toolModelBindingMapper,
+                agentModelConfigMapper,
                 mock(ToolCategoryMapper.class),
                 toolFieldSchemaMapper,
                 toolFieldItemMapper,
@@ -143,6 +151,27 @@ class ToolServiceImplCapabilityTest {
     }
 
     @Test
+    void createTool_persistsOrderedReadyModelBindingsAndDefault() {
+        prepareSuccessfulInsert();
+        AgentModelConfig first = model(44L, "[\"VIDEO_GENERATION\"]");
+        AgentModelConfig second = model(45L, "[\"VIDEO_GENERATION\"]");
+        when(agentModelConfigMapper.findActiveById(44L)).thenReturn(first);
+        when(agentModelConfigMapper.findActiveById(45L)).thenReturn(second);
+        UpsertToolRequest request = new UpsertToolRequest(
+                "capability_tool", "Capability tool", 1L, "test", null,
+                "VIDEO_GENERATION", "TEXT", "VIDEO", null, 0,
+                44L, List.of(44L, 45L), 45L,
+                "VIDEO_GENERATION", List.of("VIDEO_GENERATION"), null
+        );
+
+        toolService.createTool(request, 7L);
+
+        verify(toolModelBindingMapper).insertBinding(10L, 44L, false, 0);
+        verify(toolModelBindingMapper).insertBinding(10L, 45L, true, 1);
+        verify(toolMapper).updateToolModelConfig(10L, 45L, 7L);
+    }
+
+    @Test
     void createTool_derivesImageUnderstandingCapabilitiesBeforeDefaultingExecutionHandler() {
         AtomicReference<AiTool> inserted = prepareSuccessfulInsert();
         UpsertToolRequest request = requestForType("IMAGE_UNDERSTANDING", null, null);
@@ -181,6 +210,8 @@ class ToolServiceImplCapabilityTest {
                 44L,
                 null,
                 null,
+                null,
+                null,
                 "digital_human_default"
         );
 
@@ -206,6 +237,48 @@ class ToolServiceImplCapabilityTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("VISION_INPUT");
         verify(toolMapper, never()).updateTool(eq(10L), any(), eq(7L));
+    }
+
+    @Test
+    void updateTool_validatesTheNewBindingsAfterReplacingTheOldBindings() {
+        AiTool existing = tool(10L, "ONLINE", 44L, "[\"VIDEO_GENERATION\"]");
+        when(toolMapper.findById(10L)).thenReturn(Optional.of(existing));
+
+        AtomicReference<List<ToolModelBinding>> persistedBindings = new AtomicReference<>(
+                List.of(binding(10L, 44L, true, 0))
+        );
+        when(toolModelBindingMapper.findByToolId(10L))
+                .thenAnswer(invocation -> persistedBindings.get());
+        doAnswer(invocation -> {
+            persistedBindings.set(List.of());
+            return null;
+        }).when(toolModelBindingMapper).deleteByToolId(10L);
+        doAnswer(invocation -> {
+            persistedBindings.set(List.of(binding(
+                    10L,
+                    invocation.getArgument(1),
+                    invocation.getArgument(2),
+                    invocation.getArgument(3)
+            )));
+            return null;
+        }).when(toolModelBindingMapper).insertBinding(eq(10L), anyLong(), anyBoolean(), anyInt());
+
+        when(agentModelConfigMapper.findActiveById(44L))
+                .thenReturn(model(44L, "[\"TEXT_GENERATION\"]"));
+        when(agentModelConfigMapper.findActiveById(45L))
+                .thenReturn(model(45L, "[\"VIDEO_GENERATION\"]"));
+        UpsertToolRequest request = new UpsertToolRequest(
+                "capability_tool", "Capability tool", 1L, "test", null,
+                "VIDEO_GENERATION", "TEXT", "VIDEO", null, 0,
+                45L, List.of(45L), 45L,
+                "VIDEO_GENERATION", List.of("VIDEO_GENERATION"), null
+        );
+
+        toolService.updateTool(10L, request, 7L);
+
+        verify(toolModelBindingMapper).deleteByToolId(10L);
+        verify(toolModelBindingMapper).insertBinding(10L, 45L, true, 0);
+        verify(agentModelConfigMapper, never()).findActiveById(44L);
     }
 
     @Test
@@ -327,6 +400,8 @@ class ToolServiceImplCapabilityTest {
                 null,
                 0,
                 modelConfigId,
+                null,
+                null,
                 executionHandler,
                 capabilities,
                 null
@@ -354,7 +429,21 @@ class ToolServiceImplCapabilityTest {
         config.setModelName("model-" + id);
         config.setCapabilities(capabilities);
         config.setEnabled(true);
+        config.setContractStatus("READY");
+        config.setRequestSchemaJson("{\"version\":1,\"fields\":[]}");
         return config;
+    }
+
+    private static ToolModelBinding binding(Long toolId,
+                                            Long modelConfigId,
+                                            boolean isDefault,
+                                            int sortOrder) {
+        ToolModelBinding binding = new ToolModelBinding();
+        binding.setToolId(toolId);
+        binding.setModelConfigId(modelConfigId);
+        binding.setDefault(isDefault);
+        binding.setSortOrder(sortOrder);
+        return binding;
     }
 
     private static ModelProviderResponse provider(List<String> capabilities) {

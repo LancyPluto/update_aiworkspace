@@ -3,13 +3,17 @@ package com.aiminilab.aitoolmarket.community.dto;
 import com.aiminilab.aitoolmarket.community.entity.CommunityPost;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
 public record CommunityPostResponse(
         Long id,
+        @JsonInclude(JsonInclude.Include.NON_NULL)
         Long userId,
+        String authorPublicCode,
+        Boolean ownedByCurrentUser,
         String authorNickname,
         String authorAvatarUrl,
         Long taskId,
@@ -51,7 +55,9 @@ public record CommunityPostResponse(
     }
 
     public static CommunityPostResponse from(CommunityPost post, boolean liked, boolean favorited, List<String> tags) {
-        return from(post, liked, favorited, tags, null, null, post.getPromptSnapshot(), defaultMediaUrls(post));
+        return from(post, liked, favorited, tags, null, null, null, false,
+                post.getPromptSnapshot(), defaultMediaUrls(post),
+                Boolean.TRUE.equals(post.getPromptVisible()), null);
     }
 
     public static CommunityPostResponse from(CommunityPost post,
@@ -60,7 +66,9 @@ public record CommunityPostResponse(
                                              List<String> tags,
                                              String authorNickname,
                                              String authorAvatarUrl) {
-        return from(post, liked, favorited, tags, authorNickname, authorAvatarUrl, post.getPromptSnapshot(), defaultMediaUrls(post));
+        return from(post, liked, favorited, tags, authorNickname, authorAvatarUrl, null, false,
+                post.getPromptSnapshot(), defaultMediaUrls(post),
+                Boolean.TRUE.equals(post.getPromptVisible()), null);
     }
 
     public static CommunityPostResponse from(CommunityPost post,
@@ -70,7 +78,9 @@ public record CommunityPostResponse(
                                              String authorNickname,
                                              String authorAvatarUrl,
                                              String promptSnapshot) {
-        return from(post, liked, favorited, tags, authorNickname, authorAvatarUrl, promptSnapshot, defaultMediaUrls(post));
+        return from(post, liked, favorited, tags, authorNickname, authorAvatarUrl, null, false,
+                promptSnapshot, defaultMediaUrls(post),
+                Boolean.TRUE.equals(post.getPromptVisible()), null);
     }
 
     public static CommunityPostResponse from(CommunityPost post,
@@ -81,15 +91,33 @@ public record CommunityPostResponse(
                                              String authorAvatarUrl,
                                              String promptSnapshot,
                                              List<String> mediaUrls) {
-        return from(post, liked, favorited, tags, authorNickname, authorAvatarUrl, promptSnapshot, mediaUrls, Boolean.TRUE.equals(post.getPromptVisible()));
+        return from(post, liked, favorited, tags, authorNickname, authorAvatarUrl, null, false,
+                promptSnapshot, mediaUrls, Boolean.TRUE.equals(post.getPromptVisible()), null);
+    }
+
+    public static CommunityPostResponse publicFrom(CommunityPost post,
+                                                    boolean liked,
+                                                    boolean favorited,
+                                                    List<String> tags,
+                                                    String authorPublicCode,
+                                                    boolean ownedByCurrentUser,
+                                                    String authorNickname,
+                                                    String authorAvatarUrl,
+                                                    String promptSnapshot,
+                                                    List<String> mediaUrls) {
+        return from(post, liked, favorited, tags, authorNickname, authorAvatarUrl,
+                authorPublicCode, ownedByCurrentUser, promptSnapshot, mediaUrls,
+                Boolean.TRUE.equals(post.getPromptVisible()), null);
     }
 
     public static CommunityPostResponse adminFrom(CommunityPost post,
                                                   List<String> tags,
+                                                  String authorPublicCode,
                                                   String authorNickname,
                                                   String authorAvatarUrl,
                                                   String promptSnapshot) {
-        return from(post, false, false, tags, authorNickname, authorAvatarUrl, promptSnapshot, defaultMediaUrls(post), true);
+        return from(post, false, false, tags, authorNickname, authorAvatarUrl,
+                authorPublicCode, false, promptSnapshot, defaultMediaUrls(post), true, post.getUserId());
     }
 
     private static CommunityPostResponse from(CommunityPost post,
@@ -98,12 +126,17 @@ public record CommunityPostResponse(
                                               List<String> tags,
                                               String authorNickname,
                                               String authorAvatarUrl,
+                                              String authorPublicCode,
+                                              boolean ownedByCurrentUser,
                                               String promptSnapshot,
                                               List<String> mediaUrls,
-                                              boolean exposePrompt) {
+                                              boolean exposePrompt,
+                                              Long exposedUserId) {
         return new CommunityPostResponse(
                 post.getId(),
-                post.getUserId(),
+                exposedUserId,
+                authorPublicCode,
+                ownedByCurrentUser,
                 authorNickname,
                 authorAvatarUrl,
                 post.getTaskId(),
@@ -141,7 +174,8 @@ public record CommunityPostResponse(
 
     public CommunityPostResponse withRewrittenUrls(String coverUrl, String mediaUrl, List<String> mediaUrls) {
         return new CommunityPostResponse(
-                id, userId, authorNickname, authorAvatarUrl, taskId, modality,
+                id, userId, authorPublicCode, ownedByCurrentUser,
+                authorNickname, authorAvatarUrl, taskId, modality,
                 coverUrl, mediaUrl, mediaUrls,
                 title, description, promptVisible, prompt, promptPreview,
                 toolCode, toolName, status, featured, pinned, topic, tags,

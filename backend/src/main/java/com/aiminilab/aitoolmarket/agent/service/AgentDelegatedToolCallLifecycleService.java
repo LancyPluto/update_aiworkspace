@@ -5,11 +5,14 @@ import com.aiminilab.aitoolmarket.agent.entity.AgentToolCall;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentRunEventMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentToolCallMapper;
 import com.aiminilab.aitoolmarket.agent.metrics.AgentMetrics;
+import com.aiminilab.aitoolmarket.agent.support.AgentFailureMessage;
+import com.aiminilab.aitoolmarket.common.error.ErrorMessageSanitizer;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.comic.dto.ComicDtos;
 import com.aiminilab.aitoolmarket.comic.service.ComicProjectApplicationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -108,7 +111,15 @@ public class AgentDelegatedToolCallLifecycleService {
                 ? "SUCCESS"
                 : "CANCELLED".equals(normalizedStatus) ? "CANCELLED" : "FAILED";
         String errorCode = success ? null : "WORKFLOW_" + normalizedStatus;
-        String errorMessage = success ? null : normalizeError(normalizedStatus, workflowError);
+        String userMessage = success ? null : ErrorMessageSanitizer.sanitizeUserMessage(
+                AgentFailureMessage.userMessage(errorCode),
+                "工作流执行失败，请稍后重试"
+        );
+        String developerMessage = success ? null : ErrorMessageSanitizer.sanitizeDeveloperMessage(
+                normalizeError(normalizedStatus, workflowError),
+                "Delegated workflow failed"
+        );
+        String failureTraceId = success ? null : currentTraceId();
         LocalDateTime now = LocalDateTime.now();
         String runUrl = runUrl(rootTaskId);
         String resultJson = writeJson(Map.of(
@@ -117,15 +128,17 @@ public class AgentDelegatedToolCallLifecycleService {
                 "taskId", rootTaskId,
                 "status", nextStatus,
                 "runUrl", runUrl,
-                "data", terminalData(workflowRunId, normalizedStatus, workflowError)
+                "data", terminalData(workflowRunId, normalizedStatus, userMessage)
         ));
-        int updated = toolCallMapper.finishDelegated(
+        int updated = toolCallMapper.finishDelegatedWithContract(
                 call.getId(),
                 rootTaskId,
                 nextStatus,
                 resultJson,
                 errorCode,
-                errorMessage,
+                userMessage,
+                developerMessage,
+                failureTraceId,
                 now
         );
         if (updated == 0) {
@@ -135,7 +148,7 @@ public class AgentDelegatedToolCallLifecycleService {
         event.setRunId(call.getRunId());
         event.setUserId(call.getUserId());
         event.setEventType("tool.finished");
-        event.setEventText(success ? "Workflow completed" : errorMessage);
+        event.setEventText(success ? "Workflow completed" : userMessage);
         event.setEventJson(writeJson(Map.of(
                 "toolCode", call.getToolCode(),
                 "toolCallId", call.getId(),
@@ -144,7 +157,7 @@ public class AgentDelegatedToolCallLifecycleService {
                 "workflowRunId", workflowRunId,
                 "workflowStatus", normalizedStatus,
                 "errorCode", errorCode == null ? "" : errorCode,
-                "workflowError", workflowError == null ? "" : workflowError,
+                "workflowError", userMessage == null ? "" : userMessage,
                 "runUrl", runUrl
         )));
         event.setCreatedAt(now);
@@ -204,6 +217,15 @@ public class AgentDelegatedToolCallLifecycleService {
                 ? "Workflow ended with status " + workflowStatus
                 : workflowError.trim();
         return message.length() <= 4000 ? message : message.substring(0, 4000);
+    }
+
+    private String currentTraceId() {
+        String traceId = MDC.get("traceId");
+        if (traceId == null || traceId.isBlank()) {
+            return null;
+        }
+        String normalized = traceId.strip();
+        return normalized.length() <= 64 ? normalized : normalized.substring(0, 64);
     }
 
     private String writeJson(Object value) {

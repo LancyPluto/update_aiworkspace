@@ -18,26 +18,25 @@ import com.aiminilab.aitoolmarket.common.enums.UserStatus;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.credit.service.impl.MembershipService;
+import com.aiminilab.aitoolmarket.credit.service.ReferralCodeService;
 import com.aiminilab.aitoolmarket.credit.service.ReferralService;
 import com.aiminilab.aitoolmarket.user.dto.UserProfileResponse;
 import com.aiminilab.aitoolmarket.user.entity.User;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
+import com.aiminilab.aitoolmarket.user.service.PublicUserIdentityService;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.security.SecureRandom;
 
 @Service
 public class AuthServiceImpl implements AuthService {
 
     private static final String DEFAULT_AVATAR_URL =
             "https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com/assets/default-user-avatar.svg";
-    private static final SecureRandom RANDOM = new SecureRandom();
-    private static final int DEFAULT_NAME_DIGITS = 5;
-
     private final UserMapper userMapper;
+    private final PublicUserIdentityService publicUserIdentityService;
+    private final ReferralCodeService referralCodeService;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final SmsCodeService smsCodeService;
@@ -47,6 +46,8 @@ public class AuthServiceImpl implements AuthService {
     private final AuthMetrics authMetrics;
 
     public AuthServiceImpl(UserMapper userMapper,
+                           PublicUserIdentityService publicUserIdentityService,
+                           ReferralCodeService referralCodeService,
                            PasswordEncoder passwordEncoder,
                            JwtTokenProvider jwtTokenProvider,
                            SmsCodeService smsCodeService,
@@ -55,6 +56,8 @@ public class AuthServiceImpl implements AuthService {
                            ReferralService referralService,
                            AuthMetrics authMetrics) {
         this.userMapper = userMapper;
+        this.publicUserIdentityService = publicUserIdentityService;
+        this.referralCodeService = referralCodeService;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
         this.smsCodeService = smsCodeService;
@@ -90,8 +93,10 @@ public class AuthServiceImpl implements AuthService {
             });
         }
 
-        String defaultName = createDefaultDisplayName();
         User user = new User();
+        publicUserIdentityService.assignPublicCode(user);
+        referralCodeService.assignReferralCode(user);
+        String defaultName = publicUserIdentityService.fallbackDisplayName(user.getPublicCode());
         user.setUsername(username == null ? defaultName : username);
         user.setPasswordHash(passwordEncoder.encode(request.password()));
         user.setPhone(phone);
@@ -165,8 +170,10 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "用户名已存在");
         });
 
-        String defaultName = createDefaultDisplayName();
         User user = new User();
+        publicUserIdentityService.assignPublicCode(user);
+        referralCodeService.assignReferralCode(user);
+        String defaultName = publicUserIdentityService.fallbackDisplayName(user.getPublicCode());
         user.setUsername(defaultName);
         String password = normalizeBlank(request.password());
         user.setPasswordHash(passwordEncoder.encode(password == null ? "SMS_LOGIN_ONLY:" + phone + ":" + System.nanoTime() : password));
@@ -193,8 +200,10 @@ public class AuthServiceImpl implements AuthService {
                 userMapper.findByUsername(phone).ifPresent(existing -> {
                     throw new BusinessException(ErrorCode.PARAM_ERROR, "用户名已存在");
                 });
-                String defaultName = createDefaultDisplayName();
                 User created = new User();
+                publicUserIdentityService.assignPublicCode(created);
+                referralCodeService.assignReferralCode(created);
+                String defaultName = publicUserIdentityService.fallbackDisplayName(created.getPublicCode());
                 created.setUsername(defaultName);
                 created.setPasswordHash(passwordEncoder.encode("SMS_LOGIN_ONLY:" + phone + ":" + System.nanoTime()));
                 created.setPhone(phone);
@@ -251,24 +260,6 @@ public class AuthServiceImpl implements AuthService {
         String token = jwtTokenProvider.createToken(new AuthUser(user.getId(), user.getUsername(), user.getUserType()));
         UserProfileResponse profile = UserProfileResponse.from(user, membershipService.current(user.getId()));
         return new AuthenticatedSession(token, new LoginResponse(token, profile));
-    }
-
-    private String createDefaultDisplayName() {
-        for (int attempt = 0; attempt < 20; attempt++) {
-            String displayName = "用户" + randomDigits(DEFAULT_NAME_DIGITS);
-            if (userMapper.findByUsername(displayName).isEmpty()) {
-                return displayName;
-            }
-        }
-        return "用户" + System.currentTimeMillis();
-    }
-
-    private String randomDigits(int length) {
-        StringBuilder builder = new StringBuilder(length);
-        for (int i = 0; i < length; i++) {
-            builder.append(RANDOM.nextInt(10));
-        }
-        return builder.toString();
     }
 
     private Long insertUser(User user) {

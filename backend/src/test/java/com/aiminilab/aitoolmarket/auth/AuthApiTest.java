@@ -46,6 +46,7 @@ class AuthApiTest {
     private static final String DEFAULT_AVATAR_URL =
             "https://wlcloudai-assets-public.oss-cn-guangzhou.aliyuncs.com/assets/default-user-avatar.svg";
     private static final String DEFAULT_DISPLAY_NAME_PATTERN = "^用户\\d{5}$";
+    private static final String REFERRAL_CODE_PATTERN = "^(?=.*[2-9])(?=.*[A-HJ-NP-Z])[2-9A-HJ-NP-Z]{6}$";
     private static final AtomicInteger PHONE_SEQUENCE = new AtomicInteger(1000);
 
     @Autowired
@@ -88,6 +89,8 @@ class AuthApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
                 .andExpect(jsonPath("$.data.user.id", notNullValue()))
+                .andExpect(jsonPath("$.data.user.publicCode").value(org.hamcrest.Matchers.matchesPattern("^[1-9]\\d{4}$")))
+                .andExpect(jsonPath("$.data.user.referralCode").value(org.hamcrest.Matchers.matchesPattern(REFERRAL_CODE_PATTERN)))
                 .andExpect(jsonPath("$.data.user.username").value("new_user"))
                 .andExpect(jsonPath("$.data.user.nickname").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
                 .andExpect(jsonPath("$.data.user.avatarUrl").value(DEFAULT_AVATAR_URL))
@@ -95,11 +98,17 @@ class AuthApiTest {
                 .andReturn();
 
         String registerToken = AuthTestTokens.userJwtFrom(registerResult);
+        String publicCode = objectMapper.readTree(registerResult.getResponse().getContentAsString())
+                .path("data").path("user").path("publicCode").asText();
+        String referralCode = objectMapper.readTree(registerResult.getResponse().getContentAsString())
+                .path("data").path("user").path("referralCode").asText();
 
         mockMvc.perform(get("/api/v1/users/me")
                         .header("Authorization", "Bearer " + registerToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.publicCode").value(publicCode))
+                .andExpect(jsonPath("$.data.referralCode").value(referralCode))
                 .andExpect(jsonPath("$.data.username").value("new_user"))
                 .andExpect(jsonPath("$.data.nickname").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
                 .andExpect(jsonPath("$.data.avatarUrl").value(DEFAULT_AVATAR_URL))
@@ -115,6 +124,8 @@ class AuthApiTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.user.publicCode").value(publicCode))
+                .andExpect(jsonPath("$.data.user.referralCode").value(referralCode))
                 .andExpect(jsonPath("$.data.user.username").value("new_user"))
                 .andExpect(jsonPath("$.data.user.nickname").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
                 .andExpect(jsonPath("$.data.user.avatarUrl").value(DEFAULT_AVATAR_URL))
@@ -126,6 +137,8 @@ class AuthApiTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.publicCode").value(publicCode))
+                .andExpect(jsonPath("$.data.referralCode").value(referralCode))
                 .andExpect(jsonPath("$.data.username").value("new_user"))
                 .andExpect(jsonPath("$.data.nickname").value(org.hamcrest.Matchers.matchesPattern(DEFAULT_DISPLAY_NAME_PATTERN)))
                 .andExpect(jsonPath("$.data.avatarUrl").value(DEFAULT_AVATAR_URL))

@@ -11,7 +11,13 @@ WORKER_ROOT = Path(__file__).resolve().parents[1]
 if str(WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_ROOT))
 
-from client.suno_music_client import SunoMusicClient, SunoMusicError, _extract_tracks, _read_audio_bytes
+from client.suno_music_client import (
+    SunoMusicClient,
+    SunoMusicError,
+    SunoMusicInputError,
+    _extract_tracks,
+    _read_audio_bytes,
+)
 from utils.outbound_http import OutboundRequestsClient
 
 
@@ -246,6 +252,61 @@ class SunoMusicClientTest(unittest.TestCase):
         self.assertEqual(payload["personaModel"], "voice_persona")
         self.assertEqual(payload["styleWeight"], 0.65)
 
+    def test_v5_5_custom_mode_passes_valid_duration(self):
+        payload = SunoMusicClient()._build_payload(
+            model="V5_5",
+            prompt="[Verse] Night city lights",
+            params={
+                "customMode": True,
+                "duration": 180,
+                "style": "electronic pop",
+                "title": "Night City",
+            },
+            api_key="secret",
+        )
+
+        self.assertTrue(payload["customMode"])
+        self.assertEqual(payload["duration"], 180)
+
+    def test_v5_5_custom_mode_rejects_invalid_duration(self):
+        for duration in (9, 361, 10.5, "not-a-number"):
+            with self.subTest(duration=duration):
+                with self.assertRaisesRegex(SunoMusicError, "integer from 10 to 360"):
+                    SunoMusicClient()._build_payload(
+                        model="V5_5",
+                        prompt="[Verse] Night city lights",
+                        params={
+                            "customMode": True,
+                            "duration": duration,
+                            "style": "electronic pop",
+                            "title": "Night City",
+                        },
+                        api_key="secret",
+                    )
+
+    def test_duration_is_not_sent_outside_v5_5_custom_mode(self):
+        client = SunoMusicClient()
+        simple_payload = client._build_payload(
+            model="V5_5",
+            prompt="short relaxing tune",
+            params={"customMode": False, "duration": 180},
+            api_key="secret",
+        )
+        older_model_payload = client._build_payload(
+            model="V5",
+            prompt="[Verse] Night city lights",
+            params={
+                "customMode": True,
+                "duration": 180,
+                "style": "electronic pop",
+                "title": "Night City",
+            },
+            api_key="secret",
+        )
+
+        self.assertNotIn("duration", simple_payload)
+        self.assertNotIn("duration", older_model_payload)
+
     def test_vocal_gender_auto_is_omitted(self):
         client = SunoMusicClient()
         payload = client._build_payload(
@@ -322,6 +383,215 @@ class SunoMusicClientTest(unittest.TestCase):
         self.assertTrue(create_url.endswith("/api/v1/generate/upload-cover"))
         create_payload = request.call_args_list[0].kwargs["json"]
         self.assertEqual(create_payload["uploadUrl"], "https://tempfile.redpandaai.co/ref.mp3")
+
+    def test_v5_5_generation_modes_use_documented_endpoints_and_record_polling(self):
+        cases = [
+            (
+                "generate",
+                "city sunrise pop",
+                {"generationMode": "generate"},
+                "/api/v1/generate",
+                {"model": "V5_5"},
+            ),
+            (
+                "upload_cover",
+                "turn this into jazz",
+                {
+                    "generationMode": "upload_cover",
+                    "referenceAudio": "https://cdn.example.com/source.mp3",
+                },
+                "/api/v1/generate/upload-cover",
+                {"uploadUrl": "https://cdn.example.com/source.mp3"},
+            ),
+            (
+                "extend",
+                "",
+                {
+                    "generationMode": "extend",
+                    "extendAudioId": "audio-extend",
+                    "defaultParamFlag": False,
+                },
+                "/api/v1/generate/extend",
+                {"audioId": "audio-extend", "defaultParamFlag": False},
+            ),
+            (
+                "upload_extend",
+                "continue in the same style",
+                {
+                    "generationMode": "upload_extend",
+                    "referenceAudio": "https://cdn.example.com/uploaded.mp3",
+                    "defaultParamFlag": False,
+                },
+                "/api/v1/generate/upload-extend",
+                {
+                    "uploadUrl": "https://cdn.example.com/uploaded.mp3",
+                    "defaultParamFlag": False,
+                    "prompt": "continue in the same style",
+                },
+            ),
+            (
+                "add_vocals",
+                "soft hopeful vocals",
+                {
+                    "generationMode": "add_vocals",
+                    "referenceAudio": "https://cdn.example.com/instrumental.mp3",
+                    "title": "New Vocals",
+                    "negativeTags": "aggressive vocals",
+                    "style": "dream pop",
+                },
+                "/api/v1/generate/add-vocals",
+                {"prompt": "soft hopeful vocals", "style": "dream pop"},
+            ),
+            (
+                "add_instrumental",
+                "",
+                {
+                    "generationMode": "add_instrumental",
+                    "referenceAudio": "https://cdn.example.com/vocal.mp3",
+                    "title": "New Arrangement",
+                    "negativeTags": "heavy drums",
+                    "tags": "ambient piano",
+                },
+                "/api/v1/generate/add-instrumental",
+                {"tags": "ambient piano", "title": "New Arrangement"},
+            ),
+            (
+                "replace_section",
+                "replacement chorus",
+                {
+                    "generationMode": "replace_section",
+                    "replaceSource": "existing_audio",
+                    "taskId": "parent-task",
+                    "audioId": "audio-section",
+                    "tags": "pop",
+                    "title": "Revised Song",
+                    "fullLyrics": "complete revised lyrics",
+                    "infillStartS": 10,
+                    "infillEndS": 20,
+                },
+                "/api/v1/generate/replace-section",
+                {"taskId": "parent-task", "audioId": "audio-section"},
+            ),
+        ]
+
+        for mode, prompt, params, expected_path, expected_payload in cases:
+            with self.subTest(mode=mode):
+                with patch.object(
+                    OutboundRequestsClient,
+                    "request",
+                    autospec=True,
+                    side_effect=[FakeCreateResponse(), FakeRecordResponse()],
+                ) as request:
+                    result = SunoMusicClient().generate(
+                        model="V5_5",
+                        prompt=prompt,
+                        base_url="https://api.sunoapi.org",
+                        api_key="secret",
+                        params=params,
+                    )
+
+                self.assertEqual(result.metadata["generationMode"], mode)
+                self.assertTrue(request.call_args_list[0].args[2].endswith(expected_path))
+                create_payload = request.call_args_list[0].kwargs["json"]
+                for key, value in expected_payload.items():
+                    self.assertEqual(create_payload[key], value)
+                self.assertTrue(
+                    request.call_args_list[1].args[2].endswith("/api/v1/generate/record-info")
+                )
+
+    def test_replace_section_uploaded_audio_uses_upload_url_and_model_one_of(self):
+        payload = SunoMusicClient()._build_payload(
+            model="V5_5",
+            prompt="replacement chorus",
+            params={
+                "generationMode": "replace_section",
+                "replaceSource": "uploaded_audio",
+                "replaceAudio": "https://cdn.example.com/custom.mp3",
+                "tags": "pop",
+                "title": "Revised Song",
+                "fullLyrics": "complete revised lyrics",
+                "infillStartS": 12.5,
+                "infillEndS": 20.5,
+            },
+            api_key="secret",
+        )
+
+        self.assertEqual(payload["uploadUrl"], "https://cdn.example.com/custom.mp3")
+        self.assertEqual(payload["model"], "V5_5")
+        self.assertNotIn("taskId", payload)
+        self.assertNotIn("audioId", payload)
+
+    def test_upload_extend_custom_instrumental_allows_optional_prompt_and_continue_at(self):
+        payload = SunoMusicClient()._build_payload(
+            model="V5_5",
+            prompt="",
+            params={
+                "generationMode": "upload_extend",
+                "referenceAudio": "https://cdn.example.com/custom.mp3",
+                "defaultParamFlag": True,
+                "instrumental": True,
+                "style": "ambient piano",
+                "title": "Longer Arrangement",
+            },
+            api_key="secret",
+        )
+
+        self.assertTrue(payload["instrumental"])
+        self.assertNotIn("prompt", payload)
+        self.assertNotIn("continueAt", payload)
+
+    def test_replace_section_rejects_invalid_interval_before_request(self):
+        with patch.object(OutboundRequestsClient, "request", autospec=True) as request:
+            with self.assertRaisesRegex(SunoMusicInputError, "between 6 and 60 seconds"):
+                SunoMusicClient().generate(
+                    model="V5_5",
+                    prompt="replacement chorus",
+                    base_url="https://api.sunoapi.org",
+                    api_key="secret",
+                    params={
+                        "generationMode": "replace_section",
+                        "replaceSource": "existing_audio",
+                        "taskId": "parent-task",
+                        "audioId": "audio-section",
+                        "tags": "pop",
+                        "title": "Revised Song",
+                        "fullLyrics": "complete revised lyrics",
+                        "infillStartS": 10,
+                        "infillEndS": 15,
+                    },
+                )
+
+        request.assert_not_called()
+
+    def test_v5_5_mashup_is_rejected_before_request(self):
+        with patch.object(OutboundRequestsClient, "request", autospec=True) as request:
+            with self.assertRaisesRegex(SunoMusicInputError, "unsupported Suno generationMode: mashup"):
+                SunoMusicClient().generate(
+                    model="V5_5",
+                    prompt="mash these tracks",
+                    base_url="https://api.sunoapi.org",
+                    api_key="secret",
+                    params={"generationMode": "mashup"},
+                )
+
+        request.assert_not_called()
+
+    @patch("client.suno_music_client._ensure_suno_upload_url")
+    def test_upload_mode_validates_required_fields_before_uploading_audio(self, upload):
+        with self.assertRaisesRegex(SunoMusicInputError, "requires title"):
+            SunoMusicClient()._build_payload(
+                model="V5_5",
+                prompt="soft hopeful vocals",
+                params={
+                    "generationMode": "add_vocals",
+                    "referenceAudio": "data:audio/mpeg;base64,ZmFrZQ==",
+                    "negativeTags": "aggressive vocals",
+                    "style": "dream pop",
+                },
+                api_key="secret",
+            )
+
+        upload.assert_not_called()
 
     def test_project_gateway_configures_suno_requests(self):
         client = SunoMusicClient()

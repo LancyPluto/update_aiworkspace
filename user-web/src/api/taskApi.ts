@@ -1,4 +1,4 @@
-import { apiRequest } from "./client"
+import { apiErrorFromResponse, apiRequest } from "./client"
 import type {
   CreateTaskRequest,
   CreateTaskResponse,
@@ -52,7 +52,10 @@ export async function streamTaskStatus(
     credentials: "include",
     signal: options?.signal,
   })
-  if (!res.ok || !res.body) {
+  if (!res.ok) {
+    throw await apiErrorFromResponse(res, { fallbackMessage: `任务进度流连接失败 (${res.status})` })
+  }
+  if (!res.body) {
     throw new Error(`任务进度流连接失败 (${res.status})`)
   }
 

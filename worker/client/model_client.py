@@ -16,6 +16,7 @@ from client.provider_error import (
     response_provider_error_code,
 )
 from config import settings
+from utils.model_contract import read_json_path, read_response_value, response_mapping_has
 from volcengine_model import normalize_volcengine_openai_base_url, resolve_volcengine_model_name
 
 
@@ -77,6 +78,8 @@ class ModelClient:
         api_key: str | None = None,
         timeout_seconds: int | None = None,
         max_tokens: int | None = None,
+        model_params: dict[str, Any] | None = None,
+        response_mapping: dict[str, Any] | None = None,
     ) -> str:
         return self.generate_with_usage(
             prompt,
@@ -87,6 +90,8 @@ class ModelClient:
             api_key=api_key,
             timeout_seconds=timeout_seconds,
             max_tokens=max_tokens,
+            model_params=model_params,
+            response_mapping=response_mapping,
         ).content
 
     def generate_with_usage(
@@ -100,6 +105,8 @@ class ModelClient:
         api_key: str | None = None,
         timeout_seconds: int | None = None,
         max_tokens: int | None = None,
+        model_params: dict[str, Any] | None = None,
+        response_mapping: dict[str, Any] | None = None,
     ) -> ModelGenerationResult:
         effective_provider = provider or settings.model_provider
         effective_base_url = normalize_volcengine_openai_base_url((base_url or self.base_url).rstrip("/"))
@@ -139,20 +146,24 @@ class ModelClient:
                 api_key=effective_api_key,
                 timeout=timeout,
                 max_tokens=effective_max_tokens,
+                model_params=model_params,
+                response_mapping=response_mapping,
             )
 
+        request_payload: dict[str, Any] = {
+            "model": effective_model_name,
+            "messages": messages,
+            "stream": False,
+            "max_tokens": effective_max_tokens,
+        }
+        _apply_openai_generation_params(request_payload, model_params)
         response = self._post_with_timeout_retry(
             f"{effective_base_url}/chat/completions",
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {effective_api_key}",
             },
-            payload={
-                "model": effective_model_name,
-                "messages": messages,
-                "stream": False,
-                "max_tokens": effective_max_tokens,
-            },
+            payload=request_payload,
             timeout=timeout,
         )
 
@@ -173,10 +184,14 @@ class ModelClient:
         except ValueError as exc:
             raise ModelClientError("model returned non-json response") from exc
 
-        content = self._extract_content(payload)
+        content = self._extract_mapped_content(payload, response_mapping, provider="openai")
         if not content:
             raise ModelOutputEmptyError("model returned empty content")
-        prompt_tokens, completion_tokens = self._extract_openai_usage(payload)
+        prompt_tokens, completion_tokens = self._extract_mapped_usage(
+            payload,
+            response_mapping,
+            provider="openai",
+        )
         return ModelGenerationResult(content, prompt_tokens, completion_tokens)
 
     def generate_stream_with_usage(
@@ -190,6 +205,8 @@ class ModelClient:
         api_key: str | None = None,
         timeout_seconds: int | None = None,
         max_tokens: int | None = None,
+        model_params: dict[str, Any] | None = None,
+        response_mapping: dict[str, Any] | None = None,
     ) -> Iterator[str]:
         """OpenAI-compatible SSE 流式生成，逐段 yield 文本增量。"""
         effective_provider = provider or settings.model_provider
@@ -203,6 +220,8 @@ class ModelClient:
                 api_key=api_key,
                 timeout_seconds=timeout_seconds,
                 max_tokens=max_tokens,
+                model_params=model_params,
+                response_mapping=response_mapping,
             )
             for chunk in self._chunk_text(content, 24):
                 yield chunk
@@ -225,6 +244,14 @@ class ModelClient:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
+        request_payload: dict[str, Any] = {
+            "model": effective_model_name,
+            "messages": messages,
+            "stream": True,
+            "max_tokens": effective_max_tokens,
+        }
+        _apply_openai_generation_params(request_payload, model_params)
+        request_payload["stream"] = True
         response = self._post_with_timeout_retry(
             f"{effective_base_url}/chat/completions",
             headers={
@@ -232,12 +259,7 @@ class ModelClient:
                 "Authorization": f"Bearer {effective_api_key}",
                 "Accept": "text/event-stream",
             },
-            payload={
-                "model": effective_model_name,
-                "messages": messages,
-                "stream": True,
-                "max_tokens": effective_max_tokens,
-            },
+            payload=request_payload,
             timeout=timeout,
             stream=True,
         )
@@ -263,11 +285,7 @@ class ModelClient:
                 payload = json.loads(data)
             except json.JSONDecodeError:
                 continue
-            choices = payload.get("choices") or []
-            if not choices:
-                continue
-            delta = choices[0].get("delta") or {}
-            piece = delta.get("content")
+            piece = self._extract_stream_content(payload, response_mapping)
             if isinstance(piece, str) and piece:
                 yield piece
 
@@ -281,7 +299,16 @@ class ModelClient:
         api_key: str,
         timeout: tuple[int, int],
         max_tokens: int,
+        model_params: dict[str, Any] | None,
+        response_mapping: dict[str, Any] | None,
     ) -> ModelGenerationResult:
+        request_payload: dict[str, Any] = {
+            "model": model_name,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+        }
+        _apply_anthropic_generation_params(request_payload, model_params)
         response = self._post_with_timeout_retry(
             f"{base_url}/v1/messages",
             headers={
@@ -289,12 +316,7 @@ class ModelClient:
                 "x-api-key": api_key,
                 "anthropic-version": "2023-06-01",
             },
-            payload={
-                "model": model_name,
-                "system": system_prompt,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": max_tokens,
-            },
+            payload=request_payload,
             timeout=timeout,
         )
 
@@ -315,11 +337,69 @@ class ModelClient:
         except ValueError as exc:
             raise ModelClientError("model returned non-json response") from exc
 
-        content = self._extract_anthropic_content(payload)
+        content = self._extract_mapped_content(payload, response_mapping, provider="anthropic")
         if not content:
             raise ModelOutputEmptyError("model returned empty content")
-        prompt_tokens, completion_tokens = self._extract_anthropic_usage(payload)
+        prompt_tokens, completion_tokens = self._extract_mapped_usage(
+            payload,
+            response_mapping,
+            provider="anthropic",
+        )
         return ModelGenerationResult(content, prompt_tokens, completion_tokens)
+
+    @classmethod
+    def _extract_mapped_content(
+        cls,
+        payload: dict[str, Any],
+        response_mapping: dict[str, Any] | None,
+        *,
+        provider: str,
+    ) -> str:
+        if response_mapping_has(response_mapping, "contentPath", "contentPaths"):
+            value = _first_mapped_text(payload, response_mapping, "contentPath", "contentPaths")
+            return value.strip()
+        if provider == "anthropic":
+            return cls._extract_anthropic_content(payload)
+        return cls._extract_content(payload)
+
+    @classmethod
+    def _extract_mapped_usage(
+        cls,
+        payload: dict[str, Any],
+        response_mapping: dict[str, Any] | None,
+        *,
+        provider: str,
+    ) -> tuple[int, int]:
+        if response_mapping_has(response_mapping, "usagePath", "usagePaths"):
+            usage = read_response_value(payload, response_mapping, "usagePath", "usagePaths")
+            if not isinstance(usage, dict):
+                return 0, 0
+            return (
+                cls._non_negative_int(usage.get("prompt_tokens") or usage.get("input_tokens")),
+                cls._non_negative_int(usage.get("completion_tokens") or usage.get("output_tokens")),
+            )
+        if provider == "anthropic":
+            return cls._extract_anthropic_usage(payload)
+        return cls._extract_openai_usage(payload)
+
+    @staticmethod
+    def _extract_stream_content(
+        payload: dict[str, Any],
+        response_mapping: dict[str, Any] | None,
+    ) -> str:
+        if response_mapping_has(response_mapping, "streamContentPath", "streamContentPaths"):
+            return _first_mapped_text(
+                payload,
+                response_mapping,
+                "streamContentPath",
+                "streamContentPaths",
+            )
+        choices = payload.get("choices") or []
+        if not choices or not isinstance(choices[0], dict):
+            return ""
+        delta = choices[0].get("delta") or {}
+        piece = delta.get("content") if isinstance(delta, dict) else None
+        return piece if isinstance(piece, str) else ""
 
     @staticmethod
     def _chunk_text(value: str, size: int) -> list[str]:
@@ -412,6 +492,105 @@ class ModelClient:
         if not text:
             return 0
         return max(1, len(text) // 4)
+
+
+_OPENAI_GENERATION_PARAM_ALIASES: dict[str, tuple[str, ...]] = {
+    "temperature": ("temperature",),
+    "top_p": ("top_p", "topP"),
+    "max_tokens": ("max_tokens", "maxTokens"),
+    "frequency_penalty": ("frequency_penalty", "frequencyPenalty"),
+    "presence_penalty": ("presence_penalty", "presencePenalty"),
+    "repetition_penalty": ("repetition_penalty", "repetitionPenalty"),
+    "seed": ("seed",),
+    "stop": ("stop",),
+    "response_format": ("response_format", "responseFormat"),
+    "enable_thinking": ("enable_thinking", "enableThinking"),
+    "thinking_budget": ("thinking_budget", "thinkingBudget"),
+    "thinking": ("thinking",),
+}
+
+
+def _apply_openai_generation_params(
+    payload: dict[str, Any],
+    model_params: dict[str, Any] | None,
+) -> None:
+    if not isinstance(model_params, dict):
+        return
+    for target, aliases in _OPENAI_GENERATION_PARAM_ALIASES.items():
+        value = _first_present_param(model_params, aliases)
+        if _has_param_value(value):
+            payload[target] = value
+
+
+def _apply_anthropic_generation_params(
+    payload: dict[str, Any],
+    model_params: dict[str, Any] | None,
+) -> None:
+    if not isinstance(model_params, dict):
+        return
+    aliases: dict[str, tuple[str, ...]] = {
+        "temperature": ("temperature",),
+        "top_p": ("top_p", "topP"),
+        "top_k": ("top_k", "topK"),
+        "max_tokens": ("max_tokens", "maxTokens"),
+        "stop_sequences": ("stop_sequences", "stopSequences", "stop"),
+        "thinking": ("thinking",),
+    }
+    for target, source_keys in aliases.items():
+        value = _first_present_param(model_params, source_keys)
+        if _has_param_value(value):
+            payload[target] = value
+
+
+def _first_present_param(params: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    for key in keys:
+        if key in params:
+            return params[key]
+    return None
+
+
+def _has_param_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, dict)):
+        return bool(value)
+    return True
+
+
+def _first_mapped_text(
+    payload: dict[str, Any],
+    response_mapping: dict[str, Any] | None,
+    *mapping_keys: str,
+) -> str:
+    if not isinstance(response_mapping, dict):
+        return ""
+    for mapping_key in mapping_keys:
+        if mapping_key not in response_mapping:
+            continue
+        raw_paths = response_mapping[mapping_key]
+        paths = [raw_paths] if isinstance(raw_paths, str) else raw_paths
+        if not isinstance(paths, list):
+            return ""
+        for path in paths:
+            if not isinstance(path, str):
+                continue
+            value = read_json_path(payload, path)
+            if isinstance(value, str) and value.strip():
+                return value
+            if isinstance(value, list):
+                text = _flatten_content(value, allow_empty=True)
+                if text.strip():
+                    return text
+            if isinstance(value, dict) and isinstance(value.get("text"), str):
+                text = value["text"]
+                if text.strip():
+                    return text
+        return ""
+    return ""
+
+
 def _retry_after_seconds(value: Any) -> int | None:
     try:
         return max(0, int(float(str(value).strip())))

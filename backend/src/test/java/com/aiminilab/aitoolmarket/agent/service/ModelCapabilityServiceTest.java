@@ -9,6 +9,8 @@ import com.aiminilab.aitoolmarket.agent.support.ModelConfigCredentialResolver;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
+import com.aiminilab.aitoolmarket.tool.entity.ToolModelBinding;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolModelBindingMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,6 +42,9 @@ class ModelCapabilityServiceTest {
     @Mock
     private ModelProviderMetadataService providerMetadataService;
 
+    @Mock
+    private ToolModelBindingMapper toolModelBindingMapper;
+
     private ModelCapabilityService modelCapabilityService;
 
     @BeforeEach
@@ -50,7 +55,8 @@ class ModelCapabilityServiceTest {
                 providerMetadataService,
                 codec,
                 agentModelConfigMapper,
-                credentialResolver
+                credentialResolver,
+                toolModelBindingMapper
         );
         lenient().when(credentialResolver.resolveForExecution(org.mockito.ArgumentMatchers.any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -131,6 +137,44 @@ class ModelCapabilityServiceTest {
         AgentModelConfig resolved = modelCapabilityService.resolveModelConfigForTool(digitalHumanTool);
 
         assertThat(resolved).isEqualTo(bound);
+    }
+
+    @Test
+    void explicitSelection_requiresMembershipAndReadyContractWhenToolHasBindings() {
+        AiTool tool = new AiTool();
+        tool.setId(90L);
+        tool.setRequiredModelCapabilities("[\"VIDEO_GENERATION\"]");
+        when(toolModelBindingMapper.countByToolId(90L)).thenReturn(1);
+        when(toolModelBindingMapper.countByToolIdAndModelConfigId(90L, 44L)).thenReturn(0);
+
+        assertThatThrownBy(() -> modelCapabilityService.resolveModelConfigForTool(tool, 44L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("not bound");
+
+        AgentModelConfig pending = config(44L, "pending", "[\"VIDEO_GENERATION\"]", false);
+        pending.setContractStatus("DOCS_PENDING");
+        when(toolModelBindingMapper.countByToolIdAndModelConfigId(90L, 44L)).thenReturn(1);
+        when(agentModelConfigMapper.findActiveById(44L)).thenReturn(pending);
+
+        assertThatThrownBy(() -> modelCapabilityService.resolveModelConfigForTool(tool, 44L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("not READY");
+    }
+
+    @Test
+    void defaultSelection_keepsLegacyPendingBindingCompatible() {
+        AiTool tool = new AiTool();
+        tool.setId(91L);
+        ToolModelBinding binding = new ToolModelBinding();
+        binding.setToolId(91L);
+        binding.setModelConfigId(55L);
+        binding.setDefault(true);
+        AgentModelConfig pending = config(55L, "pending", "[\"VIDEO_GENERATION\"]", false);
+        pending.setContractStatus("DOCS_PENDING");
+        when(toolModelBindingMapper.findByToolId(91L)).thenReturn(List.of(binding));
+        when(agentModelConfigMapper.findActiveById(55L)).thenReturn(pending);
+
+        assertThat(modelCapabilityService.resolveModelConfigForTool(tool)).isEqualTo(pending);
     }
 
     @Test

@@ -1,10 +1,10 @@
 /**
  * 与《openapi.yml》V1 契约对齐的类型与常量。
- * 响应壳：{ code, message, data, traceId? }
+ * 第一阶段同时解析旧成功/错误壳与新的 userMessage/developerMessage 错误壳。
  */
 
 /** §3 V1 保留错误码 */
-export type ApiErrorCode =
+export type KnownApiErrorCode =
   | "SUCCESS"
   | "PARAM_ERROR"
   | "UNAUTHORIZED"
@@ -29,15 +29,52 @@ export type ApiErrorCode =
   | "AGENT_TOOL_CALL_LIMIT"
   | "AGENT_MODEL_CALL_LIMIT"
   | "AGENT_SECURITY_REJECTED"
+  | "API_001"
+  | "API_002"
+  | "AUTH_001"
+  | "AUTH_002"
+  | "AUTH_003"
+  | "TOOL_001"
+  | "TOOL_002"
+  | "TASK_001"
+  | "TASK_002"
+  | "TASK_003"
+  | "MODEL_001"
+  | "MODEL_002"
+  | "MODEL_003"
+  | "MODEL_004"
+  | "SYSTEM_001"
   | "SYSTEM_ERROR"
 
-export interface ApiResponse<T> {
+/** Known values retain autocomplete while rolling deployments may introduce a new module code. */
+export type ApiErrorCode = KnownApiErrorCode | (string & {})
+
+export interface LegacyApiResponse<T> {
   code: ApiErrorCode
-  message: string
+  message?: string
   data: T | null
   traceId?: string
   requestId?: string
 }
+
+export interface ApiSuccessResponse<T> {
+  code: "SUCCESS"
+  data: T
+  traceId?: string
+  requestId?: string
+}
+
+export interface UserApiErrorResponse {
+  errorCode: ApiErrorCode
+  userMessage: string
+  traceId?: string
+}
+
+/** Phase-one rolling-deployment contract: consumers accept either envelope, producers emit only one. */
+export type ApiResponse<T> =
+  | LegacyApiResponse<T>
+  | ApiSuccessResponse<T>
+  | UserApiErrorResponse
 
 /** §4 统一任务状态 */
 export type TaskStatus =
@@ -137,6 +174,8 @@ export interface RegisterRequest {
 /** GET /api/v1/users/me —— UserProfile */
 export interface UserProfile {
   id: number
+  publicCode: string
+  referralCode: string
   username: string
   nickname?: string
   avatarUrl?: string | null
@@ -171,8 +210,7 @@ export interface UserAvatarUploadResponse {
 }
 
 export interface PublicUserProfile {
-  id: number
-  username: string
+  publicCode: string
   nickname?: string | null
   avatarUrl?: string | null
   bio?: string | null
@@ -185,7 +223,8 @@ export interface PublicUserProfile {
 
 export interface CommunityPost {
   id: number
-  userId: number
+  authorPublicCode?: string | null
+  ownedByCurrentUser?: boolean
   authorNickname?: string | null
   authorAvatarUrl?: string | null
   taskId: number
@@ -311,6 +350,7 @@ export interface ToolField {
     | "image"
     | "multi_image"
     | "multi_video"
+    | "multi_audio"
     | "subject_element_list"
     | "omni_video_list"
     | "file"
@@ -324,6 +364,58 @@ export interface ToolField {
   userRequired?: boolean
   defaultValue?: string | null
   sortOrder: number
+}
+
+export interface ModelRequestFieldOption {
+  label: string
+  value: string | number | boolean
+}
+
+export interface ModelRequestSchemaField {
+  key: string
+  label?: string | null
+  type: "string" | "number" | "integer" | "boolean" | "array" | string
+  control?: "segmented" | "select" | "textarea" | "slider" | "upload" | string | null
+  required?: boolean
+  default?: unknown
+  enum?: Array<ModelRequestFieldOption | string | number | boolean> | null
+  min?: number | null
+  max?: number | null
+  step?: number | null
+  minLength?: number | null
+  maxLength?: number | null
+  pattern?: string | null
+  minItems?: number | null
+  maxItems?: number | null
+  requiresAny?: string[] | null
+  itemType?: "image" | "video" | "audio" | "file" | string | null
+  visibleWhen?: Record<string, unknown> | null
+  requiredWhen?: Record<string, unknown> | null
+  accept?: string | null
+  helpText?: string | null
+}
+
+export interface ModelRequestSchemaRequiresAnyGroup {
+  when?: Record<string, unknown> | null
+  fields: string[]
+}
+
+export interface ModelRequestSchema {
+  version: "1" | string
+  fields: ModelRequestSchemaField[]
+  requiresAnyGroups?: ModelRequestSchemaRequiresAnyGroup[] | null
+}
+
+export interface ToolSupportedModel {
+  /** Rolling-deploy compatibility for the initial backend response name. */
+  id?: number
+  modelConfigId: number
+  displayName: string
+  provider?: string | null
+  capabilities?: string[] | null
+  contractStatus?: "READY" | "DOCS_PENDING" | string | null
+  requestSchemaJson?: ModelRequestSchema | string | null
+  isDefault?: boolean
 }
 
 export interface ToolFrontendStyle {
@@ -349,6 +441,8 @@ export interface ToolDetail extends ToolCompact {
   frontendStyle?: ToolFrontendStyle | null
   /** 动态字段列表 */
   fields: ToolField[]
+  supportedModels?: ToolSupportedModel[] | null
+  defaultModelConfigId?: number | null
 }
 
 /* ========== 模型选项 ========== */
@@ -497,6 +591,10 @@ export interface TaskStatusPayload {
   status: TaskStatus
   progress?: number
   progressMessage?: string
+  errorCode?: string | null
+  userMessage?: string | null
+  failureTraceId?: string | null
+  errorMessage?: string | null
   workflowPreview?: WorkflowStagePreview | null
 }
 
@@ -514,6 +612,8 @@ export interface TaskDetail {
   progress?: number
   progressMessage?: string
   errorCode?: string | null
+  userMessage?: string | null
+  failureTraceId?: string | null
   errorMessage?: string | null
   userId: number
   toolCode: string

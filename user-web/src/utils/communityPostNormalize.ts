@@ -2,19 +2,21 @@ import type { CommunityPost, PublicUserProfile } from "@/api/types"
 import { defaultUserDisplayName, safeDisplayName } from "@/utils/displayName"
 
 type RawCommunityPost = CommunityPost & {
+  author_public_code?: string | null
+  owned_by_current_user?: boolean
   author_nickname?: string | null
   author_avatar_url?: string | null
   prompt_preview?: string | null
 }
 
-const authorProfileCache = new Map<number, PublicUserProfile>()
+const authorProfileCache = new Map<string, PublicUserProfile>()
 
 export function rememberCommunityAuthorProfile(profile: PublicUserProfile) {
-  if (profile?.id) authorProfileCache.set(profile.id, profile)
+  if (profile?.publicCode) authorProfileCache.set(profile.publicCode, profile)
 }
 
-export function getCachedCommunityAuthorProfile(userId: number) {
-  return authorProfileCache.get(userId)
+export function getCachedCommunityAuthorProfile(publicCode?: string | null) {
+  return publicCode ? authorProfileCache.get(publicCode) : undefined
 }
 
 export function normalizeCommunityPost(post: RawCommunityPost): CommunityPost {
@@ -22,7 +24,13 @@ export function normalizeCommunityPost(post: RawCommunityPost): CommunityPost {
   const favorited = post.favorited ?? (post as { is_favorited?: boolean }).is_favorited
   return {
     ...post,
-    authorNickname: safeDisplayName(post.authorNickname ?? post.author_nickname) || null,
+    authorPublicCode: post.authorPublicCode ?? post.author_public_code ?? null,
+    ownedByCurrentUser: post.ownedByCurrentUser ?? post.owned_by_current_user ?? false,
+    authorNickname:
+      safeDisplayName(
+        post.authorNickname ?? post.author_nickname,
+        post.authorPublicCode ?? post.author_public_code,
+      ) || null,
     authorAvatarUrl: post.authorAvatarUrl ?? post.author_avatar_url ?? null,
     promptPreview: post.promptPreview ?? post.prompt_preview ?? null,
     liked: liked === true,
@@ -34,18 +42,17 @@ export function normalizeCommunityPosts(posts: RawCommunityPost[]): CommunityPos
   return posts.map(normalizeCommunityPost)
 }
 
-export function resolveCommunityAuthorName(post: Pick<CommunityPost, "authorNickname" | "userId">) {
-  const cached = authorProfileCache.get(post.userId)
+export function resolveCommunityAuthorName(post: Pick<CommunityPost, "authorNickname" | "authorPublicCode">) {
+  const cached = getCachedCommunityAuthorProfile(post.authorPublicCode)
   const nickname =
-    safeDisplayName(post.authorNickname) ||
-    safeDisplayName(cached?.nickname) ||
-    safeDisplayName(cached?.username)
+    safeDisplayName(post.authorNickname, post.authorPublicCode) ||
+    safeDisplayName(cached?.nickname, post.authorPublicCode)
   if (nickname) return nickname
-  return defaultUserDisplayName(post.userId)
+  return defaultUserDisplayName(post.authorPublicCode)
 }
 
-export function resolveCommunityAuthorAvatar(post: Pick<CommunityPost, "authorAvatarUrl" | "userId">) {
-  return post.authorAvatarUrl ?? authorProfileCache.get(post.userId)?.avatarUrl ?? null
+export function resolveCommunityAuthorAvatar(post: Pick<CommunityPost, "authorAvatarUrl" | "authorPublicCode">) {
+  return post.authorAvatarUrl ?? getCachedCommunityAuthorProfile(post.authorPublicCode)?.avatarUrl ?? null
 }
 
 export function resolveCommunityPrompt(post: Pick<CommunityPost, "promptPreview" | "promptVisible" | "prompt">) {
@@ -62,24 +69,23 @@ export function mergeCommunityPostAuthor(
 ): CommunityPost {
   if (!profile) return post
   rememberCommunityAuthorProfile(profile)
-  const existingAuthorName = safeDisplayName(post.authorNickname)
+  const existingAuthorName = safeDisplayName(post.authorNickname, post.authorPublicCode)
   if (existingAuthorName) return { ...post, authorNickname: existingAuthorName }
   return {
     ...post,
     authorNickname:
-      safeDisplayName(profile.nickname) ||
-      safeDisplayName(profile.username) ||
-      defaultUserDisplayName(post.userId),
+      safeDisplayName(profile.nickname, post.authorPublicCode) ||
+      defaultUserDisplayName(post.authorPublicCode),
     authorAvatarUrl: post.authorAvatarUrl ?? profile.avatarUrl ?? null,
   }
 }
 
-export function collectMissingAuthorUserIds(posts: CommunityPost[]) {
+export function collectMissingAuthorPublicCodes(posts: CommunityPost[]) {
   return [
     ...new Set(
       posts
-        .filter((post) => !post.authorNickname?.trim() && post.userId)
-        .map((post) => post.userId),
+        .filter((post) => !post.authorNickname?.trim() && post.authorPublicCode)
+        .map((post) => post.authorPublicCode as string),
     ),
   ]
 }

@@ -22,6 +22,12 @@ public class AgentModelConfig {
     private String extraAuthJson;
     private String executionTask;
     private String executionOptionsJson;
+    private String requestSchemaJson;
+    private String requestMappingJson;
+    private String responseMappingJson;
+    private String apiContractVersion;
+    private String contractStatus;
+    private LocalDateTime contractVerifiedAt;
     private String minimaxGroupId;
     private String consoleUrl;
     private String balanceUrl;
@@ -69,6 +75,18 @@ public class AgentModelConfig {
     public void setExecutionTask(String executionTask) { this.executionTask = executionTask; }
     public String getExecutionOptionsJson() { return executionOptionsJson; }
     public void setExecutionOptionsJson(String executionOptionsJson) { this.executionOptionsJson = executionOptionsJson; }
+    public String getRequestSchemaJson() { return requestSchemaJson; }
+    public void setRequestSchemaJson(String requestSchemaJson) { this.requestSchemaJson = requestSchemaJson; }
+    public String getRequestMappingJson() { return requestMappingJson; }
+    public void setRequestMappingJson(String requestMappingJson) { this.requestMappingJson = requestMappingJson; }
+    public String getResponseMappingJson() { return responseMappingJson; }
+    public void setResponseMappingJson(String responseMappingJson) { this.responseMappingJson = responseMappingJson; }
+    public String getApiContractVersion() { return apiContractVersion; }
+    public void setApiContractVersion(String apiContractVersion) { this.apiContractVersion = apiContractVersion; }
+    public String getContractStatus() { return contractStatus; }
+    public void setContractStatus(String contractStatus) { this.contractStatus = contractStatus; }
+    public LocalDateTime getContractVerifiedAt() { return contractVerifiedAt; }
+    public void setContractVerifiedAt(LocalDateTime contractVerifiedAt) { this.contractVerifiedAt = contractVerifiedAt; }
     public String getMinimaxGroupId() { return minimaxGroupId; }
     public void setMinimaxGroupId(String minimaxGroupId) { this.minimaxGroupId = minimaxGroupId; }
     public String getConsoleUrl() { return consoleUrl; }

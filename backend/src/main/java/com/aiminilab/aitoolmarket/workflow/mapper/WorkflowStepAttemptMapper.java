@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.workflow.mapper;
 
 import com.aiminilab.aitoolmarket.workflow.entity.WorkflowStepAttempt;
+import com.aiminilab.aitoolmarket.workflow.support.WorkflowFailureContract;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -85,6 +86,11 @@ public interface WorkflowStepAttemptMapper extends BaseMapper<WorkflowStepAttemp
             UPDATE workflow_step_attempts
             SET status = 'SUCCESS',
                 output_json = #{outputJson},
+                error_code = NULL,
+                error_message = NULL,
+                user_message = NULL,
+                developer_message = NULL,
+                failure_trace_id = NULL,
                 provider_request_id = COALESCE(provider_request_id, #{providerRequestId}),
                 finished_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
@@ -103,12 +109,32 @@ public interface WorkflowStepAttemptMapper extends BaseMapper<WorkflowStepAttemp
                     @Param("providerRequestId") String providerRequestId,
                     @Param("expectedStatuses") List<String> expectedStatuses);
 
+    default int markFailed(Long attemptId,
+                           String errorCode,
+                           String errorMessage,
+                           String providerRequestId,
+                           List<String> expectedStatuses) {
+        WorkflowFailureContract failure = WorkflowFailureContract.from(errorCode, errorMessage);
+        return markFailedWithContract(
+                attemptId,
+                failure.errorCode(),
+                failure.userMessage(),
+                failure.developerMessage(),
+                failure.failureTraceId(),
+                providerRequestId,
+                expectedStatuses
+        );
+    }
+
     @Update("""
             <script>
             UPDATE workflow_step_attempts
             SET status = 'FAILED',
                 error_code = #{errorCode},
-                error_message = #{errorMessage},
+                error_message = #{developerMessage},
+                user_message = #{userMessage},
+                developer_message = #{developerMessage},
+                failure_trace_id = #{failureTraceId},
                 provider_request_id = COALESCE(provider_request_id, #{providerRequestId}),
                 finished_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
@@ -122,11 +148,13 @@ public interface WorkflowStepAttemptMapper extends BaseMapper<WorkflowStepAttemp
               </foreach>
             </script>
             """)
-    int markFailed(@Param("attemptId") Long attemptId,
-                   @Param("errorCode") String errorCode,
-                   @Param("errorMessage") String errorMessage,
-                   @Param("providerRequestId") String providerRequestId,
-                   @Param("expectedStatuses") List<String> expectedStatuses);
+    int markFailedWithContract(@Param("attemptId") Long attemptId,
+                               @Param("errorCode") String errorCode,
+                               @Param("userMessage") String userMessage,
+                               @Param("developerMessage") String developerMessage,
+                               @Param("failureTraceId") String failureTraceId,
+                               @Param("providerRequestId") String providerRequestId,
+                               @Param("expectedStatuses") List<String> expectedStatuses);
 
     @Select("""
             SELECT *
@@ -140,11 +168,24 @@ public interface WorkflowStepAttemptMapper extends BaseMapper<WorkflowStepAttemp
     List<WorkflowStepAttempt> selectExpiredActive(@Param("cutoff") LocalDateTime cutoff,
                                                    @Param("limit") int limit);
 
+    default int markTimedOutIfExpired(Long attemptId, LocalDateTime cutoff) {
+        WorkflowFailureContract failure = WorkflowFailureContract.from(
+                "ATTEMPT_LEASE_EXPIRED",
+                "Workflow step attempt lease expired before worker claim"
+        );
+        return markTimedOutIfExpiredWithContract(
+                attemptId, cutoff, failure.userMessage(), failure.developerMessage(), failure.failureTraceId()
+        );
+    }
+
     @Update("""
             UPDATE workflow_step_attempts
             SET status = 'TIMEOUT',
                 error_code = 'ATTEMPT_LEASE_EXPIRED',
-                error_message = 'Workflow step attempt lease expired before worker claim',
+                error_message = #{developerMessage},
+                user_message = #{userMessage},
+                developer_message = #{developerMessage},
+                failure_trace_id = #{failureTraceId},
                 finished_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{attemptId}
@@ -152,14 +193,30 @@ public interface WorkflowStepAttemptMapper extends BaseMapper<WorkflowStepAttemp
               AND lease_expires_at IS NOT NULL
               AND lease_expires_at < #{cutoff}
             """)
-    int markTimedOutIfExpired(@Param("attemptId") Long attemptId,
-                              @Param("cutoff") LocalDateTime cutoff);
+    int markTimedOutIfExpiredWithContract(@Param("attemptId") Long attemptId,
+                                          @Param("cutoff") LocalDateTime cutoff,
+                                          @Param("userMessage") String userMessage,
+                                          @Param("developerMessage") String developerMessage,
+                                          @Param("failureTraceId") String failureTraceId);
+
+    default int markLostIfExpired(Long attemptId, LocalDateTime cutoff) {
+        WorkflowFailureContract failure = WorkflowFailureContract.from(
+                "ATTEMPT_LEASE_EXPIRED",
+                "Workflow step attempt lease expired"
+        );
+        return markLostIfExpiredWithContract(
+                attemptId, cutoff, failure.userMessage(), failure.developerMessage(), failure.failureTraceId()
+        );
+    }
 
     @Update("""
             UPDATE workflow_step_attempts
             SET status = 'LOST',
                 error_code = 'ATTEMPT_LEASE_EXPIRED',
-                error_message = 'Workflow step attempt lease expired',
+                error_message = #{developerMessage},
+                user_message = #{userMessage},
+                developer_message = #{developerMessage},
+                failure_trace_id = #{failureTraceId},
                 finished_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{attemptId}
@@ -167,28 +224,55 @@ public interface WorkflowStepAttemptMapper extends BaseMapper<WorkflowStepAttemp
               AND lease_expires_at IS NOT NULL
               AND lease_expires_at < #{cutoff}
             """)
-    int markLostIfExpired(@Param("attemptId") Long attemptId,
-                          @Param("cutoff") LocalDateTime cutoff);
+    int markLostIfExpiredWithContract(@Param("attemptId") Long attemptId,
+                                      @Param("cutoff") LocalDateTime cutoff,
+                                      @Param("userMessage") String userMessage,
+                                      @Param("developerMessage") String developerMessage,
+                                      @Param("failureTraceId") String failureTraceId);
+
+    default int markLostForTerminalChild(Long attemptId, String errorMessage) {
+        WorkflowFailureContract failure = WorkflowFailureContract.from("CHILD_ALREADY_TERMINAL", errorMessage);
+        return markLostForTerminalChildWithContract(
+                attemptId, failure.userMessage(), failure.developerMessage(), failure.failureTraceId()
+        );
+    }
 
     @Update("""
             UPDATE workflow_step_attempts
             SET status = 'LOST',
                 error_code = 'CHILD_ALREADY_TERMINAL',
-                error_message = #{errorMessage},
+                error_message = #{developerMessage},
+                user_message = #{userMessage},
+                developer_message = #{developerMessage},
+                failure_trace_id = #{failureTraceId},
                 finished_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{attemptId} AND status IN ('DISPATCHED', 'QUEUED', 'RUNNING')
             """)
-    int markLostForTerminalChild(@Param("attemptId") Long attemptId,
-                                 @Param("errorMessage") String errorMessage);
+    int markLostForTerminalChildWithContract(@Param("attemptId") Long attemptId,
+                                             @Param("userMessage") String userMessage,
+                                             @Param("developerMessage") String developerMessage,
+                                             @Param("failureTraceId") String failureTraceId);
+
+    default int cancelIfActive(Long attemptId, String reason) {
+        WorkflowFailureContract failure = WorkflowFailureContract.from("WORKFLOW_CANCELLED", reason);
+        return cancelIfActiveWithContract(
+                attemptId, failure.userMessage(), failure.developerMessage(), failure.failureTraceId()
+        );
+    }
 
     @Update("""
             UPDATE workflow_step_attempts
             SET status = 'CANCELLED', error_code = 'WORKFLOW_CANCELLED',
-                error_message = #{reason}, finished_at = CURRENT_TIMESTAMP,
+                error_message = #{developerMessage}, user_message = #{userMessage},
+                developer_message = #{developerMessage}, failure_trace_id = #{failureTraceId},
+                finished_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{attemptId}
               AND status IN ('CREATED', 'DISPATCHED', 'QUEUED', 'RUNNING')
             """)
-    int cancelIfActive(@Param("attemptId") Long attemptId, @Param("reason") String reason);
+    int cancelIfActiveWithContract(@Param("attemptId") Long attemptId,
+                                   @Param("userMessage") String userMessage,
+                                   @Param("developerMessage") String developerMessage,
+                                   @Param("failureTraceId") String failureTraceId);
 }

@@ -22,6 +22,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -50,8 +51,9 @@ class AgentDelegatedToolCallLifecycleServiceTest {
     void workflowSuccessCompletesDelegatedCallAndEmitsOneFinishedEvent() {
         AgentToolCall call = delegatedCall();
         when(toolCallMapper.findDelegatedByWorkflow(501L, 601L)).thenReturn(java.util.Optional.of(call));
-        when(toolCallMapper.finishDelegated(
-                eq(91L), eq(501L), eq("SUCCESS"), any(), eq(null), eq(null), any(LocalDateTime.class)
+        when(toolCallMapper.finishDelegatedWithContract(
+                eq(91L), eq(501L), eq("SUCCESS"), any(), isNull(), isNull(), isNull(), isNull(),
+                any(LocalDateTime.class)
         )).thenReturn(1);
 
         service.finishForWorkflow(501L, 601L, "SUCCESS", null);
@@ -69,8 +71,12 @@ class AgentDelegatedToolCallLifecycleServiceTest {
     void failedWorkflowTerminalMapsToFailedAndDuplicateFinalizationEmitsNothing(String workflowStatus) {
         AgentToolCall call = delegatedCall();
         when(toolCallMapper.findDelegatedByWorkflow(501L, 601L)).thenReturn(java.util.Optional.of(call));
-        when(toolCallMapper.finishDelegated(
-                eq(91L), eq(501L), eq("FAILED"), any(), eq("WORKFLOW_" + workflowStatus), eq("provider timeout"), any(LocalDateTime.class)
+        String expectedUserMessage = "TIMEOUT".equals(workflowStatus)
+                ? "执行超时，请稍后重试"
+                : "工作流执行失败，请稍后重试";
+        when(toolCallMapper.finishDelegatedWithContract(
+                eq(91L), eq(501L), eq("FAILED"), any(), eq("WORKFLOW_" + workflowStatus),
+                eq(expectedUserMessage), eq("provider timeout"), isNull(), any(LocalDateTime.class)
         )).thenReturn(1, 0);
 
         service.finishForWorkflow(501L, 601L, workflowStatus, "provider timeout");
@@ -80,7 +86,8 @@ class AgentDelegatedToolCallLifecycleServiceTest {
         verify(eventMapper).insertEvent(event.capture());
         assertThat(event.getValue().getEventJson()).contains("\"workflowStatus\":\"" + workflowStatus + "\"");
         assertThat(event.getValue().getEventJson()).contains("\"errorCode\":\"WORKFLOW_" + workflowStatus + "\"");
-        assertThat(event.getValue().getEventJson()).contains("provider timeout");
+        assertThat(event.getValue().getEventText()).isEqualTo(expectedUserMessage);
+        assertThat(event.getValue().getEventJson()).contains(expectedUserMessage).doesNotContain("provider timeout");
         verify(metrics).recordToolCallOutcome(eq("comic_workflow"), eq("FAILED"), any(), any());
     }
 
@@ -89,9 +96,10 @@ class AgentDelegatedToolCallLifecycleServiceTest {
         AgentToolCall call = delegatedCall();
         when(toolCallMapper.findDelegatedByWorkflow(501L, 601L)).thenReturn(java.util.Optional.of(call));
         ArgumentCaptor<String> resultJson = ArgumentCaptor.forClass(String.class);
-        when(toolCallMapper.finishDelegated(
+        when(toolCallMapper.finishDelegatedWithContract(
                 eq(91L), eq(501L), eq("CANCELLED"), resultJson.capture(),
-                eq("WORKFLOW_CANCELLED"), eq("USER_CANCELLED"), any(LocalDateTime.class)
+                eq("WORKFLOW_CANCELLED"), eq("工作流已取消"), eq("USER_CANCELLED"), isNull(),
+                any(LocalDateTime.class)
         )).thenReturn(1, 0);
 
         service.finishForWorkflow(501L, 601L, "CANCELLED", "USER_CANCELLED");
@@ -99,7 +107,9 @@ class AgentDelegatedToolCallLifecycleServiceTest {
 
         assertThat(resultJson.getValue()).contains("\"success\":false")
                 .contains("\"status\":\"CANCELLED\"")
-                .contains("\"workflowStatus\":\"CANCELLED\"");
+                .contains("\"workflowStatus\":\"CANCELLED\"")
+                .contains("工作流已取消")
+                .doesNotContain("USER_CANCELLED");
         ArgumentCaptor<AgentRunEvent> event = ArgumentCaptor.forClass(AgentRunEvent.class);
         verify(eventMapper).insertEvent(event.capture());
         assertThat(event.getValue().getEventJson()).contains("\"status\":\"CANCELLED\"")

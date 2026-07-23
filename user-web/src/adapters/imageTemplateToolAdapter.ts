@@ -1,4 +1,9 @@
 import type { ToolDetail, ToolField, ToolFrontendStyle } from "@/api/types"
+import {
+  canonicalFieldOptionValue,
+  defaultFieldValue as resolveConfiguredDefault,
+  isFieldVisible,
+} from "@/utils/fieldUiMeta"
 
 const IMAGE_FIELD_KEYS = ["sourceImageUrl", "imageUrl", "referenceImageUrl", "inputImageUrl"]
 
@@ -45,6 +50,9 @@ export function defaultFieldValue(field: ToolField): unknown {
   if (field.defaultValue !== undefined && field.defaultValue !== null && field.defaultValue !== "") {
     return field.defaultValue
   }
+  if (field.options && typeof field.options === "object" && !Array.isArray(field.options)) {
+    return resolveConfiguredDefault(field)
+  }
   if ((field.fieldType === "select" || field.fieldType === "radio") && Array.isArray(field.options) && field.options.length) {
     const option = field.options[0]
     return typeof option === "string" ? option : option.value
@@ -72,11 +80,14 @@ export function buildImageTemplateTaskParams(
   const params: Record<string, unknown> = {
     [imageKey]: uploadedImageUrl,
   }
+  const visibilityValues = { ...optionValues, ...params }
 
   for (const field of compactOptionFields(tool)) {
+    if (!isFieldVisible(field, visibilityValues)) continue
     const value = optionValues[field.fieldKey]
     const fallback = defaultFieldValue(field)
-    const resolved = value === undefined || value === null || value === "" ? fallback : value
+    const raw = value === undefined || value === null || value === "" ? fallback : value
+    const resolved = canonicalFieldOptionValue(field, raw)
     if (resolved !== undefined && resolved !== null && resolved !== "") {
       params[field.fieldKey] = resolved
     }

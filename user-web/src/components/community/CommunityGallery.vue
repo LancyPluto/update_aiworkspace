@@ -313,8 +313,8 @@ function openPost(post: CommunityPost) {
 
 function openAuthorProfile(post: CommunityPost, event: Event) {
   event.stopPropagation()
-  if (!post.userId) return
-  router.push(`/u/${post.userId}`)
+  if (!post.authorPublicCode) return
+  router.push(userRoutes.publicProfile(post.authorPublicCode))
 }
 
 async function toggleLike(post: CommunityPost, event: Event) {

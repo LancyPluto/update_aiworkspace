@@ -21,6 +21,32 @@ def test_openai_gateway_prefers_preserved_frontend_size_field():
     ) == "1024x1536"
 
 
+def test_gpt_image_2_uses_true_ratio_sizes_and_preserves_valid_explicit_size():
+    model_config = {"provider": "openai_images_gateway", "modelName": "openai/gpt-image-2-2026-07-01"}
+
+    assert _resolve_openai_image_size({"aspectRatio": "16:9"}, model_config) == "1536x864"
+    assert _resolve_openai_image_size({"aspectRatio": "9:16"}, model_config) == "864x1536"
+    assert _resolve_openai_image_size({"aspectRatio": "4:3"}, model_config) == "1280x960"
+    assert _resolve_openai_image_size({"aspectRatio": "21:9"}, model_config) == "1792x768"
+    assert _resolve_openai_image_size({"size": "1280x720"}, model_config) == "1280x720"
+    assert _resolve_openai_image_size({"size": "1279x720"}, model_config) == "auto"
+
+
+def test_agnes_image_preserves_resolution_tier():
+    model_config = {
+        "provider": "agnes_images",
+        "modelName": "agnes-image-2.1-flash",
+        "baseUrl": "https://apihub.agnes-ai.com/v1",
+    }
+
+    assert _resolve_openai_image_size({"imageSize": "2K", "aspectRatio": "16:9"}, model_config) == "2K"
+    assert _resolve_openai_image_size({"aspectRatio": "9:16"}, model_config) == "2K"
+    assert _resolve_openai_image_size(
+        {},
+        {**model_config, "modelName": "agnes-image-2.0-flash"},
+    ) == "1024x1024"
+
+
 def test_volcengine_seedream_auto_size_uses_aspect_ratio_size():
     model_config = {
         "provider": "volcengine_images",
@@ -185,3 +211,82 @@ def test_image_generation_handler_renders_tool_prompt_template_for_image_tools()
     assert result["status"] == "SUCCESS"
     assert image_client.calls[0]["prompt"].startswith("Extend the image from data:image/png;base64,ZmFrZQ==")
     assert "Extend the uploaded image canvas" not in image_client.calls[0]["prompt"]
+
+
+def test_image_generation_handler_applies_model_request_mapping():
+    backend = RecordingBackendClient()
+    context = backend.get_execution_context(99143, trace_id="image-contract-test")
+    context["params"] = {
+        "creativeBrief": "mapped product photo",
+        "imageSize": "2K",
+        "aspectRatio": "16:9",
+    }
+    context["modelConfig"]["requestMappingJson"] = (
+        '{"version":"1","fieldMap":{"creativeBrief":"prompt"}}'
+    )
+    image_client = RecordingImageClient()
+    handler = ImageGenerationHandler(
+        backend_client=backend,
+        image_client=image_client,
+        image_persister=PassthroughImagePersister(),
+        final_progress_interval_seconds=0,
+    )
+
+    result = handler.handle({"taskId": 99143, "__executionContext": context})
+
+    assert result["status"] == "SUCCESS"
+    assert image_client.calls[0]["prompt"] == "mapped product photo"
+    assert image_client.calls[0]["image_size"] == "2K"
+    assert image_client.calls[0]["aspect_ratio"] == "16:9"
+
+
+def test_image_edit_mode_requires_reference_image():
+    backend = RecordingBackendClient()
+    context = backend.get_execution_context(99145, trace_id="image-edit-contract-test")
+    context["params"] = {
+        "prompt": "change the background",
+        "generationMode": "image_edit",
+    }
+    image_client = RecordingImageClient()
+    handler = ImageGenerationHandler(
+        backend_client=backend,
+        image_client=image_client,
+        image_persister=PassthroughImagePersister(),
+        final_progress_interval_seconds=0,
+    )
+
+    result = handler.handle({"taskId": 99145, "__executionContext": context})
+
+    assert result["status"] == "FAILED"
+    assert result["errorCode"] == "INVALID_TASK_PARAMS"
+    assert image_client.calls == []
+
+
+def test_seedream_group_mode_uses_sequential_generation_contract():
+    backend = RecordingBackendClient()
+    context = backend.get_execution_context(99144, trace_id="seedream-group-test")
+    context["params"] = {
+        "prompt": "four related product shots",
+        "generationMode": "text_to_image_series",
+        "count": 6,
+    }
+    context["modelConfig"] = {
+        "provider": "volcengine_images",
+        "modelName": "doubao-seedream-4-5-251128",
+        "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+        "apiKey": "fake-key",
+    }
+    image_client = RecordingImageClient()
+    handler = ImageGenerationHandler(
+        backend_client=backend,
+        image_client=image_client,
+        image_persister=PassthroughImagePersister(),
+        final_progress_interval_seconds=0,
+    )
+
+    result = handler.handle({"taskId": 99144, "__executionContext": context})
+
+    assert result["status"] == "SUCCESS"
+    assert image_client.calls[0]["batch_size"] == 1
+    assert image_client.calls[0]["sequential_image_generation"] == "auto"
+    assert image_client.calls[0]["max_images"] == 6

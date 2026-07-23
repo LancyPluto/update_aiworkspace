@@ -38,6 +38,14 @@ import { buildTaskResultBlocks } from "@/utils/taskResultBlocks"
 import { userRoutes } from "@/router/userRoutes"
 import { resolveModelBrand } from "@/utils/modelBrand"
 import { randomUUID } from "@/utils/randomUUID"
+import { isFieldRequired, resolveVisibleCoreField } from "@/utils/fieldUiMeta"
+import { buildTaskParams } from "@/utils/toolTaskParams"
+import {
+  buildEffectiveToolFields,
+  parseModelRequestSchema,
+  prepareModelParams,
+  resolveDefaultModelConfigId,
+} from "@/utils/modelRequestSchema"
 
 const route = useRoute()
 const router = useRouter()
@@ -89,8 +97,10 @@ const loadError = ref<string | null>(null)
 const sending = ref(false)
 const sendError = ref<string | null>(null)
 const capabilityRef = ref<InstanceType<typeof CapabilityControls> | null>(null)
+const capabilityParams = ref<Record<string, unknown>>({})
 const messagesEndRef = ref<HTMLElement | null>(null)
 const activeSessionId = ref<string | null>(null)
+const selectedModelConfigId = ref<number | null>(null)
 
 const sessions = ref<ChatSession[]>([])
 const sessionsLoading = ref(false)
@@ -140,7 +150,31 @@ const chatBackPath = computed(() => "/marketplace")
 const usesTaskChat = computed(() => !isMarketplaceChat.value)
 
 const showWelcome = computed(() => messages.value.length === 0 && !sending.value && !switchingSession.value)
-const coreField = computed(() => (tool.value?.fields || []).find((field) => isCoreField(field)) || null)
+const supportedModels = computed(() => tool.value?.supportedModels || [])
+const selectedSupportedModel = computed(() =>
+  supportedModels.value.find((model) => model.modelConfigId === selectedModelConfigId.value) || null,
+)
+const effectiveFields = computed(() =>
+  buildEffectiveToolFields(tool.value?.fields || [], selectedSupportedModel.value),
+)
+const selectedRequestSchema = computed(() =>
+  parseModelRequestSchema(selectedSupportedModel.value?.requestSchemaJson),
+)
+const effectiveCapabilities = computed(() =>
+  selectedRequestSchema.value
+    ? (tool.value?.capabilities || []).filter((capability) => capability.type !== "imageGeneration")
+    : tool.value?.capabilities || [],
+)
+const coreField = computed(() => resolveVisibleCoreField(effectiveFields.value, capabilityParams.value))
+const coreInputRequired = computed(() =>
+  coreField.value
+    ? isFieldRequired(coreField.value, capabilityParams.value)
+    : !selectedRequestSchema.value,
+)
+
+function onCapabilityParamsChange(params: Record<string, unknown>) {
+  capabilityParams.value = { ...params }
+}
 
 const chatIconUrl = computed(() => {
   if (!tool.value) return ""
@@ -220,14 +254,6 @@ function persistTaskWindows() {
 function setTaskWindows(next: TaskWindow[]) {
   taskWindows.value = [...next].sort((a, b) => b.updatedAt - a.updatedAt)
   persistTaskWindows()
-}
-
-function isCoreField(field: { options?: unknown }): boolean {
-  if (field.options && typeof field.options === "object" && !Array.isArray(field.options)) {
-    const options = field.options as { core?: unknown; isCore?: unknown }
-    if (options.core === true || options.isCore === true) return true
-  }
-  return false
 }
 
 function normalizeMediaUrl(value?: string | null): string {
@@ -446,6 +472,7 @@ async function loadTool() {
   loadError.value = null
   sendError.value = null
   messages.value = []
+  selectedModelConfigId.value = null
   activeSessionId.value = null
   sessions.value = []
   taskWindows.value = []
@@ -454,6 +481,10 @@ async function loadTool() {
   clearTaskPolling()
   try {
     tool.value = await fetchAIToolById(toolId.value, { token: auth.token })
+    selectedModelConfigId.value = resolveDefaultModelConfigId(
+      tool.value.supportedModels || [],
+      tool.value.defaultModelConfigId,
+    )
     if (!tool.value.enabled) {
       router.replace({ path: chatBackPath.value, query: { notice: "offline" } })
       return
@@ -680,9 +711,15 @@ function pollTaskUntilDone(taskId: number) {
 async function handleSend() {
   if (!tool.value || sending.value) return
   const content = inputText.value.trim()
-  if (!content) return
+  if (!content && coreInputRequired.value) return
+  if (supportedModels.value.length > 0 && selectedModelConfigId.value == null) {
+    sendError.value = "请选择要使用的模型"
+    return
+  }
 
-  const validation = capabilityRef.value?.validate()
+  const validation = capabilityRef.value?.validate(
+    coreField.value ? { [coreField.value.fieldKey]: content } : {},
+  )
   if (validation && !validation.valid) {
     sendError.value = validation.message || "请完善参数"
     return
@@ -698,11 +735,10 @@ async function handleSend() {
     params[coreField.value.fieldKey] = content
   }
   const attachments = capabilityRef.value?.getAttachmentIds() || []
-  const taskParams = {
-    ...params,
-    prompt: content,
-    text: content,
-    attachments,
+  const taskParams: Record<string, unknown> = { ...params, attachments }
+  if (!selectedRequestSchema.value) {
+    taskParams.prompt = content
+    taskParams.text = content
   }
 
   messages.value = [...messages.value, buildOptimisticUserMessage(content, params)]
@@ -734,6 +770,7 @@ async function handleSend() {
         {
           toolCode: tool.value.id,
           params: taskParams,
+          modelConfigId: selectedModelConfigId.value,
           clientRequestId: randomUUID(),
         },
         { token: auth.token },
@@ -791,20 +828,33 @@ async function regenerateFromAssistant(assistantMsg: LocalChatMessage) {
 
 async function regenerateMessage(msg: LocalChatMessage) {
   if (sending.value || msg.role !== "user") return
+  if (supportedModels.value.length > 0 && selectedModelConfigId.value == null) {
+    sendError.value = "请选择要使用的模型"
+    return
+  }
   sending.value = true
   await scrollToBottom()
   try {
-    const params = msg.params || {}
+    const params = selectedRequestSchema.value
+      ? buildTaskParams(
+          effectiveFields.value,
+          prepareModelParams(effectiveFields.value, msg.params || {}),
+        )
+      : { ...(msg.params || {}) }
+    const retryCoreField = resolveVisibleCoreField(effectiveFields.value, params)
     const attachments = capabilityRef.value?.getAttachmentIds() || []
+    const taskParams: Record<string, unknown> = { ...params, attachments }
+    if (retryCoreField) {
+      taskParams[retryCoreField.fieldKey] = msg.content
+    } else if (!selectedRequestSchema.value) {
+      taskParams.prompt = msg.content
+      taskParams.text = msg.content
+    }
     const response = await createTask(
       {
         toolCode: tool.value!.id,
-        params: {
-          ...params,
-          prompt: msg.content,
-          text: msg.content,
-          attachments,
-        },
+        params: taskParams,
+        modelConfigId: selectedModelConfigId.value,
         clientRequestId: randomUUID(),
       },
       { token: auth.token },
@@ -818,12 +868,7 @@ async function regenerateMessage(msg: LocalChatMessage) {
         pending: true,
       }),
     ]
-    appendTaskToActiveWindow(response.taskId, msg.content, {
-      ...params,
-      prompt: msg.content,
-      text: msg.content,
-      attachments,
-    })
+    appendTaskToActiveWindow(response.taskId, msg.content, taskParams)
     await loadTaskHistory()
     pollTaskUntilDone(response.taskId)
   } catch (e) {
@@ -848,6 +893,10 @@ watch(
     void loadTool()
   },
 )
+
+watch(selectedModelConfigId, () => {
+  capabilityParams.value = {}
+})
 
 watch(inputText, () => {
   nextTick(() => autoResizeTextarea())
@@ -1128,13 +1177,29 @@ onUnmounted(() => {
                 <Minimize2 v-else class="h-3 w-3" />
               </button>
 
+              <div v-if="supportedModels.length > 1" class="mb-3 max-w-xs space-y-1.5 pr-8">
+                <label for="chat-model-config" class="block text-xs font-medium text-muted-foreground">生成模型</label>
+                <select
+                  id="chat-model-config"
+                  v-model.number="selectedModelConfigId"
+                  class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option v-for="model in supportedModels" :key="model.modelConfigId" :value="model.modelConfigId">
+                    {{ model.displayName }}
+                  </option>
+                </select>
+              </div>
+
               <CapabilityControls
+                :key="selectedModelConfigId ?? 'legacy'"
                 ref="capabilityRef"
-                :capabilities="tool.capabilities || []"
-                :fields="tool.fields || []"
+                :capabilities="effectiveCapabilities"
+                :fields="effectiveFields"
                 :core-field-key="coreField?.fieldKey"
+                :requires-any-groups="selectedRequestSchema?.requiresAnyGroups"
                 :tool-id="tool.id"
                 class="mb-2"
+                @params-change="onCapabilityParamsChange"
               />
 
               <!-- 完美对齐：输入框 + 发送按钮 -->
@@ -1154,7 +1219,7 @@ onUnmounted(() => {
                 <button
                   type="button"
                   class="h-11 w-11 inline-flex shrink-0 items-center justify-center rounded-full bg-primary text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
-                  :disabled="!inputText.trim() || sending"
+                  :disabled="(!inputText.trim() && coreInputRequired) || sending || (supportedModels.length > 0 && selectedModelConfigId == null)"
                   @click="handleSend"
                   title="发送"
                 >

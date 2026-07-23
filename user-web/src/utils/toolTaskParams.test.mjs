@@ -8,10 +8,22 @@ async function importToolTaskParams() {
   source = source
     .replace(/import type .*? from ".*?"\r?\n/g, "")
     .replace(
-      /import \{ parseFieldMeta \} from ".*?"\r?\n/,
+      /import \{ canonicalFieldOptionValue, isFieldVisible, parseFieldMeta \} from ".*?"\r?\n/,
       `const parseFieldMeta = (field) => {
         const options = field?.options
         return options && typeof options === "object" && !Array.isArray(options) ? options : {}
+      }
+      const isFieldVisible = (field, values) => {
+        const visibleWhen = parseFieldMeta(field).visibleWhen
+        if (!visibleWhen) return true
+        return Object.entries(visibleWhen).every(([key, allowed]) => allowed.map(String).includes(String(values[key] ?? "")))
+      }
+      const canonicalFieldOptionValue = (field, value) => {
+        const options = parseFieldMeta(field).options || []
+        const values = options.map((item) => typeof item === "object" ? item.value : item)
+        return values.find((item) => Object.is(item, value))
+          ?? values.find((item) => String(item) === String(value))
+          ?? value
       }\n`,
     )
   const { outputText } = ts.transpileModule(source, {
@@ -93,4 +105,55 @@ test("keeps non-empty array fields and custom aspect ratio values", () => {
       aspectRatio: "21:9",
     },
   )
+})
+
+test("submits only fields visible in the active generation mode without mutating source values", () => {
+  const fields = [
+    { fieldKey: "generationMode", fieldType: "radio", required: true },
+    {
+      fieldKey: "firstFrameImage",
+      fieldType: "image_upload",
+      required: true,
+      options: { visibleWhen: { generationMode: ["image_to_video"] } },
+    },
+    {
+      fieldKey: "referenceVideos",
+      fieldType: "multi_video",
+      required: false,
+      options: { visibleWhen: { generationMode: ["multimodal_reference"] } },
+    },
+  ]
+  const raw = {
+    generationMode: "image_to_video",
+    firstFrameImage: "first.png",
+    referenceVideos: ["old.mp4"],
+  }
+
+  assert.deepEqual(buildTaskParams(fields, raw), {
+    generationMode: "image_to_video",
+    firstFrameImage: "first.png",
+  })
+  assert.deepEqual(raw.referenceVideos, ["old.mp4"])
+})
+
+test("restores numeric and boolean enum values before task submission", () => {
+  const fields = [
+    {
+      fieldKey: "sampleRate",
+      fieldType: "select",
+      required: true,
+      options: { options: [{ label: "32 kHz", value: 32000 }] },
+    },
+    {
+      fieldKey: "stream",
+      fieldType: "radio",
+      required: true,
+      options: { options: [{ label: "关闭", value: false }, { label: "开启", value: true }] },
+    },
+  ]
+
+  assert.deepEqual(buildTaskParams(fields, { sampleRate: "32000", stream: "false" }), {
+    sampleRate: 32000,
+    stream: false,
+  })
 })

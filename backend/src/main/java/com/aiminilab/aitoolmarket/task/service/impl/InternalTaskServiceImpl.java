@@ -15,6 +15,7 @@ import com.aiminilab.aitoolmarket.community.service.CommunityService;
 import com.aiminilab.aitoolmarket.common.enums.CreditSourceType;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
+import com.aiminilab.aitoolmarket.common.error.ErrorMessageSanitizer;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.credit.dto.PricingQuote;
@@ -54,6 +55,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -533,13 +535,23 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         String targetStatus = "MODEL_TIMEOUT".equals(errorCode)
                 ? TaskStatus.TIMEOUT.name()
                 : TaskStatus.FAILED.name();
-        String errorMessage = request.errorMessage() == null || request.errorMessage().isBlank()
-                ? "Worker execution failed"
-                : limitText(request.errorMessage(), 4000);
-        String progressMessage = TaskFailureMessage.userFacingProgressMessage(
-                errorCode,
-                limitText(("MODEL_TIMEOUT".equals(errorCode) ? "任务超时：" : "任务失败：") + errorCode, 240)
+        String userMessage = ErrorMessageSanitizer.sanitizeUserMessage(
+                TaskFailureMessage.userFacingProgressMessage(errorCode, "任务执行失败，请稍后重试"),
+                "任务执行失败，请稍后重试"
         );
+        String developerSource = request.developerMessage() == null || request.developerMessage().isBlank()
+                ? request.errorMessage()
+                : request.developerMessage();
+        String developerMessage = ErrorMessageSanitizer.sanitizeDeveloperMessage(
+                developerSource,
+                "Worker execution failed"
+        );
+        String failureTraceId = cleanClaimPart(request.failureTraceId(), 64);
+        if (failureTraceId == null) {
+            failureTraceId = cleanClaimPart(MDC.get("traceId"), 64);
+        }
+        String providerErrorCode = cleanClaimPart(request.providerErrorCode(), 128);
+        String providerRequestId = cleanClaimPart(request.providerRequestId(), 128);
         if (isWorkflowStepTask(task)) {
             if (TaskStateMachine.isTerminal(task.getStatus())) {
                 workflowStepCallbackService.failed(taskId, request);
@@ -548,8 +560,9 @@ public class InternalTaskServiceImpl implements InternalTaskService {
                 return TaskStatusResponse.from(findTask(rootTaskId == null ? taskId : rootTaskId));
             }
             TaskStateMachine.ensureTransition(task.getStatus(), targetStatus);
-            int updated = taskMapper.markFailedGuarded(taskId, claimToken, targetStatus, errorCode,
-                    progressMessage, errorMessage, List.of(TaskStatus.PROCESSING.name()));
+            int updated = taskMapper.markFailedGuardedWithContract(taskId, claimToken, targetStatus, errorCode,
+                    userMessage, developerMessage, failureTraceId, providerErrorCode, providerRequestId,
+                    List.of(TaskStatus.PROCESSING.name()));
             if (updated == 0) {
                 AiTask current = findTask(taskId);
                 if (TaskStateMachine.isTerminal(current.getStatus())) {
@@ -586,8 +599,9 @@ public class InternalTaskServiceImpl implements InternalTaskService {
             return TaskStatusResponse.from(task);
         }
         TaskStateMachine.ensureTransition(task.getStatus(), targetStatus);
-        int updated = taskMapper.markFailedGuarded(taskId, claimToken, targetStatus, errorCode,
-                progressMessage, errorMessage, List.of(TaskStatus.PROCESSING.name()));
+        int updated = taskMapper.markFailedGuardedWithContract(taskId, claimToken, targetStatus, errorCode,
+                userMessage, developerMessage, failureTraceId, providerErrorCode, providerRequestId,
+                List.of(TaskStatus.PROCESSING.name()));
         if (updated == 0) {
             AiTask current = findTask(taskId);
             if (TaskStatus.FAILED.name().equals(current.getStatus()) || TaskStatus.TIMEOUT.name().equals(current.getStatus())
@@ -601,7 +615,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         creditService.release(task.getUserId(), CreditSourceType.TASK, taskId, task.getEstimatedCreditCost());
         recordFailureCostIfPresent(task, request, targetStatus, errorCode);
         if (shouldMarkToolUnhealthy(errorCode)) {
-            agentToolDescriptorService.markToolHealth(task.getToolCode(), "FAILED", errorMessage);
+            agentToolDescriptorService.markToolHealth(task.getToolCode(), "FAILED", developerMessage);
         }
         taskMetrics.recordTaskOutcome(task.getToolCode(), targetStatus, task.getCreatedAt(), findTask(taskId).getFinishedAt());
         return TaskStatusResponse.from(findTask(taskId));

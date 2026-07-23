@@ -8,11 +8,13 @@ from client.suno_music_client import (
     SunoGenerationResult,
     SunoMusicClient,
     SunoMusicError,
+    SunoMusicInputError,
     SunoMusicTimeoutError,
 )
 from handlers.generated_audio_persister import GeneratedAudioPersistError, GeneratedAudioPersister
 from providers import registry as provider_registry
 from providers.registry import ProviderRegistryError
+from utils.model_contract import ModelContractParamsError, ModelContractResponseError, apply_request_mapping
 
 
 LOGGER = logging.getLogger(__name__)
@@ -41,8 +43,8 @@ class MusicGenerationHandler:
                 LOGGER.info("skip terminal music task taskId=%s status=%s traceId=%s", task_id, status, trace_id or "-")
                 return {"status": "SKIPPED", "taskId": task_id, "taskStatus": status, "traceId": trace_id}
 
-            params = context.get("params") or {}
             model_config = context.get("modelConfig") or {}
+            params = apply_request_mapping(context.get("params"), model_config)
             provider = str(model_config.get("provider") or context.get("modelProviderCode") or "").lower()
             provider_registry.require_capability(provider, "MUSIC_GENERATION")
             provider_registry.require_worker_ready(provider)
@@ -133,6 +135,12 @@ class MusicGenerationHandler:
             return self._mark_failed(task_id, "MODEL_TIMEOUT", str(exc), trace_id)
         except ProviderRegistryError as exc:
             return self._mark_failed(task_id, classify_model_error(str(exc)), str(exc), trace_id)
+        except ModelContractParamsError as exc:
+            return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
+        except ModelContractResponseError as exc:
+            return self._mark_failed(task_id, "MODEL_CALL_FAILED", str(exc), trace_id)
+        except SunoMusicInputError as exc:
+            return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
         except SunoMusicError as exc:
             return self._mark_failed(task_id, classify_model_error(str(exc)), str(exc), trace_id)
         except GeneratedAudioPersistError as exc:

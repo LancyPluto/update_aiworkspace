@@ -19,6 +19,7 @@ from client.provider_error import (
 )
 from config import settings
 from utils.outbound_http import OutboundRequestsClient
+from utils.model_contract import parse_response_mapping, read_response_value, response_mapping_has
 
 
 LOGGER = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ class KlingVideoClient:
         image_generation_result_path: str | None = None,
         poll_interval_seconds: float | None = None,
         timeout_seconds: int | None = None,
+        model_config: dict[str, Any] | None = None,
     ) -> None:
         self.base_url = (base_url or settings.kling_base_url).rstrip("/")
         self.api_key = api_key if api_key is not None else settings.kling_api_key
@@ -77,6 +79,7 @@ class KlingVideoClient:
         self.timeout = (10, 300)
         self.session = OutboundRequestsClient()
         self.max_input_image_bytes = 20 * 1024 * 1024
+        self.response_mapping = parse_response_mapping(model_config)
 
     def generate_video(
         self,
@@ -162,18 +165,19 @@ class KlingVideoClient:
             _json_for_log(payload),
         )
         created = self._request("POST", resolved_create_path, payload)
-        task_id = self._extract_task_id(created)
+        task_id = self._response_task_id(created)
         finished = self.wait_for_video(task_id, result_path_template=resolved_result_path)
         return {
             "requestId": task_id,
-            "status": self._extract_status(finished),
-            "videoUrl": self._extract_video_url(finished),
+            "status": self._response_status(finished),
+            "videoUrl": self._response_video_url(finished),
             "reason": str(finished.get("reason") or finished.get("message") or ""),
             "seed": seed,
             "timings": {},
             "provider": "kling_video",
             "model": model or settings.kling_video_model,
             "resolution": resolution,
+            "usage": self._response_usage(finished),
         }
 
     def generate_images(
@@ -195,6 +199,7 @@ class KlingVideoClient:
         image_list: Any = None,
         resolution: str = "",
         result_type: str = "",
+        series_amount: Any = None,
     ) -> list[str]:
         if not self._has_auth():
             raise KlingVideoError("Kling credentials are not configured")
@@ -216,6 +221,8 @@ class KlingVideoClient:
                 payload["resolution"] = resolution.strip()
             if result_type.strip():
                 payload["result_type"] = result_type.strip()
+            if series_amount not in (None, ""):
+                payload["series_amount"] = series_amount
         else:
             if image.strip():
                 payload["image"] = self._image_to_base64(image.strip())
@@ -241,12 +248,12 @@ class KlingVideoClient:
             _json_for_log(payload),
         )
         response = self._request("POST", self.image_generation_path, payload)
-        urls = self._extract_image_urls_or_empty(response)
+        urls = self._response_image_urls_or_empty(response)
         if urls:
             return urls
-        task_id = self._extract_task_id(response)
+        task_id = self._response_task_id(response)
         finished = self.wait_for_images(task_id)
-        return self._extract_image_urls(finished)
+        return self._response_image_urls(finished)
 
     def wait_for_video(self, task_id: str, *, result_path_template: str | None = None) -> dict[str, Any]:
         deadline = time.monotonic() + self.timeout_seconds
@@ -254,9 +261,9 @@ class KlingVideoClient:
         path = self._task_result_path(task_id, result_path_template or self.image_result_path)
         while time.monotonic() < deadline:
             last_payload = self._request("GET", path, None)
-            if self._extract_video_url_or_empty(last_payload):
+            if self._response_video_url_or_empty(last_payload):
                 return last_payload
-            status = self._extract_status(last_payload).lower()
+            status = self._response_status(last_payload).lower()
             if status in SUCCESS_STATUSES:
                 raise KlingVideoError(
                     self._describe_response_problem(
@@ -277,7 +284,7 @@ class KlingVideoClient:
             time.sleep(self.poll_interval_seconds)
         raise KlingVideoTimeoutError(
             self._describe_response_problem(
-                f"kling video generation timed out, taskId={task_id}, lastStatus={self._extract_status(last_payload)}",
+                f"kling video generation timed out, taskId={task_id}, lastStatus={self._response_status(last_payload)}",
                 last_payload,
             )
         )
@@ -288,9 +295,9 @@ class KlingVideoClient:
         path = self._task_result_path(task_id, self.image_generation_result_path)
         while time.monotonic() < deadline:
             last_payload = self._request("GET", path, None)
-            if self._extract_image_urls_or_empty(last_payload):
+            if self._response_image_urls_or_empty(last_payload):
                 return last_payload
-            status = self._extract_status(last_payload).lower()
+            status = self._response_status(last_payload).lower()
             if status in SUCCESS_STATUSES:
                 raise KlingVideoError(
                     self._describe_response_problem(
@@ -311,7 +318,7 @@ class KlingVideoClient:
             time.sleep(self.poll_interval_seconds)
         raise KlingVideoTimeoutError(
             self._describe_response_problem(
-                f"kling image generation timed out, taskId={task_id}, lastStatus={self._extract_status(last_payload)}",
+                f"kling image generation timed out, taskId={task_id}, lastStatus={self._response_status(last_payload)}",
                 last_payload,
             )
         )
@@ -992,6 +999,81 @@ class KlingVideoClient:
     def _base64url_json(payload: dict[str, Any]) -> str:
         raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+    def _response_task_id(self, payload: dict[str, Any]) -> str:
+        if not response_mapping_has(self.response_mapping, "requestIdPath", "requestIdPaths"):
+            return self._extract_task_id(payload)
+        value = read_response_value(payload, self.response_mapping, "requestIdPath", "requestIdPaths")
+        task_id = str(value or "").strip()
+        if not task_id:
+            raise KlingVideoError("kling create response missing mapped task id")
+        return task_id
+
+    def _response_status(self, payload: dict[str, Any]) -> str:
+        if not response_mapping_has(self.response_mapping, "statusPath", "statusPaths"):
+            return self._extract_status(payload)
+        value = read_response_value(payload, self.response_mapping, "statusPath", "statusPaths")
+        return str(value or "unknown").strip()
+
+    def _response_video_url(self, payload: dict[str, Any]) -> str:
+        url = self._response_video_url_or_empty(payload)
+        if url:
+            return url
+        raise KlingVideoError(self._describe_response_problem("kling response missing mapped video url", payload))
+
+    def _response_video_url_or_empty(self, payload: dict[str, Any]) -> str:
+        if not response_mapping_has(
+            self.response_mapping,
+            "videoUrlPath",
+            "urlPath",
+            "urlPaths",
+        ):
+            return self._extract_video_url_or_empty(payload)
+        value = read_response_value(
+            payload,
+            self.response_mapping,
+            "videoUrlPath",
+            "urlPath",
+            "urlPaths",
+        )
+        return str(value or "").strip()
+
+    def _response_image_urls(self, payload: dict[str, Any]) -> list[str]:
+        urls = self._response_image_urls_or_empty(payload)
+        if urls:
+            return urls
+        raise KlingVideoError(self._describe_response_problem("kling image response missing mapped image url", payload))
+
+    def _response_image_urls_or_empty(self, payload: dict[str, Any]) -> list[str]:
+        if response_mapping_has(self.response_mapping, "imageUrlPath"):
+            value = read_response_value(payload, self.response_mapping, "imageUrlPath")
+            values = value if isinstance(value, list) else [value]
+            return [str(item).strip() for item in values if isinstance(item, str) and item.strip()]
+        if response_mapping_has(self.response_mapping, "itemsPath"):
+            items = read_response_value(payload, self.response_mapping, "itemsPath")
+            if not isinstance(items, list):
+                return []
+            urls: list[str] = []
+            for item in items:
+                value = read_response_value(
+                    item,
+                    self.response_mapping,
+                    "urlPath",
+                    fallback_paths=("url", "image_url"),
+                )
+                if isinstance(value, str) and value.strip():
+                    urls.append(value.strip())
+            return list(dict.fromkeys(urls))
+        return self._extract_image_urls_or_empty(payload)
+
+    def _response_usage(self, payload: dict[str, Any]) -> dict[str, Any]:
+        value = read_response_value(
+            payload,
+            self.response_mapping,
+            "usagePath",
+            fallback_paths=("usage",),
+        )
+        return value if isinstance(value, dict) else {}
 
     @classmethod
     def _extract_task_id(cls, payload: dict[str, Any]) -> str:

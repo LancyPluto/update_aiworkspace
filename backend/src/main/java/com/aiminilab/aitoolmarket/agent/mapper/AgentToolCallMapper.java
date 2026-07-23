@@ -1,12 +1,15 @@
 package com.aiminilab.aitoolmarket.agent.mapper;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentToolCall;
+import com.aiminilab.aitoolmarket.agent.support.AgentFailureMessage;
+import com.aiminilab.aitoolmarket.common.error.ErrorMessageSanitizer;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
+import org.slf4j.MDC;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -16,9 +19,11 @@ public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
 
     @Insert("""
             INSERT INTO agent_tool_calls(run_id, user_id, tool_code, task_id, status, arguments_json, result_json,
-                                         error_code, error_message, started_at, finished_at, created_at)
+                                         error_code, error_message, user_message, developer_message, failure_trace_id,
+                                         started_at, finished_at, created_at)
             VALUES(#{call.runId}, #{call.userId}, #{call.toolCode}, #{call.taskId}, #{call.status}, #{call.argumentsJson}, #{call.resultJson},
-                   #{call.errorCode}, #{call.errorMessage}, #{call.startedAt}, #{call.finishedAt}, #{call.createdAt})
+                   #{call.errorCode}, #{call.errorMessage}, #{call.userMessage}, #{call.developerMessage}, #{call.failureTraceId},
+                   #{call.startedAt}, #{call.finishedAt}, #{call.createdAt})
             """)
     @Options(useGeneratedKeys = true, keyProperty = "call.id")
     void insertToolCall(@Param("call") AgentToolCall call);
@@ -174,35 +179,80 @@ public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
                      @Param("resultJson") String resultJson,
                      @Param("now") LocalDateTime now);
 
+    default int markFailed(Long toolCallId,
+                           String errorCode,
+                           String errorMessage,
+                           LocalDateTime now) {
+        String userMessage = ErrorMessageSanitizer.sanitizeUserMessage(
+                AgentFailureMessage.userMessage(errorCode),
+                "工具调用失败，请稍后重试"
+        );
+        String developerMessage = ErrorMessageSanitizer.sanitizeDeveloperMessage(
+                errorMessage,
+                "Agent tool call failed"
+        );
+        return markFailedWithContract(toolCallId, errorCode, userMessage, developerMessage, currentTraceId(), now);
+    }
+
     @Update("""
             UPDATE agent_tool_calls
-            SET status = 'FAILED', error_code = #{errorCode}, error_message = #{errorMessage}, finished_at = #{now}
+            SET status = 'FAILED', error_code = #{errorCode}, error_message = #{developerMessage},
+                user_message = #{userMessage}, developer_message = #{developerMessage},
+                failure_trace_id = #{failureTraceId}, finished_at = #{now}
             WHERE id = #{toolCallId}
               AND status = 'RUNNING'
             """)
-    int markFailed(@Param("toolCallId") Long toolCallId,
-                    @Param("errorCode") String errorCode,
-                    @Param("errorMessage") String errorMessage,
-                     @Param("now") LocalDateTime now);
+    int markFailedWithContract(@Param("toolCallId") Long toolCallId,
+                               @Param("errorCode") String errorCode,
+                               @Param("userMessage") String userMessage,
+                               @Param("developerMessage") String developerMessage,
+                               @Param("failureTraceId") String failureTraceId,
+                               @Param("now") LocalDateTime now);
+
+    default int finishDelegated(Long toolCallId,
+                                Long taskId,
+                                String nextStatus,
+                                String resultJson,
+                                String errorCode,
+                                String errorMessage,
+                                LocalDateTime now) {
+        String userMessage = errorCode == null ? null : ErrorMessageSanitizer.sanitizeUserMessage(
+                AgentFailureMessage.userMessage(errorCode),
+                "工作流执行失败，请稍后重试"
+        );
+        String developerMessage = errorCode == null ? null : ErrorMessageSanitizer.sanitizeDeveloperMessage(
+                errorMessage,
+                "Delegated workflow failed"
+        );
+        return finishDelegatedWithContract(
+                toolCallId, taskId, nextStatus, resultJson, errorCode,
+                userMessage, developerMessage, errorCode == null ? null : currentTraceId(), now
+        );
+    }
 
     @Update("""
             UPDATE agent_tool_calls
             SET status = #{nextStatus},
                 result_json = #{resultJson},
                 error_code = #{errorCode},
-                error_message = #{errorMessage},
+                error_message = #{developerMessage},
+                user_message = #{userMessage},
+                developer_message = #{developerMessage},
+                failure_trace_id = #{failureTraceId},
                 finished_at = #{now}
             WHERE id = #{toolCallId}
               AND task_id = #{taskId}
               AND status = 'DELEGATED'
             """)
-    int finishDelegated(@Param("toolCallId") Long toolCallId,
-                        @Param("taskId") Long taskId,
-                        @Param("nextStatus") String nextStatus,
-                        @Param("resultJson") String resultJson,
-                        @Param("errorCode") String errorCode,
-                        @Param("errorMessage") String errorMessage,
-                        @Param("now") LocalDateTime now);
+    int finishDelegatedWithContract(@Param("toolCallId") Long toolCallId,
+                                    @Param("taskId") Long taskId,
+                                    @Param("nextStatus") String nextStatus,
+                                    @Param("resultJson") String resultJson,
+                                    @Param("errorCode") String errorCode,
+                                    @Param("userMessage") String userMessage,
+                                    @Param("developerMessage") String developerMessage,
+                                    @Param("failureTraceId") String failureTraceId,
+                                    @Param("now") LocalDateTime now);
 
     @Select("""
             SELECT c.*
@@ -235,4 +285,13 @@ public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
             </script>
             """)
     List<AgentToolCall> batchFindByTaskIds(@Param("taskIds") List<Long> taskIds);
+
+    private static String currentTraceId() {
+        String traceId = MDC.get("traceId");
+        if (traceId == null || traceId.isBlank()) {
+            return null;
+        }
+        String normalized = traceId.strip();
+        return normalized.length() <= 64 ? normalized : normalized.substring(0, 64);
+    }
 }

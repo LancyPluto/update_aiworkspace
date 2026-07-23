@@ -4,7 +4,26 @@ import test from "node:test"
 const ts = await import(process.env.TYPESCRIPT_MODULE || "typescript")
 
 async function importTsModule(path) {
-  const source = await readFile(new URL(path, import.meta.url), "utf8")
+  let source = await readFile(new URL(path, import.meta.url), "utf8")
+  source = source
+    .replace(/import type .*?\r?\n/, "")
+    .replace(/import \{[\s\S]*?\} from "@\/utils\/fieldUiMeta"\r?\n/, `
+      const fieldMeta = (field) => field?.options && typeof field.options === "object" && !Array.isArray(field.options) ? field.options : {}
+      const fieldOptions = (field) => Array.isArray(fieldMeta(field).options) ? fieldMeta(field).options : []
+      const canonicalFieldOptionValue = (field, value) => {
+        const values = fieldOptions(field).map((item) => typeof item === "object" ? item.value : item)
+        return values.find((item) => Object.is(item, value))
+          ?? values.find((item) => String(item) === String(value))
+          ?? value
+      }
+      const resolveConfiguredDefault = (field) => fieldMeta(field).defaultValue
+        ?? (fieldOptions(field)[0] && (typeof fieldOptions(field)[0] === "object" ? fieldOptions(field)[0].value : fieldOptions(field)[0]))
+        ?? (field.fieldType === "checkbox" ? false : "")
+      const isFieldVisible = (field, values) => {
+        const visibleWhen = fieldMeta(field).visibleWhen
+        return !visibleWhen || Object.entries(visibleWhen).every(([key, allowed]) => allowed.map(String).includes(String(values[key] ?? "")))
+      }
+    `)
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.ESNext,
@@ -67,5 +86,30 @@ test("builds media template task params from uploaded source media", () => {
     sourceVideoUrl: "/uploads/source.mp4",
     duration: "10",
     motionMode: "motion_transfer",
+  })
+})
+
+test("does not submit compact fields hidden by the selected mode", () => {
+  const tool = {
+    ...publicVideoTool,
+    fields: [
+      { fieldKey: "sourceVideoUrl", fieldType: "file", required: true, sortOrder: 1 },
+      { fieldKey: "generationMode", fieldType: "radio", required: true, sortOrder: 2 },
+      {
+        fieldKey: "referenceImages",
+        fieldType: "multi_image",
+        required: false,
+        sortOrder: 3,
+        options: { visibleWhen: { generationMode: ["reference_to_video"] } },
+      },
+    ],
+  }
+
+  assert.deepEqual(adapter.buildMediaTemplateTaskParams(tool, "/uploads/source.mp4", {
+    generationMode: "video_edit",
+    referenceImages: ["old.png"],
+  }), {
+    sourceVideoUrl: "/uploads/source.mp4",
+    generationMode: "video_edit",
   })
 })
