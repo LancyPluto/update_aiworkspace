@@ -33,13 +33,36 @@ from app.security.signature import signature_headers
 
 
 class BackendClientError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str = "",
+        trace_id: str | None = None,
+        status_code: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.trace_id = trace_id
+        self.status_code = status_code
 
 
 class BackendBusinessError(BackendClientError):
-    def __init__(self, message: str, *, error_code: str = "", data: Any | None = None) -> None:
-        super().__init__(message)
-        self.error_code = error_code
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str = "",
+        data: Any | None = None,
+        trace_id: str | None = None,
+        status_code: int | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            error_code=error_code,
+            trace_id=trace_id,
+            status_code=status_code,
+        )
         self.data = data
 
 
@@ -338,22 +361,34 @@ class BackendClient:
     def _parse_response(self, response: httpx.Response) -> dict[str, Any]:
         payload = self._read_json_payload(response)
         if response.status_code < 200 or response.status_code >= 300:
-            if isinstance(payload, dict) and payload.get("code"):
+            if isinstance(payload, dict) and (payload.get("errorCode") or payload.get("code")):
                 self._raise_business_error(response, payload)
+            trace_id = response.headers.get(TRACE_ID_HEADER) or "-"
             message = (
                 f"backend request failed: method={response.request.method}, "
-                f"url={response.request.url}, status={response.status_code}, body={_truncate(response.text)}"
+                f"url={response.request.url}, status={response.status_code}, traceId={trace_id}"
             )
             logger.error(message)
-            raise BackendClientError(message)
+            raise BackendClientError(
+                message,
+                error_code="SYSTEM_001",
+                trace_id=None if trace_id == "-" else trace_id,
+                status_code=response.status_code,
+            )
         if not isinstance(payload, dict):
+            trace_id = response.headers.get(TRACE_ID_HEADER) or "-"
             message = (
                 f"backend returned non-json response: method={response.request.method}, "
-                f"url={response.request.url}, status={response.status_code}, body={_truncate(response.text)}"
+                f"url={response.request.url}, status={response.status_code}, traceId={trace_id}"
             )
             logger.error(message)
-            raise BackendClientError(message)
-        if payload.get("code") != "SUCCESS":
+            raise BackendClientError(
+                message,
+                error_code="API_001",
+                trace_id=None if trace_id == "-" else trace_id,
+                status_code=response.status_code,
+            )
+        if payload.get("errorCode") or payload.get("code") != "SUCCESS":
             self._raise_business_error(response, payload)
         return payload.get("data") or {}
 
@@ -365,15 +400,37 @@ class BackendClient:
         return payload if isinstance(payload, dict) else None
 
     def _raise_business_error(self, response: httpx.Response, payload: dict[str, Any]) -> None:
+        error_code = str(payload.get("errorCode") or payload.get("code") or "SYSTEM_001")
+        invalid_success_code = error_code.upper() == "SUCCESS"
+        if invalid_success_code:
+            error_code = "SYSTEM_001"
+        trace_id = str(
+            payload.get("traceId")
+            or payload.get("requestId")
+            or response.headers.get(TRACE_ID_HEADER)
+            or ""
+        )
+        developer_message = (
+            f"backend returned SUCCESS error code with HTTP status {response.status_code}"
+            if invalid_success_code
+            else str(
+                payload.get("developerMessage")
+                or payload.get("userMessage")
+                or payload.get("message")
+                or error_code
+            )
+        )
         message = (
             f"backend business error: method={response.request.method}, url={response.request.url}, "
-            f"code={payload.get('code')}, message={payload.get('message', '')}, traceId={payload.get('traceId')}"
+            f"errorCode={error_code}, message={_truncate(developer_message)}, traceId={trace_id or '-'}"
         )
         logger.error(message)
         raise BackendBusinessError(
-            str(payload.get("message") or payload.get("code") or "backend business error"),
-            error_code=str(payload.get("code") or ""),
+            developer_message,
+            error_code=error_code,
             data=payload.get("data"),
+            trace_id=trace_id or None,
+            status_code=response.status_code,
         )
 
 

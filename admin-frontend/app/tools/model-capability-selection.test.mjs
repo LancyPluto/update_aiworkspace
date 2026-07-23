@@ -24,16 +24,20 @@ test("tool model choices use all selected capabilities and report invalidated se
   assert.match(source, /已清除不匹配的模型/)
 })
 
-test("an unbound tool requires a default model that supports every selected capability", () => {
-  assert.match(source, /if \(!form\.modelConfigId && !defaultModelSupportsRequiredCapability\)/)
-  assert.match(source, /默认模型未同时支持「\$\{requiredModelCapabilityLabels\}」/)
-  assert.match(source, /if \(!modelConfigSupportsToolRequirements\(\s*selectedModel,/)
+test("a tool submits an ordered model list and a selected default model", () => {
+  assert.match(source, /modelConfigIds:\s*string\[\]/)
+  assert.match(source, /if \(form\.modelConfigIds\.length === 0\)/)
+  assert.match(source, /modelConfigIds:\s*form\.modelConfigIds\.map\(Number\)/)
+  assert.match(source, /defaultModelConfigId:\s*Number\(form\.defaultModelConfigId\)/)
+  assert.match(source, /请从已绑定模型中指定一个默认模型/)
 })
 
-test("the default option is unavailable when no model is explicitly marked as default", () => {
-  assert.match(source, /modelConfigs\.find\(\(config\) => config\.isDefault\) \|\| null/)
-  assert.doesNotMatch(source, /modelConfigs\.find\(\(config\) => config\.isDefault\) \|\| modelConfigs\[0\]/)
-  assert.match(source, /Boolean\(defaultModelConfig && modelConfigSupportsToolRequirements\(/)
+test("models with pending API documentation cannot be newly bound", () => {
+  assert.match(source, /function isModelContractReady/)
+  assert.match(source, /const disabled = !ready && !checked/)
+  assert.match(source, />文档待补</)
+  assert.match(source, /暂不能新增绑定/)
+  assert.match(source, /<RadioGroup[\s\S]*?value=\{form\.defaultModelConfigId\}/)
 })
 
 test("digital human remains an execution handler rather than a selectable model capability", () => {

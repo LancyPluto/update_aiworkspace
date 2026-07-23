@@ -1,5 +1,7 @@
 package com.aiminilab.aitoolmarket.agent.dto;
 
+import com.aiminilab.aitoolmarket.common.error.ErrorMessageSanitizer;
+
 import java.time.LocalDateTime;
 
 public record AdminAgentRunListItemResponse(
@@ -21,4 +23,9 @@ public record AdminAgentRunListItemResponse(
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
+    public AdminAgentRunListItemResponse {
+        if (errorMessage != null && !errorMessage.isBlank()) {
+            errorMessage = ErrorMessageSanitizer.sanitizeDeveloperMessage(errorMessage, "Agent run failed");
+        }
+    }
 }

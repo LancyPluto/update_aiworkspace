@@ -115,3 +115,91 @@ test("postForm reports fetch failures as network errors", async () => {
     code: "NETWORK_ERROR",
   })
 })
+
+test("admin requests prefer developerMessage from the new error envelope", async () => {
+  installBrowserWindow()
+  const { request } = await importTsModule("./http.ts")
+
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        errorCode: "MODEL_004",
+        userMessage: "模型响应超时，请稍后重试",
+        developerMessage: "provider=minimax elapsedMs=60021 attempt=3",
+        traceId: "trace-admin",
+      }),
+      { status: 504, headers: { "Content-Type": "application/json" } },
+    )
+
+  await assert.rejects(
+    () => request("/api/admin/v1/tasks/1"),
+    (error) => {
+      assert.equal(error.message, "provider=minimax elapsedMs=60021 attempt=3")
+      assert.equal(error.errorCode, "MODEL_004")
+      assert.equal(error.code, "MODEL_004")
+      assert.equal(error.httpStatus, 504)
+      assert.equal(error.status, 504)
+      assert.equal(error.userMessage, "模型响应超时，请稍后重试")
+      assert.equal(error.developerMessage, "provider=minimax elapsedMs=60021 attempt=3")
+      assert.equal(error.traceId, "trace-admin")
+      return true
+    },
+  )
+})
+
+test("public admin login errors can display the safe userMessage envelope", async () => {
+  installBrowserWindow()
+  const { request } = await importTsModule("./http.ts")
+
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({ errorCode: "AUTH_001", userMessage: "账号或密码错误", traceId: "trace-login" }),
+      { status: 401, headers: { "Content-Type": "application/json" } },
+    )
+
+  await assert.rejects(
+    () => request("/api/admin/v1/auth/login", { method: "POST", skipAuthRedirect: true }),
+    (error) => {
+      assert.equal(error.message, "账号或密码错误")
+      assert.equal(error.developerMessage, undefined)
+      assert.equal(error.traceId, "trace-login")
+      return true
+    },
+  )
+})
+
+test("admin requests preserve the session on forbidden responses", async () => {
+  installBrowserWindow()
+  const { getToken, request, setToken } = await importTsModule("./http.ts")
+  setToken("still-valid")
+
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({ errorCode: "AUTH_003", developerMessage: "role=OPS lacks task:read", traceId: "trace-403" }),
+      { status: 403, headers: { "Content-Type": "application/json" } },
+    )
+
+  await assert.rejects(() => request("/api/admin/v1/tasks"), {
+    code: "AUTH_003",
+    status: 403,
+    traceId: "trace-403",
+  })
+  assert.equal(getToken(), "still-valid")
+  assert.equal(globalThis.window.location.href, "http://127.0.0.1:5174/tools")
+})
+
+test("admin requests still reject HTTP errors carrying a legacy SUCCESS body", async () => {
+  installBrowserWindow()
+  const { request } = await importTsModule("./http.ts")
+
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ code: "SUCCESS", message: "ok", data: { unsafe: true } }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    })
+
+  await assert.rejects(() => request("/api/admin/v1/tasks"), {
+    code: "HTTP_ERROR",
+    status: 500,
+  })
+})

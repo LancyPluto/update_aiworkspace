@@ -77,12 +77,13 @@ class WorkflowStepCallbackRetryControlTest {
         when(stepMapper.selectById(21L)).thenReturn(step);
         when(runMapper.selectByIdForUpdate(41L)).thenReturn(run);
         when(attemptMapper.attachProviderRequestId(11L, "provider-request")).thenReturn(1);
-        when(attemptMapper.markFailed(
-                eq(11L), eq("PROVIDER_FAILED"), eq("provider failed"),
-                eq("provider-request"), anyList()
+        when(attemptMapper.markFailedWithContract(
+                eq(11L), eq("PROVIDER_FAILED"), eq("工作流执行失败，请稍后重试"),
+                eq("provider failed"), eq(null), eq("provider-request"), anyList()
         )).thenReturn(1);
-        when(stepMapper.failActiveAttempt(
-                eq(21L), eq(0L), eq(11L), eq("provider failed"), anyList()
+        when(stepMapper.failActiveAttemptWithContract(
+                eq(21L), eq(0L), eq(11L), eq("PROVIDER_FAILED"),
+                eq("工作流执行失败，请稍后重试"), eq("provider failed"), eq(null), anyList()
         )).thenReturn(1);
 
         assertThat(service.failed(31L, failure)).isTrue();

@@ -144,6 +144,7 @@ public class BypassCacheService {
         if (toolCode == null || toolCode.isBlank()) {
             return;
         }
+        evictWithDelayedDoubleDelete(CacheNamespaces.toolDetail(currentToolListVersion(), toolCode));
         evictWithDelayedDoubleDelete(CacheNamespaces.toolDetail(toolCode));
     }
 

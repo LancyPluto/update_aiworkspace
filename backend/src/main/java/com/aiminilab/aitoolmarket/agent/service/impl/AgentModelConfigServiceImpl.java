@@ -25,6 +25,7 @@ import com.aiminilab.aitoolmarket.agent.support.OpenAiCompatibleEndpointSupport.
 import com.aiminilab.aitoolmarket.agent.support.OutboundProxyPolicyResolver;
 import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
 import com.aiminilab.aitoolmarket.agent.support.VolcengineEndpointSupport;
+import com.aiminilab.aitoolmarket.common.cache.BypassCacheService;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.task.routing.mapper.AccountModelRouteStateMapper;
@@ -33,6 +34,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.net.URI;
@@ -53,6 +56,9 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     private static final String BILLING_UNIT_PER_CHARACTER = "PER_CHARACTER";
     private static final BigDecimal TOKEN_UNIT_SCALE = BigDecimal.valueOf(1000);
     private static final String TEST_STRATEGY_ACCEPT_ONLY = "accept_only";
+    private static final String CONTRACT_STATUS_DOCS_PENDING = "DOCS_PENDING";
+    private static final String CONTRACT_STATUS_READY = "READY";
+    private static final Set<String> CONTRACT_STATUSES = Set.of(CONTRACT_STATUS_DOCS_PENDING, CONTRACT_STATUS_READY);
 
     private final AgentModelConfigMapper agentModelConfigMapper;
     private final ModelVendorAccountMapper vendorAccountMapper;
@@ -68,6 +74,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     private final VendorCodeResolver vendorCodeResolver;
     private final ObjectMapper objectMapper;
     private final AccountModelRouteStateMapper routeStateMapper;
+    private final BypassCacheService bypassCacheService;
 
     public AgentModelConfigServiceImpl(AgentModelConfigMapper agentModelConfigMapper,
                                        ModelVendorAccountMapper vendorAccountMapper,
@@ -79,10 +86,11 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                                        ModelCapabilitiesCodec capabilitiesCodec,
                                        ModelConfigCredentialResolver credentialResolver,
                                        ModelRoutePreviewResolver routePreviewResolver,
-                                        OutboundProxyPolicyResolver outboundProxyPolicyResolver,
-                                        VendorCodeResolver vendorCodeResolver,
-                                        ObjectMapper objectMapper,
-                                        AccountModelRouteStateMapper routeStateMapper) {
+                                       OutboundProxyPolicyResolver outboundProxyPolicyResolver,
+                                       VendorCodeResolver vendorCodeResolver,
+                                       ObjectMapper objectMapper,
+                                       AccountModelRouteStateMapper routeStateMapper,
+                                       BypassCacheService bypassCacheService) {
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.vendorAccountMapper = vendorAccountMapper;
         this.routingPoolMapper = routingPoolMapper;
@@ -97,6 +105,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         this.vendorCodeResolver = vendorCodeResolver;
         this.objectMapper = objectMapper;
         this.routeStateMapper = routeStateMapper;
+        this.bypassCacheService = bypassCacheService;
     }
 
     @Override
@@ -135,11 +144,13 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         ensureConfigCodeAvailable(request.configCode(), null);
         LocalDateTime now = LocalDateTime.now();
         AgentModelConfig config = applyRequest(new AgentModelConfig(), request, null, now);
+        validateContractConfig(config);
         config.setCreatedAt(now);
         agentModelConfigMapper.insertConfig(config);
         if (Boolean.TRUE.equals(config.getDefault())) {
             agentModelConfigMapper.clearDefaultExcept(config.getId());
         }
+        invalidateToolModelCachesAfterCommit();
         return toResponse(config);
     }
 
@@ -150,10 +161,12 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         AgentModelConfig existing = findActiveOrThrow(id);
         ensureConfigCodeAvailable(request.configCode(), existing.getId());
         AgentModelConfig config = applyRequest(existing, request, existing, LocalDateTime.now());
+        validateContractConfig(config);
         agentModelConfigMapper.updateConfig(config);
         if (Boolean.TRUE.equals(config.getDefault())) {
             agentModelConfigMapper.clearDefaultExcept(config.getId());
         }
+        invalidateToolModelCachesAfterCommit();
         return toResponse(config);
     }
 
@@ -174,6 +187,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         agentModelConfigMapper.setDefault(id);
         existing.setDefault(true);
         existing.setUpdatedAt(LocalDateTime.now());
+        invalidateToolModelCachesAfterCommit();
         return toResponse(existing);
     }
 
@@ -190,6 +204,20 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             }
         }
         agentModelConfigMapper.softDelete(id);
+        invalidateToolModelCachesAfterCommit();
+    }
+
+    private void invalidateToolModelCachesAfterCommit() {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            bypassCacheService.bumpToolListVersion();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                bypassCacheService.bumpToolListVersion();
+            }
+        });
     }
 
     private AgentModelConfig applyRequest(AgentModelConfig config,
@@ -209,6 +237,15 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         config.setExtraAuthJson(mergeEndpointPath(mergeExtraAuthJson(request, existing), normalizedEndpoint.endpointPath()));
         config.setExecutionTask(resolveExecutionTask(request, existing));
         config.setExecutionOptionsJson(resolveExecutionOptionsJson(request, existing));
+        config.setRequestSchemaJson(resolveContractJson(request.requestSchemaJson(), existing == null ? null : existing.getRequestSchemaJson()));
+        config.setRequestMappingJson(resolveContractJson(request.requestMappingJson(), existing == null ? null : existing.getRequestMappingJson()));
+        config.setResponseMappingJson(resolveContractJson(request.responseMappingJson(), existing == null ? null : existing.getResponseMappingJson()));
+        config.setApiContractVersion(resolveContractText(request.apiContractVersion(), existing == null ? null : existing.getApiContractVersion()));
+        String contractStatus = resolveContractStatus(request.contractStatus(), existing);
+        config.setContractStatus(contractStatus);
+        config.setContractVerifiedAt(CONTRACT_STATUS_READY.equals(contractStatus)
+                ? firstNonNull(request.contractVerifiedAt(), existing == null ? null : existing.getContractVerifiedAt(), now)
+                : null);
         if (request.vendorAccountId() != null) {
             config.setApiKey("");
         } else if (request.apiKey() != null && !request.apiKey().isBlank()) {
@@ -629,6 +666,12 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 null,
                 config.getExecutionTask(),
                 config.getExecutionOptionsJson(),
+                config.getRequestSchemaJson(),
+                config.getRequestMappingJson(),
+                config.getResponseMappingJson(),
+                config.getApiContractVersion(),
+                config.getContractStatus(),
+                config.getContractVerifiedAt(),
                 config.getMinimaxGroupId(),
                 config.getConsoleUrl(),
                 config.getBalanceUrl(),
@@ -729,6 +772,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
         fallback.setBaseUrl(null);
         fallback.setApiKey("");
         fallback.setExtraAuthJson(null);
+        fallback.setContractStatus(CONTRACT_STATUS_DOCS_PENDING);
         fallback.setMinimaxGroupId(null);
         fallback.setConsoleUrl(null);
         fallback.setBalanceUrl(null);
@@ -938,6 +982,123 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 throw new BusinessException(ErrorCode.PARAM_ERROR, "executionOptionsJson must be valid JSON");
             }
         }
+        validateRequestSchemaJson(request.requestSchemaJson());
+        validateJsonObject(request.requestMappingJson(), "requestMappingJson");
+        validateJsonObject(request.responseMappingJson(), "responseMappingJson");
+        if (request.contractStatus() != null && !request.contractStatus().isBlank()
+                && !CONTRACT_STATUSES.contains(request.contractStatus().trim().toUpperCase(java.util.Locale.ROOT))) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "unsupported contractStatus");
+        }
+    }
+
+    private void validateContractConfig(AgentModelConfig config) {
+        if (!CONTRACT_STATUS_READY.equals(config.getContractStatus())) {
+            return;
+        }
+        if (config.getRequestSchemaJson() == null || config.getRequestSchemaJson().isBlank()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "requestSchemaJson is required when contractStatus is READY");
+        }
+        validateRequestSchemaJson(config.getRequestSchemaJson());
+        JsonNode requestMapping = requireVersionedMapping(
+                config.getRequestMappingJson(), "requestMappingJson");
+        JsonNode fieldMap = requestMapping.get("fieldMap");
+        if (fieldMap == null || !fieldMap.isObject()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "requestMappingJson.fieldMap must be a JSON object when contractStatus is READY");
+        }
+        fieldMap.fields().forEachRemaining(entry -> {
+            if (!entry.getValue().isTextual() || entry.getValue().asText().isBlank()) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR,
+                        "requestMappingJson.fieldMap values must be non-blank strings");
+            }
+        });
+
+        JsonNode responseMapping = requireVersionedMapping(
+                config.getResponseMappingJson(), "responseMappingJson");
+        if (responseMapping.size() <= 1) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "responseMappingJson must define at least one response rule when contractStatus is READY");
+        }
+    }
+
+    private JsonNode requireVersionedMapping(String raw, String fieldName) {
+        if (raw == null || raw.isBlank()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    fieldName + " is required when contractStatus is READY");
+        }
+        JsonNode mapping = parseJsonObject(raw, fieldName);
+        JsonNode version = mapping.get("version");
+        if (version == null || version.isNull() || !"1".equals(version.asText())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    fieldName + ".version must be 1 when contractStatus is READY");
+        }
+        return mapping;
+    }
+
+    private void validateRequestSchemaJson(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return;
+        }
+        JsonNode root = parseJsonObject(raw, "requestSchemaJson");
+        if (!root.hasNonNull("version")) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "requestSchemaJson.version is required");
+        }
+        JsonNode fields = root.get("fields");
+        if (fields == null || !fields.isArray()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "requestSchemaJson.fields must be an array");
+        }
+        for (JsonNode field : fields) {
+            if (field == null || !field.isObject()) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR,
+                        "requestSchemaJson.fields items must be JSON objects");
+            }
+        }
+    }
+
+    private void validateJsonObject(String raw, String fieldName) {
+        if (raw == null || raw.isBlank()) {
+            return;
+        }
+        parseJsonObject(raw, fieldName);
+    }
+
+    private JsonNode parseJsonObject(String raw, String fieldName) {
+        try {
+            JsonNode parsed = objectMapper.readTree(raw);
+            if (parsed == null || !parsed.isObject()) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, fieldName + " must be a JSON object");
+            }
+            return parsed;
+        } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, fieldName + " must be valid JSON");
+        }
+    }
+
+    private String resolveContractStatus(String requested, AgentModelConfig existing) {
+        String value = blankToNull(requested);
+        if (value == null && existing != null) {
+            value = blankToNull(existing.getContractStatus());
+        }
+        return value == null ? CONTRACT_STATUS_DOCS_PENDING : value.toUpperCase(java.util.Locale.ROOT);
+    }
+
+    private String resolveContractJson(String requested, String existing) {
+        return requested == null ? existing : blankToNull(requested);
+    }
+
+    private String resolveContractText(String requested, String existing) {
+        return requested == null ? existing : blankToNull(requested);
+    }
+
+    @SafeVarargs
+    private final <T> T firstNonNull(T... values) {
+        for (T value : values) {
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private void validateModelAccountBinding(AgentModelConfigRequest request, ModelVendorAccount account) {
@@ -1043,6 +1204,12 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 hasExtraAuth ? request.extraAuthJson() : existing.getExtraAuthJson(),
                 request.executionTask(),
                 request.executionOptionsJson(),
+                request.requestSchemaJson(),
+                request.requestMappingJson(),
+                request.responseMappingJson(),
+                request.apiContractVersion(),
+                request.contractStatus(),
+                request.contractVerifiedAt(),
                 request.minimaxGroupId(),
                 request.consoleUrl(),
                 request.balanceUrl(),
@@ -1098,6 +1265,12 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 extraAuthJson,
                 request.executionTask(),
                 request.executionOptionsJson(),
+                request.requestSchemaJson(),
+                request.requestMappingJson(),
+                request.responseMappingJson(),
+                request.apiContractVersion(),
+                request.contractStatus(),
+                request.contractVerifiedAt(),
                 request.minimaxGroupId(),
                 request.consoleUrl(),
                 request.balanceUrl(),
@@ -1149,6 +1322,12 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 hasExtraAuth ? request.extraAuthJson() : "",
                 request.executionTask(),
                 request.executionOptionsJson(),
+                request.requestSchemaJson(),
+                request.requestMappingJson(),
+                request.responseMappingJson(),
+                request.apiContractVersion(),
+                request.contractStatus(),
+                request.contractVerifiedAt(),
                 request.minimaxGroupId(),
                 request.consoleUrl(),
                 request.balanceUrl(),
@@ -1192,6 +1371,12 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 normalizedExtraAuthJson,
                 request.executionTask(),
                 request.executionOptionsJson(),
+                request.requestSchemaJson(),
+                request.requestMappingJson(),
+                request.responseMappingJson(),
+                request.apiContractVersion(),
+                request.contractStatus(),
+                request.contractVerifiedAt(),
                 request.minimaxGroupId(),
                 request.consoleUrl(),
                 request.balanceUrl(),

@@ -617,7 +617,12 @@ class WorkerInternalApiTest {
         String failedBody = """
                                 {
                                   "errorCode": "MODEL_RISK_CONTROL_REJECTED",
-                                  "errorMessage": "Failure to pass the risk control system"
+                                  "errorMessage": "Failure to pass the risk control system",
+                                  "userMessage": "apiKey=must-not-reach-users",
+                                  "developerMessage": "provider apiKey=secret-value request failed",
+                                  "failureTraceId": "worker-risk-trace",
+                                  "providerErrorCode": "UPSTREAM_451",
+                                  "providerRequestId": "provider-risk-1"
                                 }
                                 """;
         mockMvc.perform(signed(post("/api/internal/v1/tasks/{taskId}/failed", taskId), "POST",
@@ -637,8 +642,34 @@ class WorkerInternalApiTest {
                         .header("Authorization", "Bearer " + userToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.errorCode").value("MODEL_RISK_CONTROL_REJECTED"))
-                .andExpect(jsonPath("$.data.errorMessage").value("Failure to pass the risk control system"))
+                .andExpect(jsonPath("$.data.errorMessage").value("您的提示词包含违禁词"))
+                .andExpect(jsonPath("$.data.failureTraceId").value("worker-risk-trace"))
                 .andExpect(jsonPath("$.data.progressMessage").value("您的提示词包含违禁词"));
+
+        mockMvc.perform(get("/api/admin/v1/tasks/{taskId}", taskId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.errorMessage").value("provider apiKey=[REDACTED] request failed"))
+                .andExpect(jsonPath("$.data.failureTraceId").value("worker-risk-trace"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT user_message FROM ai_tasks WHERE id = ?", String.class, taskId
+        )).isEqualTo("您的提示词包含违禁词");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT developer_message FROM ai_tasks WHERE id = ?", String.class, taskId
+        )).doesNotContain("secret-value");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT error_message FROM ai_tasks WHERE id = ?", String.class, taskId
+        )).doesNotContain("secret-value");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT failure_trace_id FROM ai_tasks WHERE id = ?", String.class, taskId
+        )).isEqualTo("worker-risk-trace");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT provider_error_code FROM ai_tasks WHERE id = ?", String.class, taskId
+        )).isEqualTo("UPSTREAM_451");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT provider_request_id FROM ai_tasks WHERE id = ?", String.class, taskId
+        )).isEqualTo("provider-risk-1");
     }
 
     @Test
@@ -1072,6 +1103,11 @@ class WorkerInternalApiTest {
                                   "billingUnit": "PER_CALL",
                                   "unitPrice": 0.03,
                                   "capabilities": ["IMAGE_GENERATION"],
+                                  "requestSchemaJson": "{\\"version\\":\\"1\\",\\"fields\\":[]}",
+                                  "requestMappingJson": "{\\"version\\":\\"1\\",\\"fieldMap\\":{}}",
+                                  "responseMappingJson": "{\\"version\\":\\"1\\",\\"resultPath\\":\\"data\\"}",
+                                  "apiContractVersion": "1",
+                                  "contractStatus": "READY",
                                   "enabled": true,
                                   "agentEnabled": true,
                                   "isDefault": false

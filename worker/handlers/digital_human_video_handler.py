@@ -33,11 +33,16 @@ class DigitalHumanVideoHandler:
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any]:
         task_id = int(message["taskId"])
-        LOGGER.info("start processing digital human video task %s", task_id)
+        trace_id = message.get("traceId")
+        LOGGER.info("start processing digital human video task %s traceId=%s", task_id, trace_id or "-")
 
         try:
-            context = message.get("__executionContext") or self.backend_client.get_execution_context(task_id)
-            self._report(task_id, 8, "任务已启动，正在整理脚本与参数")
+            context = message.get("__executionContext") or self.backend_client.get_execution_context(
+                task_id,
+                trace_id=trace_id,
+            )
+            trace_id = trace_id or context.get("traceId")
+            self._report(task_id, 8, "任务已启动，正在整理脚本与参数", trace_id)
             model_config = context.get("modelConfig") or {}
             provider = self._resolve_video_provider(context, model_config)
             provider_registry.require_capability(provider, "VIDEO_GENERATION")
@@ -52,14 +57,14 @@ class DigitalHumanVideoHandler:
             presenter_gender = self._resolve_presenter_gender(params)
             voice = self._resolve_voice(params, presenter_gender)
 
-            self._report(task_id, 18, "正在通过硅基流动生成口播音频")
+            self._report(task_id, 18, "正在通过硅基流动生成口播音频", trace_id)
             audio_data_url = siliconflow_client.generate_speech_data_url(
                 input_text=speech_text,
                 model=self._optional_string(params.get("voiceModel")),
                 voice=voice,
             )
 
-            self._report(task_id, 36, "正在通过硅基流动生成数字人形象图")
+            self._report(task_id, 36, "正在通过硅基流动生成数字人形象图", trace_id)
             avatar_image_url = reference_image or siliconflow_client.generate_image(
                 prompt=self._build_avatar_prompt(params),
                 model=self._optional_string(params.get("imageModel")),
@@ -68,13 +73,13 @@ class DigitalHumanVideoHandler:
             background_image_url = ""
 
             if provider == "infinitetalk":
-                self._report(task_id, 68, "正在通过 InfiniteTalk 生成音频驱动数字人成片")
+                self._report(task_id, 68, "正在通过 InfiniteTalk 生成音频驱动数字人成片", trace_id)
             else:
-                self._report(task_id, 68, "正在通过 Seedance 合成图生视频，通常需要 30 秒到 3 分钟")
+                self._report(task_id, 68, "正在通过 Seedance 合成图生视频，通常需要 30 秒到 3 分钟", trace_id)
             result = self._generate_video(provider, model_config, params, prompt, avatar_image_url, audio_data_url)
 
             if provider == "infinitetalk":
-                self._report(task_id, 92, "InfiniteTalk 已返回音频驱动成片，正在整理输出")
+                self._report(task_id, 92, "InfiniteTalk 已返回音频驱动成片，正在整理输出", trace_id)
                 success_payload = {
                     "resourceType": "MARKDOWN",
                     "contentText": self._build_result_markdown(
@@ -93,11 +98,11 @@ class DigitalHumanVideoHandler:
                     "providerRequestId": result.get("requestId"),
                     "providerCalled": True,
                 }
-                self.backend_client.mark_success(task_id, success_payload)
-                LOGGER.info("digital human InfiniteTalk task %s completed successfully", task_id)
-                return {"status": "SUCCESS", "taskId": task_id, "provider": provider}
+                self.backend_client.mark_success(task_id, success_payload, trace_id=trace_id)
+                LOGGER.info("digital human InfiniteTalk task %s completed successfully traceId=%s", task_id, trace_id or "-")
+                return {"status": "SUCCESS", "taskId": task_id, "provider": provider, "traceId": trace_id}
 
-            self._report(task_id, 88, "正在通过 FFmpeg 合并音频并烧录字幕")
+            self._report(task_id, 88, "正在通过 FFmpeg 合并音频并烧录字幕", trace_id)
             final_video = self.postprocessor.process(
                 task_id=task_id,
                 video_url=result["videoUrl"],
@@ -105,7 +110,7 @@ class DigitalHumanVideoHandler:
                 subtitle_text=speech_text,
             )
 
-            self._report(task_id, 94, "正在整理字幕与输出文件")
+            self._report(task_id, 94, "正在整理字幕与输出文件", trace_id)
             success_payload = {
                 "resourceType": "MARKDOWN",
                 "contentText": self._build_result_markdown(
@@ -123,44 +128,59 @@ class DigitalHumanVideoHandler:
                 "providerRequestId": result.get("requestId"),
                 "providerCalled": True,
             }
-            self.backend_client.mark_success(task_id, success_payload)
-            LOGGER.info("digital human video task %s completed successfully", task_id)
-            return {"status": "SUCCESS", "taskId": task_id}
+            self.backend_client.mark_success(task_id, success_payload, trace_id=trace_id)
+            LOGGER.info("digital human video task %s completed successfully traceId=%s", task_id, trace_id or "-")
+            return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id}
         except SiliconFlowVideoTimeoutError as exc:
-            return self._mark_failed(task_id, error_code="MODEL_TIMEOUT", error_message=str(exc))
+            return self._mark_failed(task_id, error_code="MODEL_TIMEOUT", error_message=str(exc), trace_id=trace_id)
         except SiliconFlowVideoError as exc:
-            return self._mark_failed(task_id, error_code=classify_model_error(str(exc)), error_message=str(exc))
+            return self._mark_failed(task_id, error_code=classify_model_error(str(exc)), error_message=str(exc), trace_id=trace_id)
         except SeedanceVideoTimeoutError as exc:
-            return self._mark_failed(task_id, error_code="MODEL_TIMEOUT", error_message=str(exc))
+            return self._mark_failed(task_id, error_code="MODEL_TIMEOUT", error_message=str(exc), trace_id=trace_id)
         except SeedanceVideoError as exc:
-            return self._mark_failed(task_id, error_code=classify_model_error(str(exc)), error_message=str(exc))
+            return self._mark_failed(task_id, error_code=classify_model_error(str(exc)), error_message=str(exc), trace_id=trace_id)
         except InfiniteTalkVideoTimeoutError as exc:
-            return self._mark_failed(task_id, error_code="MODEL_TIMEOUT", error_message=str(exc))
+            return self._mark_failed(task_id, error_code="MODEL_TIMEOUT", error_message=str(exc), trace_id=trace_id)
         except InfiniteTalkVideoError as exc:
-            return self._mark_failed(task_id, error_code=classify_model_error(str(exc)), error_message=str(exc))
+            return self._mark_failed(task_id, error_code=classify_model_error(str(exc)), error_message=str(exc), trace_id=trace_id)
         except DigitalHumanPostprocessError as exc:
-            return self._mark_failed(task_id, error_code="POSTPROCESS_FAILED", error_message=str(exc))
+            return self._mark_failed(task_id, error_code="POSTPROCESS_FAILED", error_message=str(exc), trace_id=trace_id)
         except BackendClientError:
             raise
         except Exception as exc:
-            return self._mark_failed(task_id, error_code="WORKER_INTERNAL_ERROR", error_message=str(exc))
+            return self._mark_failed(task_id, error_code="WORKER_INTERNAL_ERROR", error_message=str(exc), trace_id=trace_id)
 
-    def _mark_failed(self, task_id: int, *, error_code: str, error_message: str) -> dict[str, Any]:
-        LOGGER.exception("digital human video task %s failed: %s", task_id, error_message)
+    def _mark_failed(
+        self,
+        task_id: int,
+        *,
+        error_code: str,
+        error_message: str,
+        trace_id: str | None,
+    ) -> dict[str, Any]:
+        LOGGER.exception(
+            "digital human video task %s failed traceId=%s errorCode=%s: %s",
+            task_id,
+            trace_id or "-",
+            error_code,
+            error_message,
+        )
         self.backend_client.mark_failed(
             task_id,
             {
                 "errorCode": error_code,
                 "errorMessage": error_message,
             },
+            trace_id=trace_id,
         )
-        return {"status": "FAILED", "taskId": task_id, "errorCode": error_code}
+        return {"status": "FAILED", "taskId": task_id, "errorCode": error_code, "traceId": trace_id}
 
-    def _report(self, task_id: int, progress: int, message: str) -> None:
+    def _report(self, task_id: int, progress: int, message: str, trace_id: str | None) -> None:
         self.backend_client.mark_processing(
             task_id,
             progress=progress,
             progress_message=message,
+            trace_id=trace_id,
         )
 
     def _siliconflow_client(self, model_config: dict[str, Any]) -> SiliconFlowVideoClient:

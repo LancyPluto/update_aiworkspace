@@ -21,7 +21,18 @@ _CURRENT_ROUTE_ATTEMPT_ID: ContextVar[int | None] = ContextVar("worker_route_att
 
 
 class BackendClientError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str | None = None,
+        trace_id: str | None = None,
+        status_code: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.trace_id = trace_id
+        self.status_code = status_code
 
 
 class RouteFailoverRequested(BackendClientError):
@@ -209,6 +220,11 @@ class BackendClient:
         if route_attempt_id is not None and "routeAttemptId" not in payload:
             payload["routeAttemptId"] = route_attempt_id
         payload.setdefault("failureStage", _infer_failure_stage(str(payload.get("errorCode") or "")))
+        legacy_message = payload.get("errorMessage")
+        if legacy_message is not None and "developerMessage" not in payload:
+            payload["developerMessage"] = legacy_message
+        if trace_id and "failureTraceId" not in payload:
+            payload["failureTraceId"] = trace_id
         if _should_attempt_route_failover(payload):
             try:
                 failover = self.request_route_failover(task_id, payload, trace_id=trace_id)
@@ -330,21 +346,45 @@ class BackendClient:
 
     def _parse_response(self, response: requests.Response) -> dict[str, Any]:
         try:
-            response.raise_for_status()
-        except requests.HTTPError as exc:
-            raise BackendClientError(
-                f"backend request failed: status={response.status_code}, body={response.text}"
-            ) from exc
-
-        try:
             payload = response.json()
-        except ValueError as exc:
-            raise BackendClientError("backend returned non-json response") from exc
+        except ValueError:
+            payload = None
+
+        trace_id = _response_trace_id(response, payload)
+        response_ok = getattr(response, "ok", 200 <= int(response.status_code) < 300)
+        if not response_ok:
+            error_code, message = _response_error(payload, f"backend HTTP {response.status_code}")
+            raise BackendClientError(
+                _backend_error_message(response.status_code, error_code, message, trace_id),
+                error_code=error_code,
+                trace_id=trace_id,
+                status_code=response.status_code,
+            )
+
+        if not isinstance(payload, dict):
+            raise BackendClientError(
+                f"backend returned non-json response traceId={trace_id or '-'}",
+                error_code="API_001",
+                trace_id=trace_id,
+                status_code=response.status_code,
+            )
 
         code = payload.get("code")
+        if payload.get("errorCode") or (code is not None and code != "SUCCESS"):
+            error_code, message = _response_error(payload, "backend business error")
+            raise BackendClientError(
+                _backend_error_message(response.status_code, error_code, message, trace_id),
+                error_code=error_code,
+                trace_id=trace_id,
+                status_code=response.status_code,
+            )
+
         if code != "SUCCESS":
             raise BackendClientError(
-                f"backend business error: code={code}, message={payload.get('message', '')}"
+                f"backend returned an invalid success envelope traceId={trace_id or '-'}",
+                error_code="API_001",
+                trace_id=trace_id,
+                status_code=response.status_code,
             )
 
         data = payload.get("data")
@@ -409,6 +449,9 @@ def _terminal_failure_payload(payload: dict[str, Any]) -> dict[str, Any]:
     supported = {
         "errorCode",
         "errorMessage",
+        "userMessage",
+        "developerMessage",
+        "failureTraceId",
         "failureStage",
         "providerCharged",
         "providerCostAmount",
@@ -424,6 +467,38 @@ def _terminal_failure_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "claimToken",
     }
     return {key: value for key, value in payload.items() if key in supported}
+
+
+def _response_trace_id(response: requests.Response, payload: object) -> str | None:
+    if isinstance(payload, dict):
+        candidate = payload.get("traceId") or payload.get("requestId")
+        if candidate is not None and str(candidate).strip():
+            return str(candidate).strip()[:64]
+    headers = getattr(response, "headers", None)
+    header = headers.get("X-Request-Id") if headers is not None else None
+    return header.strip()[:64] if header and header.strip() else None
+
+
+def _response_error(payload: object, fallback: str) -> tuple[str, str]:
+    if not isinstance(payload, dict):
+        return "SYSTEM_001", fallback
+    code = str(payload.get("errorCode") or payload.get("code") or "SYSTEM_001").strip()[:64]
+    if code.upper() == "SUCCESS":
+        return "SYSTEM_001", fallback
+    message = str(
+        payload.get("developerMessage")
+        or payload.get("userMessage")
+        or payload.get("message")
+        or fallback
+    ).strip()
+    return code or "SYSTEM_001", (message or fallback)[:2000]
+
+
+def _backend_error_message(status: int, error_code: str, message: str, trace_id: str | None) -> str:
+    return (
+        f"backend request failed: status={status}, errorCode={error_code}, "
+        f"traceId={trace_id or '-'}, message={message}"
+    )
 
 
 def _record_backend_operation_metric(path: str, status_code: int) -> None:

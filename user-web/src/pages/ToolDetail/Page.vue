@@ -23,27 +23,37 @@ import MediaComparisonSlider from "@/components/MediaComparisonSlider.vue"
 import { fetchToolByCode } from "@/api/toolApi"
 import { createTask } from "@/api/taskApi"
 import { uploadChatFile } from "@/api/aiToolApi"
-import type { ToolDetail, ToolField, ToolFieldOption } from "@/api/types"
+import type { ToolDetail, ToolField } from "@/api/types"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { cleanToolDisplayText } from "@/utils/toolDisplayText"
 import { formatToolCreditLabel, usesVariableWorkflowCredits } from "@/utils/toolCreditLabel"
-import { fieldOptionsFromMeta } from "@/utils/fieldUiMeta"
+import {
+  canonicalFieldOptionValue,
+  defaultFieldValue as resolveDefaultFieldValue,
+  fieldOptionsFromMeta,
+  filterFieldsForUi,
+  type FieldOptionValue,
+  type FieldUiOption,
+} from "@/utils/fieldUiMeta"
 import {
   buildImageTemplateTaskParams,
   compactOptionFields,
-  initialImageTemplateOptions,
   isImageTemplateTool,
   primaryImageField,
 } from "@/adapters/imageTemplateToolAdapter"
 import {
   buildMediaTemplateTaskParams,
   compactMediaOptionFields,
-  initialMediaTemplateOptions,
   isVideoTemplateTool,
   primaryMediaField,
   resolveToolKind,
 } from "@/adapters/mediaTemplateToolAdapter"
+import {
+  buildEffectiveToolFields,
+  hasSchemaBackedModel,
+  resolveDefaultModelConfigId,
+} from "@/utils/modelRequestSchema"
 
 const props = defineProps<{
   id: string
@@ -73,6 +83,7 @@ const mediaSubmitError = ref<string | null>(null)
 const toolUseModalOpen = ref(false)
 const toolUseModalExpanded = ref(false)
 const uploadDragging = ref(false)
+const selectedModelConfigId = ref<number | null>(null)
 
 const title = computed(() => cleanToolDisplayText(tool.value?.toolName) || `工具 · ${props.id}`)
 const isOffline = computed(() => false)
@@ -81,10 +92,23 @@ const imageTemplateMode = computed(() => isImageTemplateTool(tool.value))
 const videoTemplateMode = computed(() => isVideoTemplateTool(tool.value))
 const frontendStyle = computed(() => tool.value?.frontendStyle || null)
 const toolKind = computed(() => resolveToolKind(tool.value))
-const imageField = computed(() => (tool.value ? primaryImageField(tool.value) : null))
-const compactFields = computed(() => (tool.value ? compactOptionFields(tool.value) : []))
-const mediaField = computed(() => (tool.value ? primaryMediaField(tool.value, toolKind.value) : null))
-const mediaCompactFields = computed(() => (tool.value ? compactMediaOptionFields(tool.value, toolKind.value) : []))
+const supportedModels = computed(() => tool.value?.supportedModels || [])
+const schemaBackedTool = computed(() => hasSchemaBackedModel(supportedModels.value))
+const selectedSupportedModel = computed(() =>
+  supportedModels.value.find((model) => model.modelConfigId === selectedModelConfigId.value) || null,
+)
+const effectiveFields = computed(() =>
+  buildEffectiveToolFields(tool.value?.fields || [], selectedSupportedModel.value),
+)
+const modelBoundTool = computed<ToolDetail | null>(() =>
+  tool.value ? { ...tool.value, fields: effectiveFields.value } : null,
+)
+const imageField = computed(() => (modelBoundTool.value ? primaryImageField(modelBoundTool.value) : null))
+const allCompactFields = computed(() => (modelBoundTool.value ? compactOptionFields(modelBoundTool.value) : []))
+const compactFields = computed(() => filterFieldsForUi(allCompactFields.value, imageOptions.value, { advancedModeEnabled: false }))
+const mediaField = computed(() => (modelBoundTool.value ? primaryMediaField(modelBoundTool.value, toolKind.value) : null))
+const allMediaCompactFields = computed(() => (modelBoundTool.value ? compactMediaOptionFields(modelBoundTool.value, toolKind.value) : []))
+const mediaCompactFields = computed(() => filterFieldsForUi(allMediaCompactFields.value, mediaOptions.value, { advancedModeEnabled: false }))
 const heroTitle = computed(() => cleanToolDisplayText(frontendStyle.value?.heroTitle) || title.value)
 const heroSubtitle = computed(() =>
   cleanToolDisplayText(frontendStyle.value?.heroSubtitle) ||
@@ -135,7 +159,12 @@ const activeBusy = computed(() => imageTemplateMode.value ? uploadingImage.value
 const activeUploading = computed(() => imageTemplateMode.value ? uploadingImage.value : uploadingMedia.value)
 const activeSubmitLoading = computed(() => imageTemplateMode.value ? imageSubmitLoading.value : mediaSubmitLoading.value)
 const activeUploadedUrl = computed(() => imageTemplateMode.value ? uploadedImageUrl.value : uploadedMediaUrl.value)
-const activeCanSubmit = computed(() => !isOffline.value && !activeBusy.value && Boolean(activeUploadedUrl.value))
+const activeCanSubmit = computed(() =>
+  !isOffline.value
+  && !activeBusy.value
+  && Boolean(activeUploadedUrl.value)
+  && (supportedModels.value.length === 0 || selectedModelConfigId.value != null),
+)
 
 const useLink = computed(() => userRoutes.toolUse(props.id))
 
@@ -221,12 +250,16 @@ function fileMatchesAccept(file: File, accept: string) {
   })
 }
 
-function optionValue(option: ToolFieldOption | string) {
-  return typeof option === "string" ? option : option.value
+function optionValue(option: FieldUiOption): FieldOptionValue {
+  return option.value
 }
 
-function optionLabel(option: ToolFieldOption | string) {
-  return typeof option === "string" ? option : option.label
+function optionValueText(option: FieldUiOption): string {
+  return String(option.value)
+}
+
+function optionLabel(option: FieldUiOption) {
+  return option.label
 }
 
 function updateImageOption(field: ToolField, value: unknown) {
@@ -237,12 +270,28 @@ function updateMediaOption(field: ToolField, value: unknown) {
   mediaOptions.value = { ...mediaOptions.value, [field.fieldKey]: value }
 }
 
+function updateImageSelect(field: ToolField, event: Event) {
+  updateImageOption(field, canonicalFieldOptionValue(field, (event.target as HTMLSelectElement).value))
+}
+
+function updateMediaSelect(field: ToolField, event: Event) {
+  updateMediaOption(field, canonicalFieldOptionValue(field, (event.target as HTMLSelectElement).value))
+}
+
+function initialOptionValues(fields: ToolField[]): Record<string, unknown> {
+  return Object.fromEntries(fields.map((field) => [field.fieldKey, resolveDefaultFieldValue(field)]))
+}
+
 function clientRequestId() {
   return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 async function openUseTool() {
   if (!tool.value || isOffline.value) return
+  if (schemaBackedTool.value) {
+    await router.push(useLink.value)
+    return
+  }
   if (imageTemplateMode.value || videoTemplateMode.value) {
     toolUseModalOpen.value = true
     return
@@ -328,6 +377,10 @@ async function submitImageTemplate() {
     imageSubmitError.value = "请先上传一张图片"
     return
   }
+  if (supportedModels.value.length > 0 && selectedModelConfigId.value == null) {
+    imageSubmitError.value = "请选择要使用的模型"
+    return
+  }
 
   imageSubmitError.value = null
   imageSubmitLoading.value = true
@@ -335,7 +388,8 @@ async function submitImageTemplate() {
     const task = await createTask(
       {
         toolCode: tool.value.toolCode,
-        params: buildImageTemplateTaskParams(tool.value, uploadedImageUrl.value, imageOptions.value),
+        params: buildImageTemplateTaskParams(modelBoundTool.value || tool.value, uploadedImageUrl.value, imageOptions.value),
+        modelConfigId: selectedModelConfigId.value,
         clientRequestId: clientRequestId(),
       },
       { token: auth.token },
@@ -403,6 +457,10 @@ async function submitMediaTemplate() {
     mediaSubmitError.value = "请先上传一段素材"
     return
   }
+  if (supportedModels.value.length > 0 && selectedModelConfigId.value == null) {
+    mediaSubmitError.value = "请选择要使用的模型"
+    return
+  }
 
   mediaSubmitError.value = null
   mediaSubmitLoading.value = true
@@ -410,7 +468,8 @@ async function submitMediaTemplate() {
     const task = await createTask(
       {
         toolCode: tool.value.toolCode,
-        params: buildMediaTemplateTaskParams(tool.value, uploadedMediaUrl.value, mediaOptions.value, toolKind.value),
+        params: buildMediaTemplateTaskParams(modelBoundTool.value || tool.value, uploadedMediaUrl.value, mediaOptions.value, toolKind.value),
+        modelConfigId: selectedModelConfigId.value,
         clientRequestId: clientRequestId(),
       },
       { token: auth.token },
@@ -425,9 +484,9 @@ async function submitMediaTemplate() {
 
 watch(
   tool,
-  (next) => {
-    imageOptions.value = next ? initialImageTemplateOptions(next) : {}
-    mediaOptions.value = next ? initialMediaTemplateOptions(next, resolveToolKind(next)) : {}
+  () => {
+    imageOptions.value = initialOptionValues(allCompactFields.value)
+    mediaOptions.value = initialOptionValues(allMediaCompactFields.value)
     uploadedImageUrl.value = ""
     uploadPreviewUrl.value = ""
     imageSubmitError.value = null
@@ -442,9 +501,20 @@ watch(
   { immediate: true },
 )
 
+watch(selectedModelConfigId, () => {
+  imageOptions.value = initialOptionValues(allCompactFields.value)
+  mediaOptions.value = initialOptionValues(allMediaCompactFields.value)
+  imageSubmitError.value = null
+  mediaSubmitError.value = null
+})
+
 onMounted(async () => {
   try {
     tool.value = await fetchToolByCode(props.id, { token: auth.token })
+    selectedModelConfigId.value = resolveDefaultModelConfigId(
+      tool.value.supportedModels || [],
+      tool.value.defaultModelConfigId,
+    )
   } catch (e) {
     error.value = (e as Error).message || "加载工具详情失败"
   } finally {
@@ -580,7 +650,7 @@ onMounted(async () => {
                   <div v-if="field.fieldType === 'radio'" class="grid grid-cols-2 gap-2">
                     <button
                       v-for="option in fieldOptionsFromMeta(field)"
-                      :key="optionValue(option)"
+                      :key="optionValueText(option)"
                       type="button"
                       class="min-h-9 rounded-md border px-3 py-2 text-xs font-medium transition"
                       :class="imageOptions[field.fieldKey] === optionValue(option) ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-background text-muted-foreground hover:bg-secondary'"
@@ -594,9 +664,9 @@ onMounted(async () => {
                     v-else-if="field.fieldType === 'select'"
                     class="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
                     :value="String(imageOptions[field.fieldKey] ?? '')"
-                    @change="updateImageOption(field, ($event.target as HTMLSelectElement).value)"
+                    @change="updateImageSelect(field, $event)"
                   >
-                    <option v-for="option in fieldOptionsFromMeta(field)" :key="optionValue(option)" :value="optionValue(option)">
+                    <option v-for="option in fieldOptionsFromMeta(field)" :key="optionValueText(option)" :value="optionValueText(option)">
                       {{ optionLabel(option) }}
                     </option>
                   </select>
@@ -608,7 +678,7 @@ onMounted(async () => {
                     max="100"
                     class="w-full accent-primary"
                     :value="Number(imageOptions[field.fieldKey] ?? 50)"
-                    @input="updateImageOption(field, ($event.target as HTMLInputElement).value)"
+                    @input="updateImageOption(field, Number(($event.target as HTMLInputElement).value))"
                   />
 
                   <label v-else-if="field.fieldType === 'checkbox'" class="inline-flex items-center gap-2 text-sm text-muted-foreground">
@@ -627,7 +697,7 @@ onMounted(async () => {
                     class="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
                     :placeholder="field.placeholder || ''"
                     :value="String(imageOptions[field.fieldKey] ?? '')"
-                    @input="updateImageOption(field, ($event.target as HTMLInputElement).value)"
+                    @input="updateImageOption(field, field.fieldType === 'number' ? Number(($event.target as HTMLInputElement).value) : ($event.target as HTMLInputElement).value)"
                   />
                 </div>
               </div>
@@ -772,7 +842,7 @@ onMounted(async () => {
                   <div v-if="field.fieldType === 'radio'" class="grid grid-cols-2 gap-2">
                     <button
                       v-for="option in fieldOptionsFromMeta(field)"
-                      :key="optionValue(option)"
+                      :key="optionValueText(option)"
                       type="button"
                       class="min-h-9 rounded-md border px-3 py-2 text-xs font-medium transition"
                       :class="mediaOptions[field.fieldKey] === optionValue(option) ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-background text-muted-foreground hover:bg-secondary'"
@@ -786,9 +856,9 @@ onMounted(async () => {
                     v-else-if="field.fieldType === 'select'"
                     class="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
                     :value="String(mediaOptions[field.fieldKey] ?? '')"
-                    @change="updateMediaOption(field, ($event.target as HTMLSelectElement).value)"
+                    @change="updateMediaSelect(field, $event)"
                   >
-                    <option v-for="option in fieldOptionsFromMeta(field)" :key="optionValue(option)" :value="optionValue(option)">
+                    <option v-for="option in fieldOptionsFromMeta(field)" :key="optionValueText(option)" :value="optionValueText(option)">
                       {{ optionLabel(option) }}
                     </option>
                   </select>
@@ -800,7 +870,7 @@ onMounted(async () => {
                     max="100"
                     class="w-full accent-primary"
                     :value="Number(mediaOptions[field.fieldKey] ?? 50)"
-                    @input="updateMediaOption(field, ($event.target as HTMLInputElement).value)"
+                    @input="updateMediaOption(field, Number(($event.target as HTMLInputElement).value))"
                   />
 
                   <label v-else-if="field.fieldType === 'checkbox'" class="inline-flex items-center gap-2 text-sm text-muted-foreground">
@@ -827,7 +897,7 @@ onMounted(async () => {
                     class="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
                     :placeholder="field.placeholder || ''"
                     :value="String(mediaOptions[field.fieldKey] ?? '')"
-                    @input="updateMediaOption(field, ($event.target as HTMLInputElement).value)"
+                    @input="updateMediaOption(field, field.fieldType === 'number' ? Number(($event.target as HTMLInputElement).value) : ($event.target as HTMLInputElement).value)"
                   />
                 </div>
               </div>
@@ -1066,6 +1136,24 @@ onMounted(async () => {
             <aside class="flex w-full flex-col border-b border-white/10 bg-[#17171d] md:max-w-[430px] md:border-b-0 md:border-r">
               <div class="min-h-0 flex-1 overflow-y-auto p-5">
                 <h2 class="text-lg font-semibold text-white">{{ title }}</h2>
+
+                <div v-if="supportedModels.length > 1" class="mt-5 space-y-2">
+                  <label for="tool-detail-model" class="block text-sm font-medium text-zinc-200">生成模型</label>
+                  <select
+                    id="tool-detail-model"
+                    v-model.number="selectedModelConfigId"
+                    class="h-10 w-full rounded-md border border-white/10 bg-white/5 px-3 text-sm text-white outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+                  >
+                    <option
+                      v-for="model in supportedModels"
+                      :key="model.modelConfigId"
+                      :value="model.modelConfigId"
+                      class="bg-[#17171d] text-white"
+                    >
+                      {{ model.displayName }}
+                    </option>
+                  </select>
+                </div>
 
                 <div class="mt-6 space-y-2">
                   <p class="text-sm font-medium text-zinc-200">

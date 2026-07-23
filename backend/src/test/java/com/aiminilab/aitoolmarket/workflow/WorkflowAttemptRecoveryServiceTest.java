@@ -115,9 +115,10 @@ class WorkflowAttemptRecoveryServiceTest {
         AiTask child = child(TaskStatus.QUEUED.name());
         stub(attempt, step, child);
         when(attemptMapper.markTimedOutIfExpired(attempt.getId(), cutoff)).thenReturn(1);
-        when(stepMapper.failActiveAttempt(
+        when(stepMapper.failActiveAttemptWithContract(
                 eq(step.getId()), eq(0L), eq(attempt.getId()),
-                eq("Workflow step attempt lease expired"), anyList()
+                eq("ATTEMPT_LEASE_EXPIRED"), eq("工作流执行超时，请稍后重试"),
+                eq("Workflow step attempt lease expired"), eq(null), anyList()
         )).thenReturn(1);
 
         assertThat(service.recoverOne(attempt.getId(), cutoff)).isTrue();

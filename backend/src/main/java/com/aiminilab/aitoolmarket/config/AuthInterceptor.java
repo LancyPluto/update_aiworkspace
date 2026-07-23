@@ -6,10 +6,13 @@ import com.aiminilab.aitoolmarket.auth.security.AuthCookieSupport;
 import com.aiminilab.aitoolmarket.auth.security.AuthUser;
 import com.aiminilab.aitoolmarket.auth.security.InternalRequestSignatureVerifier;
 import com.aiminilab.aitoolmarket.auth.security.JwtTokenProvider;
-import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.UserStatus;
 import com.aiminilab.aitoolmarket.common.enums.UserType;
+import com.aiminilab.aitoolmarket.common.error.ApiErrors;
+import com.aiminilab.aitoolmarket.common.error.AuthErrors;
+import com.aiminilab.aitoolmarket.common.error.ErrorContractResponseFactory;
+import com.aiminilab.aitoolmarket.common.error.ErrorDefinition;
 import com.aiminilab.aitoolmarket.task.support.ProviderCheckpointLimits;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -40,22 +43,22 @@ import java.util.Optional;
 @Component
 public class AuthInterceptor implements HandlerInterceptor, Filter {
 
-    private static final String INTERNAL_SIGNATURE_VERIFIED_ATTRIBUTE =
-            AuthInterceptor.class.getName() + ".internalSignatureVerified";
-
     private final JwtTokenProvider jwtTokenProvider;
     private final ObjectMapper objectMapper;
+    private final ErrorContractResponseFactory responseFactory;
     private final InternalRequestSignatureVerifier internalRequestSignatureVerifier;
     private final UserMapper userMapper;
     private final AuthMetrics authMetrics;
 
     public AuthInterceptor(JwtTokenProvider jwtTokenProvider,
                            ObjectMapper objectMapper,
+                           ErrorContractResponseFactory responseFactory,
                            InternalRequestSignatureVerifier internalRequestSignatureVerifier,
                            UserMapper userMapper,
                            AuthMetrics authMetrics) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.objectMapper = objectMapper;
+        this.responseFactory = responseFactory;
         this.internalRequestSignatureVerifier = internalRequestSignatureVerifier;
         this.userMapper = userMapper;
         this.authMetrics = authMetrics;
@@ -77,7 +80,9 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
             long contentLength = request.getContentLengthLong();
             if (contentLength > ProviderCheckpointLimits.MAX_REQUEST_BODY_BYTES) {
                 try {
-                    writeError(response, HttpStatus.PAYLOAD_TOO_LARGE, ErrorCode.PARAM_ERROR, "供应商任务检查点请求过大");
+                    writeError(request, response, HttpStatus.PAYLOAD_TOO_LARGE, ApiErrors.UPLOAD_TOO_LARGE,
+                            ErrorCode.PARAM_ERROR, "供应商任务检查点请求过大",
+                            "Provider checkpoint request exceeded the configured body limit");
                 } catch (Exception exception) {
                     throw new ServletException(exception);
                 }
@@ -86,7 +91,9 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
             body = request.getInputStream().readNBytes(ProviderCheckpointLimits.MAX_REQUEST_BODY_BYTES + 1);
             if (body.length > ProviderCheckpointLimits.MAX_REQUEST_BODY_BYTES) {
                 try {
-                    writeError(response, HttpStatus.PAYLOAD_TOO_LARGE, ErrorCode.PARAM_ERROR, "供应商任务检查点请求过大");
+                    writeError(request, response, HttpStatus.PAYLOAD_TOO_LARGE, ApiErrors.UPLOAD_TOO_LARGE,
+                            ErrorCode.PARAM_ERROR, "供应商任务检查点请求过大",
+                            "Provider checkpoint request exceeded the configured body limit");
                 } catch (Exception exception) {
                     throw new ServletException(exception);
                 }
@@ -99,14 +106,16 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
         if (!verifyInternalSignature(wrappedRequest, body)) {
             try {
                 authMetrics.recordUnauthorizedRequest(request.getRequestURI(), "internal_signature_invalid");
-                writeError(response, HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHORIZED, "内部接口签名无效");
+                writeError(request, response, HttpStatus.UNAUTHORIZED, AuthErrors.CREDENTIALS_MISSING,
+                        ErrorCode.UNAUTHORIZED, "内部接口签名无效",
+                        "Internal request signature is missing or invalid");
             } catch (Exception exception) {
                 throw new ServletException(exception);
             }
             return;
         }
 
-        wrappedRequest.setAttribute(INTERNAL_SIGNATURE_VERIFIED_ATTRIBUTE, Boolean.TRUE);
+        wrappedRequest.setAttribute(ErrorContractResponseFactory.INTERNAL_SIGNATURE_VERIFIED_ATTRIBUTE, Boolean.TRUE);
         filterChain.doFilter(wrappedRequest, response);
     }
 
@@ -127,31 +136,47 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
         }
 
         if (path.startsWith("/api/internal/v1/")) {
-            if (Boolean.TRUE.equals(request.getAttribute(INTERNAL_SIGNATURE_VERIFIED_ATTRIBUTE))) {
+            if (Boolean.TRUE.equals(request.getAttribute(
+                    ErrorContractResponseFactory.INTERNAL_SIGNATURE_VERIFIED_ATTRIBUTE))) {
                 return true;
             }
             authMetrics.recordUnauthorizedRequest(path, "internal_signature_invalid");
-            writeError(response, HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHORIZED, "内部接口签名无效");
+            writeError(request, response, HttpStatus.UNAUTHORIZED, AuthErrors.CREDENTIALS_MISSING,
+                    ErrorCode.UNAUTHORIZED, "内部接口签名无效",
+                    "Internal request signature is missing or invalid");
             return false;
         }
 
         Optional<AuthUser> authUser = extractAuthUser(request);
         if (authUser.isEmpty()) {
-            authMetrics.recordUnauthorizedRequest(path, "missing_or_invalid_token");
-            writeError(response, HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHORIZED, "未登录或 Token 失效");
+            boolean credentialsPresented = hasPresentedCredentials(request);
+            authMetrics.recordUnauthorizedRequest(
+                    path,
+                    credentialsPresented ? "invalid_or_expired_token" : "missing_token"
+            );
+            writeError(request, response, HttpStatus.UNAUTHORIZED,
+                    credentialsPresented ? AuthErrors.CREDENTIALS_EXPIRED : AuthErrors.CREDENTIALS_MISSING,
+                    ErrorCode.UNAUTHORIZED, "未登录或 Token 失效",
+                    credentialsPresented
+                            ? "Authentication credentials are invalid or expired"
+                            : "Authentication credentials are missing");
             return false;
         }
 
         if (!isActiveUser(authUser.get())) {
             authMetrics.recordUnauthorizedRequest(path, "inactive_user");
-            writeError(response, HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHORIZED, "账号已注销或被禁用");
+            writeError(request, response, HttpStatus.UNAUTHORIZED, AuthErrors.CREDENTIALS_EXPIRED,
+                    ErrorCode.UNAUTHORIZED, "账号已注销或被禁用",
+                    "Authenticated account is inactive or deleted");
             return false;
         }
 
         if (requiresAdmin(path)
                 && !UserType.ADMIN.name().equals(authUser.get().userType())) {
             authMetrics.recordUnauthorizedRequest(path, "admin_forbidden");
-            writeError(response, HttpStatus.FORBIDDEN, ErrorCode.ADMIN_FORBIDDEN, "管理员无权限");
+            writeError(request, response, HttpStatus.FORBIDDEN, AuthErrors.ACCESS_DENIED,
+                    ErrorCode.ADMIN_FORBIDDEN, "管理员无权限",
+                    "Authenticated principal does not have administrator access");
             return false;
         }
 
@@ -259,12 +284,32 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
         return Optional.of(authorization.substring("Bearer ".length()));
     }
 
+    private boolean hasPresentedCredentials(HttpServletRequest request) {
+        String authorization = request.getHeader("Authorization");
+        if (authorization != null && authorization.startsWith("Bearer ")) {
+            return true;
+        }
+        Cookie[] cookies = request.getCookies();
+        if (cookies == null) {
+            return false;
+        }
+        for (Cookie cookie : cookies) {
+            if ((AuthCookieSupport.USER_SESSION_COOKIE.equals(cookie.getName())
+                    || AuthCookieSupport.ADMIN_SESSION_COOKIE.equals(cookie.getName()))
+                    && cookie.getValue() != null
+                    && !cookie.getValue().isBlank()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private Optional<String> extractSessionCookieToken(HttpServletRequest request) {
         Cookie[] cookies = request.getCookies();
         if (cookies == null || cookies.length == 0) {
             return Optional.empty();
         }
-        String preferredCookie = request.getRequestURI().startsWith("/api/admin/v1/")
+        String preferredCookie = requiresAdmin(request.getRequestURI())
                 ? AuthCookieSupport.ADMIN_SESSION_COOKIE
                 : AuthCookieSupport.USER_SESSION_COOKIE;
         Optional<String> preferred = cookieValue(cookies, preferredCookie);
@@ -283,11 +328,29 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
         return Optional.empty();
     }
 
-    private void writeError(HttpServletResponse response, HttpStatus status, ErrorCode errorCode, String message) throws Exception {
-        response.setStatus(status.value());
+    private void writeError(HttpServletRequest request,
+                            HttpServletResponse response,
+                            HttpStatus legacyStatus,
+                            ErrorDefinition definition,
+                            ErrorCode legacyErrorCode,
+                            String userMessage,
+                            String developerMessage) throws Exception {
+        String contractUserMessage = responseFactory.isV2()
+                ? definition.defaultUserMessage()
+                : userMessage;
+        var contractResponse = responseFactory.errorResponse(
+                request,
+                definition,
+                contractUserMessage,
+                developerMessage,
+                legacyErrorCode,
+                null,
+                legacyStatus
+        );
+        response.setStatus(contractResponse.getStatusCode().value());
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        response.getWriter().write(objectMapper.writeValueAsString(ApiResponse.fail(errorCode, message)));
+        response.getWriter().write(objectMapper.writeValueAsString(contractResponse.getBody()));
     }
 
     private static final class CachedBodyRequest extends HttpServletRequestWrapper {

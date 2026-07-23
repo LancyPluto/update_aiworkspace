@@ -1,5 +1,5 @@
 import type { ToolField } from "@/api/types"
-import { parseFieldMeta } from "@/utils/fieldUiMeta"
+import { canonicalFieldOptionValue, isFieldVisible, parseFieldMeta } from "@/utils/fieldUiMeta"
 
 export type AspectRatioOptionInput = string | { label: string; value: string }
 export type AspectRatioOption = { label: string; value: string }
@@ -54,6 +54,7 @@ export function buildTaskParams(
   const out: Record<string, unknown> = {}
   for (const f of fields) {
     if (parseFieldMeta(f).submitPolicy === "ui_only") continue
+    if (!isFieldVisible(f, raw)) continue
     const v = raw[f.fieldKey]
     if (f.fieldType === "number") {
       if (v === "" || v === undefined || v === null) {
@@ -63,12 +64,16 @@ export function buildTaskParams(
       if (!Number.isNaN(n)) out[f.fieldKey] = n
     } else if (f.fieldType === "checkbox") {
       out[f.fieldKey] = Boolean(v)
-    } else if ((f.fieldType === "select" || f.fieldType === "radio" || f.fieldType === "aspect_ratio") && v === "__none__") {
-      continue
-    } else if ((f.fieldType === "select" || f.fieldType === "radio" || f.fieldType === "aspect_ratio") && v === "__custom__") {
-      const custom = raw[`${f.fieldKey}Custom`]
-      if (custom !== undefined && custom !== null && String(custom).trim() !== "") {
-        out[f.fieldKey] = String(custom).trim()
+    } else if (f.fieldType === "select" || f.fieldType === "radio" || f.fieldType === "aspect_ratio") {
+      const optionValue = canonicalFieldOptionValue(f, v)
+      if (optionValue === "__none__") continue
+      if (optionValue === "__custom__") {
+        const custom = raw[`${f.fieldKey}Custom`]
+        if (custom !== undefined && custom !== null && String(custom).trim() !== "") {
+          out[f.fieldKey] = String(custom).trim()
+        }
+      } else if (optionValue !== undefined && optionValue !== null && optionValue !== "") {
+        out[f.fieldKey] = optionValue
       }
     } else if (Array.isArray(v)) {
       if (v.length > 0) out[f.fieldKey] = v

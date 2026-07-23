@@ -85,11 +85,14 @@ function giftCardStatusClass(status: string | undefined | null) {
 }
 
 const displayName = computed(
-  () => safeDisplayName(auth.user?.nickname) || safeDisplayName(auth.user?.username) || defaultUserDisplayName(auth.user?.id),
+  () =>
+    safeDisplayName(auth.user?.nickname, auth.user?.publicCode) ||
+    safeDisplayName(auth.user?.username, auth.user?.publicCode) ||
+    defaultUserDisplayName(auth.user?.publicCode),
 )
-const joinedLabel = computed(() => `UID ${auth.user?.id ?? "--"}`)
+const joinedLabel = computed(() => `公开编号 p${auth.user?.publicCode ?? "-----"}`)
 const accountLabel = computed(() => auth.user?.phone || auth.user?.email || auth.user?.username || "--")
-const publicProfileUrl = computed(() => (auth.user?.id ? `/u/${auth.user.id}` : "/profile"))
+const publicProfileUrl = computed(() => (auth.user?.publicCode ? `/u/p${auth.user.publicCode}` : "/profile"))
 const cancelConfirmPhrase = computed(() => `确认注销我的账号`)
 const canSubmitCancel = computed(
   () => cancelSmsCode.value.trim().length >= 4 && cancelConfirmText.value.trim() === cancelConfirmPhrase.value,
@@ -372,7 +375,10 @@ async function submitRedeemByCode() {
 onMounted(async () => {
   document.addEventListener("keydown", handleProfileKeydown)
   if (!auth.user) await auth.fetchCurrentUser({ clearOnFailure: false })
-  nickname.value = safeDisplayName(auth.user?.nickname) || safeDisplayName(auth.user?.username) || ""
+  nickname.value =
+    safeDisplayName(auth.user?.nickname, auth.user?.publicCode) ||
+    safeDisplayName(auth.user?.username, auth.user?.publicCode) ||
+    defaultUserDisplayName(auth.user?.publicCode)
   bio.value = auth.user?.bio || ""
   autoPublishAssets.value = auth.user?.autoPublishAssets !== false
   promptPublicByDefault.value = auth.user?.promptPublicByDefault === true

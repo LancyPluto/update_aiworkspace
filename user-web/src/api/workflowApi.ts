@@ -115,6 +115,8 @@ export interface WorkflowRunStep {
   startedAt?: string | null
   completedAt?: string | null
   errorCode?: string | null
+  userMessage?: string | null
+  failureTraceId?: string | null
   errorMessage?: string | null
   artifacts?: WorkflowArtifact[] | null
   charges?: WorkflowStepCharge[] | null
@@ -143,6 +145,8 @@ export interface WorkflowRun {
   updatedAt?: string | null
   completedAt?: string | null
   errorCode?: string | null
+  userMessage?: string | null
+  failureTraceId?: string | null
   errorMessage?: string | null
   steps?: WorkflowRunStep[] | null
   artifacts?: WorkflowArtifact[] | null

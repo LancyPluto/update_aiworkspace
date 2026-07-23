@@ -8,6 +8,8 @@ import com.aiminilab.aitoolmarket.agent.support.ModelConfigCredentialResolver;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.tool.entity.AiTool;
+import com.aiminilab.aitoolmarket.tool.entity.ToolModelBinding;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolModelBindingMapper;
 import com.aiminilab.aitoolmarket.tool.support.ToolModelCapabilitySupport;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -31,18 +33,30 @@ public class ModelCapabilityService {
     private final ModelCapabilitiesCodec capabilitiesCodec;
     private final AgentModelConfigMapper agentModelConfigMapper;
     private final ModelConfigCredentialResolver credentialResolver;
+    private final ToolModelBindingMapper toolModelBindingMapper;
 
     @Autowired
     public ModelCapabilityService(ModelProviderRegistry providerRegistry,
                                   ModelProviderMetadataService providerMetadataService,
                                   ModelCapabilitiesCodec capabilitiesCodec,
                                   AgentModelConfigMapper agentModelConfigMapper,
-                                  ModelConfigCredentialResolver credentialResolver) {
+                                  ModelConfigCredentialResolver credentialResolver,
+                                  ToolModelBindingMapper toolModelBindingMapper) {
         this.providerRegistry = providerRegistry;
         this.providerMetadataService = providerMetadataService;
         this.capabilitiesCodec = capabilitiesCodec;
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.credentialResolver = credentialResolver;
+        this.toolModelBindingMapper = toolModelBindingMapper;
+    }
+
+    public ModelCapabilityService(ModelProviderRegistry providerRegistry,
+                                  ModelProviderMetadataService providerMetadataService,
+                                  ModelCapabilitiesCodec capabilitiesCodec,
+                                  AgentModelConfigMapper agentModelConfigMapper,
+                                  ModelConfigCredentialResolver credentialResolver) {
+        this(providerRegistry, providerMetadataService, capabilitiesCodec,
+                agentModelConfigMapper, credentialResolver, null);
     }
 
     public ModelCapabilityService(ModelProviderRegistry providerRegistry,
@@ -54,7 +68,8 @@ public class ModelCapabilityService {
                 new ModelProviderMetadataService(null, providerRegistry, new com.fasterxml.jackson.databind.ObjectMapper()),
                 capabilitiesCodec,
                 agentModelConfigMapper,
-                credentialResolver
+                credentialResolver,
+                null
         );
     }
 
@@ -131,8 +146,10 @@ public class ModelCapabilityService {
         if (tool == null) {
             return null;
         }
-        if (tool.getModelConfigId() != null) {
-            AgentModelConfig bound = agentModelConfigMapper.findActiveById(tool.getModelConfigId());
+        Long defaultBindingId = defaultBindingModelConfigId(tool.getId());
+        Long boundModelConfigId = defaultBindingId == null ? tool.getModelConfigId() : defaultBindingId;
+        if (boundModelConfigId != null) {
+            AgentModelConfig bound = agentModelConfigMapper.findActiveById(boundModelConfigId);
             if (bound != null) {
                 return bound;
             }
@@ -178,8 +195,10 @@ public class ModelCapabilityService {
             List<AgentModelConfig> activeConfigs,
             Map<Long, AgentModelConfig> configsById
     ) {
-        if (tool.getModelConfigId() != null) {
-            AgentModelConfig bound = configsById.get(tool.getModelConfigId());
+        Long defaultBindingId = defaultBindingModelConfigId(tool.getId());
+        Long boundModelConfigId = defaultBindingId == null ? tool.getModelConfigId() : defaultBindingId;
+        if (boundModelConfigId != null) {
+            AgentModelConfig bound = configsById.get(boundModelConfigId);
             if (bound != null) {
                 return bound;
             }
@@ -199,19 +218,42 @@ public class ModelCapabilityService {
         if (requestedModelConfigId == null) {
             return resolveModelConfigForTool(tool);
         }
+        if (hasBindings(tool == null ? null : tool.getId())) {
+            if (toolModelBindingMapper.countByToolIdAndModelConfigId(tool.getId(), requestedModelConfigId) == 0) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR,
+                        "model config is not bound to this tool");
+            }
+        }
         AgentModelConfig selected = agentModelConfigMapper.findActiveById(requestedModelConfigId);
         if (selected == null || Boolean.FALSE.equals(selected.getEnabled())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "model config not found or not selectable");
+        }
+        if (hasBindings(tool == null ? null : tool.getId()) && !isContractReady(selected)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "selected model API contract is not READY");
         }
         validateExecution(tool, selected);
         return selected;
     }
 
     public void validateToolModelBinding(AiTool tool) {
-        if (tool == null || tool.getModelConfigId() == null) {
+        if (tool == null) {
             return;
         }
-        AgentModelConfig config = agentModelConfigMapper.findActiveById(tool.getModelConfigId());
+        List<ToolModelBinding> bindings = bindings(tool.getId());
+        if (!bindings.isEmpty()) {
+            for (ToolModelBinding binding : bindings) {
+                validateBoundModel(tool, binding.getModelConfigId());
+            }
+            return;
+        }
+        if (tool.getModelConfigId() != null) {
+            validateBoundModel(tool, tool.getModelConfigId());
+        }
+    }
+
+    private void validateBoundModel(AiTool tool, Long modelConfigId) {
+        AgentModelConfig config = agentModelConfigMapper.findActiveById(modelConfigId);
         if (config == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "model config not found");
         }
@@ -220,6 +262,38 @@ public class ModelCapabilityService {
                     "bound model config is disabled: " + displayModelName(config));
         }
         validateToolModelCapabilities(tool, config);
+    }
+
+    public boolean isContractReady(AgentModelConfig config) {
+        return config != null
+                && "READY".equalsIgnoreCase(config.getContractStatus())
+                && config.getRequestSchemaJson() != null
+                && !config.getRequestSchemaJson().isBlank();
+    }
+
+    private boolean hasBindings(Long toolId) {
+        return toolModelBindingMapper != null && toolId != null
+                && toolModelBindingMapper.countByToolId(toolId) > 0;
+    }
+
+    private Long defaultBindingModelConfigId(Long toolId) {
+        List<ToolModelBinding> bindings = bindings(toolId);
+        if (bindings.isEmpty()) {
+            return null;
+        }
+        return bindings.stream()
+                .filter(binding -> Boolean.TRUE.equals(binding.getDefault()))
+                .map(ToolModelBinding::getModelConfigId)
+                .findFirst()
+                .orElse(bindings.get(0).getModelConfigId());
+    }
+
+    private List<ToolModelBinding> bindings(Long toolId) {
+        if (toolModelBindingMapper == null || toolId == null) {
+            return List.of();
+        }
+        List<ToolModelBinding> bindings = toolModelBindingMapper.findByToolId(toolId);
+        return bindings == null ? List.of() : bindings;
     }
 
     public void validateToolModelCapabilities(AiTool tool, AgentModelConfig config) {

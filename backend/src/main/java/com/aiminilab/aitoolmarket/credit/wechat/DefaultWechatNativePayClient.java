@@ -1,8 +1,13 @@
 package com.aiminilab.aitoolmarket.credit.wechat;
 
-import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
-import com.aiminilab.aitoolmarket.common.exception.BusinessException;
+import com.aiminilab.aitoolmarket.common.error.ErrorDefinition;
+import com.aiminilab.aitoolmarket.common.error.PayErrors;
+import com.aiminilab.aitoolmarket.common.exception.AppException;
+import com.aiminilab.aitoolmarket.common.exception.BizException;
+import com.aiminilab.aitoolmarket.common.exception.DependencyException;
+import com.aiminilab.aitoolmarket.common.exception.SystemException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
@@ -14,6 +19,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
+import java.net.http.HttpTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -65,20 +71,24 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
                     .build();
             HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native prepay failed: " + response.body());
+                throw upstreamHttpFailure("native-prepay", response);
             }
             verifyHttpResponseSignature(response);
             JsonNode json = objectMapper.readTree(response.body());
             String codeUrl = json.path("code_url").asText("");
             if (codeUrl.isBlank()) {
-                throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native prepay response missing code_url");
+                throw invalidProviderResponse("native-prepay", "requiredField=code_url", null);
             }
             return new NativePrepayResponse(codeUrl);
+        } catch (JsonProcessingException exception) {
+            throw invalidProviderResponse("native-prepay", "responseJsonInvalid", exception);
+        } catch (HttpTimeoutException exception) {
+            throw providerTransportFailure(PayErrors.PROVIDER_TIMEOUT, "native-prepay", exception);
         } catch (IOException exception) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native prepay request failed: " + exception.getMessage());
+            throw providerTransportFailure(PayErrors.PROVIDER_CALL_FAILED, "native-prepay", exception);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native prepay request interrupted: " + exception.getMessage());
+            throw providerTransportFailure(PayErrors.PROVIDER_CALL_FAILED, "native-prepay", exception);
         }
     }
 
@@ -100,15 +110,19 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
                 return null;
             }
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native order query failed: " + response.body());
+                throw upstreamHttpFailure("order-query", response);
             }
             verifyHttpResponseSignature(response);
             return notificationFromTransaction(objectMapper.readTree(response.body()));
+        } catch (JsonProcessingException exception) {
+            throw invalidProviderResponse("order-query", "responseJsonInvalid", exception);
+        } catch (HttpTimeoutException exception) {
+            throw providerTransportFailure(PayErrors.PROVIDER_TIMEOUT, "order-query", exception);
         } catch (IOException exception) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native order query failed");
+            throw providerTransportFailure(PayErrors.PROVIDER_CALL_FAILED, "order-query", exception);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native order query interrupted");
+            throw providerTransportFailure(PayErrors.PROVIDER_CALL_FAILED, "order-query", exception);
         }
     }
 
@@ -135,11 +149,15 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
                 return true;
             }
             return false;
+        } catch (JsonProcessingException exception) {
+            throw invalidProviderResponse("order-close", "requestJsonSerializationFailed", exception);
+        } catch (HttpTimeoutException exception) {
+            throw providerTransportFailure(PayErrors.PROVIDER_TIMEOUT, "order-close", exception);
         } catch (IOException exception) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native order close failed");
+            throw providerTransportFailure(PayErrors.PROVIDER_CALL_FAILED, "order-close", exception);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native order close interrupted");
+            throw providerTransportFailure(PayErrors.PROVIDER_CALL_FAILED, "order-close", exception);
         }
     }
 
@@ -157,8 +175,10 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
             );
             JsonNode transaction = objectMapper.readTree(plain);
             return notificationFromTransaction(transaction);
+        } catch (AppException exception) {
+            throw exception;
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat payment notification decrypt failed");
+            throw invalidCallback("notificationDecryptOrParseFailed", exception);
         }
     }
 
@@ -205,22 +225,26 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
     }
 
     private void verifyCallbackSignature(WechatPayCallbackHeaders headers, String body) {
+        verifySignature(headers, body, false);
+    }
+
+    private void verifySignature(WechatPayCallbackHeaders headers, String body, boolean providerResponse) {
         if (headers == null || blank(headers.serial()) || blank(headers.signature())
                 || blank(headers.timestamp()) || blank(headers.nonce())) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat payment callback signature headers missing");
+            throw signatureFailure(providerResponse, "signatureHeadersMissing", null);
         }
         if (!headers.serial().equals(properties.getWechatPayPublicKeyId())) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat payment callback public key mismatch");
+            throw signatureFailure(providerResponse, "publicKeyIdMismatch", null);
         }
         long now = Instant.now().getEpochSecond();
         long callbackTs;
         try {
             callbackTs = Long.parseLong(headers.timestamp());
         } catch (NumberFormatException exception) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat payment callback timestamp invalid");
+            throw signatureFailure(providerResponse, "timestampInvalid", exception);
         }
         if (Math.abs(now - callbackTs) > CALLBACK_MAX_SKEW_SECONDS) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat payment callback timestamp expired");
+            throw signatureFailure(providerResponse, "timestampExpired", null);
         }
         String message = headers.timestamp() + "\n" + headers.nonce() + "\n" + body + "\n";
         try {
@@ -229,12 +253,12 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
             verifier.update(message.getBytes(StandardCharsets.UTF_8));
             boolean ok = verifier.verify(Base64.getDecoder().decode(headers.signature()));
             if (!ok) {
-                throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat payment callback signature invalid");
+                throw signatureFailure(providerResponse, "signatureInvalid", null);
             }
-        } catch (BusinessException exception) {
+        } catch (AppException exception) {
             throw exception;
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat payment callback signature verify failed");
+            throw signatureFailure(providerResponse, "signatureVerificationFailed", exception);
         }
     }
 
@@ -245,7 +269,7 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
                 response.headers().firstValue("Wechatpay-Timestamp").orElse(""),
                 response.headers().firstValue("Wechatpay-Nonce").orElse("")
         );
-        verifyCallbackSignature(headers, response.body());
+        verifySignature(headers, response.body(), true);
     }
 
     private String decryptResource(String nonce, String associatedData, String ciphertext) throws Exception {
@@ -287,7 +311,7 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
 
             throw new IllegalArgumentException("Unsupported WeChat merchant private key PEM header");
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat merchant private key cannot be loaded");
+            throw configurationFailure("merchantPrivateKeyLoadFailed", exception);
         }
     }
 
@@ -300,7 +324,7 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
             byte[] bytes = Base64.getDecoder().decode(content);
             return KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(bytes));
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Pay public key cannot be loaded");
+            throw configurationFailure("wechatPayPublicKeyLoadFailed", exception);
         }
     }
 
@@ -311,7 +335,7 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
             signer.update(message.getBytes(StandardCharsets.UTF_8));
             return Base64.getEncoder().encodeToString(signer.sign());
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat request signature failed");
+            throw configurationFailure("requestSignatureFailed", exception);
         }
     }
 
@@ -325,7 +349,87 @@ public class DefaultWechatNativePayClient implements WechatNativePayClient {
                 || blank(properties.getWechatPayPublicKeyId())
                 || blank(properties.getWechatPayPublicKeyPath())
                 || blank(properties.getNotifyUrl())) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "WeChat Native payment is not configured");
+            throw configurationFailure("requiredConfigurationMissing", null);
+        }
+    }
+
+    private DependencyException upstreamHttpFailure(String operation, HttpResponse<String> response) {
+        String body = response.body() == null ? "" : response.body();
+        String upstreamCode = safeUpstreamCode(body);
+        String developerMessage = "WeChat Pay provider request failed; operation=" + operation
+                + "; upstreamStatus=" + response.statusCode()
+                + "; upstreamCode=" + upstreamCode
+                + "; responseBytes=" + body.getBytes(StandardCharsets.UTF_8).length;
+        return new DependencyException(
+                PayErrors.PROVIDER_CALL_FAILED,
+                developerMessage,
+                null,
+                Map.of(
+                        "provider", "wechat_pay",
+                        "operation", operation,
+                        "upstreamStatus", response.statusCode(),
+                        "upstreamCode", upstreamCode,
+                        "responseBytes", body.getBytes(StandardCharsets.UTF_8).length
+                )
+        );
+    }
+
+    private DependencyException providerTransportFailure(ErrorDefinition definition,
+                                                         String operation,
+                                                         Exception cause) {
+        return new DependencyException(
+                definition,
+                "WeChat Pay provider transport failed; operation=" + operation
+                        + "; exceptionType=" + cause.getClass().getName(),
+                cause,
+                Map.of("provider", "wechat_pay", "operation", operation)
+        );
+    }
+
+    private DependencyException invalidProviderResponse(String operation, String reason, Throwable cause) {
+        return new DependencyException(
+                PayErrors.PROVIDER_RESPONSE_INVALID,
+                "WeChat Pay provider response rejected; operation=" + operation + "; reason=" + reason,
+                cause,
+                Map.of("provider", "wechat_pay", "operation", operation, "reason", reason)
+        );
+    }
+
+    private AppException signatureFailure(boolean providerResponse, String reason, Throwable cause) {
+        if (providerResponse) {
+            return invalidProviderResponse("response-signature", reason, cause);
+        }
+        return invalidCallback(reason, cause);
+    }
+
+    private BizException invalidCallback(String reason, Throwable cause) {
+        return new BizException(
+                PayErrors.CALLBACK_INVALID,
+                PayErrors.CALLBACK_INVALID.defaultUserMessage(),
+                "WeChat Pay callback rejected; reason=" + reason,
+                cause,
+                Map.of("provider", "wechat_pay", "operation", "payment-callback", "reason", reason)
+        );
+    }
+
+    private SystemException configurationFailure(String reason, Throwable cause) {
+        return new SystemException(
+                PayErrors.SERVICE_NOT_CONFIGURED,
+                "WeChat Pay configuration unavailable; reason=" + reason,
+                cause,
+                Map.of("provider", "wechat_pay", "reason", reason)
+        );
+    }
+
+    private String safeUpstreamCode(String body) {
+        if (body == null || body.isBlank()) {
+            return "unknown";
+        }
+        try {
+            String code = objectMapper.readTree(body).path("code").asText("");
+            return code.matches("[A-Za-z0-9_.-]{1,64}") ? code : "unknown";
+        } catch (JsonProcessingException ignored) {
+            return "unknown";
         }
     }
 

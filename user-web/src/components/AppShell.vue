@@ -255,8 +255,8 @@ const paidMembership = computed(() => membershipLabel.value !== "体验版")
 const creditCtaText = computed(() => (creditWarning.value ? "立即升级" : "提升额度"))
 const isAgentRoute = computed(() => route.path === "/agent" || route.path.startsWith("/agent/"))
 const safeUserName = computed(() => {
-  const nickname = safeDisplayName(auth.user?.nickname)
-  const username = safeDisplayName(auth.user?.username)
+  const nickname = safeDisplayName(auth.user?.nickname, auth.user?.publicCode)
+  const username = safeDisplayName(auth.user?.username, auth.user?.publicCode)
   const badEncoding = /\uFFFD|锟|阖€|鍍/.test(nickname)
   if (nickname && !badEncoding) return nickname
   if (username) return username

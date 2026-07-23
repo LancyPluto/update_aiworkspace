@@ -25,12 +25,11 @@ let previousActiveElement: HTMLElement | null = null
 let previousBodyOverflow = ""
 
 const inviteCode = computed(() => {
-  const id = auth.user?.id
-  return id ? `WLCLOUD${String(id).padStart(5, "0")}` : "WLCLOUDAI"
+  return auth.user?.referralCode?.trim().toUpperCase() || ""
 })
 
 const inviteUrl = computed(() => {
-  return `${PUBLIC_SITE_ORIGIN}/?invite=${inviteCode.value}`
+  return inviteCode.value ? `${PUBLIC_SITE_ORIGIN}/?invite=${encodeURIComponent(inviteCode.value)}` : ""
 })
 
 function clearCopiedTimer() {
@@ -79,6 +78,10 @@ function selectInviteLink(event: FocusEvent) {
 }
 
 async function copyInviteLink() {
+  if (!inviteCode.value) {
+    copyError.value = "邀请码暂不可用，请稍后重试"
+    return
+  }
   clearCopiedTimer()
   copied.value = false
   copyError.value = ""
@@ -211,7 +214,7 @@ onBeforeUnmount(() => {
         <div class="referral-dialog__share">
           <div class="referral-dialog__code-row">
             <span>我的邀请码</span>
-            <code>{{ inviteCode }}</code>
+            <code>{{ inviteCode || "------" }}</code>
           </div>
 
           <label class="referral-dialog__link-label" for="referral-invite-link">
@@ -234,6 +237,7 @@ onBeforeUnmount(() => {
             type="button"
             class="referral-dialog__copy"
             :class="{ 'referral-dialog__copy--success': copied }"
+            :disabled="!inviteCode"
             @click="copyInviteLink"
           >
             <Check v-if="copied" :size="18" aria-hidden="true" />

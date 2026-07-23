@@ -37,6 +37,11 @@ function formatTimestamp(value?: string | null): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false })
 }
+
+function stepFailureMessage(step: WorkflowRunStep): string {
+  if (!["FAILED", "CANCELLED"].includes(step.status)) return ""
+  return step.userMessage?.trim() || step.errorMessage?.trim() || ""
+}
 </script>
 
 <template>
@@ -67,7 +72,7 @@ function formatTimestamp(value?: string | null): string {
             <span class="text-xs" :class="statusClass(step.status)">{{ stepStatusView(step.status).label }}</span>
           </div>
           <p v-if="step.progressMessage" class="mt-1 text-xs leading-5 text-muted-foreground">{{ step.progressMessage }}</p>
-          <p v-if="step.errorMessage" class="mt-1 text-xs leading-5 text-destructive">{{ step.errorMessage }}</p>
+          <p v-if="stepFailureMessage(step)" class="mt-1 text-xs leading-5 text-destructive">{{ stepFailureMessage(step) }}</p>
           <div v-if="step.progress != null && ['QUEUED', 'RUNNING'].includes(step.status)" class="mt-3 h-1.5 overflow-hidden rounded-full bg-secondary">
             <div class="h-full rounded-full bg-primary transition-[width]" :style="{ width: `${Math.max(0, Math.min(100, step.progress))}%` }" />
           </div>

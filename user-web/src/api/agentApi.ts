@@ -1,4 +1,4 @@
-import { apiRequest, getRequestBaseUrl } from "./client"
+import { apiErrorFromResponse, apiRequest, getRequestBaseUrl } from "./client"
 import type {
   AgentMessage,
   AgentRun,
@@ -210,12 +210,16 @@ export async function streamAgentRunEvents(
   const response = await fetch(url.toString(), {
     method: "GET",
     signal: options.signal,
+    credentials: "include",
     headers: {
       Accept: "text/event-stream",
       ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
     },
   })
-  if (!response.ok || !response.body) {
+  if (!response.ok) {
+    throw await apiErrorFromResponse(response, { fallbackMessage: `Agent event stream failed: ${response.status}` })
+  }
+  if (!response.body) {
     throw new Error(`Agent event stream failed: ${response.status}`)
   }
 

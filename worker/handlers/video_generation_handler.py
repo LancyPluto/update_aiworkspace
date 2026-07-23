@@ -5,6 +5,7 @@ from typing import Any
 from client.agnes_video_client import (
     AgnesVideoClient,
     AgnesVideoError,
+    AgnesVideoInputError,
     AgnesVideoRequestNotSentError,
     AgnesVideoTimeoutError,
 )
@@ -19,6 +20,7 @@ from handlers.generated_video_persister import GeneratedVideoPersistError, Gener
 from providers import registry as provider_registry
 from utils.input_image import InputImageError, resolve_reference_image_data_url, validate_min_resolution
 from utils.kling_config import resolve_kling_api_task, resolve_kling_model_name, resolve_kling_video_paths
+from utils.model_contract import ModelContractParamsError, ModelContractResponseError, apply_request_mapping
 from utils.volcengine_config import resolve_volcengine_task_model
 
 
@@ -82,8 +84,8 @@ class VideoGenerationHandler:
                 LOGGER.info("video generation task %s finalized from cached media traceId=%s", task_id, trace_id or "-")
                 return {"status": "SUCCESS", "taskId": task_id, "traceId": trace_id, "cached": True}
 
-            params = context.get("params") or {}
             model_config = context.get("modelConfig") or {}
+            params = apply_request_mapping(context.get("params"), model_config)
             provider = str(model_config.get("provider") or context.get("modelProviderCode") or "").lower()
             provider_registry.require_capability(provider, "VIDEO_GENERATION")
             provider_registry.require_worker_ready(provider)
@@ -92,7 +94,11 @@ class VideoGenerationHandler:
 
             prompt = _build_prompt(params)
             api_task = resolve_kling_api_task(model_config) if provider_protocol == "kling_video" else ""
-            if not prompt and api_task not in {"motion_control"}:
+            if (
+                not prompt
+                and api_task not in {"motion_control"}
+                and not (provider_protocol == "seedance" and _has_seedance_reference_media(params))
+            ):
                 raise KlingVideoError("prompt is required")
 
             self._mark_processing_safe(task_id, progress=12, progress_message="Video generation task started", trace_id=trace_id)
@@ -127,7 +133,11 @@ class VideoGenerationHandler:
                             "external_task_id": str(params.get("externalTaskId") or params.get("external_task_id") or ""),
                             "create_path": create_path,
                             "result_path_template": result_path,
-                            "video_url": _first_text(params, "videoUrl", "video_url", "sourceVideo", "sourceVideoUrl"),
+                            "video_url": (
+                                ""
+                                if video_request.get("video_list")
+                                else _first_text(params, "videoUrl", "video_url", "sourceVideo", "sourceVideoUrl")
+                            ),
                             "character_orientation": _first_text(
                                 params,
                                 "characterOrientation",
@@ -135,8 +145,16 @@ class VideoGenerationHandler:
                             ),
                             "static_mask": _first_text(params, "staticMask", "static_mask"),
                             "dynamic_masks": params.get("dynamicMasks") or params.get("dynamic_masks"),
-                            "image_list": params.get("imageList") or params.get("image_list"),
-                            "video_list": params.get("videoList") or params.get("video_list"),
+                            "image_list": (
+                                params.get("imageList")
+                                or params.get("image_list")
+                                or video_request.get("image_list")
+                            ),
+                            "video_list": (
+                                params.get("videoList")
+                                or params.get("video_list")
+                                or video_request.get("video_list")
+                            ),
                             "element_list": params.get("elementList") or params.get("element_list"),
                             "multi_shot": str(params.get("multiShot") or params.get("multi_shot") or "false"),
                             "shot_type": str(params.get("shotType") or params.get("shot_type") or ""),
@@ -250,6 +268,12 @@ class VideoGenerationHandler:
             )
         except InputImageError as exc:
             return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
+        except AgnesVideoInputError as exc:
+            return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
+        except ModelContractParamsError as exc:
+            return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
+        except ModelContractResponseError as exc:
+            return self._mark_failed(task_id, "MODEL_CALL_FAILED", str(exc), trace_id)
         except (KlingVideoError, SeedanceVideoError, AgnesVideoError, DashScopeVideoError, provider_registry.ProviderRegistryError) as exc:
             return self._mark_failed(
                 task_id,
@@ -302,6 +326,7 @@ class VideoGenerationHandler:
                 text_result_path=model_config.get("textResultPath") or result_path,
                 image_result_path=model_config.get("imageResultPath") or result_path,
                 timeout_seconds=model_config.get("timeoutSeconds"),
+                model_config=model_config,
             )
         if provider_protocol == "agnes_video":
             return self.agnes_client or AgnesVideoClient(
@@ -309,6 +334,7 @@ class VideoGenerationHandler:
                 api_key=model_config.get("apiKey"),
                 timeout_seconds=model_config.get("timeoutSeconds"),
                 extra_auth_json=model_config.get("extraAuthJson"),
+                model_config=model_config,
             )
         if provider_protocol == "seedance":
             return self.seedance_client or SeedanceVideoClient.from_model_config(model_config)
@@ -317,6 +343,7 @@ class VideoGenerationHandler:
                 base_url=model_config.get("baseUrl"),
                 api_key=model_config.get("apiKey"),
                 timeout_seconds=model_config.get("timeoutSeconds"),
+                model_config=model_config,
             )
         raise KlingVideoError(f"unsupported video provider: {provider or 'empty'}")
 
@@ -455,6 +482,9 @@ def _build_video_request(params: dict[str, Any], model: str, provider_protocol: 
         "resolution": str(params.get("resolution") or ""),
     }
     if provider_protocol == "seedance":
+        generation_mode = _first_text(params, "generationMode", "generation_mode")
+        if generation_mode:
+            request["mode"] = generation_mode
         reference_images = _resolve_reference_image_sources(params)
         if reference_images:
             request["images"] = reference_images
@@ -469,25 +499,14 @@ def _build_video_request(params: dict[str, Any], model: str, provider_protocol: 
         )
         if image_tail:
             request["image_tail"] = image_tail
-        video_url = _first_text(
-            params,
-            "sourceVideoUrl",
-            "sourceVideo",
-            "videoUrl",
-            "video_url",
-            "referenceVideoUrl",
-        )
-        if video_url:
-            request["video_url"] = video_url
-        audio_data_url = _first_text(
-            params,
-            "audioUrl",
-            "audioDataUrl",
-            "audio_url",
-            "referenceAudioUrl",
-        )
-        if audio_data_url:
-            request["audio_data_url"] = audio_data_url
+        video_urls = _resolve_reference_video_sources(params)
+        if video_urls:
+            request["video_url"] = video_urls[0]
+            request["video_urls"] = video_urls
+        audio_urls = _resolve_reference_audio_sources(params)
+        if audio_urls:
+            request["audio_data_url"] = audio_urls[0]
+            request["audio_urls"] = audio_urls
         if "generateAudio" in params or "generate_audio" in params:
             request["generate_audio"] = _resolve_bool_param(
                 params.get("generateAudio") if "generateAudio" in params else params.get("generate_audio"),
@@ -500,14 +519,104 @@ def _build_video_request(params: dict[str, Any], model: str, provider_protocol: 
                 params.get("cameraFixed") if "cameraFixed" in params else params.get("camera_fixed"),
                 default=False,
             )
+    if provider_protocol == "agnes_video":
+        generation_mode = _first_text(params, "generationMode", "generation_mode")
+        if generation_mode:
+            request["generation_mode"] = generation_mode
+        request["num_frames"] = _optional_int(params.get("numFrames") or params.get("num_frames"))
+        request["frame_rate"] = _optional_int(params.get("frameRate") or params.get("frame_rate"))
+        reference_images = _resolve_reference_image_sources(params)
+        if reference_images:
+            request["images"] = reference_images
     if provider_protocol in {"kling_video", "agnes_video"}:
-        request["image_tail"] = _first_text(params, "imageTail", "image_tail", "tailImage", "tailImageUrl", "lastFrameUrl")
+        request["image_tail"] = _first_text(
+            params,
+            "imageTail",
+            "image_tail",
+            "tailImage",
+            "tailImageUrl",
+            "lastFrameImage",
+            "lastFrameUrl",
+            "last_frame_image",
+            "last_frame_url",
+        )
         request["mode"] = str(params.get("mode") or params.get("qualityMode") or "")
+    if provider_protocol == "kling_video" and _is_kling_omni_video_model(model):
+        _apply_kling_omni_generation_mode(request, params)
     return request
+
+
+def _apply_kling_omni_generation_mode(request: dict[str, Any], params: dict[str, Any]) -> None:
+    generation_mode = _first_text(params, "generationMode", "generation_mode").lower()
+    if not generation_mode or generation_mode == "text_to_video":
+        return
+
+    first_frame = _first_text(
+        params,
+        "firstFrameImage",
+        "firstFrameUrl",
+        "first_frame_image",
+        "first_frame_url",
+        "imageUrl",
+        "image",
+    )
+    last_frame = _first_text(
+        params,
+        "lastFrameImage",
+        "lastFrameUrl",
+        "last_frame_image",
+        "last_frame_url",
+        "imageTail",
+        "image_tail",
+    )
+    if generation_mode in {"first_frame_to_video", "first_last_frame_to_video"}:
+        frames: list[dict[str, str]] = []
+        if first_frame:
+            frames.append({"image_url": first_frame, "type": "first_frame"})
+        if generation_mode == "first_last_frame_to_video" and last_frame:
+            frames.append({"image_url": last_frame, "type": "end_frame"})
+        request["image_list"] = frames
+        request["image"] = ""
+        request["image_tail"] = ""
+        return
+
+    if generation_mode == "reference_to_video":
+        request["image_list"] = [
+            {"image_url": value}
+            for value in _resolve_reference_image_sources(params)
+        ]
+        request["image"] = ""
+        request["image_tail"] = ""
+        return
+
+    if generation_mode == "video_edit":
+        source_video = _first_text(
+            params,
+            "sourceVideo",
+            "sourceVideoUrl",
+            "videoUrl",
+            "video_url",
+        )
+        request["video_list"] = ([{"video_url": source_video, "refer_type": "base"}] if source_video else [])
+
+
+def _is_kling_omni_video_model(model: str) -> bool:
+    normalized = str(model or "").strip().lower()
+    return normalized in {"kling-video-o1", "kling-v3-omni"} or "omni" in normalized
+
+
+_HAPPYHORSE_MEDIA_ONLY_MODELS = {
+    "happyhorse-1.1-t2v",
+    "happyhorse-1.1-i2v",
+    "happyhorse-1.1-r2v",
+    "happyhorse-1.0-video-edit",
+}
 
 
 def _build_happyhorse_payload(params: dict[str, Any], model_name: Any) -> dict[str, Any]:
     model = str(model_name or "happyhorse-1.0-t2v").strip()
+    normalized_model = model.lower()
+    media_only = normalized_model in _HAPPYHORSE_MEDIA_ONLY_MODELS
     input_payload: dict[str, Any] = {"prompt": _build_prompt(params)}
     parameters: dict[str, Any] = {}
     media: list[dict[str, str]] = []
@@ -520,25 +629,28 @@ def _build_happyhorse_payload(params: dict[str, Any], model_name: Any) -> dict[s
     if references:
         references = [_resolve_happyhorse_image_data_url(url, "referenceImages") for url in references]
 
-    if model.endswith("-i2v") and first_frame:
+    if normalized_model.endswith("-i2v") and first_frame:
         media.append({"type": "first_frame", "url": first_frame})
-        input_payload["img_url"] = first_frame
-    elif model.endswith("-r2v"):
+    elif normalized_model.endswith("-r2v"):
         media.extend({"type": "reference_image", "url": url} for url in references)
-    elif "video-edit" in model:
+    elif "video-edit" in normalized_model:
         if source_video:
             media.append({"type": "video", "url": source_video})
-            input_payload["video_url"] = source_video
         media.extend({"type": "reference_image", "url": url} for url in references)
 
     if media:
         input_payload["media"] = media
-    if references:
-        input_payload["reference_images"] = references
-    if source_video:
-        input_payload["source_video_url"] = source_video
+    if not media_only:
+        if normalized_model.endswith("-i2v") and first_frame:
+            input_payload["img_url"] = first_frame
+        if "video-edit" in normalized_model and source_video:
+            input_payload["video_url"] = source_video
+        if references:
+            input_payload["reference_images"] = references
+        if source_video:
+            input_payload["source_video_url"] = source_video
 
-    is_video_edit = "video-edit" in model
+    is_video_edit = "video-edit" in normalized_model
 
     for source_key, target_key in (
         ("resolution", "resolution"),
@@ -604,6 +716,72 @@ def _resolve_reference_image_sources(params: dict[str, Any]) -> list[str]:
         else:
             add(value)
     return sources
+
+
+def _resolve_reference_video_sources(params: dict[str, Any]) -> list[str]:
+    return _resolve_media_sources(
+        params,
+        (
+            "referenceVideos",
+            "referenceVideoUrls",
+            "referenceVideoUrl",
+            "reference_videos",
+            "reference_video_urls",
+            "sourceVideoUrl",
+            "sourceVideo",
+            "videoUrl",
+            "video_url",
+        ),
+    )
+
+
+def _resolve_reference_audio_sources(params: dict[str, Any]) -> list[str]:
+    return _resolve_media_sources(
+        params,
+        (
+            "referenceAudios",
+            "referenceAudioUrls",
+            "referenceAudioUrl",
+            "reference_audios",
+            "reference_audio_urls",
+            "audioUrl",
+            "audioDataUrl",
+            "audio_url",
+        ),
+    )
+
+
+def _resolve_media_sources(params: dict[str, Any], keys: tuple[str, ...]) -> list[str]:
+    sources: list[str] = []
+    seen: set[str] = set()
+    for key in keys:
+        value = params.get(key)
+        values = value if isinstance(value, list) else [value]
+        for item in values:
+            if not isinstance(item, str):
+                continue
+            text = item.strip()
+            if text and text not in seen:
+                seen.add(text)
+                sources.append(text)
+    return sources
+
+
+def _has_seedance_reference_media(params: dict[str, Any]) -> bool:
+    return bool(
+        _resolve_reference_image_sources(params)
+        or _first_text(
+            params,
+            "lastFrameImage",
+            "lastFrameUrl",
+            "tailImage",
+            "tailImageUrl",
+            "imageTail",
+            "image_tail",
+        )
+        or _resolve_reference_video_sources(params)
+        or _resolve_reference_audio_sources(params)
+    )
 
 
 def _normalize_happyhorse_audio_setting(value: Any, model: str) -> str | None:

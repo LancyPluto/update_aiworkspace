@@ -5,8 +5,9 @@ import com.aiminilab.aitoolmarket.credit.entity.UserReferral;
 import com.aiminilab.aitoolmarket.credit.mapper.ReferralRegistrationRewardMapper;
 import com.aiminilab.aitoolmarket.credit.mapper.UserReferralMapper;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
+import com.aiminilab.aitoolmarket.credit.service.ReferralCodeService;
 import com.aiminilab.aitoolmarket.credit.service.ReferralService;
-import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
+import com.aiminilab.aitoolmarket.user.entity.User;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,22 +16,21 @@ import java.time.LocalDateTime;
 
 @Service
 public class ReferralServiceImpl implements ReferralService {
-    private static final String INVITE_CODE_PREFIX = "WLCLOUD";
     private static final String INVITEE_ROLE = "INVITEE";
     private static final String INVITER_ROLE = "INVITER";
     private static final int INVITEE_REGISTRATION_REWARD = 200;
     private static final int INVITER_REGISTRATION_REWARD = 100;
 
-    private final UserMapper userMapper;
+    private final ReferralCodeService referralCodeService;
     private final UserReferralMapper referralMapper;
     private final ReferralRegistrationRewardMapper registrationRewardMapper;
     private final CreditService creditService;
 
-    public ReferralServiceImpl(UserMapper userMapper,
+    public ReferralServiceImpl(ReferralCodeService referralCodeService,
                                UserReferralMapper referralMapper,
                                ReferralRegistrationRewardMapper registrationRewardMapper,
                                CreditService creditService) {
-        this.userMapper = userMapper;
+        this.referralCodeService = referralCodeService;
         this.referralMapper = referralMapper;
         this.registrationRewardMapper = registrationRewardMapper;
         this.creditService = creditService;
@@ -42,17 +42,15 @@ public class ReferralServiceImpl implements ReferralService {
         if (inviteeUserId == null) {
             return;
         }
-        Long inviterUserId = parseInviteCode(inviteCode);
+        User inviter = referralCodeService.findInviter(inviteCode).orElse(null);
+        Long inviterUserId = inviter == null ? null : inviter.getId();
         if (inviterUserId == null || inviterUserId.equals(inviteeUserId)) {
-            return;
-        }
-        if (userMapper.selectById(inviterUserId) == null) {
             return;
         }
         UserReferral referral = new UserReferral();
         referral.setInviterUserId(inviterUserId);
         referral.setInviteeUserId(inviteeUserId);
-        referral.setInviteCode(normalizeInviteCode(inviteCode));
+        referral.setInviteCode(inviter.getReferralCode());
         referral.setStatus("REGISTERED");
         LocalDateTime now = LocalDateTime.now();
         referral.setCreatedAt(now);
@@ -99,29 +97,4 @@ public class ReferralServiceImpl implements ReferralService {
         );
     }
 
-    private Long parseInviteCode(String inviteCode) {
-        String normalized = normalizeInviteCode(inviteCode);
-        if (normalized == null) {
-            return null;
-        }
-        String rawId = normalized.startsWith(INVITE_CODE_PREFIX)
-                ? normalized.substring(INVITE_CODE_PREFIX.length())
-                : normalized;
-        if (!rawId.matches("\\d+")) {
-            return null;
-        }
-        try {
-            long id = Long.parseLong(rawId);
-            return id > 0 ? id : null;
-        } catch (NumberFormatException ignored) {
-            return null;
-        }
-    }
-
-    private String normalizeInviteCode(String inviteCode) {
-        if (inviteCode == null || inviteCode.isBlank()) {
-            return null;
-        }
-        return inviteCode.trim().toUpperCase();
-    }
 }

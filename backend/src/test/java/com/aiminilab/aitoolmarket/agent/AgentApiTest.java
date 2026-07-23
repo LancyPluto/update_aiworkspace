@@ -4,6 +4,8 @@ import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
 import com.aiminilab.aitoolmarket.agent.dto.AgentFileParseChunk;
 import com.aiminilab.aitoolmarket.agent.dto.AgentFileParseResult;
 import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
+import com.aiminilab.aitoolmarket.agent.dto.AgentRunResponse;
+import com.aiminilab.aitoolmarket.agent.dto.AgentToolCallResponse;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentMessageMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentFileChunkMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentRunEventMapper;
@@ -1111,7 +1113,7 @@ class AgentApiTest {
     }
 
     @Test
-    void internalAgentFailureMessagesAreTruncatedBeforePersisting() throws Exception {
+    void internalAgentFailureContractSeparatesUserAndDeveloperMessages() throws Exception {
         mockExternalAuthDependencies();
         register("agent_long_failure_user");
         String token = login("agent_long_failure_user");
@@ -1151,16 +1153,24 @@ class AgentApiTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(failToolBody))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("FAILED"));
+                .andExpect(jsonPath("$.data.status").value("FAILED"))
+                .andExpect(jsonPath("$.data.errorMessage").value("执行超时，请稍后重试"))
+                .andExpect(jsonPath("$.data.failureTraceId").value(notNullValue()));
 
         var toolCall = agentToolCallMapper.findById(toolCallId).orElseThrow();
         assertThat(toolCall.getErrorMessage())
-                .hasSize(4000)
-                .endsWith("... [truncated]");
+                .hasSize(2000)
+                .endsWith("...");
+        assertThat(toolCall.getDeveloperMessage()).isEqualTo(toolCall.getErrorMessage());
+        assertThat(toolCall.getUserMessage()).isEqualTo("执行超时，请稍后重试");
+        assertThat(toolCall.getFailureTraceId()).isNotBlank();
+        assertThat(AgentToolCallResponse.from(toolCall).errorMessage()).isEqualTo("执行超时，请稍后重试");
+        assertThat(AgentToolCallResponse.fromAdmin(toolCall).errorMessage())
+                .hasSize(2000)
+                .endsWith("...");
         var toolEvents = agentRunEventMapper.findEventsForAdmin(runId, 10);
         assertThat(toolEvents.get(toolEvents.size() - 1).getEventText())
-                .hasSize(4000)
-                .endsWith("... [truncated]");
+                .isEqualTo("执行超时，请稍后重试");
         JsonNode failedToolEventJson = parseEventJson(toolEvents.get(toolEvents.size() - 1).getEventJson());
         assertThat(failedToolEventJson.path("toolCode").asText()).isEqualTo("xiaohongshu_copywriting");
         assertThat(failedToolEventJson.path("toolCallId").asLong()).isEqualTo(toolCallId);
@@ -1168,8 +1178,7 @@ class AgentApiTest {
         assertThat(failedToolEventJson.path("status").asText()).isEqualTo("FAILED");
         assertThat(failedToolEventJson.path("errorCode").asText()).isEqualTo("MODEL_TIMEOUT");
         assertThat(failedToolEventJson.path("errorMessage").asText())
-                .hasSize(4000)
-                .endsWith("... [truncated]");
+                .isEqualTo("执行超时，请稍后重试");
 
         String failRunBody = objectMapper.writeValueAsString(java.util.Map.of(
                 "errorCode", "MODEL_TIMEOUT",
@@ -1180,11 +1189,17 @@ class AgentApiTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(failRunBody))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("FAILED"));
+                .andExpect(jsonPath("$.data.status").value("FAILED"))
+                .andExpect(jsonPath("$.data.errorMessage").value("执行超时，请稍后重试"))
+                .andExpect(jsonPath("$.data.failureTraceId").value(notNullValue()));
 
-        assertThat(agentRunMapper.findById(runId).orElseThrow().getErrorMessage())
-                .hasSize(4000)
-                .endsWith("... [truncated]");
+        var failedRun = agentRunMapper.findById(runId).orElseThrow();
+        assertThat(failedRun.getErrorMessage()).hasSize(2000).endsWith("...");
+        assertThat(failedRun.getDeveloperMessage()).isEqualTo(failedRun.getErrorMessage());
+        assertThat(failedRun.getUserMessage()).isEqualTo("执行超时，请稍后重试");
+        assertThat(failedRun.getFailureTraceId()).isNotBlank();
+        assertThat(AgentRunResponse.from(failedRun).errorMessage()).isEqualTo("执行超时，请稍后重试");
+        assertThat(AgentRunResponse.fromAdmin(failedRun).errorMessage()).hasSize(2000).endsWith("...");
     }
 
     @Test

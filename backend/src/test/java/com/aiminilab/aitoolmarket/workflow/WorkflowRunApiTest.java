@@ -4,6 +4,7 @@ import com.aiminilab.aitoolmarket.auth.security.AuthUser;
 import com.aiminilab.aitoolmarket.auth.security.JwtTokenProvider;
 import com.aiminilab.aitoolmarket.auth.security.TokenDenylistService;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
+import com.aiminilab.aitoolmarket.common.error.LegacyErrorCodeMapper;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.aiminilab.aitoolmarket.workflow.dto.CreateWorkflowRunCommand;
@@ -303,7 +304,10 @@ class WorkflowRunApiTest {
                                 {"clientRequestId":"duplicate-key","input":{}}
                                 """))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_CONFLICT"));
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_CONFLICT"))
+                .andExpect(jsonPath("$.message").value(
+                        LegacyErrorCodeMapper.fromLegacy(ErrorCode.IDEMPOTENCY_CONFLICT).defaultUserMessage()
+                ));
     }
 
     @Test

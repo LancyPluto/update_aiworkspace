@@ -343,6 +343,50 @@ class AdminAgentApiTest {
     }
 
     @Test
+    void readyModelContractRequiresExecutableVersionedMappings() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        com.fasterxml.jackson.databind.node.ObjectNode body = objectMapper.createObjectNode();
+        body.put("displayName", "Versioned contract test");
+        body.put("configCode", "versioned_contract_test");
+        body.put("provider", "openai_compatible");
+        body.put("modelName", "versioned-contract-model");
+        body.put("baseUrl", "https://example.com/v1");
+        body.put("apiKey", "test-secret");
+        body.put("enabled", false);
+        body.put("agentEnabled", false);
+        body.put("isDefault", false);
+        body.put("contractStatus", "READY");
+        body.put("requestSchemaJson", "{\"version\":\"1\",\"fields\":[]}");
+        body.put("requestMappingJson", "{\"fieldMap\":{}}");
+        body.put("responseMappingJson", "{\"version\":\"1\",\"contentPath\":\"choices[0].message.content\"}");
+
+        mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(containsString("requestMappingJson.version")));
+
+        body.put("requestMappingJson", "{\"version\":\"1\",\"fieldMap\":{}}");
+        body.put("responseMappingJson", "{\"version\":\"1\"}");
+        mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(containsString("responseMappingJson")));
+
+        body.put("responseMappingJson", "{\"version\":\"1\",\"contentPath\":\"choices[0].message.content\"}");
+        mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.contractStatus").value("READY"));
+    }
+
+    @Test
     void adminAgentModelToggleControlsUserSelectableModelsWithKlingCredentials() throws Exception {
         mockExternalAuthDependencies();
         String adminToken = login("/api/admin/v1/auth/login", "admin");

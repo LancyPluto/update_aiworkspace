@@ -38,6 +38,7 @@ from utils.kling_config import (
     resolve_kling_image_paths,
     resolve_kling_model_name,
 )
+from utils.model_contract import ModelContractParamsError, ModelContractResponseError, apply_request_mapping
 from utils.volcengine_config import is_volcengine_model_config, resolve_volcengine_task_model
 
 
@@ -132,8 +133,8 @@ class ImageGenerationHandler:
             if status in TERMINAL_TASK_STATUSES:
                 LOGGER.info("skip terminal image task taskId=%s status=%s traceId=%s", task_id, status, trace_id or "-")
                 return {"status": "SKIPPED", "taskId": task_id, "taskStatus": status, "traceId": trace_id}
-            params = context.get("params") or {}
             model_config = context.get("modelConfig") or {}
+            params = apply_request_mapping(context.get("params"), model_config)
             self._mark_processing_safe(task_id, progress=1, progress_message="实时进度：1%", trace_id=trace_id)
             provider = str(model_config.get("provider") or context.get("modelProviderCode") or "").lower()
             provider_registry.require_capability(provider, "IMAGE_GENERATION")
@@ -195,11 +196,22 @@ class ImageGenerationHandler:
                         {
                             "image_list": params.get("imageList") or params.get("image_list"),
                             "result_type": str(params.get("resultType") or params.get("result_type") or ""),
+                            "series_amount": params.get("seriesAmount") or params.get("series_amount"),
                         }
                     )
             if provider_protocol == "openai_images":
                 image_request["quality"] = _first_text(params, "quality", "imageQuality", "image_quality")
                 image_request["style"] = _first_text(params, "style", "imageStyle", "image_style")
+                image_request["response_format"] = _first_text(
+                    params,
+                    "responseFormat",
+                    "response_format",
+                )
+                image_request["output_format"] = _first_text(
+                    params,
+                    "outputFormat",
+                    "output_format",
+                )
                 image_request["sequential_image_generation"] = _first_text(
                     params,
                     "sequentialImageGeneration",
@@ -214,7 +226,29 @@ class ImageGenerationHandler:
                 if "watermark" in params:
                     image_request["watermark"] = params.get("watermark")
                 image_request["image_size"] = _resolve_openai_image_size(params, model_config)
+                image_request["aspect_ratio"] = _first_text(
+                    params,
+                    "ratio",
+                    "aspectRatio",
+                    "aspect_ratio",
+                    "imageRatio",
+                    "image_ratio",
+                )
+                if _is_volcengine_group_generation(params, model_config):
+                    reference_count = len(_resolve_reference_image_sources(params))
+                    max_output_count = max(1, 15 - reference_count)
+                    image_request["sequential_image_generation"] = "auto"
+                    image_request["max_images"] = max(
+                        1,
+                        min(max_output_count, _as_int(params.get("maxImages") or params.get("count"), 4)),
+                    )
+                    image_request["batch_size"] = 1
+                generation_mode = _first_text(params, "generationMode", "generation_mode").lower()
                 reference_images = _resolve_reference_image_sources(params)
+                if generation_mode == "image_edit" and not reference_images:
+                    raise InputImageError("image_edit requires at least one reference image")
+                if generation_mode == "text_to_image":
+                    reference_images = []
                 if reference_images:
                     backend_base_url = getattr(self.backend_client, "base_url", settings.backend_internal_base_url)
                     if isinstance(client, OpenAIImagesClient) and client._uses_json_image_array_input():
@@ -292,6 +326,10 @@ class ImageGenerationHandler:
             return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
         except InputImageError as exc:
             return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
+        except ModelContractParamsError as exc:
+            return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
+        except ModelContractResponseError as exc:
+            return self._mark_failed(task_id, "MODEL_CALL_FAILED", str(exc), trace_id)
         except (SiliconFlowVideoError, KlingVideoError, OpenAIImagesError) as exc:
             return self._mark_failed(
                 task_id,
@@ -338,6 +376,7 @@ class ImageGenerationHandler:
                 image_generation_path=model_config.get("imagePath") or model_config.get("endpointPath") or create_path,
                 image_generation_result_path=model_config.get("imageResultPath") or result_path,
                 timeout_seconds=model_config.get("timeoutSeconds"),
+                model_config=model_config,
             )
         if provider_protocol == "openai_images":
             return OpenAIImagesClient(
@@ -351,6 +390,7 @@ class ImageGenerationHandler:
         return SiliconFlowVideoClient(
             base_url=model_config.get("baseUrl"),
             api_key=resolve_siliconflow_api_key(model_config),
+            model_config=model_config,
         )
 
     def _mark_failed(
@@ -776,10 +816,15 @@ def _resolve_openai_image_size(params: dict[str, Any], model_config: dict[str, A
     allowed_sizes = _openai_allowed_image_sizes(config)
     explicit = params.get("imageSize") or params.get("image_size") or params.get("size")
     if isinstance(explicit, str) and explicit.strip():
+        if _is_agnes_image_model(config):
+            tier = explicit.strip().upper()
+            return tier if tier in {"1K", "2K", "3K", "4K"} else explicit.strip()
         if _is_volcengine_image_model(config):
             tiered_size = _volcengine_tiered_image_size(explicit.strip(), params)
             if tiered_size:
                 return tiered_size
+        if _is_gpt_image_2_model(config) and not allowed_sizes:
+            return _gpt_image_2_size_from_ratio_or_size(explicit.strip())
         requested = _openai_image_size_from_ratio_or_size(explicit.strip())
         if requested == "auto":
             if allowed_sizes:
@@ -793,8 +838,13 @@ def _resolve_openai_image_size(params: dict[str, Any], model_config: dict[str, A
     aspect_ratio = _normalize_aspect_ratio(params.get("aspectRatio") or params.get("aspect_ratio") or params.get("imageRatio") or "auto")
     if allowed_sizes:
         return _preferred_allowed_image_size(aspect_ratio, allowed_sizes)
+    if _is_agnes_image_model(config):
+        model_name = str(config.get("modelName") or config.get("model") or "").strip().lower()
+        return "2K" if "2.1" in model_name else "1024x1024"
     if _is_volcengine_image_model(config):
         return _volcengine_image_size_from_aspect_ratio(params)
+    if _is_gpt_image_2_model(config):
+        return _gpt_image_2_size_from_ratio_or_size(aspect_ratio)
     return _openai_image_size_from_ratio_or_size(aspect_ratio)
 
 
@@ -807,6 +857,32 @@ def _is_volcengine_image_model(model_config: dict[str, Any]) -> bool:
     base_url = str(model_config.get("baseUrl") or "").strip().lower()
     model_name = str(model_config.get("modelName") or model_config.get("model") or "").strip().lower()
     return provider == "volcengine_images" or "volces.com" in base_url or "volcengine.com" in base_url or "seedream" in model_name
+
+
+def _is_volcengine_group_generation(
+    params: dict[str, Any],
+    model_config: dict[str, Any],
+) -> bool:
+    if not _is_volcengine_image_model(model_config):
+        return False
+    mode = _first_text(params, "generationMode", "generation_mode").lower()
+    return mode in {
+        "text_to_image_series",
+        "single_reference_to_image_series",
+        "multi_reference_to_image_series",
+    }
+
+
+def _is_gpt_image_2_model(model_config: dict[str, Any]) -> bool:
+    model_name = str(model_config.get("modelName") or model_config.get("model") or "").strip().lower()
+    return model_name.rsplit("/", 1)[-1].startswith("gpt-image-2")
+
+
+def _is_agnes_image_model(model_config: dict[str, Any]) -> bool:
+    provider = str(model_config.get("provider") or "").strip().lower()
+    base_url = str(model_config.get("baseUrl") or "").strip().lower()
+    model_name = str(model_config.get("modelName") or model_config.get("model") or "").strip().lower()
+    return provider == "agnes_images" or "agnes-ai.com" in base_url or model_name.startswith("agnes-image-")
 
 
 def _volcengine_image_size_from_aspect_ratio(params: dict[str, Any]) -> str:
@@ -882,6 +958,35 @@ def _openai_image_size_from_ratio_or_size(value: Any) -> str:
         "3:4": "1024x1536",
         "2:3": "1024x1536",
     }.get(aspect_ratio, "1024x1024")
+
+
+def _gpt_image_2_size_from_ratio_or_size(value: Any) -> str:
+    normalized = _normalize_aspect_ratio(value)
+    if _is_auto_aspect_ratio(normalized):
+        return "auto"
+    lowered = normalized.lower()
+    if "x" in lowered:
+        left, separator, right = lowered.partition("x")
+        if separator:
+            try:
+                width = int(left.strip())
+                height = int(right.strip())
+            except ValueError:
+                return "auto"
+            ratio = width / height if height > 0 else 0
+            if width > 0 and height > 0 and width % 16 == 0 and height % 16 == 0 and 1 / 3 <= ratio <= 3:
+                return f"{width}x{height}"
+        return "auto"
+    return {
+        "1:1": "1024x1024",
+        "16:9": "1536x864",
+        "9:16": "864x1536",
+        "4:3": "1280x960",
+        "3:4": "960x1280",
+        "3:2": "1536x1024",
+        "2:3": "1024x1536",
+        "21:9": "1792x768",
+    }.get(normalized, "auto")
 
 
 GPT_IMAGE_2_4K_ALLOWED_SIZES = [

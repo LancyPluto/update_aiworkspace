@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.credit.service.impl;
 
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.RechargeOrderStatus;
+import com.aiminilab.aitoolmarket.common.exception.AppException;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayNotification;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayPagePayClient;
@@ -236,7 +237,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
                 if (orderMapper.bindPayUrl(order.getId(), prepay.codeUrl(), "WeChat Native prepay created", LocalDateTime.now()) != 1) {
                     throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed before WeChat prepay binding");
                 }
-            } catch (BusinessException exception) {
+            } catch (AppException exception) {
                 if ("MEMBERSHIP".equals(order.getOrderType())) {
                     reconcileFailedMembershipWechatPrepay(order, exception);
                 } else {
@@ -329,7 +330,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
                 if (orderMapper.bindPayUrl(order.getId(), prepay.codeUrl(), "WeChat Native prepay created", LocalDateTime.now()) != 1) {
                     throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed before WeChat prepay binding");
                 }
-            } catch (BusinessException exception) {
+            } catch (AppException exception) {
                 orderMapper.transit(order.getId(), RechargeOrderStatus.WAITING_PAYMENT.name(), RechargeOrderStatus.FAILED.name(),
                         statusReason(exception), LocalDateTime.now());
                 throw exception;
@@ -513,7 +514,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
         return true;
     }
 
-    private void reconcileFailedMembershipWechatPrepay(CreditRechargeOrder order, BusinessException prepayFailure) {
+    private void reconcileFailedMembershipWechatPrepay(CreditRechargeOrder order, AppException prepayFailure) {
         boolean channelClosed = false;
         String closeFailure = null;
         try {

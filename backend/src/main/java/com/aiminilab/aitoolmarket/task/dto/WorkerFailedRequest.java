@@ -17,8 +17,32 @@ public record WorkerFailedRequest(
         String deliveryState,
         String retryScope,
         Integer retryAfterSeconds,
-        String claimToken
+        String claimToken,
+        String userMessage,
+        String developerMessage,
+        String failureTraceId
 ) {
+    public WorkerFailedRequest(String errorCode,
+                               String errorMessage,
+                               String failureStage,
+                               Boolean providerCharged,
+                               BigDecimal providerCostAmount,
+                               String providerCostCurrency,
+                               String providerErrorCode,
+                               String providerRequestId,
+                               Integer promptTokens,
+                               Integer completionTokens,
+                               Integer billableUnits,
+                               String deliveryState,
+                               String retryScope,
+                               Integer retryAfterSeconds,
+                               String claimToken) {
+        this(errorCode, errorMessage, failureStage, providerCharged, providerCostAmount,
+                providerCostCurrency, providerErrorCode, providerRequestId, promptTokens,
+                completionTokens, billableUnits, deliveryState, retryScope, retryAfterSeconds,
+                claimToken, null, null, null);
+    }
+
     public WorkerFailedRequest(String errorCode,
                                String errorMessage,
                                String failureStage,
@@ -33,7 +57,8 @@ public record WorkerFailedRequest(
                                String claimToken) {
         this(errorCode, errorMessage, failureStage, providerCharged, providerCostAmount,
                 providerCostCurrency, providerErrorCode, providerRequestId, promptTokens,
-                completionTokens, billableUnits, null, null, null, claimToken);
+                completionTokens, billableUnits, null, null, null, claimToken,
+                null, null, null);
     }
 
     public WorkerFailedRequest(String errorCode,
@@ -49,6 +74,6 @@ public record WorkerFailedRequest(
                                String claimToken) {
         this(errorCode, errorMessage, failureStage, providerCharged, providerCostAmount,
                 null, providerErrorCode, providerRequestId, promptTokens, completionTokens,
-                billableUnits, null, null, null, claimToken);
+                billableUnits, null, null, null, claimToken, null, null, null);
     }
 }

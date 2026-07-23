@@ -14,6 +14,7 @@ from handlers.generated_audio_persister import GeneratedAudioPersistError, Gener
 from providers import registry as provider_registry
 from providers.registry import ProviderRegistryError
 from utils.tts_config import merge_tts_params, speech_billable_units
+from utils.model_contract import ModelContractParamsError, ModelContractResponseError, apply_request_mapping
 
 
 LOGGER = logging.getLogger(__name__)
@@ -42,8 +43,8 @@ class TextToSpeechHandler:
                 LOGGER.info("skip terminal TTS task taskId=%s status=%s traceId=%s", task_id, status, trace_id or "-")
                 return {"status": "SKIPPED", "taskId": task_id, "taskStatus": status, "traceId": trace_id}
 
-            params = context.get("params") or {}
             model_config = context.get("modelConfig") or {}
+            params = apply_request_mapping(context.get("params"), model_config)
             provider = str(model_config.get("provider") or context.get("modelProviderCode") or "").lower()
             provider_registry.require_capability(provider, "TEXT_TO_SPEECH")
             provider_registry.require_worker_ready(provider)
@@ -60,6 +61,7 @@ class TextToSpeechHandler:
                 base_url=model_config.get("baseUrl"),
                 api_key=model_config.get("apiKey"),
                 params=tts_params,
+                model_config=model_config,
             )
 
             self.backend_client.mark_processing(
@@ -102,6 +104,10 @@ class TextToSpeechHandler:
             return self._mark_failed(task_id, "MODEL_TIMEOUT", str(exc), trace_id)
         except ProviderRegistryError as exc:
             return self._mark_failed(task_id, classify_model_error(str(exc)), str(exc), trace_id)
+        except ModelContractParamsError as exc:
+            return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
+        except ModelContractResponseError as exc:
+            return self._mark_failed(task_id, "MODEL_CALL_FAILED", str(exc), trace_id)
         except TextToSpeechError as exc:
             return self._mark_failed(task_id, classify_model_error(str(exc)), str(exc), trace_id)
         except GeneratedAudioPersistError as exc:

@@ -163,6 +163,32 @@ class TextToSpeechHandlerTest(unittest.TestCase):
         self.assertEqual(content["audios"][0]["url"], "/generated/audio/101/audio-1.mp3")
         self.assertEqual(content["metadata"]["providerTrace"], "trace")
 
+    def test_handler_applies_model_request_mapping(self):
+        context = {
+            "taskId": 107,
+            "status": "QUEUED",
+            "toolType": "TEXT_TO_SPEECH",
+            "params": {"scriptInput": "Mapped narration"},
+            "modelConfig": {
+                "provider": "minimax_speech",
+                "modelName": "speech-2.8-hd",
+                "apiKey": "secret",
+                "requestMappingJson": '{"version":"1","fieldMap":{"scriptInput":"text"}}',
+            },
+        }
+        backend = FakeBackend(context)
+        tts_client = FakeTtsClient()
+        handler = TextToSpeechHandler(
+            backend_client=backend,
+            tts_client=tts_client,
+            audio_persister=FakePersister(),
+        )
+
+        result = handler.handle({"taskId": 107})
+
+        self.assertEqual(result["status"], "SUCCESS")
+        self.assertEqual(tts_client.calls[0]["text"], "Mapped narration")
+
     def test_handler_reports_character_units_for_per_character_model(self):
         class CharacterUsageTtsClient(FakeTtsClient):
             def generate(self, **kwargs):

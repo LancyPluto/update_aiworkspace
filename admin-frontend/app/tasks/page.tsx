@@ -62,6 +62,8 @@ interface Task {
   outputResourceType: string
   error: string
   errorCode: string
+  developerMessage: string
+  failureTraceId: string
   errorMessage: string
   progressMessage: string
   agentSource?: AdminTaskApiPayload["agentSource"]
@@ -120,11 +122,11 @@ function buildParamsText(params: unknown): string {
   }
 }
 
-/** 失败/取消时后端将原因写在 progressMessage */
+/** Rolling-deployment fallback: new diagnostics use developerMessage, legacy tasks use error/progress fields. */
 function taskFailureHint(row: AdminTaskApiPayload): string {
   const st = (row.status || "").toUpperCase()
   if (st !== "FAILED" && st !== "TIMEOUT" && st !== "CANCELLED") return ""
-  return row.progressMessage?.trim() || ""
+  return row.developerMessage?.trim() || row.errorMessage?.trim() || row.progressMessage?.trim() || ""
 }
 
 function isExceptionalTaskStatus(status: string): boolean {
@@ -138,7 +140,17 @@ function currentDialogTask(item: Task, selectedTask: Task | null): Task {
 function taskDialogError(item: Task, selectedTask: Task | null): string {
   const current = currentDialogTask(item, selectedTask)
   if (!isExceptionalTaskStatus(current.rawStatus)) return ""
-  return current.errorMessage?.trim() || current.error?.trim() || current.progressMessage?.trim() || ""
+  return current.developerMessage?.trim()
+    || current.errorMessage?.trim()
+    || current.error?.trim()
+    || current.progressMessage?.trim()
+    || ""
+}
+
+function taskDialogHasDiagnostic(item: Task, selectedTask: Task | null): boolean {
+  const current = currentDialogTask(item, selectedTask)
+  return isExceptionalTaskStatus(current.rawStatus)
+    && Boolean(taskDialogError(item, selectedTask) || current.failureTraceId)
 }
 
 function errorStatusLabel(status: string): string {
@@ -184,6 +196,8 @@ function rowToTask(row: AdminTaskApiPayload): Task {
     outputResourceType: row.result?.resourceType || "",
     error: taskFailureHint(row),
     errorCode: row.errorCode?.trim() || "",
+    developerMessage: row.developerMessage?.trim() || "",
+    failureTraceId: row.failureTraceId?.trim() || "",
     errorMessage: row.errorMessage?.trim() || "",
     progressMessage: row.progressMessage?.trim() || "",
     agentSource: row.agentSource ?? null,
@@ -406,6 +420,8 @@ function TasksPageContent() {
         outputResourceType: detail.result?.resourceType || "",
         error: taskFailureHint(detail) || item.error,
         errorCode: row.errorCode,
+        developerMessage: row.developerMessage,
+        failureTraceId: row.failureTraceId,
         errorMessage: row.errorMessage,
         progressMessage: row.progressMessage,
         agentSource: detail.agentSource ?? null,
@@ -458,6 +474,23 @@ function TasksPageContent() {
         <span>{value === null || value === undefined ? "—" : `${value as number} 算力`}</span>
       ),
     },
+    {
+      key: "developerMessage" as const,
+      title: "错误信息",
+      render: (_: unknown, item: Task) => {
+        if (!isExceptionalTaskStatus(item.rawStatus)) return <span className="text-muted-foreground">—</span>
+        const message = taskDialogError(item, null)
+        if (!message && !item.failureTraceId) return <span className="text-muted-foreground">—</span>
+        return (
+          <div className="max-w-[28rem] space-y-1 text-xs">
+            {message ? <p className="whitespace-pre-wrap break-all text-destructive">{message}</p> : null}
+            {item.failureTraceId ? (
+              <p className="break-all font-mono text-[11px] text-muted-foreground">traceId: {item.failureTraceId}</p>
+            ) : null}
+          </div>
+        )
+      },
+    },
     { key: "duration" as const, title: "耗时" },
     { key: "createdAt" as const, title: "创建时间" },
     {
@@ -505,7 +538,7 @@ function TasksPageContent() {
                 <TabsList className="shrink-0 bg-secondary">
                   <TabsTrigger value="input">输入参数</TabsTrigger>
                   <TabsTrigger value="output">生成结果</TabsTrigger>
-                  {taskDialogError(item, selectedTask) && (
+                  {taskDialogHasDiagnostic(item, selectedTask) && (
                     <TabsTrigger value="error">错误信息</TabsTrigger>
                   )}
                 </TabsList>
@@ -521,10 +554,10 @@ function TasksPageContent() {
                     {renderTaskOutput(selectedTask)}
                   </div>
                 </TabsContent>
-                {taskDialogError(item, selectedTask) && (() => {
+                {taskDialogHasDiagnostic(item, selectedTask) && (() => {
                   const current = currentDialogTask(item, selectedTask)
                   const tone = errorPanelTone(current.rawStatus)
-                  const fullError = taskDialogError(item, selectedTask)
+                  const fullError = taskDialogError(item, selectedTask) || "-"
                   const summary = current.progressMessage || current.error || "-"
                   return (
                   <TabsContent value="error" className="mt-4 min-h-0 flex-1 overflow-hidden data-[state=active]:flex">
@@ -562,6 +595,14 @@ function TasksPageContent() {
                               {fullError}
                             </pre>
                           </div>
+                          {current.failureTraceId ? (
+                            <div>
+                              <p className="text-xs text-muted-foreground">Trace ID</p>
+                              <code className="mt-1 block break-all rounded-md bg-background/80 p-2 text-xs text-card-foreground">
+                                {current.failureTraceId}
+                              </code>
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     </div>

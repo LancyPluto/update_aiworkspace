@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.workflow.mapper;
 
 import com.aiminilab.aitoolmarket.workflow.entity.WorkflowRunStep;
+import com.aiminilab.aitoolmarket.workflow.support.WorkflowFailureContract;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -46,7 +47,9 @@ public interface WorkflowRunStepMapper extends BaseMapper<WorkflowRunStep> {
     @Update("""
             UPDATE workflow_run_steps
             SET status = 'AWAITING_USER', revision = revision + 1,
-                output_json = #{previewJson}, started_at = COALESCE(started_at, CURRENT_TIMESTAMP)
+                output_json = #{previewJson}, error_code = NULL, error_message = NULL,
+                user_message = NULL, developer_message = NULL, failure_trace_id = NULL,
+                started_at = COALESCE(started_at, CURRENT_TIMESTAMP)
             WHERE id = #{stepId} AND revision = #{expectedRevision} AND status = 'PENDING'
             """)
     int markAwaitingUser(@Param("stepId") Long stepId,
@@ -56,26 +59,45 @@ public interface WorkflowRunStepMapper extends BaseMapper<WorkflowRunStep> {
     @Update("""
             UPDATE workflow_run_steps
             SET status = 'SUCCESS', revision = revision + 1, output_json = #{outputJson},
-                error_message = NULL, finished_at = CURRENT_TIMESTAMP
+                error_code = NULL, error_message = NULL, user_message = NULL,
+                developer_message = NULL, failure_trace_id = NULL,
+                finished_at = CURRENT_TIMESTAMP
             WHERE id = #{stepId} AND revision = #{expectedRevision} AND status = 'AWAITING_USER'
             """)
     int completeAwaitingUser(@Param("stepId") Long stepId,
                              @Param("expectedRevision") Long expectedRevision,
                              @Param("outputJson") String outputJson);
 
+    default int cancelActiveByRunId(Long runId, String reason) {
+        WorkflowFailureContract failure = WorkflowFailureContract.from("WORKFLOW_CANCELLED", reason);
+        return cancelActiveByRunIdWithContract(
+                runId, failure.userMessage(), failure.developerMessage(), failure.failureTraceId()
+        );
+    }
+
     @Update("""
             UPDATE workflow_run_steps
             SET status = 'CANCELLED', revision = revision + 1,
-                error_message = #{reason}, finished_at = CURRENT_TIMESTAMP
+                error_code = 'WORKFLOW_CANCELLED', error_message = #{developerMessage},
+                user_message = #{userMessage}, developer_message = #{developerMessage},
+                failure_trace_id = #{failureTraceId}, finished_at = CURRENT_TIMESTAMP
             WHERE run_id = #{runId}
               AND status IN ('PENDING', 'READY', 'QUEUED', 'RUNNING', 'AWAITING_USER', 'AWAITING_FUNDS')
             """)
-    int cancelActiveByRunId(@Param("runId") Long runId, @Param("reason") String reason);
+    int cancelActiveByRunIdWithContract(@Param("runId") Long runId,
+                                        @Param("userMessage") String userMessage,
+                                        @Param("developerMessage") String developerMessage,
+                                        @Param("failureTraceId") String failureTraceId);
 
     @Update("""
             UPDATE workflow_run_steps
             SET status = 'READY',
                 input_json = #{inputJson},
+                error_code = NULL,
+                error_message = NULL,
+                user_message = NULL,
+                developer_message = NULL,
+                failure_trace_id = NULL,
                 started_at = COALESCE(started_at, #{startedAt}),
                 revision = revision + 1
             WHERE id = #{stepId}
@@ -99,7 +121,11 @@ public interface WorkflowRunStepMapper extends BaseMapper<WorkflowRunStep> {
                 attempt = #{attemptNo},
                 attempt_count = #{attemptNo},
                 current_attempt_id = #{attemptId},
+                error_code = NULL,
                 error_message = NULL,
+                user_message = NULL,
+                developer_message = NULL,
+                failure_trace_id = NULL,
                 finished_at = NULL
             WHERE id = #{stepId}
               AND revision = #{expectedRevision}
@@ -133,7 +159,11 @@ public interface WorkflowRunStepMapper extends BaseMapper<WorkflowRunStep> {
             SET status = 'SUCCESS',
                 revision = revision + 1,
                 output_json = #{outputJson},
+                error_code = NULL,
                 error_message = NULL,
+                user_message = NULL,
+                developer_message = NULL,
+                failure_trace_id = NULL,
                 finished_at = CURRENT_TIMESTAMP
             WHERE id = #{stepId}
               AND revision = #{expectedRevision}
@@ -155,6 +185,10 @@ public interface WorkflowRunStepMapper extends BaseMapper<WorkflowRunStep> {
             SET status = 'AWAITING_FUNDS',
                 revision = revision + 1,
                 output_json = #{outputJson},
+                error_code = NULL,
+                user_message = NULL,
+                developer_message = NULL,
+                failure_trace_id = NULL,
                 error_message = #{errorMessage},
                 finished_at = NULL
             WHERE id = #{stepId}
@@ -173,7 +207,11 @@ public interface WorkflowRunStepMapper extends BaseMapper<WorkflowRunStep> {
             UPDATE workflow_run_steps
             SET status = 'READY',
                 revision = revision + 1,
-                error_message = #{errorMessage},
+                error_code = NULL,
+                error_message = NULL,
+                user_message = NULL,
+                developer_message = NULL,
+                failure_trace_id = NULL,
                 finished_at = NULL
             WHERE id = #{stepId}
               AND revision = #{expectedRevision}
@@ -190,12 +228,34 @@ public interface WorkflowRunStepMapper extends BaseMapper<WorkflowRunStep> {
                                      @Param("errorMessage") String errorMessage,
                                      @Param("expectedStatuses") List<String> expectedStatuses);
 
+    default int failActiveAttempt(Long stepId,
+                                  Long expectedRevision,
+                                  Long attemptId,
+                                  String errorMessage,
+                                  List<String> expectedStatuses) {
+        WorkflowFailureContract failure = WorkflowFailureContract.from("WORKFLOW_FAILED", errorMessage);
+        return failActiveAttemptWithContract(
+                stepId,
+                expectedRevision,
+                attemptId,
+                failure.errorCode(),
+                failure.userMessage(),
+                failure.developerMessage(),
+                failure.failureTraceId(),
+                expectedStatuses
+        );
+    }
+
     @Update("""
             <script>
             UPDATE workflow_run_steps
             SET status = 'FAILED',
                 revision = revision + 1,
-                error_message = #{errorMessage},
+                error_code = #{errorCode},
+                error_message = #{developerMessage},
+                user_message = #{userMessage},
+                developer_message = #{developerMessage},
+                failure_trace_id = #{failureTraceId},
                 finished_at = CURRENT_TIMESTAMP
             WHERE id = #{stepId}
               AND revision = #{expectedRevision}
@@ -206,18 +266,25 @@ public interface WorkflowRunStepMapper extends BaseMapper<WorkflowRunStep> {
               </foreach>
             </script>
             """)
-    int failActiveAttempt(@Param("stepId") Long stepId,
-                          @Param("expectedRevision") Long expectedRevision,
-                          @Param("attemptId") Long attemptId,
-                          @Param("errorMessage") String errorMessage,
-                          @Param("expectedStatuses") List<String> expectedStatuses);
+    int failActiveAttemptWithContract(@Param("stepId") Long stepId,
+                                      @Param("expectedRevision") Long expectedRevision,
+                                      @Param("attemptId") Long attemptId,
+                                      @Param("errorCode") String errorCode,
+                                      @Param("userMessage") String userMessage,
+                                      @Param("developerMessage") String developerMessage,
+                                      @Param("failureTraceId") String failureTraceId,
+                                      @Param("expectedStatuses") List<String> expectedStatuses);
 
     @Update("""
             UPDATE workflow_run_steps
             SET status = 'SUCCESS',
                 revision = revision + 1,
                 output_json = #{outputJson},
+                error_code = NULL,
                 error_message = NULL,
+                user_message = NULL,
+                developer_message = NULL,
+                failure_trace_id = NULL,
                 finished_at = #{finishedAt}
             WHERE id = #{stepId}
               AND revision = #{expectedRevision}

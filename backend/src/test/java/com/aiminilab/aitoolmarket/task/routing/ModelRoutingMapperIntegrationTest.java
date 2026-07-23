@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.task.routing;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
+import com.aiminilab.aitoolmarket.task.dto.RouteFailoverRequest;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.task.mapper.TaskMapper;
 import com.aiminilab.aitoolmarket.task.routing.entity.AccountModelRouteState;
@@ -134,6 +135,35 @@ class ModelRoutingMapperIntegrationTest {
         assertThat(candidates)
                 .extracting(AgentModelConfig::getConfigCode)
                 .contains("cached_failure_model");
+    }
+
+    @Test
+    void closingFailurePersistsThePhaseOneErrorContract() {
+        jdbcTemplate.update("""
+                INSERT INTO ai_tasks(task_no, user_id, tool_id, model_config_id, status, params_json)
+                VALUES ('routing-contract-task', 1, 1, 90001, 'PROCESSING', '{}')
+                """);
+        Long taskId = jdbcTemplate.queryForObject(
+                "SELECT id FROM ai_tasks WHERE task_no = 'routing-contract-task'", Long.class);
+        TaskModelRouteAttempt attempt = attempt(taskId, 1, 90001L, 80001L);
+        assertThat(attemptMapper.insertAttempt(attempt)).isEqualTo(1);
+
+        RouteFailoverRequest failure = new RouteFailoverRequest(
+                "claim-1", attempt.getId(), "NOT_SENT", "ACCOUNT", "PROVIDER_CALL",
+                "MODEL_001", "legacy upstream failure", "UPSTREAM_429", "provider-request-1",
+                false, 30
+        );
+        assertThat(attemptMapper.closeWithFailureContract(
+                attempt.getId(), "FAILED", failure, "Please retry later",
+                "Provider call failed before delivery", "trace-route-1"
+        )).isEqualTo(1);
+
+        TaskModelRouteAttempt persisted = attemptMapper.selectById(attempt.getId());
+        assertThat(persisted.getErrorCode()).isEqualTo("MODEL_001");
+        assertThat(persisted.getErrorMessage()).isEqualTo("Provider call failed before delivery");
+        assertThat(persisted.getUserMessage()).isEqualTo("Please retry later");
+        assertThat(persisted.getDeveloperMessage()).isEqualTo("Provider call failed before delivery");
+        assertThat(persisted.getFailureTraceId()).isEqualTo("trace-route-1");
     }
 
     private static TaskModelRouteAttempt attempt(Long taskId,

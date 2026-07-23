@@ -207,7 +207,7 @@ const router = createRouter({
       redirect: "/library/subjects",
     },
     {
-      path: "/u/:userId",
+      path: "/u/p:publicCode(\\d{5})",
       name: "PublicProfile",
       meta: { requiresAuth: false },
       component: PublicProfilePage,

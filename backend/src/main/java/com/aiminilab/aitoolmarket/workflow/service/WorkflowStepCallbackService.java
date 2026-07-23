@@ -12,6 +12,7 @@ import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowStepAttemptMapper;
 import com.aiminilab.aitoolmarket.workflow.metrics.WorkflowMetrics;
 import com.aiminilab.aitoolmarket.workflow.model.WorkflowAttemptStatus;
 import com.aiminilab.aitoolmarket.workflow.model.WorkflowStepStatus;
+import com.aiminilab.aitoolmarket.workflow.support.WorkflowFailureContract;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -236,14 +237,17 @@ public class WorkflowStepCallbackService {
         }
         attachProviderRequestId(attempt.getId(), providerRequestId);
 
-        String errorCode = request.errorCode() == null || request.errorCode().isBlank()
-                ? "MODEL_CALL_FAILED"
-                : request.errorCode();
-        String errorMessage = limit(request.errorMessage(), 1900, "Workflow step failed");
-        if (attemptMapper.markFailed(
+        WorkflowFailureContract failure = WorkflowFailureContract.from(
+                request.errorCode(),
+                request.errorMessage(),
+                request.developerMessage()
+        );
+        if (attemptMapper.markFailedWithContract(
                 attempt.getId(),
-                errorCode,
-                errorMessage,
+                failure.errorCode(),
+                failure.userMessage(),
+                failure.developerMessage(),
+                failure.failureTraceId(),
                 providerRequestId,
                 RUNNING_ATTEMPT_STATUS
         ) != 1) {
@@ -258,7 +262,7 @@ public class WorkflowStepCallbackService {
                     step.getId(),
                     revision(step),
                     attempt.getId(),
-                    errorMessage,
+                    failure.developerMessage(),
                     List.of(WorkflowStepStatus.RUNNING.name())
             ) != 1) {
                 throw new IllegalStateException("Active workflow step retry compare-and-set failed");
@@ -266,11 +270,14 @@ public class WorkflowStepCallbackService {
             stepScheduler.retry(step.getId());
             return true;
         }
-        if (stepMapper.failActiveAttempt(
+        if (stepMapper.failActiveAttemptWithContract(
                 step.getId(),
                 revision(step),
                 attempt.getId(),
-                errorMessage,
+                failure.errorCode(),
+                failure.userMessage(),
+                failure.developerMessage(),
+                failure.failureTraceId(),
                 List.of(WorkflowStepStatus.RUNNING.name())
         ) != 1) {
             throw new IllegalStateException("Active workflow step failure compare-and-set failed");
@@ -381,11 +388,6 @@ public class WorkflowStepCallbackService {
         output.put("contentText", request.contentText());
         output.put("resourceType", request.resourceType());
         return output;
-    }
-
-    private String limit(String value, int maxLength, String fallback) {
-        String normalized = value == null || value.isBlank() ? fallback : value.trim();
-        return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength);
     }
 
     private String providerRequestId(String value) {

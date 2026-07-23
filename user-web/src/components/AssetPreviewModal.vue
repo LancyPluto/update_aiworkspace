@@ -81,8 +81,7 @@ const canExportEffectAsset = computed(() => props.asset?.kind === "audio" && Boo
 const canReportCommunity = computed(() => {
   const asset = props.asset
   if (!asset || asset.source !== "community" || !asset.communityPostId) return false
-  if (!auth.user?.id) return true
-  return asset.authorUserId !== auth.user.id
+  return asset.ownedByCurrentUser !== true
 })
 
 function formatTime(value?: string | null) {

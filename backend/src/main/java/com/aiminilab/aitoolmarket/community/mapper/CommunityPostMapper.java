@@ -75,6 +75,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
     @Select("""
             <script>
             SELECT p.*,
+                   u.public_code AS author_public_code,
                    COALESCE(NULLIF(TRIM(u.nickname), ''), NULLIF(TRIM(u.username), '')) AS author_nickname,
                    u.avatar_url AS author_avatar_url
             FROM community_posts p
@@ -116,6 +117,7 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
     @Select("""
             <script>
             SELECT p.*,
+                   u.public_code AS author_public_code,
                    COALESCE(NULLIF(TRIM(u.nickname), ''), NULLIF(TRIM(u.username), '')) AS author_nickname,
                    u.avatar_url AS author_avatar_url
             FROM community_posts p

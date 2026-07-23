@@ -18,6 +18,7 @@ import { fetchTaskById } from "@/api/taskApi"
 import { favoritePostToCollection, unfavoritePostFromAllCollections } from "@/utils/communitySync"
 import type { CommunityPost } from "@/api/types"
 import { useAuthStore } from "@/store/authStore"
+import { userRoutes } from "@/router/userRoutes"
 import { assetFromCommunityPost } from "@/utils/assetPreviewAdapter"
 import { communityDisplayTitle } from "@/utils/communityDisplay"
 import { resolveCommunityAuthorAvatar, resolveCommunityAuthorName, resolveCommunityPrompt } from "@/utils/communityPostNormalize"
@@ -74,9 +75,13 @@ const authorName = computed(() => (post.value ? resolveCommunityAuthorName(post.
 
 const canReport = computed(() => {
   if (!post.value) return false
-  if (!auth.user?.id) return true
-  return post.value.userId !== auth.user.id
+  return post.value.ownedByCurrentUser !== true
 })
+
+function openAuthorProfile() {
+  if (!post.value?.authorPublicCode) return
+  router.push(userRoutes.publicProfile(post.value.authorPublicCode))
+}
 
 const audioMedia = computed(() => {
   if (!post.value) return { coverUrl: "", audioUrl: "" }
@@ -655,7 +660,7 @@ onUnmounted(() => {
         <div class="metadata">
           <div>
             <span>作者</span>
-            <button class="author-link" type="button" @click="router.push(`/u/${post.userId}`)">
+            <button class="author-link" type="button" :disabled="!post.authorPublicCode" @click="openAuthorProfile">
               <UserAvatar :src="resolveCommunityAuthorAvatar(post)" :name="authorName" size="sm" />
               {{ authorName }}
             </button>

@@ -1,5 +1,7 @@
 CREATE TABLE users (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  public_code CHAR(5) UNIQUE,
+  referral_code CHAR(6) UNIQUE,
   username VARCHAR(64) UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
   phone VARCHAR(32) UNIQUE,
@@ -68,6 +70,17 @@ CREATE TABLE ai_tools (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   is_deleted TINYINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE tool_model_bindings (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  tool_id BIGINT NOT NULL,
+  model_config_id BIGINT NOT NULL,
+  is_default TINYINT NOT NULL DEFAULT 0,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(tool_id, model_config_id)
 );
 
 CREATE TABLE tool_templates (
@@ -161,6 +174,11 @@ CREATE TABLE ai_tasks (
   max_retry_count INT NOT NULL DEFAULT 1,
   error_code VARCHAR(64),
   error_message TEXT,
+  user_message VARCHAR(255),
+  developer_message TEXT,
+  failure_trace_id VARCHAR(64),
+  provider_error_code VARCHAR(128),
+  provider_request_id VARCHAR(128),
   claimed_by VARCHAR(128),
   claim_token VARCHAR(128),
   lease_until DATETIME,
@@ -176,6 +194,7 @@ CREATE TABLE ai_tasks (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT uk_ai_tasks_user_idempotency UNIQUE (user_id, idempotency_key)
 );
+CREATE INDEX idx_ai_tasks_failure_trace ON ai_tasks(failure_trace_id);
 
 CREATE TABLE task_model_route_attempts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -188,6 +207,9 @@ CREATE TABLE task_model_route_attempts (
   failure_stage VARCHAR(64),
   error_code VARCHAR(64),
   error_message CLOB,
+  user_message VARCHAR(255),
+  developer_message CLOB,
+  failure_trace_id VARCHAR(64),
   provider_error_code VARCHAR(128),
   provider_request_id VARCHAR(128),
   provider_charged TINYINT,
@@ -199,6 +221,7 @@ CREATE TABLE task_model_route_attempts (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT uk_task_model_route_attempt UNIQUE (task_id, attempt_no)
 );
+CREATE INDEX idx_task_model_route_attempt_failure_trace ON task_model_route_attempts(failure_trace_id);
 
 CREATE TABLE account_model_route_state (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -434,11 +457,15 @@ CREATE TABLE ai_task_logs (
   message TEXT,
   error_code VARCHAR(64),
   error_message TEXT,
+  user_message VARCHAR(255),
+  developer_message CLOB,
+  failure_trace_id VARCHAR(64),
   operator_type VARCHAR(32) NOT NULL DEFAULT 'SYSTEM',
   operator_id BIGINT,
   metadata_json JSON,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX idx_ai_task_logs_failure_trace ON ai_task_logs(failure_trace_id);
 
 CREATE TABLE agent_sessions (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -525,6 +552,9 @@ CREATE TABLE agent_runs (
   consumed_credits INT NOT NULL DEFAULT 0,
   error_code VARCHAR(64),
   error_message CLOB,
+  user_message VARCHAR(255),
+  developer_message CLOB,
+  failure_trace_id VARCHAR(64),
   started_at DATETIME,
   finished_at DATETIME,
   parent_run_id BIGINT,
@@ -541,6 +571,7 @@ CREATE UNIQUE INDEX uk_agent_runs_user_client ON agent_runs (user_id, client_req
 CREATE INDEX idx_agent_runs_session_user_id ON agent_runs (session_id, user_id, id);
 CREATE INDEX idx_agent_runs_model_config ON agent_runs (model_config_id);
 CREATE INDEX idx_agent_runs_context_snapshot ON agent_runs (context_snapshot_id);
+CREATE INDEX idx_agent_runs_failure_trace ON agent_runs (failure_trace_id);
 CREATE INDEX idx_agent_messages_session_active ON agent_messages (session_id, status, id);
 
 CREATE TABLE agent_context_snapshots (
@@ -587,10 +618,14 @@ CREATE TABLE agent_tool_calls (
   result_json JSON,
   error_code VARCHAR(64),
   error_message CLOB,
+  user_message VARCHAR(255),
+  developer_message CLOB,
+  failure_trace_id VARCHAR(64),
   started_at DATETIME,
   finished_at DATETIME,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX idx_agent_tool_calls_failure_trace ON agent_tool_calls(failure_trace_id);
 
 CREATE TABLE community_posts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -848,6 +883,14 @@ CREATE TABLE agent_model_configs (
   base_url VARCHAR(512),
   api_key VARCHAR(512),
   extra_auth_json TEXT,
+  execution_task VARCHAR(64),
+  execution_options_json TEXT,
+  request_schema_json TEXT,
+  request_mapping_json TEXT,
+  response_mapping_json TEXT,
+  api_contract_version VARCHAR(64),
+  contract_status VARCHAR(32) NOT NULL DEFAULT 'DOCS_PENDING',
+  contract_verified_at DATETIME,
   minimax_group_id VARCHAR(128),
   console_url VARCHAR(512),
   balance_url VARCHAR(512),
@@ -1190,7 +1233,11 @@ CREATE TABLE workflow_runs (
   current_step_id BIGINT,
   billing_status VARCHAR(32) NOT NULL DEFAULT 'CLEAR',
   provider_cost_reserved_cny DECIMAL(18,6) NOT NULL DEFAULT 0,
+  error_code VARCHAR(64),
   error_message VARCHAR(2000),
+  user_message VARCHAR(255),
+  developer_message CLOB,
+  failure_trace_id VARCHAR(64),
   started_at TIMESTAMP,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1198,6 +1245,7 @@ CREATE TABLE workflow_runs (
   CONSTRAINT uk_workflow_run_root_task UNIQUE (root_task_id),
   CONSTRAINT uk_workflow_run_user_request UNIQUE (user_id, client_request_id)
 );
+CREATE INDEX idx_workflow_runs_failure_trace ON workflow_runs(failure_trace_id);
 
 CREATE TABLE workflow_provider_cost_budget_days (
   budget_date DATE PRIMARY KEY,
@@ -1220,11 +1268,16 @@ CREATE TABLE workflow_run_steps (
   max_attempts INT NOT NULL DEFAULT 2,
   input_json CLOB,
   output_json CLOB,
+  error_code VARCHAR(64),
   error_message VARCHAR(2000),
+  user_message VARCHAR(255),
+  developer_message CLOB,
+  failure_trace_id VARCHAR(64),
   started_at TIMESTAMP,
   finished_at TIMESTAMP,
   CONSTRAINT uk_workflow_step_run_node UNIQUE (run_id, node_id)
 );
+CREATE INDEX idx_workflow_run_steps_failure_trace ON workflow_run_steps(failure_trace_id);
 
 CREATE TABLE workflow_step_attempts (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -1240,6 +1293,9 @@ CREATE TABLE workflow_step_attempts (
   output_json CLOB,
   error_code VARCHAR(64),
   error_message VARCHAR(2000),
+  user_message VARCHAR(255),
+  developer_message CLOB,
+  failure_trace_id VARCHAR(64),
   lease_expires_at TIMESTAMP,
   started_at TIMESTAMP,
   finished_at TIMESTAMP,
@@ -1250,6 +1306,7 @@ CREATE TABLE workflow_step_attempts (
   CONSTRAINT uk_workflow_attempt_claim_token UNIQUE (claim_token),
   CONSTRAINT uk_workflow_attempt_provider_request UNIQUE (provider_code, provider_request_id)
 );
+CREATE INDEX idx_workflow_step_attempts_failure_trace ON workflow_step_attempts(failure_trace_id);
 
 CREATE TABLE workflow_step_charges (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,

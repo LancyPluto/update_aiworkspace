@@ -30,6 +30,7 @@ import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.agent.service.ModelExecutionSnapshotService;
 import com.aiminilab.aitoolmarket.task.service.TaskCreditDispatchService;
 import com.aiminilab.aitoolmarket.task.service.TaskOutboxService;
+import com.aiminilab.aitoolmarket.task.service.ModelRequestSchemaService;
 import com.aiminilab.aitoolmarket.task.service.TaskService;
 import com.aiminilab.aitoolmarket.task.service.TaskStateMachine;
 import com.aiminilab.aitoolmarket.task.support.TaskParamMediaFields;
@@ -82,6 +83,7 @@ public class TaskServiceImpl implements TaskService {
     private final AgentToolCallMapper agentToolCallMapper;
     private final ModelCapabilityService modelCapabilityService;
     private final ModelExecutionSnapshotService modelExecutionSnapshotService;
+    private final ModelRequestSchemaService modelRequestSchemaService;
     private final CreditService creditService;
     private final ObjectMapper objectMapper;
     private final TaskOutboxService taskOutboxService;
@@ -108,6 +110,7 @@ public class TaskServiceImpl implements TaskService {
             AgentToolCallMapper agentToolCallMapper,
             ModelCapabilityService modelCapabilityService,
             ModelExecutionSnapshotService modelExecutionSnapshotService,
+            ModelRequestSchemaService modelRequestSchemaService,
             CreditService creditService,
             ObjectMapper objectMapper,
             TaskOutboxService taskOutboxService,
@@ -133,6 +136,7 @@ public class TaskServiceImpl implements TaskService {
         this.agentToolCallMapper = agentToolCallMapper;
         this.modelCapabilityService = modelCapabilityService;
         this.modelExecutionSnapshotService = modelExecutionSnapshotService;
+        this.modelRequestSchemaService = modelRequestSchemaService;
         this.creditService = creditService;
         this.objectMapper = objectMapper;
         this.taskOutboxService = taskOutboxService;
@@ -256,7 +260,11 @@ public class TaskServiceImpl implements TaskService {
         }
 
         AgentModelConfig modelConfig = modelCapabilityService.resolveModelConfigForTool(tool, request.modelConfigId());
-        PricingQuote quote = taskCreditEstimateService.quoteUserFacing(tool, modelConfig, params);
+        JsonNode validatedParams = modelRequestSchemaService.validateAndSanitize(tool, modelConfig, params);
+        if (validatedParams == null) {
+            validatedParams = params;
+        }
+        PricingQuote quote = taskCreditEstimateService.quoteUserFacing(tool, modelConfig, validatedParams);
         int credits = quote.chargeCredits();
         return new TaskEstimateResponse(credits, false, available, available >= credits, quote.breakdown());
     }
@@ -447,6 +455,10 @@ public class TaskServiceImpl implements TaskService {
         }
 
         JsonNode normalizedParams = normalizeTaskParams(userId, params);
+        JsonNode validatedParams = modelRequestSchemaService.validateAndSanitize(tool, modelConfig, normalizedParams);
+        if (validatedParams != null) {
+            normalizedParams = validatedParams;
+        }
         AiTask task = new AiTask();
         task.setTaskNo(generateTaskNo());
         task.setUserId(userId);
@@ -560,7 +572,8 @@ public class TaskServiceImpl implements TaskService {
                 .filter(post -> post.getAuditStatus() == null || "APPROVED".equalsIgnoreCase(post.getAuditStatus()))
                 .map(post -> post.getId())
                 .orElse(null);
-        return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result, agentSource, communityPostId, consumedCredits);
+        return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result, agentSource, communityPostId,
+                consumedCredits, forAdmin);
     }
 
     private List<TaskDetailResponse> toDetailBatch(List<AiTask> tasks, boolean forAdmin) {
@@ -630,7 +643,8 @@ public class TaskServiceImpl implements TaskService {
                 communityPostId = post.getId();
             }
 
-            return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result, agentSource, communityPostId, consumedCredits);
+            return TaskDetailResponse.of(task, parseParams(task.getParamsJson()), result, agentSource, communityPostId,
+                    consumedCredits, forAdmin);
         }).toList();
     }
 

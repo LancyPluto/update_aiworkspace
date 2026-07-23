@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import time
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -14,11 +15,22 @@ from client.provider_error import (
 )
 from config import settings
 from utils.input_image import InputImageError, resolve_reference_image_data_url
+from utils.model_contract import parse_response_mapping, read_response_value, response_mapping_has
 from volcengine_model import normalize_volcengine_openai_base_url
 
 
 LOGGER = logging.getLogger(__name__)
 POLL_REQUEST_ATTEMPTS = 3
+TEXT_TO_VIDEO = "text_to_video"
+FIRST_FRAME_TO_VIDEO = "first_frame_to_video"
+FIRST_LAST_FRAME_TO_VIDEO = "first_last_frame_to_video"
+MULTIMODAL_REFERENCE = "multimodal_reference"
+SEEDANCE_GENERATION_MODES = {
+    TEXT_TO_VIDEO,
+    FIRST_FRAME_TO_VIDEO,
+    FIRST_LAST_FRAME_TO_VIDEO,
+    MULTIMODAL_REFERENCE,
+}
 
 
 class SeedanceVideoError(ProviderCallError):
@@ -39,6 +51,7 @@ class SeedanceVideoClient:
         create_path: str | None = None,
         poll_interval_seconds: int | None = None,
         timeout_seconds: int | None = None,
+        model_config: dict[str, Any] | None = None,
     ) -> None:
         normalized_base, normalized_path = self._normalize_endpoint(
             (base_url or settings.seedance_base_url).rstrip("/"),
@@ -56,6 +69,7 @@ class SeedanceVideoClient:
         )
         self.timeout = (10, 300)
         self.session = requests.Session()
+        self.response_mapping = parse_response_mapping(model_config)
 
     @staticmethod
     def _normalize_endpoint(base_url: str, path: str) -> tuple[str, str]:
@@ -74,7 +88,12 @@ class SeedanceVideoClient:
         model_name = str(config.get("modelName") or config.get("model_name") or settings.seedance_video_model).strip()
         if not api_key:
             raise SeedanceVideoError("Seedance model snapshot missing apiKey")
-        return cls(base_url=base_url, api_key=api_key, default_model=model_name)
+        return cls(
+            base_url=base_url,
+            api_key=api_key,
+            default_model=model_name,
+            model_config=config,
+        )
 
     def generate_video(
         self,
@@ -87,7 +106,9 @@ class SeedanceVideoClient:
         images: list[str] | None = None,
         image_tail: str = "",
         video_url: str = "",
+        video_urls: list[str] | None = None,
         audio_data_url: str = "",
+        audio_urls: list[str] | None = None,
         seed: int | None = None,
         duration: str = "",
         aspect_ratio: str = "",
@@ -114,8 +135,10 @@ class SeedanceVideoClient:
                 image=image,
                 images=images,
                 audio_data_url=audio_data_url,
+                audio_urls=audio_urls,
                 image_tail=image_tail,
                 video_url=video_url,
+                video_urls=video_urls,
                 seed=seed,
                 duration=duration,
                 aspect_ratio=aspect_ratio,
@@ -123,23 +146,25 @@ class SeedanceVideoClient:
                 generate_audio=generate_audio,
                 watermark=watermark,
                 camera_fixed=camera_fixed,
+                mode=mode,
             )
             created = self._request("POST", self.create_path, payload)
-            task_id = self._extract_task_id(created)
+            task_id = self._response_task_id(created)
             request_id = task_id
             if submitted_callback:
                 submitted_callback({"taskId": task_id, "requestId": request_id})
         finished = self.wait_for_video(task_id)
         return {
             "requestId": request_id,
-            "status": self._extract_status(finished),
-            "videoUrl": self._extract_video_url(finished),
+            "status": self._response_status(finished),
+            "videoUrl": self._response_video_url(finished),
             "reason": str(finished.get("reason") or finished.get("message") or ""),
             "seed": seed,
             "timings": {},
             "provider": "seedance",
             "model": model or self.default_model,
             "resolution": resolution,
+            "usage": self._response_usage(finished),
         }
 
     def wait_for_video(self, task_id: str) -> dict[str, Any]:
@@ -148,7 +173,7 @@ class SeedanceVideoClient:
         path = f"{self.create_path.rstrip('/')}/{task_id}"
         while time.monotonic() < deadline:
             last_payload = self._poll_status_with_retry(path=path, task_id=task_id, deadline=deadline)
-            status = self._extract_status(last_payload).lower()
+            status = self._response_status(last_payload).lower()
             if status in {"succeeded", "succeed", "success", "completed", "done"}:
                 return last_payload
             if status in {"failed", "fail", "error", "cancelled", "canceled"}:
@@ -160,8 +185,52 @@ class SeedanceVideoClient:
             time.sleep(min(self.poll_interval_seconds, remaining))
 
         raise SeedanceVideoTimeoutError(
-            f"seedance video generation timed out, taskId={task_id}, lastStatus={self._extract_status(last_payload)}"
+            f"seedance video generation timed out, taskId={task_id}, lastStatus={self._response_status(last_payload)}"
         )
+
+    def _response_task_id(self, payload: dict[str, Any]) -> str:
+        if not response_mapping_has(self.response_mapping, "requestIdPath", "requestIdPaths"):
+            return self._extract_task_id(payload)
+        value = read_response_value(payload, self.response_mapping, "requestIdPath", "requestIdPaths")
+        task_id = str(value or "").strip()
+        if not task_id:
+            raise SeedanceVideoError("seedance create response missing mapped task id")
+        return task_id
+
+    def _response_status(self, payload: dict[str, Any]) -> str:
+        if not response_mapping_has(self.response_mapping, "statusPath", "statusPaths"):
+            return self._extract_status(payload)
+        value = read_response_value(payload, self.response_mapping, "statusPath", "statusPaths")
+        return str(value or "processing").strip()
+
+    def _response_video_url(self, payload: dict[str, Any]) -> str:
+        if not response_mapping_has(
+            self.response_mapping,
+            "videoUrlPath",
+            "urlPath",
+            "urlPaths",
+        ):
+            return self._extract_video_url(payload)
+        value = read_response_value(
+            payload,
+            self.response_mapping,
+            "videoUrlPath",
+            "urlPath",
+            "urlPaths",
+        )
+        url = str(value or "").strip()
+        if not url:
+            raise SeedanceVideoError("seedance response missing mapped video url")
+        return url
+
+    def _response_usage(self, payload: dict[str, Any]) -> dict[str, Any]:
+        value = read_response_value(
+            payload,
+            self.response_mapping,
+            "usagePath",
+            fallback_paths=("usage",),
+        )
+        return value if isinstance(value, dict) else {}
 
     def _poll_status_with_retry(self, *, path: str, task_id: str, deadline: float) -> dict[str, Any]:
         for attempt in range(1, POLL_REQUEST_ATTEMPTS + 1):
@@ -215,8 +284,10 @@ class SeedanceVideoClient:
         image: str,
         images: list[str] | None = None,
         audio_data_url: str = "",
+        audio_urls: list[str] | None = None,
         image_tail: str = "",
         video_url: str = "",
+        video_urls: list[str] | None = None,
         seed: int | None = None,
         duration: str = "",
         aspect_ratio: str = "",
@@ -224,54 +295,75 @@ class SeedanceVideoClient:
         generate_audio: bool | None = None,
         watermark: bool | None = None,
         camera_fixed: bool | None = None,
+        mode: str = "",
     ) -> dict[str, Any]:
         text = prompt.strip()
         if negative_prompt.strip():
             text = f"{text}\nNegative prompt: {negative_prompt.strip()}"
-        content: list[dict[str, Any]] = [{"type": "text", "text": text}]
-        resolved_images = _dedupe_texts([*(images or []), image])
+        content: list[dict[str, Any]] = []
+        if text:
+            content.append({"type": "text", "text": text})
+        resolved_images = _dedupe_texts([image, *(images or [])])
         tail_image = (image_tail or "").strip()
-        if tail_image:
-            resolved_images.append(tail_image)
-        if resolved_images:
-            image_payloads = [self._image_payload_value(item) for item in resolved_images[:9]]
-            if len(image_payloads) == 1:
-                content.append({"type": "image_url", "image_url": {"url": image_payloads[0]}})
-            elif len(image_payloads) == 2 and tail_image:
-                content.append({"type": "image_url", "image_url": {"url": image_payloads[0]}, "role": "first_frame"})
-                content.append({"type": "image_url", "image_url": {"url": image_payloads[1]}, "role": "last_frame"})
-            else:
-                for value in image_payloads:
-                    content.append({"type": "image_url", "image_url": {"url": value}, "role": "reference_image"})
-        if video_url.strip():
-            content.append({"type": "video_url", "video_url": {"url": video_url.strip()}, "role": "reference_video"})
-        audio_payload = self._audio_payload(audio_data_url)
-        if audio_payload:
-            content.append(audio_payload)
+        resolved_videos = _dedupe_texts([video_url, *(video_urls or [])])
+        resolved_audios = _dedupe_texts([audio_data_url, *(audio_urls or [])])
+        generation_mode = self._resolve_generation_mode(
+            mode,
+            images=resolved_images,
+            image_tail=tail_image,
+            videos=resolved_videos,
+            audios=resolved_audios,
+        )
+        self._validate_generation_inputs(
+            generation_mode,
+            model=model,
+            prompt=text,
+            images=resolved_images,
+            image_tail=tail_image,
+            videos=resolved_videos,
+            audios=resolved_audios,
+        )
+        image_payloads = [self._image_payload_value(item) for item in resolved_images]
+        if generation_mode == FIRST_FRAME_TO_VIDEO:
+            content.append({"type": "image_url", "image_url": {"url": image_payloads[0]}, "role": "first_frame"})
+        elif generation_mode == FIRST_LAST_FRAME_TO_VIDEO:
+            content.append({"type": "image_url", "image_url": {"url": image_payloads[0]}, "role": "first_frame"})
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": self._image_payload_value(tail_image)},
+                    "role": "last_frame",
+                }
+            )
+        elif generation_mode == MULTIMODAL_REFERENCE:
+            content.extend(
+                {"type": "image_url", "image_url": {"url": value}, "role": "reference_image"}
+                for value in image_payloads
+            )
+            content.extend(
+                {"type": "video_url", "video_url": {"url": value}, "role": "reference_video"}
+                for value in resolved_videos
+            )
+            content.extend(self._audio_payload(value) for value in resolved_audios)
 
         payload: dict[str, Any] = {
             "model": model,
             "content": content,
             "resolution": resolution,
         }
-        if str(image_size or "").strip().lower() != "auto":
-            payload["size"] = image_size
-            payload["image_size"] = image_size
-        duration_seconds = self._duration_seconds(duration)
+        duration_seconds = self._duration_seconds(duration, model)
         if duration_seconds is not None:
             payload["duration"] = duration_seconds
-            payload["duration_seconds"] = duration_seconds
         ratio = self._aspect_ratio(aspect_ratio, image_size)
         if ratio:
             payload["ratio"] = ratio
-            payload["aspect_ratio"] = ratio
-        if seed is not None:
+        if seed is not None and not self._is_seedance_2(model):
             payload["seed"] = seed
         if generate_audio is not None:
             payload["generate_audio"] = bool(generate_audio)
         if watermark is not None:
             payload["watermark"] = bool(watermark)
-        if camera_fixed is not None:
+        if camera_fixed is not None and not self._is_seedance_2(model) and generation_mode == TEXT_TO_VIDEO:
             payload["camera_fixed"] = bool(camera_fixed)
         return payload
 
@@ -309,25 +401,98 @@ class SeedanceVideoClient:
         }
         return parsed.hostname in internal_hosts
 
+    @classmethod
+    def _resolve_generation_mode(
+        cls,
+        value: str,
+        *,
+        images: list[str],
+        image_tail: str,
+        videos: list[str],
+        audios: list[str],
+    ) -> str:
+        raw = str(value or "").strip().lower().replace("-", "_")
+        aliases = {
+            "t2v": TEXT_TO_VIDEO,
+            "text2video": TEXT_TO_VIDEO,
+            "text_to_video": TEXT_TO_VIDEO,
+            "i2v": FIRST_FRAME_TO_VIDEO,
+            "image2video": FIRST_FRAME_TO_VIDEO,
+            "first_frame": FIRST_FRAME_TO_VIDEO,
+            "first_frame_to_video": FIRST_FRAME_TO_VIDEO,
+            "first_last_frame": FIRST_LAST_FRAME_TO_VIDEO,
+            "first_last_frame_to_video": FIRST_LAST_FRAME_TO_VIDEO,
+            "first_end_frame_to_video": FIRST_LAST_FRAME_TO_VIDEO,
+            "r2v": MULTIMODAL_REFERENCE,
+            "reference": MULTIMODAL_REFERENCE,
+            "omni_reference": MULTIMODAL_REFERENCE,
+            "multimodal_reference": MULTIMODAL_REFERENCE,
+        }
+        if raw:
+            resolved = aliases.get(raw, raw)
+            if resolved not in SEEDANCE_GENERATION_MODES:
+                raise SeedanceVideoError(f"unsupported Seedance generationMode: {value}")
+            return resolved
+        if image_tail:
+            return FIRST_LAST_FRAME_TO_VIDEO
+        if videos or audios or len(images) > 1:
+            return MULTIMODAL_REFERENCE
+        if images:
+            return FIRST_FRAME_TO_VIDEO
+        return TEXT_TO_VIDEO
+
+    @classmethod
+    def _validate_generation_inputs(
+        cls,
+        mode: str,
+        *,
+        model: str,
+        prompt: str,
+        images: list[str],
+        image_tail: str,
+        videos: list[str],
+        audios: list[str],
+    ) -> None:
+        if mode == TEXT_TO_VIDEO:
+            if not prompt:
+                raise SeedanceVideoError("prompt is required for Seedance text-to-video")
+            if images or image_tail or videos or audios:
+                raise SeedanceVideoError("text-to-video does not accept reference media")
+            return
+        if mode == FIRST_FRAME_TO_VIDEO:
+            if len(images) != 1 or image_tail or videos or audios:
+                raise SeedanceVideoError("first-frame video requires exactly one image")
+            return
+        if mode == FIRST_LAST_FRAME_TO_VIDEO:
+            if len(images) != 1 or not image_tail or videos or audios:
+                raise SeedanceVideoError("first/last-frame video requires one first frame and one last frame")
+            return
+        if not cls._is_seedance_2(model):
+            raise SeedanceVideoError("multimodal reference video requires a Seedance 2.0 model")
+        if len(images) > 9:
+            raise SeedanceVideoError("multimodal reference video accepts at most 9 images")
+        if len(videos) > 3:
+            raise SeedanceVideoError("multimodal reference video accepts at most 3 videos")
+        if len(audios) > 3:
+            raise SeedanceVideoError("multimodal reference video accepts at most 3 audio files")
+        if not images and not videos:
+            raise SeedanceVideoError("multimodal reference video requires at least one image or video")
+
+    @staticmethod
+    def _is_seedance_2(model: str) -> bool:
+        normalized = str(model or "").strip().lower().replace(".", "-")
+        return "seedance-2-0" in normalized
+
     @staticmethod
     def _audio_payload(audio_data_url: str) -> dict[str, Any] | None:
         raw = (audio_data_url or "").strip()
         if not raw:
             return None
-        marker = "base64,"
-        if marker in raw:
-            media_type = raw.split(";", 1)[0].replace("data:", "") or "audio/mpeg"
-            audio_format = "mp3"
-            if "/" in media_type:
-                audio_format = media_type.rsplit("/", 1)[-1].replace("mpeg", "mp3")
-            return {
-                "type": "input_audio",
-                "input_audio": {
-                    "data": raw.split(marker, 1)[1],
-                    "format": audio_format,
-                },
-            }
-        return {"type": "audio_url", "audio_url": {"url": raw}}
+        return {
+            "type": "audio_url",
+            "audio_url": {"url": raw},
+            "role": "reference_audio",
+        }
 
     def _request(
         self,
@@ -429,12 +594,23 @@ class SeedanceVideoClient:
                 values.extend(cls._walk(item))
         return values
 
-    @staticmethod
-    def _duration_seconds(duration: str) -> int | None:
-        digits = "".join(char for char in str(duration) if char.isdigit())
-        if not digits:
+    @classmethod
+    def _duration_seconds(cls, duration: str, model: str) -> int | None:
+        raw = str(duration or "").strip()
+        match = re.search(r"-?\d+", raw)
+        if not match:
             return None
-        return max(int(digits), 1)
+        seconds = int(match.group(0))
+        normalized_model = str(model or "").strip().lower().replace(".", "-")
+        if cls._is_seedance_2(model):
+            valid = seconds == -1 or 4 <= seconds <= 15
+        elif "seedance-1-5" in normalized_model:
+            valid = seconds == -1 or 4 <= seconds <= 12
+        else:
+            valid = 2 <= seconds <= 12
+        if not valid:
+            raise SeedanceVideoError(f"duration {seconds} is not supported by model {model}")
+        return seconds
 
     @staticmethod
     def _aspect_ratio(aspect_ratio: str, image_size: str) -> str:

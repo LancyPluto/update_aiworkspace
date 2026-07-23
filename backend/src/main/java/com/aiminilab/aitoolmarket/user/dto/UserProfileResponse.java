@@ -7,6 +7,8 @@ import java.time.LocalDateTime;
 
 public record UserProfileResponse(
         Long id,
+        String publicCode,
+        String referralCode,
         String username,
         String nickname,
         String avatarUrl,
@@ -33,6 +35,8 @@ public record UserProfileResponse(
         boolean pending = "PENDING".equals(membershipStatus);
         return new UserProfileResponse(
                 user.getId(),
+                user.getPublicCode(),
+                user.getReferralCode(),
                 user.getUsername(),
                 user.getNickname(),
                 user.getAvatarUrl(),

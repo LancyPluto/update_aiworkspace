@@ -41,6 +41,10 @@
       {
         "name": "traceId", "type": "textbox", "label": "TraceId / X-Request-Id（可选）",
         "query": "", "current": { "text": "", "value": "" }
+      },
+      {
+        "name": "errorCode", "type": "textbox", "label": "ErrorCode（可选）",
+        "query": "", "current": { "text": "", "value": "" }
       }
     ]
   },
@@ -65,7 +69,7 @@
       "id": 3, "type": "stat", "title": "当前筛选日志速率",
       "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "refId": "A", "expr": "sum(rate({container=~\"${container:regex}\",service=~\"${service:regex}\",stream=~\"${stream:regex}\"} |~ ${keyword:doublequote} |= ${traceId:doublequote} [1m]))", "queryType": "instant" }],
+      "targets": [{ "refId": "A", "expr": "sum(rate({container=~\"${container:regex}\",service=~\"${service:regex}\",stream=~\"${stream:regex}\"} |~ ${keyword:doublequote} |= ${traceId:doublequote} |= ${errorCode:doublequote} [1m]))", "queryType": "instant" }],
       "fieldConfig": { "defaults": { "unit": "cps", "decimals": 1, "thresholds": { "steps": [{ "color": "green", "value": null }] } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" }
     },
@@ -73,7 +77,7 @@
       "id": 4, "type": "timeseries", "title": "每容器日志速率",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "refId": "A", "expr": "sum by (container) (rate({container=~\"${container:regex}\",service=~\"${service:regex}\",stream=~\"${stream:regex}\"} |~ ${keyword:doublequote} |= ${traceId:doublequote} [1m]))", "legendFormat": "{{container}}" }],
+      "targets": [{ "refId": "A", "expr": "sum by (container) (rate({container=~\"${container:regex}\",service=~\"${service:regex}\",stream=~\"${stream:regex}\"} |~ ${keyword:doublequote} |= ${traceId:doublequote} |= ${errorCode:doublequote} [1m]))", "legendFormat": "{{container}}" }],
       "fieldConfig": { "defaults": { "unit": "cps", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 18, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } } }, "overrides": [] },
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
     },
@@ -82,14 +86,14 @@
       "description": "TraceId 留空时显示最近日志；填写后跨所有已选容器检索同一请求链路。",
       "gridPos": { "h": 14, "w": 24, "x": 0, "y": 12 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "refId": "A", "expr": "{container=~\"${container:regex}\",service=~\"${service:regex}\",stream=~\"${stream:regex}\"} |~ ${keyword:doublequote} |= ${traceId:doublequote}" }],
+      "targets": [{ "refId": "A", "expr": "{container=~\"${container:regex}\",service=~\"${service:regex}\",stream=~\"${stream:regex}\"} |~ ${keyword:doublequote} |= ${traceId:doublequote} |= ${errorCode:doublequote}" }],
       "options": { "dedupStrategy": "none", "enableLogDetails": true, "prettifyLogMessage": false, "showCommonLabels": false, "showLabels": true, "showTime": true, "sortOrder": "Descending", "wrapLogMessage": true }
     },
     {
       "id": 6, "type": "logs", "title": "最近错误 / 异常 / 超时",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 26 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "refId": "A", "expr": "{container=~\"${container:regex}\",service=~\"${service:regex}\",stream=~\"${stream:regex}\"} |~ \"(?i)(error|exception|failed|timeout|warn)\" |= ${traceId:doublequote}" }],
+      "targets": [{ "refId": "A", "expr": "{container=~\"${container:regex}\",service=~\"${service:regex}\",stream=~\"${stream:regex}\"} |~ \"(?i)(error|exception|failed|timeout|warn)\" |= ${traceId:doublequote} |= ${errorCode:doublequote}" }],
       "options": { "dedupStrategy": "none", "enableLogDetails": true, "prettifyLogMessage": false, "showCommonLabels": false, "showLabels": true, "showTime": true, "sortOrder": "Descending", "wrapLogMessage": true }
     }
   ]

@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 from typing import Any
@@ -54,6 +55,12 @@ from tools.wechat_longform_generator import (
 )
 from tools.stream_preview import build_stream_progress_message
 from tools.xiaohongshu_copywriting import build_prompt_payload as build_xiaohongshu_prompt_payload
+from utils.model_contract import (
+    ModelContractParamsError,
+    ModelContractResponseError,
+    apply_request_mapping,
+    parse_response_mapping,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -123,6 +130,12 @@ class TextTaskHandler:
             )
             trace_id = trace_id or context.get("traceId")
             context["traceId"] = trace_id
+            model_config = context.get("modelConfig") or {}
+            model_params = _select_model_request_params(
+                apply_request_mapping(context.get("params"), model_config),
+                model_config,
+            )
+            response_mapping = parse_response_mapping(model_config)
             self._report_progress(context, task_id, 12, trace_id=trace_id)
 
             system_prompt, user_prompt = self._build_model_prompts(context)
@@ -142,6 +155,8 @@ class TextTaskHandler:
                 task_id=task_id,
                 context=context,
                 trace_id=trace_id,
+                model_params=model_params,
+                response_mapping=response_mapping,
             )
 
             self._report_progress(context, task_id, 86, trace_id=trace_id)
@@ -178,6 +193,20 @@ class TextTaskHandler:
             return self._mark_failed(
                 task_id,
                 error_code="MODEL_OUTPUT_EMPTY",
+                error_message=str(exc),
+                trace_id=trace_id,
+            )
+        except ModelContractParamsError as exc:
+            return self._mark_failed(
+                task_id,
+                error_code="INVALID_TASK_PARAMS",
+                error_message=str(exc),
+                trace_id=trace_id,
+            )
+        except ModelContractResponseError as exc:
+            return self._mark_failed(
+                task_id,
+                error_code="MODEL_CALL_FAILED",
                 error_message=str(exc),
                 trace_id=trace_id,
             )
@@ -453,3 +482,42 @@ class TextTaskHandler:
         except (TypeError, ValueError):
             return default
         return parsed if parsed > 0 else default
+
+
+def _select_model_request_params(
+    params: dict[str, Any],
+    model_config: dict[str, Any],
+) -> dict[str, Any]:
+    raw_schema = model_config.get("requestSchemaJson")
+    if raw_schema is None:
+        raw_schema = model_config.get("request_schema_json")
+    if raw_schema is None or (isinstance(raw_schema, str) and not raw_schema.strip()):
+        return {}
+    try:
+        schema = json.loads(raw_schema) if isinstance(raw_schema, str) else raw_schema
+    except json.JSONDecodeError as exc:
+        raise ModelContractParamsError("requestSchemaJson is not valid JSON") from exc
+    if not isinstance(schema, dict) or schema.get("version") != "1":
+        raise ModelContractParamsError("requestSchemaJson.version must be '1'")
+    fields = schema.get("fields")
+    if not isinstance(fields, list):
+        raise ModelContractParamsError("requestSchemaJson.fields must be an array")
+
+    allowed: set[str] = set()
+    for field in fields:
+        if isinstance(field, dict) and isinstance(field.get("key"), str) and field["key"].strip():
+            allowed.add(field["key"].strip())
+
+    raw_mapping = model_config.get("requestMappingJson")
+    if raw_mapping is None:
+        raw_mapping = model_config.get("request_mapping_json")
+    if raw_mapping:
+        try:
+            mapping = json.loads(raw_mapping) if isinstance(raw_mapping, str) else raw_mapping
+        except json.JSONDecodeError as exc:
+            raise ModelContractParamsError("requestMappingJson is not valid JSON") from exc
+        if isinstance(mapping, dict) and isinstance(mapping.get("fieldMap"), dict):
+            for source, target in mapping["fieldMap"].items():
+                if source in allowed and isinstance(target, str) and target.strip():
+                    allowed.add(target.strip())
+    return {key: value for key, value in params.items() if key in allowed}

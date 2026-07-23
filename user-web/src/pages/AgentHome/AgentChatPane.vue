@@ -99,7 +99,7 @@ import { openCreateWithAssetRecommendation } from "@/utils/assetReplay"
 import { recommendToolsForAsset as recommendAssetTools } from "@/utils/assetToolRecommendations"
 import { publishAssetToCommunity, type CommunityPublishPayload } from "@/utils/publishCommunityAsset"
 import { buildTaskResultBlocks, resolveAudioTracks } from "@/utils/taskResultBlocks"
-import { safeDisplayName } from "@/utils/displayName"
+import { defaultUserDisplayName, safeDisplayName } from "@/utils/displayName"
 import { useGeneratedMaterialList, useUploadHistoryList } from "@/composables/useMaterialPickerLists"
 import {
   chatAssetRefByUrl,
@@ -109,7 +109,12 @@ import {
 } from "@/utils/agentChatAssetRefs"
 
 const auth = useAuthStore()
-const userDisplayName = computed(() => safeDisplayName(auth.user?.nickname) || safeDisplayName(auth.user?.username) || "我")
+const userDisplayName = computed(
+  () =>
+    safeDisplayName(auth.user?.nickname, auth.user?.publicCode) ||
+    safeDisplayName(auth.user?.username, auth.user?.publicCode) ||
+    defaultUserDisplayName(auth.user?.publicCode),
+)
 
 const props = defineProps<{
   sessionId: number

@@ -36,6 +36,8 @@ public record ToolDetailResponse(
         Boolean workflowExecutionEnabled,
         Long publishedWorkflowVersionId,
         Boolean workflowUsable,
+        Long defaultModelConfigId,
+        List<ToolSupportedModelResponse> supportedModels,
         List<ToolFieldResponse> fields,
         ToolFrontendStyleConfig frontendStyle,
         // 平台级集成块；标准任务工具的 integrationMode 为 STANDARD_TASK。
@@ -45,20 +47,29 @@ public record ToolDetailResponse(
         PptWorkflow workflow
 ) {
     public static ToolDetailResponse of(ToolSummaryResponse summary, List<ToolFieldResponse> fields) {
-        return of(summary, fields, null, null);
+        return of(summary, fields, null, null, summary.modelConfigId(), List.of());
     }
 
     public static ToolDetailResponse of(ToolSummaryResponse summary,
                                         List<ToolFieldResponse> fields,
                                         ToolIntegrationView integration) {
         PptWorkflow legacy = integration != null && integration.extension() instanceof PptWorkflow w ? w : null;
-        return of(summary, fields, integration, legacy);
+        return of(summary, fields, integration, legacy, summary.modelConfigId(), List.of());
     }
 
     public static ToolDetailResponse of(ToolSummaryResponse summary,
                                         List<ToolFieldResponse> fields,
                                         ToolIntegrationView integration,
                                         PptWorkflow legacyWorkflow) {
+        return of(summary, fields, integration, legacyWorkflow, summary.modelConfigId(), List.of());
+    }
+
+    public static ToolDetailResponse of(ToolSummaryResponse summary,
+                                        List<ToolFieldResponse> fields,
+                                        ToolIntegrationView integration,
+                                        PptWorkflow legacyWorkflow,
+                                        Long defaultModelConfigId,
+                                        List<ToolSupportedModelResponse> supportedModels) {
         return new ToolDetailResponse(
                 summary.id(),
                 summary.toolCode(),
@@ -88,6 +99,8 @@ public record ToolDetailResponse(
                 summary.workflowExecutionEnabled(),
                 summary.publishedWorkflowVersionId(),
                 summary.workflowUsable(),
+                defaultModelConfigId,
+                supportedModels == null ? List.of() : supportedModels,
                 fields,
                 summary.frontendStyle(),
                 integration,

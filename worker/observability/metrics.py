@@ -88,10 +88,21 @@ def task_timer(context: dict | None):
     start = time.perf_counter()
     status = "success"
     error_code = "none"
+    outcome: dict[str, object] = {}
     TASKS_STARTED.labels(tool_code, tool_type).inc()
     ACTIVE_TASKS.labels(tool_code, tool_type).inc()
     try:
-        yield
+        yield outcome
+        result_status = normalize(outcome.get("status"), "success", 32).lower()
+        if result_status in {"failed", "failure", "error", "timeout", "cancelled"}:
+            status = "failed"
+            error_code = normalize(
+                outcome.get("errorCode") or outcome.get("error_code"),
+                "unknown",
+                64,
+            )
+        elif result_status == "skipped":
+            status = "skipped"
     except Exception as exc:
         status = "failed"
         error_code = normalize(getattr(exc, "error_code", None) or exc.__class__.__name__, "unknown", 64)

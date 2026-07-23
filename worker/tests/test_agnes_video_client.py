@@ -239,6 +239,89 @@ def test_agnes_video_client_uses_extra_body_image_for_multi_image_requests():
     }
 
 
+def test_agnes_image_to_video_uses_one_top_level_image():
+    client = AgnesVideoClient(base_url="https://apihub.agnes-ai.com", api_key="test-key")
+
+    payload = client._build_payload(
+        prompt="Animate this frame",
+        image_size="1280x720",
+        negative_prompt="",
+        model="agnes-video-v2.0",
+        image="https://cdn.example/frame.png",
+        image_tail="",
+        images=None,
+        seed=None,
+        duration="5",
+        aspect_ratio="16:9",
+        resolution="",
+        mode="",
+        generation_mode="image_to_video",
+    )
+
+    assert payload["image"] == "https://cdn.example/frame.png"
+    assert "extra_body" not in payload
+
+
+def test_agnes_video_payload_uses_explicit_frame_contract():
+    client = AgnesVideoClient(base_url="https://apihub.agnes-ai.com", api_key="test-key")
+
+    payload = client._build_payload(
+        prompt="Generate a short clip",
+        image_size="1280x720",
+        negative_prompt="",
+        model="agnes-video-v2.0",
+        image="",
+        image_tail="",
+        images=None,
+        seed=None,
+        duration="",
+        aspect_ratio="16:9",
+        resolution="",
+        mode="",
+        generation_mode="text_to_video",
+        num_frames=81,
+        frame_rate=30,
+    )
+
+    assert payload["num_frames"] == 81
+    assert payload["frame_rate"] == 30
+
+
+@pytest.mark.parametrize(
+    "generation_mode,image,images,error",
+    [
+        ("text_to_video", "https://cdn.example/frame.png", None, "does not accept"),
+        ("image_to_video", "", None, "exactly one image"),
+        ("keyframes", "https://cdn.example/frame.png", None, "at least two images"),
+        ("unsupported", "", None, "unsupported Agnes generationMode"),
+    ],
+)
+def test_agnes_generation_mode_rejects_mismatched_media(
+    generation_mode,
+    image,
+    images,
+    error,
+):
+    client = AgnesVideoClient(base_url="https://apihub.agnes-ai.com", api_key="test-key")
+
+    with pytest.raises(Exception, match=error):
+        client._build_payload(
+            prompt="Generate a video",
+            image_size="1280x720",
+            negative_prompt="",
+            model="agnes-video-v2.0",
+            image=image,
+            image_tail="",
+            images=images,
+            seed=None,
+            duration="5",
+            aspect_ratio="16:9",
+            resolution="",
+            mode="",
+            generation_mode=generation_mode,
+        )
+
+
 def test_agnes_video_client_accepts_explicit_multi_image_list():
     session = RecordingSession(
         [

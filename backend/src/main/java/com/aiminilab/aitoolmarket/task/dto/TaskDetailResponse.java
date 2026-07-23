@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.task.dto;
 
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
+import com.aiminilab.aitoolmarket.common.error.ErrorMessageSanitizer;
 import com.aiminilab.aitoolmarket.task.support.TaskFailureMessage;
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -23,6 +24,7 @@ public record TaskDetailResponse(
         String progressMessage,
         String errorCode,
         String errorMessage,
+        String failureTraceId,
         JsonNode params,
         TaskResultResponse result,
         AgentTaskSourceResponse agentSource,
@@ -45,6 +47,12 @@ public record TaskDetailResponse(
 
     public static TaskDetailResponse of(AiTask task, JsonNode params, TaskResultResponse result,
                            AgentTaskSourceResponse agentSource, Long communityPostId, Integer consumedCredits) {
+        return of(task, params, result, agentSource, communityPostId, consumedCredits, false);
+    }
+
+    public static TaskDetailResponse of(AiTask task, JsonNode params, TaskResultResponse result,
+                           AgentTaskSourceResponse agentSource, Long communityPostId, Integer consumedCredits,
+                           boolean forAdmin) {
         return new TaskDetailResponse(
                 task.getId(),
                 task.getTaskNo(),
@@ -61,7 +69,8 @@ public record TaskDetailResponse(
                 task.getProgress(),
                 TaskFailureMessage.userFacingProgressMessage(task.getErrorCode(), task.getProgressMessage()),
                 task.getErrorCode(),
-                task.getErrorMessage(),
+                responseErrorMessage(task, forAdmin),
+                task.getFailureTraceId(),
                 params,
                 result,
                 agentSource,
@@ -72,6 +81,27 @@ public record TaskDetailResponse(
                 task.getStartedAt(),
                 task.getFinishedAt()
         );
+    }
+
+    private static String responseErrorMessage(AiTask task, boolean forAdmin) {
+        if (task.getErrorCode() == null
+                && task.getErrorMessage() == null
+                && task.getUserMessage() == null
+                && task.getDeveloperMessage() == null) {
+            return null;
+        }
+        if (forAdmin) {
+            String candidate = task.getDeveloperMessage() == null || task.getDeveloperMessage().isBlank()
+                    ? task.getErrorMessage()
+                    : task.getDeveloperMessage();
+            return candidate == null
+                    ? null
+                    : ErrorMessageSanitizer.sanitizeDeveloperMessage(candidate, "Task execution failed");
+        }
+        String candidate = task.getUserMessage() == null || task.getUserMessage().isBlank()
+                ? TaskFailureMessage.userFacingProgressMessage(task.getErrorCode(), task.getProgressMessage())
+                : task.getUserMessage();
+        return ErrorMessageSanitizer.sanitizeUserMessage(candidate, "任务执行失败，请稍后重试");
     }
 
     private static String defaultValue(String value, String fallback) {

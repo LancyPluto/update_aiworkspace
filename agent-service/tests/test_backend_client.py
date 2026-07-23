@@ -82,6 +82,74 @@ async def test_backend_client_raises_business_error():
 
 
 @pytest.mark.asyncio
+async def test_backend_client_accepts_v2_admin_error_contract():
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            504,
+            json={
+                "errorCode": "MODEL_004",
+                "developerMessage": "provider timed out after retry",
+                "traceId": "trace-v2",
+            },
+        )
+
+    client = BackendClient(
+        Settings(backend_internal_base_url="http://backend"),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with pytest.raises(BackendBusinessError) as exc_info:
+        await client.get_run_context(7)
+
+    assert exc_info.value.error_code == "MODEL_004"
+    assert exc_info.value.trace_id == "trace-v2"
+    assert exc_info.value.status_code == 504
+    assert str(exc_info.value) == "provider timed out after retry"
+
+
+@pytest.mark.asyncio
+async def test_backend_client_does_not_echo_non_json_response_body():
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="sql password=secret", headers={"X-Request-Id": "trace-safe"})
+
+    client = BackendClient(
+        Settings(backend_internal_base_url="http://backend"),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with pytest.raises(BackendClientError) as exc_info:
+        await client.get_run_context(7)
+
+    assert "sql password=secret" not in str(exc_info.value)
+    assert "trace-safe" in str(exc_info.value)
+    assert exc_info.value.error_code == "SYSTEM_001"
+    assert exc_info.value.trace_id == "trace-safe"
+    assert exc_info.value.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_backend_client_rejects_success_code_on_failed_http_response():
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            500,
+            json={"code": "SUCCESS", "message": "ok", "traceId": "trace-invalid-success"},
+        )
+
+    client = BackendClient(
+        Settings(backend_internal_base_url="http://backend"),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with pytest.raises(BackendBusinessError) as exc_info:
+        await client.get_run_context(7)
+
+    assert exc_info.value.error_code == "SYSTEM_001"
+    assert exc_info.value.trace_id == "trace-invalid-success"
+    assert exc_info.value.status_code == 500
+    assert "SUCCESS error code with HTTP status 500" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_backend_client_raises_http_error():
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(500, text="boom")

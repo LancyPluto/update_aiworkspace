@@ -408,9 +408,11 @@ class UsageSequenceModelClient:
     def __init__(self, responses):
         self.responses = list(responses)
         self.prompts = []
+        self.kwargs = []
 
     def generate_with_usage(self, prompt, **kwargs):
         self.prompts.append(prompt)
+        self.kwargs.append(kwargs)
         content, prompt_tokens, completion_tokens = self.responses.pop(0)
         return {
             "content": content,
@@ -447,6 +449,7 @@ def test_checkpointed_text_retry_accumulates_usage_and_replays_without_provider_
             "provider": "agnes_chat",
             "modelName": "agnes-2.0-flash",
             "billingUnit": "TOKEN_PER_M",
+            "responseMappingJson": '{"version":"1","contentPath":"result.answer"}',
         },
     }
     handler = WorkflowStepHandler(backend_client=backend, model_client=model)
@@ -455,6 +458,10 @@ def test_checkpointed_text_retry_accumulates_usage_and_replays_without_provider_
 
     assert result["status"] == "SUCCESS"
     assert len(model.prompts) == 2
+    assert [item["response_mapping"] for item in model.kwargs] == [
+        {"version": "1", "contentPath": "result.answer"},
+        {"version": "1", "contentPath": "result.answer"},
+    ]
     assert backend.success_payload["promptTokens"] == 34
     assert backend.success_payload["completionTokens"] == 31
     assert backend.success_payload["providerCalled"] is True

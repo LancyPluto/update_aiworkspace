@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.tool.service.impl;
 
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
+import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.common.cache.BypassCacheService;
 import com.aiminilab.aitoolmarket.common.cache.CacheNamespaces;
 import com.aiminilab.aitoolmarket.support.GeneratedMediaPathSupport;
@@ -35,6 +36,7 @@ import com.aiminilab.aitoolmarket.tool.dto.ToolDetailResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldRequest;
 import com.aiminilab.aitoolmarket.tool.dto.ToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolSummaryResponse;
+import com.aiminilab.aitoolmarket.tool.dto.ToolSupportedModelResponse;
 import com.aiminilab.aitoolmarket.tool.dto.UpdateToolFieldsRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertFieldSchemaRequest;
 import com.aiminilab.aitoolmarket.tool.dto.UpsertToolCategoryRequest;
@@ -48,12 +50,14 @@ import com.aiminilab.aitoolmarket.tool.entity.ToolFieldItem;
 import com.aiminilab.aitoolmarket.tool.entity.ToolFieldSchema;
 import com.aiminilab.aitoolmarket.tool.entity.ToolPrompt;
 import com.aiminilab.aitoolmarket.tool.entity.ToolPromptVersion;
+import com.aiminilab.aitoolmarket.tool.entity.ToolModelBinding;
 import com.aiminilab.aitoolmarket.tool.support.ToolRuntimeConfig;
 import com.aiminilab.aitoolmarket.tool.support.ToolModelCapabilitySupport;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolCategoryMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldItemMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolFieldSchemaMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
+import com.aiminilab.aitoolmarket.tool.mapper.ToolModelBindingMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptMapper;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolPromptVersionMapper;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
@@ -83,6 +87,7 @@ import java.text.Normalizer;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -99,6 +104,8 @@ public class ToolServiceImpl implements ToolService {
     );
 
     private final ToolMapper toolMapper;
+    private final ToolModelBindingMapper toolModelBindingMapper;
+    private final AgentModelConfigMapper agentModelConfigMapper;
     private final ToolCategoryMapper toolCategoryMapper;
     private final ToolFieldSchemaMapper toolFieldSchemaMapper;
     private final ToolFieldItemMapper toolFieldItemMapper;
@@ -114,7 +121,9 @@ public class ToolServiceImpl implements ToolService {
     private final WorkflowExecutionService workflowExecutionService;
     private final WorkflowService workflowService;
 
-    public ToolServiceImpl(ToolMapper toolMapper, ToolCategoryMapper toolCategoryMapper,
+    public ToolServiceImpl(ToolMapper toolMapper, ToolModelBindingMapper toolModelBindingMapper,
+                           AgentModelConfigMapper agentModelConfigMapper,
+                           ToolCategoryMapper toolCategoryMapper,
                            ToolFieldSchemaMapper toolFieldSchemaMapper, ToolFieldItemMapper toolFieldItemMapper,
                            ToolPromptMapper toolPromptMapper, ToolPromptVersionMapper toolPromptVersionMapper,
                            ObjectMapper objectMapper, ToolTemplateService toolTemplateService,
@@ -126,6 +135,8 @@ public class ToolServiceImpl implements ToolService {
                            @Lazy WorkflowExecutionService workflowExecutionService,
                            WorkflowService workflowService) {
         this.toolMapper = toolMapper;
+        this.toolModelBindingMapper = toolModelBindingMapper;
+        this.agentModelConfigMapper = agentModelConfigMapper;
         this.toolCategoryMapper = toolCategoryMapper;
         this.toolFieldSchemaMapper = toolFieldSchemaMapper;
         this.toolFieldItemMapper = toolFieldItemMapper;
@@ -219,8 +230,9 @@ public class ToolServiceImpl implements ToolService {
     @Override
     public PublicToolDetailResponse userToolDetail(String toolCode) {
         JavaType type = objectMapper.getTypeFactory().constructType(PublicToolDetailResponse.class);
+        long version = bypassCacheService.currentToolListVersion();
         return bypassCacheService.getOrLoad(
-                CacheNamespaces.toolDetail(toolCode),
+                CacheNamespaces.toolDetail(version, toolCode),
                 bypassCacheService.toolTtl(),
                 type,
                 () -> loadUserToolDetail(toolCode)
@@ -266,6 +278,7 @@ public class ToolServiceImpl implements ToolService {
         AiTool tool = toolMapper.findOnlineByCode(toolCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
         PublicToolCompactResponse compact = toPublicCompact(tool);
+        ToolModelSelection modelSelection = modelSelection(tool);
         List<PublicToolFieldResponse> publicFields = fields(tool.getId()).stream()
                 .map(PublicToolFieldResponse::from)
                 .toList();
@@ -273,7 +286,9 @@ public class ToolServiceImpl implements ToolService {
                 compact,
                 publicFields,
                 PublicToolFrontendStyleResponse.detailFrom(
-                        ToolFrontendStyleConfig.fromConfigNote(tool.getConfigNote(), objectMapper))
+                        ToolFrontendStyleConfig.fromConfigNote(tool.getConfigNote(), objectMapper)),
+                modelSelection.defaultModelConfigId(),
+                modelSelection.supportedModels()
         );
     }
 
@@ -341,7 +356,17 @@ public class ToolServiceImpl implements ToolService {
     @Override
     public ToolDetailResponse adminToolDetail(Long toolId) {
         ToolSummaryResponse summary = findAdminToolSummary(toolId);
-        return ToolDetailResponse.of(summary, fields(toolId));
+        AiTool tool = toolMapper.findById(toolId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
+        ToolModelSelection modelSelection = modelSelection(tool);
+        return ToolDetailResponse.of(
+                summary,
+                fields(toolId),
+                null,
+                null,
+                modelSelection.defaultModelConfigId(),
+                modelSelection.supportedModels()
+        );
     }
 
     @Override
@@ -359,6 +384,9 @@ public class ToolServiceImpl implements ToolService {
             tool.setExecutionHandler(ExecutionHandler.fromNullable(tool.getToolType()).name());
         }
         boolean appliesTemplate = request.templateCode() != null && !request.templateCode().isBlank();
+        if (!appliesTemplate) {
+            validateRequestedModelBindings(tool, request, null);
+        }
         if (!appliesTemplate) {
             modelCapabilityService.validateToolModelBinding(tool);
         }
@@ -378,6 +406,7 @@ public class ToolServiceImpl implements ToolService {
                 toolFieldItemMapper.replaceActiveFields(schemaId, runtimeFields);
             }
         }
+        persistRequestedModelBindings(toolId, request, operatorId);
         AiTool persisted = toolMapper.findById(toolId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在"));
         if (appliesTemplate) {
@@ -386,6 +415,7 @@ public class ToolServiceImpl implements ToolService {
                         ToolModelCapabilitySupport.defaultsFor(persisted), objectMapper));
                 toolMapper.updateById(persisted);
             }
+            validateRequestedModelBindings(persisted, request, null);
             modelCapabilityService.validateToolModelBinding(persisted);
         }
         log.info("Admin created AI tool: toolId={}, toolCode={}, toolType={}, modelConfigId={}, operatorId={}",
@@ -455,6 +485,7 @@ public class ToolServiceImpl implements ToolService {
     }
 
     @Override
+    @Transactional
     public ToolSummaryResponse updateTool(Long toolId, UpsertToolRequest request, Long operatorId) {
         ensureToolExists(toolId);
         AiTool tool = fromRequest(request);
@@ -467,9 +498,13 @@ public class ToolServiceImpl implements ToolService {
         if (tool.getExecutionHandler() == null || tool.getExecutionHandler().isBlank()) {
             tool.setExecutionHandler(existing.getExecutionHandler());
         }
+        preserveLegacyBindingDefault(tool, request, existing);
         applyRequiredModelCapabilities(tool, request.requiredModelCapabilities());
         tool.setConfigNote(ConfigNoteMergeSupport.mergePreservingIntegrationMarkers(
                 existing.getConfigNote(), tool.getConfigNote()));
+        validateRequestedModelBindings(tool, request, existing);
+        toolMapper.updateTool(toolId, tool, operatorId);
+        persistRequestedModelBindings(toolId, request, operatorId);
         if (workflowService.getWorkflow(toolId) == null) {
             if (ToolStatus.ONLINE.name().equalsIgnoreCase(existing.getStatus())) {
                 validatePublishable(tool);
@@ -479,7 +514,6 @@ public class ToolServiceImpl implements ToolService {
         } else {
             modelCapabilityService.validateToolModelBinding(tool);
         }
-        toolMapper.updateTool(toolId, tool, operatorId);
         ToolSummaryResponse summary = findToolSummary(toolId);
         bypassCacheService.invalidateToolCatalog(summary.toolCode());
         return summary;
@@ -748,11 +782,237 @@ public class ToolServiceImpl implements ToolService {
         tool.setOutputModality(normalizeOutputModality(toolType, request.outputModality()).name());
         tool.setConfigNote(blankToNull(request.configNote()));
         tool.setEstimatedCreditCost(request.estimatedCreditCost());
-        tool.setModelConfigId(request.modelConfigId());
+        Long selectedDefaultModelId = request.defaultModelConfigId();
+        if (request.modelConfigIds() != null) {
+            if (request.modelConfigIds().isEmpty()) {
+                selectedDefaultModelId = null;
+            } else if (selectedDefaultModelId == null) {
+                selectedDefaultModelId = request.modelConfigIds().get(0);
+            }
+        }
+        tool.setModelConfigId(selectedDefaultModelId == null ? request.modelConfigId() : selectedDefaultModelId);
         if (request.executionHandler() != null && !request.executionHandler().isBlank()) {
             tool.setExecutionHandler(ExecutionHandler.fromNullable(request.executionHandler()).name());
         }
         return tool;
+    }
+
+    private void validateRequestedModelBindings(AiTool tool,
+                                                UpsertToolRequest request,
+                                                AiTool existing) {
+        List<Long> requestedIds = request.modelConfigIds();
+        if (requestedIds == null) {
+            validateLegacyModelSelection(tool, existing);
+            return;
+        }
+        if (requestedIds.stream().anyMatch(java.util.Objects::isNull)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "modelConfigIds cannot contain null");
+        }
+        LinkedHashSet<Long> distinctIds = new LinkedHashSet<>(requestedIds);
+        if (distinctIds.size() != requestedIds.size()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "modelConfigIds cannot contain duplicates");
+        }
+        if (requestedIds.isEmpty()) {
+            if (request.defaultModelConfigId() != null) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR,
+                        "defaultModelConfigId requires at least one modelConfigId");
+            }
+            return;
+        }
+        Long requestedDefault = request.defaultModelConfigId() == null
+                ? requestedIds.get(0)
+                : request.defaultModelConfigId();
+        if (!distinctIds.contains(requestedDefault)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "defaultModelConfigId must belong to modelConfigIds");
+        }
+
+        ExistingModelSelection previous = existingModelSelection(existing);
+        boolean unchanged = previous.modelConfigIds().equals(distinctIds)
+                && java.util.Objects.equals(previous.defaultModelConfigId(), requestedDefault);
+        for (Long modelConfigId : requestedIds) {
+            AgentModelConfig config = agentModelConfigMapper.findActiveById(modelConfigId);
+            if (config == null || Boolean.FALSE.equals(config.getEnabled())) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR,
+                        "model config not found or disabled: " + modelConfigId);
+            }
+            modelCapabilityService.validateToolModelCapabilities(tool, config);
+            if (!hasValidReadyContract(config)
+                    && (!previous.modelConfigIds().contains(modelConfigId) || !unchanged)) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR,
+                        "model API contract is not READY: " + modelConfigId);
+            }
+        }
+    }
+
+    private void preserveLegacyBindingDefault(AiTool tool,
+                                              UpsertToolRequest request,
+                                              AiTool existing) {
+        if (request.modelConfigIds() != null || existing == null || existing.getId() == null) {
+            return;
+        }
+        List<ToolModelBinding> bindings = safeBindings(existing.getId());
+        if (bindings.isEmpty()) {
+            return;
+        }
+        Long currentDefault = bindings.stream()
+                .filter(binding -> Boolean.TRUE.equals(binding.getDefault()))
+                .map(ToolModelBinding::getModelConfigId)
+                .findFirst()
+                .orElse(bindings.get(0).getModelConfigId());
+        if (tool.getModelConfigId() == null) {
+            tool.setModelConfigId(currentDefault);
+            return;
+        }
+        if (!java.util.Objects.equals(tool.getModelConfigId(), currentDefault)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "modelConfigIds and defaultModelConfigId are required to change a tool model binding");
+        }
+    }
+
+    private void validateLegacyModelSelection(AiTool tool, AiTool existing) {
+        if (tool.getModelConfigId() == null) {
+            return;
+        }
+        AgentModelConfig config = agentModelConfigMapper.findActiveById(tool.getModelConfigId());
+        if (config == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "model config not found");
+        }
+        if (Boolean.FALSE.equals(config.getEnabled())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "bound model config is disabled: " + displayModelName(config));
+        }
+        modelCapabilityService.validateToolModelCapabilities(tool, config);
+        ExistingModelSelection previous = existingModelSelection(existing);
+        if (!hasValidReadyContract(config)
+                && !previous.modelConfigIds().contains(tool.getModelConfigId())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "model API contract is not READY: " + tool.getModelConfigId());
+        }
+    }
+
+    private String displayModelName(AgentModelConfig config) {
+        if (config.getDisplayName() != null && !config.getDisplayName().isBlank()) {
+            return config.getDisplayName();
+        }
+        return config.getModelName() == null ? "unknown" : config.getModelName();
+    }
+
+    private boolean hasValidReadyContract(AgentModelConfig config) {
+        if (!modelCapabilityService.isContractReady(config)) {
+            return false;
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(config.getRequestSchemaJson());
+            return root != null
+                    && root.isObject()
+                    && root.hasNonNull("version")
+                    && root.path("fields").isArray();
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private ExistingModelSelection existingModelSelection(AiTool existing) {
+        if (existing == null || existing.getId() == null) {
+            return new ExistingModelSelection(new LinkedHashSet<>(), null);
+        }
+        List<ToolModelBinding> bindings = safeBindings(existing.getId());
+        LinkedHashSet<Long> ids = new LinkedHashSet<>();
+        Long defaultId = null;
+        for (ToolModelBinding binding : bindings) {
+            ids.add(binding.getModelConfigId());
+            if (defaultId == null && Boolean.TRUE.equals(binding.getDefault())) {
+                defaultId = binding.getModelConfigId();
+            }
+        }
+        if (ids.isEmpty() && existing.getModelConfigId() != null) {
+            ids.add(existing.getModelConfigId());
+            defaultId = existing.getModelConfigId();
+        }
+        if (defaultId == null && !ids.isEmpty()) {
+            defaultId = ids.iterator().next();
+        }
+        return new ExistingModelSelection(ids, defaultId);
+    }
+
+    private void persistRequestedModelBindings(Long toolId,
+                                               UpsertToolRequest request,
+                                               Long operatorId) {
+        if (request.modelConfigIds() == null) {
+            return;
+        }
+        toolModelBindingMapper.deleteByToolId(toolId);
+        if (request.modelConfigIds().isEmpty()) {
+            toolMapper.updateToolModelConfig(toolId, null, operatorId);
+            return;
+        }
+        Long defaultId = request.defaultModelConfigId() == null
+                ? request.modelConfigIds().get(0)
+                : request.defaultModelConfigId();
+        toolMapper.updateToolModelConfig(toolId, defaultId, operatorId);
+        for (int index = 0; index < request.modelConfigIds().size(); index++) {
+            Long modelConfigId = request.modelConfigIds().get(index);
+            toolModelBindingMapper.insertBinding(
+                    toolId,
+                    modelConfigId,
+                    java.util.Objects.equals(defaultId, modelConfigId),
+                    index
+            );
+        }
+    }
+
+    private ToolModelSelection modelSelection(AiTool tool) {
+        List<ToolModelBinding> bindings = safeBindings(tool.getId());
+        if (bindings.isEmpty() && tool.getModelConfigId() != null) {
+            ToolModelBinding legacy = new ToolModelBinding();
+            legacy.setToolId(tool.getId());
+            legacy.setModelConfigId(tool.getModelConfigId());
+            legacy.setDefault(true);
+            legacy.setSortOrder(0);
+            bindings = List.of(legacy);
+        }
+        Long defaultModelConfigId = bindings.stream()
+                .filter(binding -> Boolean.TRUE.equals(binding.getDefault()))
+                .map(ToolModelBinding::getModelConfigId)
+                .findFirst()
+                .orElse(bindings.isEmpty() ? null : bindings.get(0).getModelConfigId());
+        List<ToolSupportedModelResponse> supportedModels = bindings.stream()
+                .map(binding -> {
+                    AgentModelConfig config = agentModelConfigMapper.findActiveById(binding.getModelConfigId());
+                    if (config == null) {
+                        return null;
+                    }
+                    List<String> capabilities = modelCapabilityService.resolveCapabilities(config);
+                    return new ToolSupportedModelResponse(
+                            config.getId(),
+                            config.getDisplayName() == null || config.getDisplayName().isBlank()
+                                    ? config.getModelName()
+                                    : config.getDisplayName(),
+                            config.getProvider(),
+                            capabilities == null ? List.of() : capabilities,
+                            config.getContractStatus() == null ? "DOCS_PENDING" : config.getContractStatus(),
+                            config.getRequestSchemaJson(),
+                            java.util.Objects.equals(defaultModelConfigId, config.getId())
+                    );
+                })
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        return new ToolModelSelection(defaultModelConfigId, supportedModels);
+    }
+
+    private List<ToolModelBinding> safeBindings(Long toolId) {
+        List<ToolModelBinding> bindings = toolId == null
+                ? List.of()
+                : toolModelBindingMapper.findByToolId(toolId);
+        return bindings == null ? List.of() : bindings;
+    }
+
+    private record ExistingModelSelection(LinkedHashSet<Long> modelConfigIds, Long defaultModelConfigId) {
+    }
+
+    private record ToolModelSelection(Long defaultModelConfigId,
+                                      List<ToolSupportedModelResponse> supportedModels) {
     }
 
     private void applyRequiredModelCapabilities(AiTool tool, List<String> requestedCapabilities) {

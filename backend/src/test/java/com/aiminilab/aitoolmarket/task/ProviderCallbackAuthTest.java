@@ -3,6 +3,8 @@ package com.aiminilab.aitoolmarket.task;
 import com.aiminilab.aitoolmarket.auth.metrics.AuthMetrics;
 import com.aiminilab.aitoolmarket.auth.security.InternalRequestSignatureVerifier;
 import com.aiminilab.aitoolmarket.auth.security.JwtTokenProvider;
+import com.aiminilab.aitoolmarket.common.error.ErrorContractProperties;
+import com.aiminilab.aitoolmarket.common.error.ErrorContractResponseFactory;
 import com.aiminilab.aitoolmarket.config.AuthInterceptor;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,6 +22,7 @@ class ProviderCallbackAuthTest {
         AuthInterceptor interceptor = new AuthInterceptor(
                 mock(JwtTokenProvider.class),
                 new ObjectMapper(),
+                new ErrorContractResponseFactory(new ErrorContractProperties()),
                 mock(InternalRequestSignatureVerifier.class),
                 mock(UserMapper.class),
                 mock(AuthMetrics.class)

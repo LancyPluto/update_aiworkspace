@@ -8,8 +8,8 @@ from typing import Any
 PROVIDERS: dict[str, dict[str, Any]] = {
     "mock": {"capabilities": {"TEXT_GENERATION"}, "worker_ready": True},
     "local_media_mock": {"capabilities": {"IMAGE_GENERATION", "VIDEO_GENERATION"}, "worker_ready": True},
-    "openai_compatible": {"capabilities": {"TEXT_GENERATION"}, "worker_ready": True},
-    "anthropic_compatible": {"capabilities": {"TEXT_GENERATION"}, "worker_ready": True},
+    "openai_compatible": {"capabilities": {"TEXT_GENERATION", "VISION_INPUT"}, "worker_ready": True},
+    "anthropic_compatible": {"capabilities": {"TEXT_GENERATION", "VISION_INPUT"}, "worker_ready": True},
     "minimax": {"capabilities": {"TEXT_GENERATION"}, "worker_ready": True},
     "siliconflow": {"capabilities": {"IMAGE_GENERATION"}, "worker_ready": True},
     "siliconflow_images": {"capabilities": {"IMAGE_GENERATION"}, "worker_ready": True},
@@ -37,7 +37,7 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "upstream_vendor": "openai",
     },
     "agnes_chat": {
-        "capabilities": {"TEXT_GENERATION"},
+        "capabilities": {"TEXT_GENERATION", "VISION_INPUT"},
         "worker_ready": True,
         "provider_protocol": "openai_chat",
         "vendor_kind": "direct",
@@ -62,6 +62,7 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     "minimax_music": {"capabilities": {"MUSIC_GENERATION"}, "worker_ready": False},
     "suno_music": {"capabilities": {"MUSIC_GENERATION"}, "worker_ready": True},
     "siliconflow_speech": {"capabilities": {"TEXT_TO_SPEECH"}, "worker_ready": True},
+    "siliconflow_asr": {"capabilities": {"SPEECH_TO_TEXT"}, "worker_ready": False},
     "dashscope_qwen_tts": {"capabilities": {"TEXT_TO_SPEECH"}, "worker_ready": True},
 }
 

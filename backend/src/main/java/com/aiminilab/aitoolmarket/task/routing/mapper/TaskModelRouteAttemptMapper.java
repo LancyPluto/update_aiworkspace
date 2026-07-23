@@ -46,7 +46,10 @@ public interface TaskModelRouteAttemptMapper extends BaseMapper<TaskModelRouteAt
                 delivery_state = #{request.deliveryState},
                 failure_stage = #{request.failureStage},
                 error_code = #{request.errorCode},
-                error_message = #{request.errorMessage},
+                error_message = #{developerMessage},
+                user_message = #{userMessage},
+                developer_message = #{developerMessage},
+                failure_trace_id = #{failureTraceId},
                 provider_error_code = #{request.providerErrorCode},
                 provider_request_id = #{request.providerRequestId},
                 provider_charged = #{request.providerCharged},
@@ -57,9 +60,12 @@ public interface TaskModelRouteAttemptMapper extends BaseMapper<TaskModelRouteAt
             WHERE id = #{id}
               AND status = 'ACTIVE'
             """)
-    int closeWithFailure(@Param("id") Long id,
-                         @Param("status") String status,
-                         @Param("request") RouteFailoverRequest request);
+    int closeWithFailureContract(@Param("id") Long id,
+                                 @Param("status") String status,
+                                 @Param("request") RouteFailoverRequest request,
+                                 @Param("userMessage") String userMessage,
+                                 @Param("developerMessage") String developerMessage,
+                                 @Param("failureTraceId") String failureTraceId);
 
     @Update("""
             UPDATE task_model_route_attempts

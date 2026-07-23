@@ -2,17 +2,22 @@
 import { computed, reactive, ref, watch } from "vue"
 import { BookOpen, FileUp, ImageIcon, Music, Plus, RefreshCw, Video, X } from "lucide-vue-next"
 import { getApiOrigin } from "@/api/client"
-import type { ToolField } from "@/api/types"
+import type { ModelRequestSchemaRequiresAnyGroup, ToolField } from "@/api/types"
 import { uploadToolFile } from "@/api/toolApi"
 import {
+  canonicalFieldOptionValue,
   defaultFieldValue,
   fieldOptionsFromMeta,
   filterFieldsForUi,
   groupVisibleFields,
   isCustomModeAdvanced,
+  isFieldRequired,
   isFieldVisible,
   parseFieldMeta,
   resolveMaxLength,
+  validateRequiresAnyGroups,
+  type FieldOptionValue,
+  type FieldUiOption,
 } from "@/utils/fieldUiMeta"
 import {
   isMediaListField,
@@ -45,20 +50,25 @@ import KlingOmniVideoListField from "@/components/DynamicForm/KlingOmniVideoList
 const props = defineProps<{
   fields: ToolField[]
   toolId?: string
+  requiresAnyGroups?: ModelRequestSchemaRequiresAnyGroup[] | null
 }>()
 
 const model = defineModel<Record<string, unknown>>({ required: true })
 
-type FieldOption = string | { label: string; value: string }
+type FieldOption = FieldUiOption
 const MULTI_IMAGE_HISTORY_KEY = "aidesu_multi_image_history:image"
 const MULTI_VIDEO_HISTORY_KEY = "aidesu_multi_image_history:video"
 
 function optionLabel(option: FieldOption): string {
-  return typeof option === "string" ? option : option.label
+  return option.label
 }
 
-function optionValue(option: FieldOption): string {
-  return typeof option === "string" ? option : option.value
+function optionValue(option: FieldOption): FieldOptionValue {
+  return option.value
+}
+
+function optionValueText(option: FieldOption): string {
+  return String(option.value)
 }
 
 function fieldOptions(field: ToolField): FieldOption[] {
@@ -428,20 +438,29 @@ function previewImage(url: string) {
   window.open(url, "_blank", "noopener,noreferrer")
 }
 
-function setOptionField(key: string, val: string) {
-  if (key === "sound" && val !== "off" && hasAnyOmniVideoReferences()) return
+function setOptionField(key: string, val: FieldOptionValue) {
+  const text = String(val)
+  if (key === "sound" && text !== "off" && hasAnyOmniVideoReferences()) return
   if (key === "characterOrientation") {
     const forced = forcedCharacterOrientation()
-    if (forced && val !== forced) return
+    if (forced && text !== forced) return
   }
   const next = { ...model.value, [key]: val }
-  if (val !== "__custom__") delete next[`${key}Custom`]
+  if (text !== "__custom__") delete next[`${key}Custom`]
   model.value = next
 }
 
-function isCharacterOrientationLockedField(field: ToolField, value: string): boolean {
+function setSelectField(field: ToolField, event: Event) {
+  const raw = (event.target as HTMLSelectElement).value
+  const value = canonicalFieldOptionValue(field, raw)
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    setOptionField(field.fieldKey, value)
+  }
+}
+
+function isCharacterOrientationLockedField(field: ToolField, value: FieldOptionValue): boolean {
   const forced = forcedCharacterOrientation()
-  return field.fieldKey === "characterOrientation" && Boolean(forced) && value !== forced
+  return field.fieldKey === "characterOrientation" && Boolean(forced) && String(value) !== forced
 }
 
 function onNumberInput(key: string, ev: Event) {
@@ -464,7 +483,7 @@ function maxLengthFor(field: ToolField): number | undefined {
 }
 
 function isEffectivelyRequired(field: ToolField): boolean {
-  if (!field.required && !field.userRequired) {
+  if (!isFieldRequired(field, model.value)) {
     if (field.fieldKey === "style" || field.fieldKey === "title") {
       return advancedMode.value
     }
@@ -473,12 +492,27 @@ function isEffectivelyRequired(field: ToolField): boolean {
     }
     return false
   }
-  return Boolean(field.required || field.userRequired)
+  return true
+}
+
+function hasSubmittedFieldValue(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length > 0
+  return value !== undefined && value !== null && String(value).trim() !== ""
 }
 
 function validate(): { valid: boolean; message?: string } {
   for (const f of visibleFields.value) {
     if (!isFieldVisible(f, model.value)) continue
+    const requiresAnyFields = parseFieldMeta(f).requiresAnyFields
+    if (
+      hasSubmittedFieldValue(model.value[f.fieldKey])
+      && Array.isArray(requiresAnyFields)
+      && requiresAnyFields.length > 0
+      && !requiresAnyFields.some((key) => hasSubmittedFieldValue(model.value[key]))
+    ) {
+      const labels = requiresAnyFields.map((key) => props.fields.find((item) => item.fieldKey === key)?.fieldName || key)
+      return { valid: false, message: `${f.fieldName} requires ${labels.join(" or ")}` }
+    }
     if (uploading[f.fieldKey]) {
       return { valid: false, message: `${f.fieldName} 上传中，请稍后提交` }
     }
@@ -542,7 +576,7 @@ function validate(): { valid: boolean; message?: string } {
       }
     }
   }
-  return { valid: true }
+  return validateRequiresAnyGroups(props.requiresAnyGroups, model.value, props.fields)
 }
 
 defineExpose({ validate })
@@ -560,11 +594,11 @@ defineExpose({ validate })
       <div v-if="modeField" class="inline-flex rounded-lg border border-border bg-background p-1">
         <button
           v-for="opt in fieldOptions(modeField)"
-          :key="optionValue(opt)"
+          :key="optionValueText(opt)"
           type="button"
           class="rounded-md px-3 py-1.5 text-xs font-medium transition"
           :class="
-            strVal('customMode') === optionValue(opt)
+            strVal('customMode') === optionValueText(opt)
               ? 'bg-primary text-primary-foreground'
               : 'text-muted-foreground hover:text-foreground'
           "
@@ -608,17 +642,28 @@ defineExpose({ validate })
               @input="setField(f.fieldKey, ($event.target as HTMLTextAreaElement).value)"
             />
 
-            <div v-else-if="(f.fieldType === 'select' || f.fieldType === 'radio' || f.fieldType === 'aspect_ratio') && fieldOptions(f).length" class="flex flex-wrap gap-2">
+            <select
+              v-else-if="f.fieldType === 'select' && fieldOptions(f).length"
+              :value="strVal(f.fieldKey)"
+              class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+              @change="setSelectField(f, $event)"
+            >
+              <option v-for="opt in fieldOptions(f)" :key="optionValueText(opt)" :value="optionValueText(opt)">
+                {{ optionLabel(opt) }}
+              </option>
+            </select>
+
+            <div v-else-if="(f.fieldType === 'radio' || f.fieldType === 'aspect_ratio') && fieldOptions(f).length" class="flex flex-wrap gap-2">
               <button
                 v-for="opt in fieldOptions(f)"
-                :key="optionValue(opt)"
+                :key="optionValueText(opt)"
                 type="button"
                 class="rounded-md border px-3 py-1.5 text-xs font-medium transition"
-                :disabled="(isSoundLockedField(f) && optionValue(opt) !== 'off') || isCharacterOrientationLockedField(f, optionValue(opt))"
+                :disabled="(isSoundLockedField(f) && optionValueText(opt) !== 'off') || isCharacterOrientationLockedField(f, optionValue(opt))"
                 :class="
-                  strVal(f.fieldKey) === optionValue(opt)
+                  strVal(f.fieldKey) === optionValueText(opt)
                     ? 'border-primary bg-primary/10 text-primary'
-                    : (isSoundLockedField(f) && optionValue(opt) !== 'off') || isCharacterOrientationLockedField(f, optionValue(opt))
+                    : (isSoundLockedField(f) && optionValueText(opt) !== 'off') || isCharacterOrientationLockedField(f, optionValue(opt))
                       ? 'cursor-not-allowed border-border bg-muted text-muted-foreground opacity-45'
                       : 'border-border bg-background text-foreground/70 hover:border-primary/40'
                 "

@@ -435,6 +435,9 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         config.setBillingUnit(providerRegistry.defaultBillingUnit(provider));
         config.setUnitPrice(config.getUnitPrice() == null ? BigDecimal.ZERO : config.getUnitPrice());
         config.setCapabilities(capabilitiesCodec.serialize(capabilities));
+        if (config.getContractStatus() == null || config.getContractStatus().isBlank()) {
+            config.setContractStatus("DOCS_PENDING");
+        }
         config.setEnabled(true);
         config.setAgentEnabled(config.getAgentEnabled() == null || config.getAgentEnabled());
         config.setDefault(Boolean.TRUE.equals(config.getDefault()));
@@ -599,19 +602,19 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         if ("agnes_images".equals(provider)) {
             String normalized = modelName == null ? "" : modelName.trim().toLowerCase(Locale.ROOT);
             if (normalized.contains("2.0")) {
-                return "https://agnes-ai.com/doc/agnes-image-20-flash";
+                return "https://wiki.agnes-ai.com/en/docs/agnes-image-20-flash";
             }
-            return "https://agnes-ai.com/doc/agnes-image-21-flash";
+            return "https://wiki.agnes-ai.com/en/docs/agnes-image-21-flash";
         }
         if ("agnes_video".equals(provider)) {
-            return "https://agnes-ai.com/doc/agnes-video-v20";
+            return "https://wiki.agnes-ai.com/en/docs/agnes-video-v20";
         }
         if ("agnes_chat".equals(provider)) {
             String normalized = modelName == null ? "" : modelName.trim().toLowerCase(Locale.ROOT);
             if (normalized.contains("1.5")) {
-                return "https://agnes-ai.com/doc/agnes-15-flash";
+                return "https://web.archive.org/web/20260611210950id_/https://agnes-ai.com/api/doc/agnes-15-flash?lang=en";
             }
-            return "https://agnes-ai.com/doc/agnes-20-flash";
+            return "https://wiki.agnes-ai.com/en/docs/agnes-20-flash";
         }
         if ("qwen".equals(provider)) {
             return "https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope";
@@ -692,6 +695,12 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                     account.getExtraAuthJson(),
                     linked.getExecutionTask(),
                     linked.getExecutionOptionsJson(),
+                    linked.getRequestSchemaJson(),
+                    linked.getRequestMappingJson(),
+                    linked.getResponseMappingJson(),
+                    linked.getApiContractVersion(),
+                    linked.getContractStatus(),
+                    linked.getContractVerifiedAt(),
                     linked.getMinimaxGroupId(),
                     account.getConsoleUrl(),
                     account.getBalanceUrl(),
@@ -730,6 +739,12 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 null,
                 account.getExtraAuthJson(),
                 null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "DOCS_PENDING",
                 null,
                 null,
                 account.getConsoleUrl(),
@@ -774,6 +789,12 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 normalizedExtraAuthJson,
                 request.executionTask(),
                 request.executionOptionsJson(),
+                request.requestSchemaJson(),
+                request.requestMappingJson(),
+                request.responseMappingJson(),
+                request.apiContractVersion(),
+                request.contractStatus(),
+                request.contractVerifiedAt(),
                 request.minimaxGroupId(),
                 request.consoleUrl(),
                 request.balanceUrl(),

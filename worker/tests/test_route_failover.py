@@ -105,12 +105,15 @@ def test_backend_preserves_safe_retry_classification_on_terminal_failure(monkeyp
             "retryScope": "ACCOUNT",
             "retryAfterSeconds": 17,
         },
+        trace_id="trace-904",
     )
 
     assert terminal_payloads == [
         {
             "errorCode": "MODEL_PROVIDER_UNAVAILABLE",
             "errorMessage": "connect refused",
+            "developerMessage": "connect refused",
+            "failureTraceId": "trace-904",
             "deliveryState": "NOT_SENT",
             "retryScope": "ACCOUNT",
             "retryAfterSeconds": 17,

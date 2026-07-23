@@ -4,14 +4,17 @@ export function buildDashboardTaskParams(options: {
   prompt: string
   params: Record<string, unknown>
   coreFieldKey?: string | null
+  includePromptAliases?: boolean
   attachments?: Array<string | number>
 }) {
   const content = options.prompt.trim()
   const taskParams: Record<string, unknown> = {
     ...options.params,
-    prompt: content,
-    text: content,
     attachments: options.attachments || [],
+  }
+  if (options.includePromptAliases !== false) {
+    taskParams.prompt = content
+    taskParams.text = content
   }
   if (options.coreFieldKey && content) taskParams[options.coreFieldKey] = content
   return taskParams
@@ -25,6 +28,8 @@ export function buildOptimisticDashboardTask(options: {
   params: Record<string, unknown>
   selectedModality: string
   userId: number
+  modelConfigId?: number | null
+  modelConfigName?: string | null
 }): TaskDetail {
   return {
     taskId: options.taskId,
@@ -35,6 +40,8 @@ export function buildOptimisticDashboardTask(options: {
     userId: options.userId,
     toolCode: options.tool.toolCode,
     toolName: options.tool.toolName,
+    modelConfigId: options.modelConfigId,
+    modelConfigName: options.modelConfigName,
     toolType: options.tool.toolType || undefined,
     inputModality: options.tool.inputModality || undefined,
     outputModality: options.tool.outputModality || options.selectedModality,

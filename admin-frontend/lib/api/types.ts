@@ -1,10 +1,63 @@
-export interface ApiResponse<T> {
-  code: string
-  message: string
+export type KnownApiErrorCode =
+  | 'SUCCESS'
+  | 'PARAM_ERROR'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
+  | 'ADMIN_UNAUTHORIZED'
+  | 'ADMIN_FORBIDDEN'
+  | 'API_001'
+  | 'API_002'
+  | 'AUTH_001'
+  | 'AUTH_002'
+  | 'AUTH_003'
+  | 'TOOL_001'
+  | 'TOOL_002'
+  | 'TASK_001'
+  | 'TASK_002'
+  | 'TASK_003'
+  | 'MODEL_001'
+  | 'MODEL_002'
+  | 'MODEL_003'
+  | 'MODEL_004'
+  | 'SYSTEM_001'
+  | 'SYSTEM_ERROR'
+
+/** Known values retain autocomplete while rolling deployments may add module codes independently. */
+export type ApiErrorCode = KnownApiErrorCode | (string & {})
+
+export interface LegacyApiResponse<T> {
+  code: ApiErrorCode
+  message?: string
+  data: T | null
+  traceId?: string | null
+  requestId?: string | null
+}
+
+export interface ApiSuccessResponse<T> {
+  code: 'SUCCESS'
   data: T
   traceId?: string | null
-  requestId: string | null
+  requestId?: string | null
 }
+
+export interface UserApiErrorResponse {
+  errorCode: ApiErrorCode
+  userMessage: string
+  traceId?: string | null
+}
+
+export interface DeveloperApiErrorResponse {
+  errorCode: ApiErrorCode
+  developerMessage: string
+  traceId?: string | null
+}
+
+/** Phase-one rolling-deployment contract: accept either envelope without requiring duplicate fields. */
+export type ApiResponse<T> =
+  | LegacyApiResponse<T>
+  | ApiSuccessResponse<T>
+  | UserApiErrorResponse
+  | DeveloperApiErrorResponse
 
 export interface PageResponse<T> {
   list: T[]
@@ -73,8 +126,23 @@ export interface ToolSummary {
   workflowAvailable?: boolean | null
   estimatedCreditCost: number
   modelConfigId?: number | null
+  /** 工具可选的模型配置，顺序用于用户端模型选择器。 */
+  modelConfigIds?: number[] | null
+  /** 多模型绑定中的默认模型；兼容期可能与 modelConfigId 相同。 */
+  defaultModelConfigId?: number | null
+  supportedModels?: ToolSupportedModel[] | null
   modelConfigName?: string | null
   modelName?: string | null
+}
+
+export interface ToolSupportedModel {
+  id: number
+  displayName?: string | null
+  provider: string
+  capabilities?: string[] | null
+  contractStatus?: 'READY' | 'DOCS_PENDING' | string | null
+  requestSchemaJson?: string | null
+  isDefault?: boolean | null
 }
 
 export interface ToolDetail extends ToolSummary {
@@ -94,6 +162,8 @@ export interface UpsertToolPayload {
   configNote?: string
   estimatedCreditCost: number
   modelConfigId?: number | null
+  modelConfigIds?: number[]
+  defaultModelConfigId?: number | null
   executionHandler?: string
   requiredModelCapabilities?: string[]
   templateCode?: string
@@ -179,6 +249,8 @@ export interface AdminTaskApiPayload {
   progress: number
   progressMessage?: string | null
   errorCode?: string | null
+  developerMessage?: string | null
+  failureTraceId?: string | null
   errorMessage?: string | null
   params?: unknown
   result?: TaskResult | null
@@ -439,6 +511,12 @@ export interface AgentModelConfig {
   extraAuthJsonMasked?: string | null
   executionTask?: string | null
   executionOptionsJsonMasked?: string | null
+  requestSchemaJson?: string | null
+  requestMappingJson?: string | null
+  responseMappingJson?: string | null
+  contractStatus?: 'READY' | 'DOCS_PENDING' | string | null
+  apiContractVersion?: string | null
+  contractVerifiedAt?: string | null
   routePreview?: ModelRoutePreview | null
   minimaxGroupId?: string | null
   consoleUrl?: string | null
@@ -671,6 +749,12 @@ export interface UnifiedApiModelItem {
   docsUrl?: string | null
   executionTask?: string | null
   executionOptionsJsonMasked?: string | null
+  requestSchemaJson?: string | null
+  requestMappingJson?: string | null
+  responseMappingJson?: string | null
+  contractStatus?: 'READY' | 'DOCS_PENDING' | string | null
+  apiContractVersion?: string | null
+  contractVerifiedAt?: string | null
   routePreview?: ModelRoutePreview | null
   timeoutSeconds?: number | null
   connectTimeoutSeconds?: number | null
@@ -733,6 +817,12 @@ export interface AgentModelConfigPayload {
   extraAuthJson?: string
   executionTask?: string
   executionOptionsJson?: string
+  requestSchemaJson?: string
+  requestMappingJson?: string
+  responseMappingJson?: string
+  contractStatus?: 'READY' | 'DOCS_PENDING' | string
+  apiContractVersion?: string
+  contractVerifiedAt?: string
   minimaxGroupId?: string
   consoleUrl?: string
   balanceUrl?: string

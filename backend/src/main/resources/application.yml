@@ -51,6 +51,8 @@ app:
     public-base-url: ${PUBLIC_BASE_URL:http://localhost:8080}
     token-ttl-hours: ${PROVIDER_CALLBACK_TOKEN_TTL_HOURS:24}
   env: ${APP_ENV:local}
+  error-contract:
+    mode: ${APP_ERROR_CONTRACT_MODE:LEGACY}
   cache:
     enabled: ${APP_CACHE_ENABLED:true}
     default-ttl-seconds: ${APP_CACHE_DEFAULT_TTL_SECONDS:300}

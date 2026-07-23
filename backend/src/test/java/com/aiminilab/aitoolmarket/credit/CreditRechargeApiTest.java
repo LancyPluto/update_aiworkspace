@@ -380,8 +380,9 @@ class CreditRechargeApiTest {
     @Test
     void uncertainWechatPrepayFailureKeepsTheMembershipSlot() throws Exception {
         when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
-                .thenThrow(new com.aiminilab.aitoolmarket.common.exception.BusinessException(
-                        com.aiminilab.aitoolmarket.common.enums.ErrorCode.PARAM_ERROR, "gateway timeout"));
+                .thenThrow(new com.aiminilab.aitoolmarket.common.exception.DependencyException(
+                        com.aiminilab.aitoolmarket.common.error.PayErrors.PROVIDER_CALL_FAILED,
+                        "provider responseBody={\"token\":\"upstream-secret\"}"));
         RegisteredUser user = registerUser("membership_wechat_prepay_uncertain");
 
         mockMvc.perform(post("/api/v1/credits/recharge-orders")
@@ -394,7 +395,10 @@ class CreditRechargeApiTest {
                                   "clientRequestId": "membership-prepay-uncertain-first"
                                 }
                                 """))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("SYSTEM_ERROR"))
+                .andExpect(jsonPath("$.message").value("支付服务暂不可用，请稍后重试"))
+                .andExpect(jsonPath("$.developerMessage").doesNotExist());
         Long firstOrderId = jdbcTemplate.queryForObject(
                 "SELECT id FROM credit_recharge_orders WHERE user_id = ?", Long.class, user.userId());
 
@@ -563,7 +567,7 @@ class CreditRechargeApiTest {
         when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
                 .thenReturn(new NativePrepayResponse("weixin://pay.weixin.qq.com/bizpayurl/up?pr=referral"));
         RegisteredUser inviter = registerUser("referral_inviter");
-        String inviteCode = "WLCLOUD%05d".formatted(inviter.userId());
+        String inviteCode = inviter.referralCode();
         RegisteredUser invitee = registerUser("referral_invitee", inviteCode);
 
         mockMvc.perform(get("/api/v1/credits/account")
@@ -667,7 +671,7 @@ class CreditRechargeApiTest {
     @Test
     void referralRewardFailureRollsBackUserBindingAndFirstBenefit() throws Exception {
         RegisteredUser inviter = registerUser("referral_tx_inviter");
-        String inviteCode = "WLCLOUD%05d".formatted(inviter.userId());
+        String inviteCode = inviter.referralCode();
         String failedUsername = "referral_tx_rollback_invitee";
         int rewardCountBefore = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM referral_registration_rewards", Integer.class);
@@ -712,6 +716,17 @@ class CreditRechargeApiTest {
                 Integer.class)).isEqualTo(registrationLogCountBefore);
         org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM credit_accounts", Integer.class)).isEqualTo(accountCountBefore);
+    }
+
+    @Test
+    void legacyInternalIdInviteCodeDoesNotCreateReferral() throws Exception {
+        RegisteredUser inviter = registerUser("legacy_referral_inviter");
+        String legacyInviteCode = "WLCLOUD%05d".formatted(inviter.userId());
+        RegisteredUser invitee = registerUser("legacy_referral_invitee", legacyInviteCode);
+
+        org.assertj.core.api.Assertions.assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_referrals WHERE invitee_user_id = ?",
+                Integer.class, invitee.userId())).isZero();
     }
 
     @Test
@@ -1409,9 +1424,10 @@ class CreditRechargeApiTest {
                 .getContentAsString();
         String token = response.replaceAll("(?s).*\\\"accessToken\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
         Long userId = Long.parseLong(response.replaceAll("(?s).*\\\"user\\\"\\s*:\\s*\\{\\s*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
-        return new RegisteredUser(token, userId);
+        String referralCode = response.replaceAll("(?s).*\\\"referralCode\\\"\\s*:\\s*\\\"([^\\\"]+)\\\".*", "$1");
+        return new RegisteredUser(token, userId, referralCode);
     }
 
-    private record RegisteredUser(String token, Long userId) {
+    private record RegisteredUser(String token, Long userId, String referralCode) {
     }
 }

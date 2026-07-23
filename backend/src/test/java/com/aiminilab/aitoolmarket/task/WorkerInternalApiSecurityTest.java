@@ -4,6 +4,8 @@ import com.aiminilab.aitoolmarket.auth.metrics.AuthMetrics;
 import com.aiminilab.aitoolmarket.auth.security.InternalRequestSignatureVerifier;
 import com.aiminilab.aitoolmarket.auth.security.JwtTokenProvider;
 import com.aiminilab.aitoolmarket.config.AuthInterceptor;
+import com.aiminilab.aitoolmarket.common.error.ErrorContractProperties;
+import com.aiminilab.aitoolmarket.common.error.ErrorContractResponseFactory;
 import com.aiminilab.aitoolmarket.task.controller.InternalTaskController;
 import com.aiminilab.aitoolmarket.task.dto.TaskStatusResponse;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
@@ -51,6 +53,7 @@ class WorkerInternalApiSecurityTest {
         AuthInterceptor authInterceptor = new AuthInterceptor(
                 mock(JwtTokenProvider.class),
                 new ObjectMapper(),
+                new ErrorContractResponseFactory(new ErrorContractProperties()),
                 verifier,
                 mock(UserMapper.class),
                 mock(AuthMetrics.class)

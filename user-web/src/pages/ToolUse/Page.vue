@@ -13,6 +13,12 @@ import { randomUUID } from "@/utils/randomUUID"
 import { formatToolCreditHint, formatToolCreditLabel } from "@/utils/toolCreditLabel"
 import { buildTaskParams } from "@/utils/toolTaskParams"
 import { useTaskEstimate, type UseTaskEstimateInput } from "@/composables/useTaskEstimate"
+import {
+  buildEffectiveToolFields,
+  parseModelRequestSchema,
+  prepareModelParams,
+  resolveDefaultModelConfigId,
+} from "@/utils/modelRequestSchema"
 
 const props = defineProps<{
   id: string
@@ -30,18 +36,27 @@ const submitting = ref(false)
 const createdTask = ref<{ taskId: number; taskNo: string } | null>(null)
 const formValues = ref<Record<string, unknown>>({})
 const dynamicFormRef = ref<InstanceType<typeof DynamicForm> | null>(null)
+const selectedModelConfigId = ref<number | null>(null)
 
 const title = computed(() => tool.value?.toolName ?? `工具 · ${props.id}`)
 const isOffline = computed(() => false)
 const coverMediaUrl = computed(() => normalizeToolMediaUrl(tool.value?.coverUrl))
 const coverIsVideo = computed(() => isVideoPreviewUrl(tool.value?.coverUrl))
-
-watch(
-  () => tool.value?.toolCode,
-  () => {
-    formValues.value = {}
-  },
+const supportedModels = computed(() => tool.value?.supportedModels || [])
+const selectedSupportedModel = computed(() =>
+  supportedModels.value.find((model) => model.modelConfigId === selectedModelConfigId.value) || null,
 )
+const effectiveFields = computed(() =>
+  buildEffectiveToolFields(tool.value?.fields || [], selectedSupportedModel.value),
+)
+const selectedRequestSchema = computed(() =>
+  parseModelRequestSchema(selectedSupportedModel.value?.requestSchemaJson),
+)
+
+watch(selectedModelConfigId, () => {
+  formValues.value = prepareModelParams(effectiveFields.value, formValues.value)
+  submitError.value = null
+})
 
 // 实时算力预估：表单参数变化时防抖调用后端权威预估接口。
 const estimateInput = computed<UseTaskEstimateInput | null>(() => {
@@ -49,11 +64,11 @@ const estimateInput = computed<UseTaskEstimateInput | null>(() => {
   if (!current?.toolCode) return null
   let params: Record<string, unknown> = {}
   try {
-    params = buildTaskParams(current.fields ?? [], formValues.value)
+    params = buildTaskParams(effectiveFields.value, formValues.value)
   } catch {
     params = {}
   }
-  return { toolCode: current.toolCode, params }
+  return { toolCode: current.toolCode, params, modelConfigId: selectedModelConfigId.value }
 })
 
 const { estimate: liveEstimate, loading: estimateLoading } = useTaskEstimate(estimateInput)
@@ -86,11 +101,12 @@ function isVideoPreviewUrl(value?: string | null): boolean {
 
 function applyCommunityPromptPreset() {
   const prompt = typeof route.query.prompt === "string" ? route.query.prompt.trim() : ""
-  if (!prompt || !tool.value?.fields?.length) return
+  if (!prompt || !effectiveFields.value.length) return
+  const fields = effectiveFields.value
   const target =
-    tool.value.fields.find((field) => ["prompt", "description", "text", "content", "message"].includes(field.fieldKey.toLowerCase())) ||
-    tool.value.fields.find((field) => field.fieldType === "textarea") ||
-    tool.value.fields.find((field) => field.fieldType === "text")
+    fields.find((field) => ["prompt", "description", "text", "content", "message"].includes(field.fieldKey.toLowerCase())) ||
+    fields.find((field) => field.fieldType === "textarea") ||
+    fields.find((field) => field.fieldType === "text")
   if (target && formValues.value[target.fieldKey] === undefined) {
     formValues.value = { ...formValues.value, [target.fieldKey]: prompt }
   }
@@ -99,6 +115,10 @@ function applyCommunityPromptPreset() {
 onMounted(async () => {
   try {
     tool.value = await fetchToolByCode(props.id, { token: auth.token })
+    selectedModelConfigId.value = resolveDefaultModelConfigId(
+      tool.value.supportedModels || [],
+      tool.value.defaultModelConfigId,
+    )
     formValues.value = {}
     applyCommunityPromptPreset()
   } catch (e) {
@@ -116,6 +136,10 @@ async function handleCreateTask() {
     submitError.value = "该工具已下架，暂时无法创建任务"
     return
   }
+  if (supportedModels.value.length > 0 && selectedModelConfigId.value == null) {
+    submitError.value = "请选择要使用的模型"
+    return
+  }
 
   const check = dynamicFormRef.value?.validate()
   if (check && !check.valid) {
@@ -123,7 +147,7 @@ async function handleCreateTask() {
     return
   }
 
-  const params = buildTaskParams(tool.value.fields, formValues.value)
+  const params = buildTaskParams(effectiveFields.value, formValues.value)
 
   submitting.value = true
   try {
@@ -131,6 +155,7 @@ async function handleCreateTask() {
       {
         toolCode: tool.value.toolCode,
         params,
+        modelConfigId: selectedModelConfigId.value,
         clientRequestId: randomUUID(),
       },
       { token: auth.token },
@@ -187,7 +212,25 @@ async function handleCreateTask() {
 
         <div class="grid gap-6 lg:grid-cols-[1fr_320px]">
           <div class="space-y-5">
-            <DynamicForm ref="dynamicFormRef" v-model="formValues" :fields="tool.fields" />
+            <div v-if="supportedModels.length > 1" class="rounded-lg border border-border bg-card p-4 shadow-sm">
+              <label for="tool-use-model" class="mb-2 block text-sm font-medium">生成模型</label>
+              <select
+                id="tool-use-model"
+                v-model.number="selectedModelConfigId"
+                class="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option v-for="model in supportedModels" :key="model.modelConfigId" :value="model.modelConfigId">
+                  {{ model.displayName }}
+                </option>
+              </select>
+            </div>
+
+            <DynamicForm
+              ref="dynamicFormRef"
+              v-model="formValues"
+              :fields="effectiveFields"
+              :requires-any-groups="selectedRequestSchema?.requiresAnyGroups"
+            />
 
             <div v-if="submitError" class="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
               <p class="text-sm text-destructive">{{ submitError }}</p>
@@ -263,7 +306,7 @@ async function handleCreateTask() {
               <button
                 type="button"
                 class="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-primary text-sm font-medium text-primary-foreground hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
-                :disabled="submitting || isOffline"
+                :disabled="submitting || isOffline || (supportedModels.length > 0 && selectedModelConfigId == null)"
                 @click="handleCreateTask"
               >
                 <Loader2 v-if="submitting" class="h-4 w-4 animate-spin" />

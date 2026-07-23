@@ -37,3 +37,20 @@ test("selected capabilities retain readable text in light and dark themes", () =
   assert.match(source, /border-blue-500 bg-blue-500\/10 text-foreground/)
   assert.doesNotMatch(source, /border-blue-500 bg-blue-500\/10 text-blue-100/)
 })
+
+test("model editor persists non-secret request and response contracts without masking", () => {
+  assert.match(source, /requestSchemaJson:\s*model\.requestSchemaJson \|\| "\{\}"/)
+  assert.match(source, /requestMappingJson:\s*model\.requestMappingJson \|\| "\{\}"/)
+  assert.match(source, /responseMappingJson:\s*model\.responseMappingJson \|\| "\{\}"/)
+  assert.match(source, /value=\{modelForm\.requestSchemaJson \|\| ""\}/)
+  assert.match(source, /jsonObjectValidationError\(modelForm\.responseMappingJson/)
+  assert.doesNotMatch(source, /requestSchemaJsonMasked|requestMappingJsonMasked|responseMappingJsonMasked/)
+})
+
+test("model contract status distinguishes ready models from documentation-pending models", () => {
+  assert.match(source, /contractStatus:\s*"DOCS_PENDING"/)
+  assert.match(source, /<SelectItem value="DOCS_PENDING">文档待补<\/SelectItem>/)
+  assert.match(source, /<SelectItem value="READY">契约就绪<\/SelectItem>/)
+  assert.match(source, /apiContractVersion:\s*model\.apiContractVersion \|\| ""/)
+  assert.match(source, /contractVerifiedAt:\s*toDateTimeLocalValue\(model\.contractVerifiedAt\)/)
+})

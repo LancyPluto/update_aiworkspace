@@ -4,6 +4,8 @@ from typing import Any
 
 import requests
 
+from utils.model_contract import parse_response_mapping, read_response_value, response_mapping_has
+
 from client.provider_error import (
     ProviderCallError,
     rejected_response_metadata,
@@ -29,6 +31,7 @@ class DashScopeVideoClient:
         api_key: str | None = None,
         timeout_seconds: int | None = None,
         poll_interval_seconds: float = 5,
+        model_config: dict[str, Any] | None = None,
     ) -> None:
         self.base_url = (base_url or "https://dashscope.aliyuncs.com").rstrip("/")
         self.api_key = (api_key or "").strip()
@@ -37,6 +40,7 @@ class DashScopeVideoClient:
         self.poll_interval_seconds = poll_interval_seconds
         self.timeout = (10, 300)
         self.session = requests.Session()
+        self.response_mapping = parse_response_mapping(model_config)
 
     def generate_video(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not self.api_key or self.api_key.startswith("replace-with-"):
@@ -48,16 +52,16 @@ class DashScopeVideoClient:
             payload,
             async_request=True,
         )
-        task_id = self._extract_task_id(created)
+        task_id = self._response_task_id(created)
         finished = self.wait_for_video(task_id)
         return {
             "provider": "bailian_happyhorse",
             "model": payload.get("model"),
-            "requestId": self._extract_request_id(created) or self._extract_request_id(finished),
+            "requestId": self._response_request_id(created) or self._response_request_id(finished),
             "dashscopeTaskId": task_id,
-            "status": self._extract_status(finished),
-            "videoUrl": self._extract_video_url(finished),
-            "usage": self._extract_usage(finished),
+            "status": self._response_status(finished),
+            "videoUrl": self._response_video_url(finished),
+            "usage": self._response_usage(finished),
             "raw": finished,
         }
 
@@ -66,15 +70,62 @@ class DashScopeVideoClient:
         last_payload: dict[str, Any] = {}
         while time.monotonic() < deadline:
             last_payload = self._request("GET", f"/api/v1/tasks/{task_id}", None)
-            status = self._extract_status(last_payload).upper()
+            status = self._response_status(last_payload).upper()
             if status == "SUCCEEDED":
                 return last_payload
             if status in {"FAILED", "CANCELED", "CANCELLED", "UNKNOWN"}:
                 raise DashScopeVideoError(self._failure_reason(last_payload, status))
             time.sleep(self.poll_interval_seconds)
         raise DashScopeVideoTimeoutError(
-            f"dashscope video generation timed out, taskId={task_id}, lastStatus={self._extract_status(last_payload)}"
+            f"dashscope video generation timed out, taskId={task_id}, lastStatus={self._response_status(last_payload)}"
         )
+
+    def _response_task_id(self, payload: dict[str, Any]) -> str:
+        if not response_mapping_has(self.response_mapping, "requestIdPath", "requestIdPaths"):
+            return self._extract_task_id(payload)
+        value = read_response_value(payload, self.response_mapping, "requestIdPath", "requestIdPaths")
+        task_id = str(value or "").strip()
+        if not task_id:
+            raise DashScopeVideoError("dashscope create response missing mapped task id")
+        return task_id
+
+    def _response_request_id(self, payload: dict[str, Any]) -> str:
+        if not response_mapping_has(self.response_mapping, "requestIdPath", "requestIdPaths"):
+            return self._extract_request_id(payload)
+        value = read_response_value(payload, self.response_mapping, "requestIdPath", "requestIdPaths")
+        return str(value or "").strip()
+
+    def _response_status(self, payload: dict[str, Any]) -> str:
+        if not response_mapping_has(self.response_mapping, "statusPath", "statusPaths"):
+            return self._extract_status(payload)
+        value = read_response_value(payload, self.response_mapping, "statusPath", "statusPaths")
+        return str(value or "PENDING").strip()
+
+    def _response_usage(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not response_mapping_has(self.response_mapping, "usagePath"):
+            return self._extract_usage(payload)
+        value = read_response_value(payload, self.response_mapping, "usagePath")
+        return value if isinstance(value, dict) else {}
+
+    def _response_video_url(self, payload: dict[str, Any]) -> str:
+        if not response_mapping_has(
+            self.response_mapping,
+            "videoUrlPath",
+            "urlPath",
+            "urlPaths",
+        ):
+            return self._extract_video_url(payload)
+        value = read_response_value(
+            payload,
+            self.response_mapping,
+            "videoUrlPath",
+            "urlPath",
+            "urlPaths",
+        )
+        url = str(value or "").strip()
+        if not url:
+            raise DashScopeVideoError("dashscope response missing mapped video url")
+        return url
 
     def _request(
         self,

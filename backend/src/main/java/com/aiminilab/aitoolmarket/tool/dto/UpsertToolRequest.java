@@ -17,6 +17,8 @@ public record UpsertToolRequest(
         String configNote,
         @Min(0) Integer estimatedCreditCost,
         Long modelConfigId,
+        List<Long> modelConfigIds,
+        Long defaultModelConfigId,
         String executionHandler,
         List<String> requiredModelCapabilities,
         String templateCode

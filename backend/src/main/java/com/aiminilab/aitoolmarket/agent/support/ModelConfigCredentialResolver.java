@@ -81,6 +81,7 @@ public class ModelConfigCredentialResolver {
         AgentModelConfig copy = new AgentModelConfig();
         copy.setId(source.getId());
         copy.setVendorAccountId(source.getVendorAccountId());
+        copy.setRoutingPoolId(source.getRoutingPoolId());
         copy.setDisplayName(source.getDisplayName());
         copy.setConfigCode(source.getConfigCode());
         copy.setProvider(source.getProvider());
@@ -90,6 +91,12 @@ public class ModelConfigCredentialResolver {
         copy.setExtraAuthJson(source.getExtraAuthJson());
         copy.setExecutionTask(source.getExecutionTask());
         copy.setExecutionOptionsJson(source.getExecutionOptionsJson());
+        copy.setRequestSchemaJson(source.getRequestSchemaJson());
+        copy.setRequestMappingJson(source.getRequestMappingJson());
+        copy.setResponseMappingJson(source.getResponseMappingJson());
+        copy.setApiContractVersion(source.getApiContractVersion());
+        copy.setContractStatus(source.getContractStatus());
+        copy.setContractVerifiedAt(source.getContractVerifiedAt());
         copy.setMinimaxGroupId(source.getMinimaxGroupId());
         copy.setConsoleUrl(source.getConsoleUrl());
         copy.setBalanceUrl(source.getBalanceUrl());
