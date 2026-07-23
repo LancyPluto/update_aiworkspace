@@ -39,6 +39,10 @@ image_not_found_error() {
     || [[ "$1" == "No such image:"* ]]
 }
 
+image_content_missing_error() {
+  [[ "$1" =~ content[[:space:]]digest[[:space:]]sha256:[0-9a-f]{64}.*not[[:space:]]found ]]
+}
+
 parse_environment_metadata() {
   "$PYTHON_BIN" -c '
 import json
@@ -173,13 +177,22 @@ rollback_service_cmd() {
     agent-service)
       printf '%s' '["uvicorn","app.main:app","--host","0.0.0.0","--port","8090"]'
       ;;
+    user-web) printf '%s' 'null' ;;
+    *) return 1 ;;
+  esac
+}
+
+rollback_service_entrypoint() {
+  case "$1" in
+    worker|agent-service) printf '%s' 'null' ;;
+    user-web) printf '%s' '["/entrypoint.sh"]' ;;
     *) return 1 ;;
   esac
 }
 
 rollback_service_comment() {
   case "$1" in
-    worker|agent-service)
+    worker|agent-service|user-web)
       printf 'ai-tool-market local-only %s rollback' "$1"
       ;;
     *) return 1 ;;
@@ -190,9 +203,10 @@ service_config_matches_contract() {
   local service="$1"
   local object_type="$2"
   local object="$3"
-  local expected_cmd cmd entrypoint workdir user healthcheck
+  local expected_cmd expected_entrypoint cmd entrypoint workdir user healthcheck
 
   expected_cmd="$(rollback_service_cmd "$service")" || return 1
+  expected_entrypoint="$(rollback_service_entrypoint "$service")" || return 1
 
   cmd="$(docker "$object_type" inspect --format '{{json .Config.Cmd}}' "$object")" \
     || return 1
@@ -205,21 +219,32 @@ service_config_matches_contract() {
   healthcheck="$(docker "$object_type" inspect --format '{{json .Config.Healthcheck}}' "$object")" \
     || return 1
 
-  [ "$cmd" = "$expected_cmd" ] \
-    && { [ "$entrypoint" = "null" ] || [ "$entrypoint" = "[]" ]; } \
-    && [ "$workdir" = "/app" ] \
-    && { [ -z "$user" ] || [ "$user" = "0" ] || [ "$user" = "root" ]; } \
-    && [ "$healthcheck" = "null" ]
+  if [ "$expected_cmd" = "null" ]; then
+    { [ "$cmd" = "null" ] || [ "$cmd" = "[]" ]; } || return 1
+  else
+    [ "$cmd" = "$expected_cmd" ] || return 1
+  fi
+  if [ "$expected_entrypoint" = "null" ]; then
+    { [ "$entrypoint" = "null" ] || [ "$entrypoint" = "[]" ]; } || return 1
+  else
+    [ "$entrypoint" = "$expected_entrypoint" ] || return 1
+  fi
+  [ "$workdir" = "/app" ] || return 1
+  { [ -z "$user" ] || [ "$user" = "0" ] || [ "$user" = "root" ]; } || return 1
+  if [ "$service" != "user-web" ] || [ "$object_type" = "image" ]; then
+    [ "$healthcheck" = "null" ] || return 1
+  fi
 }
 
 import_service_rootfs() {
   local service="$1"
   local container="$2"
   local candidate_ref="$3"
-  local expected_cmd image_comment path_value imported_image_id
+  local expected_cmd expected_entrypoint image_comment path_value imported_image_id
   local -a import_args=()
 
   expected_cmd="$(rollback_service_cmd "$service")" || return 1
+  expected_entrypoint="$(rollback_service_entrypoint "$service")" || return 1
   image_comment="$(rollback_service_comment "$service")" || return 1
   import_args+=(--message "$image_comment")
 
@@ -233,7 +258,12 @@ import_service_rootfs() {
 
   import_args+=(--change "ENV PATH=$path_value")
   import_args+=(--change "WORKDIR /app")
-  import_args+=(--change "CMD $expected_cmd")
+  if [ "$expected_cmd" != "null" ]; then
+    import_args+=(--change "CMD $expected_cmd")
+  fi
+  if [ "$expected_entrypoint" != "null" ]; then
+    import_args+=(--change "ENTRYPOINT $expected_entrypoint")
+  fi
 
   if imported_image_id="$(
     docker export "$container" \
@@ -259,15 +289,21 @@ smoke_service_candidate() {
   local service="$1"
   local image_id="$2"
   local smoke_name="ai-tool-market-rollback-${service}-smoke-$$"
-  local smoke_code
+  local smoke_entrypoint smoke_code
   local status=0
 
   case "$service" in
     worker)
+      smoke_entrypoint=python
       smoke_code='from pathlib import Path; import dotenv, httpx, openai, oss2, pika, prometheus_client, redis, requests; assert Path("/app/main.py").is_file()'
       ;;
     agent-service)
+      smoke_entrypoint=python
       smoke_code='from pathlib import Path; import deepagents, dotenv, fastapi, fitz, httpx, langchain_anthropic, langchain_community, langchain_openai, prometheus_client, pydantic, tiktoken, uvicorn; assert Path("/app/app/main.py").is_file()'
+      ;;
+    user-web)
+      smoke_entrypoint=sh
+      smoke_code='set -eu; test -x /entrypoint.sh; sh -n /entrypoint.sh; test -s /prebuilt-dist/index.html; command -v cp >/dev/null; command -v tail >/dev/null'
       ;;
     *) return 1 ;;
   esac
@@ -277,7 +313,7 @@ smoke_service_candidate() {
     --network none --read-only \
     --cpus 1 --memory 512m --pids-limit 64 \
     --env PYTHONDONTWRITEBYTECODE=1 \
-    --entrypoint python "$image_id" -c "$smoke_code" \
+    --entrypoint "$smoke_entrypoint" "$image_id" -c "$smoke_code" \
     || status="$?"
   docker rm -f "$smoke_name" >/dev/null 2>&1 || true
   return "$status"
@@ -358,11 +394,16 @@ for service in $DEPLOY_SERVICES; do
   candidate_ref="ai-tool-market-rollback-${service}:candidate-$$"
   staged_services+=("$service")
   candidate_refs["$service"]="$candidate_ref"
-  if docker image inspect "$image_id" >/dev/null 2>&1; then
+  if inspected_image_id="$(docker image inspect --format '{{.Id}}' "$image_id" 2>&1)"; then
+    if [ "$inspected_image_id" != "$image_id" ]; then
+      echo "ERROR: rollback image ID changed unexpectedly for $service" >&2
+      exit 1
+    fi
     echo "Validated rollback image for $service: $image_id"
-  else
+  elif image_not_found_error "$inspected_image_id" \
+      || image_content_missing_error "$inspected_image_id"; then
     case "$service" in
-      worker|agent-service)
+      worker|agent-service|user-web)
         if ! image_id="$(recover_service_rollback_image "$service" "$container" "$candidate_ref")"; then
           exit 1
         fi
@@ -373,6 +414,10 @@ for service in $DEPLOY_SERVICES; do
         exit 1
         ;;
     esac
+  else
+    echo "ERROR: unable to inspect rollback image for $service" >&2
+    [ -z "$inspected_image_id" ] || printf '%s\n' "$inspected_image_id" >&2
+    exit 1
   fi
 
   docker image tag "$image_id" "$candidate_ref"
@@ -401,7 +446,7 @@ for service in "${staged_services[@]}"; do
   elif image_not_found_error "$stable_inspect_output"; then
     backup_refs["$service"]=""
     backup_ids["$service"]=""
-  elif [[ "$stable_inspect_output" =~ content[[:space:]]digest[[:space:]]sha256:[0-9a-f]{64}.*not[[:space:]]found ]]; then
+  elif image_content_missing_error "$stable_inspect_output"; then
     echo "WARNING: existing rollback image for $service has missing content and will be replaced" >&2
     backup_refs["$service"]=""
     backup_ids["$service"]=""
