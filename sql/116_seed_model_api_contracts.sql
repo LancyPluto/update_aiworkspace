@@ -163,7 +163,9 @@ BEGIN
 
   SELECT COUNT(*) INTO matched_count
   FROM agent_model_configs model
-  JOIN tmp_model_contract_seed_116 seed ON seed.config_code = model.config_code
+  JOIN tmp_model_contract_seed_116 seed
+    ON seed.config_code COLLATE utf8mb4_unicode_ci
+     = model.config_code COLLATE utf8mb4_unicode_ci
   WHERE model.is_deleted = 0;
 
   IF matched_count <> active_count THEN
@@ -174,14 +176,22 @@ BEGIN
   IF verify_applied = 1 THEN
     SELECT COUNT(*) INTO applied_count
     FROM agent_model_configs model
-    JOIN tmp_model_contract_seed_116 seed ON seed.config_code = model.config_code
+    JOIN tmp_model_contract_seed_116 seed
+      ON seed.config_code COLLATE utf8mb4_unicode_ci
+       = model.config_code COLLATE utf8mb4_unicode_ci
     WHERE model.is_deleted = 0
-      AND model.api_contract_version = @contract_version
-      AND model.contract_status = seed.contract_status
-      AND model.request_schema_json = seed.request_schema_json
-      AND model.request_mapping_json = seed.request_mapping_json
-      AND model.response_mapping_json = seed.response_mapping_json
-      AND model.docs_url = seed.docs_url;
+      AND model.api_contract_version COLLATE utf8mb4_unicode_ci
+        = @contract_version COLLATE utf8mb4_unicode_ci
+      AND model.contract_status COLLATE utf8mb4_unicode_ci
+        = seed.contract_status COLLATE utf8mb4_unicode_ci
+      AND model.request_schema_json COLLATE utf8mb4_unicode_ci
+        = seed.request_schema_json COLLATE utf8mb4_unicode_ci
+      AND model.request_mapping_json COLLATE utf8mb4_unicode_ci
+        = seed.request_mapping_json COLLATE utf8mb4_unicode_ci
+      AND model.response_mapping_json COLLATE utf8mb4_unicode_ci
+        = seed.response_mapping_json COLLATE utf8mb4_unicode_ci
+      AND model.docs_url COLLATE utf8mb4_unicode_ci
+        = seed.docs_url COLLATE utf8mb4_unicode_ci;
 
     IF applied_count <> matched_count THEN
       SIGNAL SQLSTATE '45000'
@@ -194,10 +204,12 @@ DELIMITER ;
 CALL assert_model_contract_seed_116(0);
 
 UPDATE agent_model_configs model
-JOIN tmp_model_contract_seed_116 seed ON seed.config_code = model.config_code
-SET model.provider = COALESCE(seed.provider, model.provider),
-    model.model_name = COALESCE(seed.model_name, model.model_name),
-    model.capabilities = COALESCE(seed.capabilities, model.capabilities),
+JOIN tmp_model_contract_seed_116 seed
+  ON seed.config_code COLLATE utf8mb4_unicode_ci
+   = model.config_code COLLATE utf8mb4_unicode_ci
+SET model.provider = COALESCE(seed.provider COLLATE utf8mb4_unicode_ci, model.provider COLLATE utf8mb4_unicode_ci),
+    model.model_name = COALESCE(seed.model_name COLLATE utf8mb4_unicode_ci, model.model_name COLLATE utf8mb4_unicode_ci),
+    model.capabilities = COALESCE(seed.capabilities COLLATE utf8mb4_unicode_ci, model.capabilities COLLATE utf8mb4_unicode_ci),
     model.docs_url = seed.docs_url,
     model.request_schema_json = seed.request_schema_json,
     model.request_mapping_json = seed.request_mapping_json,
