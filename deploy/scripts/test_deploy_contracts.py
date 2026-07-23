@@ -81,6 +81,27 @@ class DeployContractTests(unittest.TestCase):
                 f"model.{field} COLLATE utf8mb4_unicode_ci)",
                 migration,
             )
+        self.assertNotIn("DECLARE active_count", migration)
+        self.assertNotIn(
+            "model contract seed does not cover every active model row",
+            migration,
+        )
+        self.assertIn("IF applied_count <> matched_count THEN", migration)
+
+    def test_user_code_migrations_normalize_existing_column_comparisons(self) -> None:
+        public_code_migration = self.read("sql/117_public_user_codes.sql")
+        referral_code_migration = self.read("sql/119_user_referral_codes.sql")
+
+        self.assertRegex(
+            public_code_migration,
+            r"public_code COLLATE utf8mb4_unicode_ci\s*"
+            r"= @next_code COLLATE utf8mb4_unicode_ci",
+        )
+        self.assertRegex(
+            referral_code_migration,
+            r"referral_code COLLATE utf8mb4_unicode_ci\s*"
+            r"= candidate_code COLLATE utf8mb4_unicode_ci",
+        )
 
     def test_backend_build_uses_strict_persistent_maven_cache(self) -> None:
         dockerfile = self.read("backend/Dockerfile")

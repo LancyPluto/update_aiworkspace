@@ -43,7 +43,12 @@ BEGIN
     SET candidate_code = NULL;
     WHILE candidate_code IS NULL AND allocation_attempts < 1000 DO
       SET @next_code = LPAD(FLOOR(10000 + RAND() * 90000), 5, '0');
-      IF NOT EXISTS (SELECT 1 FROM users WHERE public_code = @next_code) THEN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM users
+        WHERE public_code COLLATE utf8mb4_unicode_ci
+          = @next_code COLLATE utf8mb4_unicode_ci
+      ) THEN
         SET candidate_code = @next_code;
       END IF;
       SET allocation_attempts = allocation_attempts + 1;
