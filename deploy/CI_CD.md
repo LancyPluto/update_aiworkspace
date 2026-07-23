@@ -20,6 +20,8 @@
 
 3 个 CI 实例使用同一个无生产权限的 CI 用户，因此共享持久化的本机 Maven、pip 和 npm 缓存：`~/.m2/repository`、`~/.cache/pip`、`~/.npm`。workflow 保留运行时版本设置，但不再启用 setup actions 的 GitHub 远端缓存恢复与上传。各实例的 `_work` 目录不能共享；本机包缓存目录必须由 CI 用户拥有，并纳入定期容量清理。
 
+`actions/setup-python` 的 tool cache 位于各实例独立的 `_work/_tool` 下，因此不能依赖另一个 Runner 已下载的解释器。当前 3 个实例均已预热 Python 3.11 和 3.12 的完整目录及 `x64.complete` 标记；升级 Python patch 版本时必须在 Runner 空闲后同步预热每个实例，避免 job 现场从 GitHub 下载工具链。
+
 `production-deploy` 继续使用独立用户、独立 Runner 凭据、独立工作目录和现有单实例配置，不加入 `ci-isolated` 标签，也不参与 CI 调度。3 个 CI 实例不得添加 `production-deploy` 标签或读取 CD 凭据目录。
 
 ### GitHub 网络路由

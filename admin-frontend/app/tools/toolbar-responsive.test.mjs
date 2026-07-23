@@ -21,8 +21,13 @@ test("tool editor content can shrink without horizontal scrolling", () => {
     source,
     /"max-h-\[92vh\] overflow-y-auto border-border bg-card \[&>\*\]:min-w-0"/,
   )
-  const shrinkableSelectTriggers = source.match(/<SelectTrigger className="w-full min-w-0">/g) ?? []
-  assert.ok(shrinkableSelectTriggers.length >= 7)
+  const fullWidthSelectTriggers = [
+    ...source.matchAll(/<SelectTrigger className="([^"]*\bw-full\b[^"]*)">/g),
+  ]
+  assert.ok(fullWidthSelectTriggers.length > 0)
+  for (const [, className] of fullWidthSelectTriggers) {
+    assert.match(className, /(?:^|\s)min-w-0(?:\s|$)/)
+  }
 })
 
 test("tool cards use a fluid single column below the small breakpoint", () => {

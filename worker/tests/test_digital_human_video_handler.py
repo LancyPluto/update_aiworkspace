@@ -153,10 +153,12 @@ def test_digital_human_handler_executes_with_video_generation_capability(monkeyp
         def mark_processing(self, task_id, **kwargs):
             return None
 
-        def mark_success(self, task_id, payload):
+        def mark_success(self, task_id, payload, trace_id=None):
+            assert trace_id is None
             self.successes.append((task_id, payload))
 
-        def mark_failed(self, task_id, payload):
+        def mark_failed(self, task_id, payload, trace_id=None):
+            assert trace_id is None
             raise AssertionError(payload)
 
     class SiliconFlowClient:
@@ -211,7 +213,7 @@ def test_digital_human_handler_executes_with_video_generation_capability(monkeyp
         }
     )
 
-    assert result == {"status": "SUCCESS", "taskId": 901}
+    assert result == {"status": "SUCCESS", "taskId": 901, "traceId": None}
     assert capability_checks == [("seedance", "VIDEO_GENERATION")]
     assert backend.successes[0][1]["resourceType"] == "MARKDOWN"
 
