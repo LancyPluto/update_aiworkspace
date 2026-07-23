@@ -203,6 +203,13 @@ public class WorkflowToolQueryService {
                 .stream()
                 .map(resource -> toArtifact(resource, null))
                 .toList();
+        String errorCode = firstNonBlank(run.getErrorCode(), task.getErrorCode());
+        String userStatusMessage = safeUserStatusMessage(
+                run.getStatus(),
+                errorCode,
+                firstNonBlank(run.getUserMessage(), task.getUserMessage()),
+                run.getErrorMessage() != null || task.getErrorMessage() != null
+        );
 
         return new WorkflowRunDetailResponse(
                 run.getRootTaskId(),
@@ -212,19 +219,14 @@ public class WorkflowToolQueryService {
                 tool == null ? task.getToolName() : tool.getToolName(),
                 run.getStatus(),
                 task.getProgress(),
-                task.getProgressMessage(),
+                firstNonBlank(userStatusMessage, task.getProgressMessage()),
                 run.getCurrentStepId(),
                 run.getCreatedAt(),
                 run.getStartedAt(),
                 run.getUpdatedAt(),
                 run.getFinishedAt(),
-                firstNonBlank(run.getErrorCode(), task.getErrorCode()),
-                safeUserStatusMessage(
-                        run.getStatus(),
-                        firstNonBlank(run.getErrorCode(), task.getErrorCode()),
-                        firstNonBlank(run.getUserMessage(), task.getUserMessage()),
-                        run.getErrorMessage() != null || task.getErrorMessage() != null
-                ),
+                errorCode,
+                userStatusMessage,
                 stepResponses,
                 artifacts,
                 cost,

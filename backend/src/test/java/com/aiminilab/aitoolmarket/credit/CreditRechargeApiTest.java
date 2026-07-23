@@ -380,8 +380,9 @@ class CreditRechargeApiTest {
     @Test
     void uncertainWechatPrepayFailureKeepsTheMembershipSlot() throws Exception {
         when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
-                .thenThrow(new com.aiminilab.aitoolmarket.common.exception.BusinessException(
-                        com.aiminilab.aitoolmarket.common.enums.ErrorCode.PARAM_ERROR, "gateway timeout"));
+                .thenThrow(new com.aiminilab.aitoolmarket.common.exception.DependencyException(
+                        com.aiminilab.aitoolmarket.common.error.PayErrors.PROVIDER_CALL_FAILED,
+                        "provider responseBody={\"token\":\"upstream-secret\"}"));
         RegisteredUser user = registerUser("membership_wechat_prepay_uncertain");
 
         mockMvc.perform(post("/api/v1/credits/recharge-orders")
@@ -394,7 +395,10 @@ class CreditRechargeApiTest {
                                   "clientRequestId": "membership-prepay-uncertain-first"
                                 }
                                 """))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("SYSTEM_ERROR"))
+                .andExpect(jsonPath("$.message").value("支付服务暂不可用，请稍后重试"))
+                .andExpect(jsonPath("$.developerMessage").doesNotExist());
         Long firstOrderId = jdbcTemplate.queryForObject(
                 "SELECT id FROM credit_recharge_orders WHERE user_id = ?", Long.class, user.userId());
 

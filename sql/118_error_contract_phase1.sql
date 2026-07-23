@@ -115,10 +115,20 @@ CALL ensure_error_contract_column('workflow_step_attempts', 'failure_trace_id',
 
 CALL ensure_error_contract_index('ai_tasks', 'idx_ai_tasks_failure_trace',
   'ALTER TABLE ai_tasks ADD KEY idx_ai_tasks_failure_trace(failure_trace_id)');
+CALL ensure_error_contract_index('ai_task_logs', 'idx_ai_task_logs_failure_trace',
+  'ALTER TABLE ai_task_logs ADD KEY idx_ai_task_logs_failure_trace(failure_trace_id)');
+CALL ensure_error_contract_index('task_model_route_attempts', 'idx_task_model_route_attempt_failure_trace',
+  'ALTER TABLE task_model_route_attempts ADD KEY idx_task_model_route_attempt_failure_trace(failure_trace_id)');
 CALL ensure_error_contract_index('agent_runs', 'idx_agent_runs_failure_trace',
   'ALTER TABLE agent_runs ADD KEY idx_agent_runs_failure_trace(failure_trace_id)');
+CALL ensure_error_contract_index('agent_tool_calls', 'idx_agent_tool_calls_failure_trace',
+  'ALTER TABLE agent_tool_calls ADD KEY idx_agent_tool_calls_failure_trace(failure_trace_id)');
 CALL ensure_error_contract_index('workflow_runs', 'idx_workflow_runs_failure_trace',
   'ALTER TABLE workflow_runs ADD KEY idx_workflow_runs_failure_trace(failure_trace_id)');
+CALL ensure_error_contract_index('workflow_run_steps', 'idx_workflow_run_steps_failure_trace',
+  'ALTER TABLE workflow_run_steps ADD KEY idx_workflow_run_steps_failure_trace(failure_trace_id)');
+CALL ensure_error_contract_index('workflow_step_attempts', 'idx_workflow_step_attempts_failure_trace',
+  'ALTER TABLE workflow_step_attempts ADD KEY idx_workflow_step_attempts_failure_trace(failure_trace_id)');
 
 UPDATE ai_tasks
 SET developer_message = LEFT(error_message, 2000)

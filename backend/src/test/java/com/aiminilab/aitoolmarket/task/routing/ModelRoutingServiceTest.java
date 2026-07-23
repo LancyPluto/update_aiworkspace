@@ -100,7 +100,8 @@ class ModelRoutingServiceTest {
         when(stateMapper.findByModelConfigIdsForUpdate(List.of(1L, 2L)))
                 .thenReturn(List.of(sourceState, targetState));
         when(attemptMapper.findAttemptedVendorAccountIds(1L)).thenReturn(List.of(10L));
-        when(attemptMapper.closeWithFailure(eq(7L), eq("SWITCHED"), any())).thenReturn(1);
+        when(attemptMapper.closeWithFailureContract(
+                eq(7L), eq("SWITCHED"), any(), any(), any(), nullable(String.class))).thenReturn(1);
         when(stateMapper.reserve(102L, 0)).thenReturn(1);
         when(attemptMapper.insertAttempt(any())).thenAnswer(invocation -> {
             TaskModelRouteAttempt attempt = invocation.getArgument(0);
@@ -275,7 +276,8 @@ class ModelRoutingServiceTest {
 
         assertThat(decision.switched()).isFalse();
         assertThat(decision.reason()).isEqualTo("unsafe_delivery_state");
-        verify(attemptMapper, never()).closeWithFailure(anyLong(), any(), any());
+        verify(attemptMapper, never()).closeWithFailureContract(
+                anyLong(), any(), any(), any(), any(), nullable(String.class));
         verify(stateMapper, never()).reserve(anyLong(), anyInt());
     }
 
@@ -300,6 +302,9 @@ class ModelRoutingServiceTest {
     void nonRouteFailureReleasesInFlightWithoutChangingTheCircuit() {
         AiTask task = processingTask();
         task.setStatus(TaskStatus.FAILED.name());
+        task.setUserMessage("Please retry later");
+        task.setDeveloperMessage("Object storage request failed");
+        task.setFailureTraceId("trace-route-1");
         TaskModelRouteAttempt attempt = activeAttempt(7L, 1L, 10L);
         AccountModelRouteState state = state(101L, 1L, 10L);
         state.setCircuitStatus("OPEN");
@@ -311,11 +316,15 @@ class ModelRoutingServiceTest {
         );
         when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
         when(attemptMapper.findByIdForUpdate(7L)).thenReturn(attempt);
-        when(attemptMapper.closeWithFailure(eq(7L), eq(TaskStatus.FAILED.name()), any())).thenReturn(1);
+        when(attemptMapper.closeWithFailureContract(
+                eq(7L), eq(TaskStatus.FAILED.name()), any(), any(), any(), any())).thenReturn(1);
         when(stateMapper.findByModelConfigIdsForUpdate(List.of(1L))).thenReturn(List.of(state));
 
         service.completeTask(1L, TaskStatus.FAILED.name(), failure);
 
+        verify(attemptMapper).closeWithFailureContract(
+                eq(7L), eq(TaskStatus.FAILED.name()), any(),
+                eq("Please retry later"), eq("Object storage request failed"), eq("trace-route-1"));
         verify(stateMapper).releaseNeutral(101L);
         verify(stateMapper, never()).releaseFailure(anyLong(), any(), any(), anyInt());
     }
@@ -329,7 +338,8 @@ class ModelRoutingServiceTest {
         WorkerFailedRequest failure = notSentFailure();
         when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
         when(attemptMapper.findByIdForUpdate(7L)).thenReturn(attempt);
-        when(attemptMapper.closeWithFailure(eq(7L), eq(TaskStatus.FAILED.name()), any())).thenReturn(1);
+        when(attemptMapper.closeWithFailureContract(
+                eq(7L), eq(TaskStatus.FAILED.name()), any(), any(), any(), nullable(String.class))).thenReturn(1);
         when(stateMapper.findByModelConfigIdsForUpdate(List.of(1L))).thenReturn(List.of(state));
 
         service.completeTask(1L, TaskStatus.FAILED.name(), failure);
@@ -346,7 +356,8 @@ class ModelRoutingServiceTest {
         state.setConsecutiveFailures(1);
         when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
         when(attemptMapper.findByIdForUpdate(7L)).thenReturn(attempt);
-        when(attemptMapper.closeWithFailure(eq(7L), eq(TaskStatus.FAILED.name()), any())).thenReturn(1);
+        when(attemptMapper.closeWithFailureContract(
+                eq(7L), eq(TaskStatus.FAILED.name()), any(), any(), any(), nullable(String.class))).thenReturn(1);
         when(stateMapper.findByModelConfigIdsForUpdate(List.of(1L))).thenReturn(List.of(state));
 
         service.completeTask(1L, TaskStatus.FAILED.name(), notSentFailure());

@@ -9,6 +9,7 @@ import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.agent.service.ModelExecutionSnapshotService;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.TaskStatus;
+import com.aiminilab.aitoolmarket.common.error.ErrorMessageSanitizer;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.AppProperties;
 import com.aiminilab.aitoolmarket.task.dto.RouteFailoverRequest;
@@ -19,10 +20,12 @@ import com.aiminilab.aitoolmarket.task.routing.entity.AccountModelRouteState;
 import com.aiminilab.aitoolmarket.task.routing.entity.TaskModelRouteAttempt;
 import com.aiminilab.aitoolmarket.task.routing.mapper.AccountModelRouteStateMapper;
 import com.aiminilab.aitoolmarket.task.routing.mapper.TaskModelRouteAttemptMapper;
+import com.aiminilab.aitoolmarket.task.support.TaskFailureMessage;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.MDC;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -210,7 +213,16 @@ public class ModelRoutingService {
         }
 
         AccountModelRouteState currentState = pool.statesByModel().get(currentAttempt.getModelConfigId());
-        if (attemptMapper.closeWithFailure(currentAttemptId, SWITCHED, sanitize(request)) == 0) {
+        RouteFailoverRequest safeRequest = sanitize(request);
+        FailureContract failureContract = failureContract(task, null, safeRequest);
+        if (attemptMapper.closeWithFailureContract(
+                currentAttemptId,
+                SWITCHED,
+                safeRequest,
+                failureContract.userMessage(),
+                failureContract.developerMessage(),
+                failureContract.failureTraceId()
+        ) == 0) {
             return FailoverDecision.notSwitched("route_attempt_not_active", currentAttemptId);
         }
         releaseFailure(currentState, circuitDecision(currentState, request));
@@ -300,7 +312,15 @@ public class ModelRoutingService {
         } else if (failureDetails == null) {
             closed = attemptMapper.close(attempt.getId(), normalizedOutcome(outcome));
         } else {
-            closed = attemptMapper.closeWithFailure(attempt.getId(), normalizedOutcome(outcome), failureDetails);
+            FailureContract failureContract = failureContract(task, failure, failureDetails);
+            closed = attemptMapper.closeWithFailureContract(
+                    attempt.getId(),
+                    normalizedOutcome(outcome),
+                    failureDetails,
+                    failureContract.userMessage(),
+                    failureContract.developerMessage(),
+                    failureContract.failureTraceId()
+            );
         }
         if (closed == 0) {
             return;
@@ -560,6 +580,41 @@ public class ModelRoutingService {
         ));
     }
 
+    private FailureContract failureContract(AiTask task,
+                                            WorkerFailedRequest workerFailure,
+                                            RouteFailoverRequest routeFailure) {
+        String errorCode = routeFailure == null ? null : routeFailure.errorCode();
+        String defaultUserMessage = TaskFailureMessage.userFacingProgressMessage(
+                errorCode,
+                "任务执行失败，请稍后重试"
+        );
+        String userMessage = ErrorMessageSanitizer.sanitizeUserMessage(
+                task == null ? null : task.getUserMessage(),
+                defaultUserMessage
+        );
+
+        String developerSource = task == null ? null : task.getDeveloperMessage();
+        if (isBlank(developerSource) && workerFailure != null) {
+            developerSource = workerFailure.developerMessage();
+        }
+        if (isBlank(developerSource) && routeFailure != null) {
+            developerSource = routeFailure.errorMessage();
+        }
+        String developerMessage = ErrorMessageSanitizer.sanitizeDeveloperMessage(
+                developerSource,
+                "Task route attempt failed"
+        );
+
+        String failureTraceId = task == null ? null : limit(task.getFailureTraceId(), 64);
+        if (failureTraceId == null && workerFailure != null) {
+            failureTraceId = limit(workerFailure.failureTraceId(), 64);
+        }
+        if (failureTraceId == null) {
+            failureTraceId = limit(MDC.get("traceId"), 64);
+        }
+        return new FailureContract(userMessage, developerMessage, failureTraceId);
+    }
+
     private String normalizedOutcome(String outcome) {
         String normalized = upper(outcome, 32);
         return normalized == null ? "FAILED" : normalized;
@@ -603,5 +658,10 @@ public class ModelRoutingService {
     private record CircuitDecision(String status,
                                    LocalDateTime cooldownUntil,
                                    int consecutiveFailures) {
+    }
+
+    private record FailureContract(String userMessage,
+                                   String developerMessage,
+                                   String failureTraceId) {
     }
 }

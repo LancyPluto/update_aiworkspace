@@ -1919,7 +1919,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                       <TableCell className="align-middle text-center">
                         {model.routingPoolId ? (() => {
                           const pool = vendorRoutingPools.find((candidate) => candidate.id === model.routingPoolId)
-                          const poolName = model.routingPoolName || pool?.name || `池 #${model.routingPoolId}`
                           const anchor = model.vendorAccountId
                             ? accountById.get(model.vendorAccountId)
                               || vendor.accounts.find((account) => account.id === model.vendorAccountId)
@@ -1929,13 +1928,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                             : -1
                           return (
                             <div className="mx-auto grid max-w-[180px] gap-1 text-left">
-                              <Badge
-                                variant="outline"
-                                className="w-fit max-w-[180px] truncate border-blue-200 bg-blue-50 text-xs text-blue-800"
-                                title={`负载池 #${model.routingPoolId}：${poolName}`}
-                              >
-                                负载池：{poolName}
-                              </Badge>
                               <span className="truncate text-[11px] text-muted-foreground">
                                 {pool ? `${pool.eligibleAccounts.length} 个可路由账户` : "池成员详情未加载"}
                                 {anchor ? ` · 锚点 #${anchor.id} ${displayAccountName(anchor, accountIndex)}` : ""}
@@ -1944,7 +1936,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                           )
                         })() : model.vendorAccountId ? (() => {
                           const boundAccount = accountById.get(model.vendorAccountId) || vendor.accounts.find((account) => account.id === model.vendorAccountId)
-                          const accountIndex = vendor.accounts.findIndex((account) => account.id === model.vendorAccountId)
                           const fallbackAccount = {
                             id: model.vendorAccountId,
                             accountName: model.vendorAccountName || "",
@@ -1954,13 +1945,6 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                           const account = boundAccount || fallbackAccount
                           return (
                             <div className="mx-auto grid max-w-[170px] gap-1 text-left">
-                              <Badge
-                                variant="outline"
-                                className="w-fit max-w-[170px] truncate text-xs"
-                                title={`模型 ${model.displayName || model.modelName} 使用账号 #${model.vendorAccountId}：${displayAccountName(account, accountIndex)}`}
-                              >
-                                账户：#{model.vendorAccountId} {displayAccountName(account, accountIndex)}
-                              </Badge>
                               <span className={`truncate text-[11px] ${hasAccountCredential(account) ? "text-muted-foreground" : "text-amber-700"}`}>
                                 {boundAccount ? accountCredentialLabel(boundAccount) : "账号详情未加载"}
                               </span>

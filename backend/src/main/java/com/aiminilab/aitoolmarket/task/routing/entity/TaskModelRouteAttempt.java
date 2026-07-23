@@ -18,6 +18,9 @@ public class TaskModelRouteAttempt {
     private String failureStage;
     private String errorCode;
     private String errorMessage;
+    private String userMessage;
+    private String developerMessage;
+    private String failureTraceId;
     private String providerErrorCode;
     private String providerRequestId;
     private Boolean providerCharged;
@@ -48,6 +51,12 @@ public class TaskModelRouteAttempt {
     public void setErrorCode(String errorCode) { this.errorCode = errorCode; }
     public String getErrorMessage() { return errorMessage; }
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
+    public String getUserMessage() { return userMessage; }
+    public void setUserMessage(String userMessage) { this.userMessage = userMessage; }
+    public String getDeveloperMessage() { return developerMessage; }
+    public void setDeveloperMessage(String developerMessage) { this.developerMessage = developerMessage; }
+    public String getFailureTraceId() { return failureTraceId; }
+    public void setFailureTraceId(String failureTraceId) { this.failureTraceId = failureTraceId; }
     public String getProviderErrorCode() { return providerErrorCode; }
     public void setProviderErrorCode(String providerErrorCode) { this.providerErrorCode = providerErrorCode; }
     public String getProviderRequestId() { return providerRequestId; }

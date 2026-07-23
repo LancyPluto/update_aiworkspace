@@ -721,6 +721,10 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("ai_tasks", "provider_error_code", "ALTER TABLE ai_tasks ADD COLUMN provider_error_code VARCHAR(128) NULL");
         ensureColumn("ai_tasks", "provider_request_id", "ALTER TABLE ai_tasks ADD COLUMN provider_request_id VARCHAR(128) NULL");
         ensureIndex("ai_tasks", "idx_ai_tasks_failure_trace", "CREATE INDEX idx_ai_tasks_failure_trace ON ai_tasks(failure_trace_id)");
+        ensureColumn("ai_task_logs", "user_message", "ALTER TABLE ai_task_logs ADD COLUMN user_message VARCHAR(255) NULL");
+        ensureColumn("ai_task_logs", "developer_message", "ALTER TABLE ai_task_logs ADD COLUMN developer_message TEXT NULL");
+        ensureColumn("ai_task_logs", "failure_trace_id", "ALTER TABLE ai_task_logs ADD COLUMN failure_trace_id VARCHAR(64) NULL");
+        ensureIndex("ai_task_logs", "idx_ai_task_logs_failure_trace", "CREATE INDEX idx_ai_task_logs_failure_trace ON ai_task_logs(failure_trace_id)");
         ensureColumn("ai_tasks", "claimed_by", "ALTER TABLE ai_tasks ADD COLUMN claimed_by VARCHAR(128) NULL");
         ensureColumn("ai_tasks", "claim_token", "ALTER TABLE ai_tasks ADD COLUMN claim_token VARCHAR(128) NULL");
         ensureColumn("ai_tasks", "lease_until", "ALTER TABLE ai_tasks ADD COLUMN lease_until DATETIME NULL");
@@ -987,6 +991,9 @@ public class DataInitializer implements CommandLineRunner {
                   failure_stage VARCHAR(64) NULL,
                   error_code VARCHAR(64) NULL,
                   error_message TEXT NULL,
+                  user_message VARCHAR(255) NULL,
+                  developer_message TEXT NULL,
+                  failure_trace_id VARCHAR(64) NULL,
                   provider_error_code VARCHAR(128) NULL,
                   provider_request_id VARCHAR(128) NULL,
                   provider_charged TINYINT NULL,
@@ -998,9 +1005,14 @@ public class DataInitializer implements CommandLineRunner {
                   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                   UNIQUE KEY uk_task_model_route_attempt(task_id, attempt_no),
                   KEY idx_task_model_route_attempt_active(vendor_account_id, status, task_id),
-                  KEY idx_task_model_route_attempt_task(task_id, status)
+                  KEY idx_task_model_route_attempt_task(task_id, status),
+                  KEY idx_task_model_route_attempt_failure_trace(failure_trace_id)
                 )
                 """);
+        ensureColumn("task_model_route_attempts", "user_message", "ALTER TABLE task_model_route_attempts ADD COLUMN user_message VARCHAR(255) NULL");
+        ensureColumn("task_model_route_attempts", "developer_message", "ALTER TABLE task_model_route_attempts ADD COLUMN developer_message TEXT NULL");
+        ensureColumn("task_model_route_attempts", "failure_trace_id", "ALTER TABLE task_model_route_attempts ADD COLUMN failure_trace_id VARCHAR(64) NULL");
+        ensureIndex("task_model_route_attempts", "idx_task_model_route_attempt_failure_trace", "CREATE INDEX idx_task_model_route_attempt_failure_trace ON task_model_route_attempts(failure_trace_id)");
         ensureTable("account_model_route_state", """
                 CREATE TABLE account_model_route_state (
                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -1441,6 +1453,21 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("agent_tool_calls", "failure_trace_id", "ALTER TABLE agent_tool_calls ADD COLUMN failure_trace_id VARCHAR(64) NULL");
         ensureIndex("agent_tool_calls", "idx_agent_tool_calls_task_id", "CREATE INDEX idx_agent_tool_calls_task_id ON agent_tool_calls(task_id)");
         ensureIndex("agent_tool_calls", "idx_agent_tool_calls_context_recent", "CREATE INDEX idx_agent_tool_calls_context_recent ON agent_tool_calls(user_id, status, id)");
+        ensureIndex("agent_tool_calls", "idx_agent_tool_calls_failure_trace", "CREATE INDEX idx_agent_tool_calls_failure_trace ON agent_tool_calls(failure_trace_id)");
+        ensureColumn("workflow_runs", "error_code", "ALTER TABLE workflow_runs ADD COLUMN error_code VARCHAR(64) NULL");
+        ensureColumn("workflow_runs", "user_message", "ALTER TABLE workflow_runs ADD COLUMN user_message VARCHAR(255) NULL");
+        ensureColumn("workflow_runs", "developer_message", "ALTER TABLE workflow_runs ADD COLUMN developer_message TEXT NULL");
+        ensureColumn("workflow_runs", "failure_trace_id", "ALTER TABLE workflow_runs ADD COLUMN failure_trace_id VARCHAR(64) NULL");
+        ensureIndex("workflow_runs", "idx_workflow_runs_failure_trace", "CREATE INDEX idx_workflow_runs_failure_trace ON workflow_runs(failure_trace_id)");
+        ensureColumn("workflow_run_steps", "error_code", "ALTER TABLE workflow_run_steps ADD COLUMN error_code VARCHAR(64) NULL");
+        ensureColumn("workflow_run_steps", "user_message", "ALTER TABLE workflow_run_steps ADD COLUMN user_message VARCHAR(255) NULL");
+        ensureColumn("workflow_run_steps", "developer_message", "ALTER TABLE workflow_run_steps ADD COLUMN developer_message TEXT NULL");
+        ensureColumn("workflow_run_steps", "failure_trace_id", "ALTER TABLE workflow_run_steps ADD COLUMN failure_trace_id VARCHAR(64) NULL");
+        ensureIndex("workflow_run_steps", "idx_workflow_run_steps_failure_trace", "CREATE INDEX idx_workflow_run_steps_failure_trace ON workflow_run_steps(failure_trace_id)");
+        ensureColumn("workflow_step_attempts", "user_message", "ALTER TABLE workflow_step_attempts ADD COLUMN user_message VARCHAR(255) NULL");
+        ensureColumn("workflow_step_attempts", "developer_message", "ALTER TABLE workflow_step_attempts ADD COLUMN developer_message TEXT NULL");
+        ensureColumn("workflow_step_attempts", "failure_trace_id", "ALTER TABLE workflow_step_attempts ADD COLUMN failure_trace_id VARCHAR(64) NULL");
+        ensureIndex("workflow_step_attempts", "idx_workflow_step_attempts_failure_trace", "CREATE INDEX idx_workflow_step_attempts_failure_trace ON workflow_step_attempts(failure_trace_id)");
         ensureColumn("agent_workspace_memory_items", "source_message_id", "ALTER TABLE agent_workspace_memory_items ADD COLUMN source_message_id BIGINT NULL");
         ensureColumn("agent_workspace_memory_items", "source_tool_call_id", "ALTER TABLE agent_workspace_memory_items ADD COLUMN source_tool_call_id BIGINT NULL");
         ensureColumn("agent_workspace_memory_items", "importance", "ALTER TABLE agent_workspace_memory_items ADD COLUMN importance INT NOT NULL DEFAULT 5");
