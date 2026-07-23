@@ -1,4 +1,4 @@
-SET NAMES utf8mb4;
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- Model contracts are keyed by the stable production config_code. The expected
 -- production IDs are retained in the seed table for audit only; environments
@@ -50,7 +50,7 @@ CREATE TEMPORARY TABLE tmp_model_contract_seed_116 (
   request_mapping_json MEDIUMTEXT NULL,
   response_mapping_json MEDIUMTEXT NULL,
   contract_status VARCHAR(32) NOT NULL DEFAULT 'READY'
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO tmp_model_contract_seed_116 VALUES
   (1, 'siliconflow_digital_human', NULL, NULL, NULL, 'https://docs.siliconflow.cn/cn/api-reference/images/images-generations', @schema_sf_image, @mapping_sf_image, @response_sf_image, 'READY'),

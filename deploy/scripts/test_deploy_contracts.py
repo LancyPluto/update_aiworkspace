@@ -43,6 +43,16 @@ class DeployContractTests(unittest.TestCase):
             r"= model\.provider COLLATE utf8mb4_unicode_ci",
         )
 
+    def test_model_contract_seed_uses_production_collation(self) -> None:
+        migration = self.read("sql/116_seed_model_api_contracts.sql")
+        self.assertIn("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;", migration)
+        self.assertRegex(
+            migration,
+            r"(?s)CREATE TEMPORARY TABLE tmp_model_contract_seed_116 \(.*?\) "
+            r"ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 "
+            r"COLLATE=utf8mb4_unicode_ci;",
+        )
+
     def test_backend_build_uses_strict_persistent_maven_cache(self) -> None:
         dockerfile = self.read("backend/Dockerfile")
         cache_mount = (
