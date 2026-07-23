@@ -4,6 +4,7 @@ from unittest.mock import patch
 import requests
 
 from handlers.generated_video_persister import GeneratedVideoPersistError, GeneratedVideoPersister
+from utils.outbound_http import OutboundRequestsClient
 
 
 class FakeResponse:
@@ -29,11 +30,17 @@ class FakeResponse:
             raise requests.exceptions.ChunkedEncodingError("incomplete read")
 
 
-def test_generated_video_download_retries_after_incomplete_read() -> None:
+def test_generated_video_download_retries_after_incomplete_read(monkeypatch) -> None:
+    monkeypatch.setenv("PROJECT_MIHOMO_PROXY_URL", "http://mihomo:7890")
     incomplete = FakeResponse([b"partial"], fail_after_chunks=True)
     complete = FakeResponse([b"complete-video"])
     persister = GeneratedVideoPersister()
+    assert isinstance(persister.session, OutboundRequestsClient)
     assert persister.session.trust_env is False
+    assert persister.session.proxies == {
+        "http": "http://mihomo:7890",
+        "https": "http://mihomo:7890",
+    }
 
     with (
         patch(

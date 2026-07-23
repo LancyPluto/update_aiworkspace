@@ -18,7 +18,8 @@ def test_openai_image_reference_sources_put_base_before_references():
     ]
 
 
-def test_openai_image_client_receives_execution_proxy_policy():
+def test_openai_image_client_uses_project_gateway_and_ignores_execution_routing(monkeypatch):
+    monkeypatch.setenv("PROJECT_MIHOMO_PROXY_URL", "http://mihomo:7890")
     client = ImageGenerationHandler()._image_client(
         "openai_images_gateway",
         {
@@ -28,7 +29,7 @@ def test_openai_image_client_receives_execution_proxy_policy():
                 "proxyPolicy": {
                     "enabled": True,
                     "projectProxyUrl": "http://mihomo:7890",
-                    "noProxyHosts": ["backend"],
+                    "noProxyHosts": ["backend", "api.ofox.ai"],
                     "routingRules": [
                         {"id": "ofox", "patternType": "EXACT", "pattern": "api.ofox.ai", "strategy": "PROXY", "priority": 100, "enabled": True}
                     ],
@@ -39,7 +40,8 @@ def test_openai_image_client_receives_execution_proxy_policy():
 
     assert isinstance(client, OpenAIImagesClient)
     assert client.session.proxies["http"] == "http://mihomo:7890"
-    assert client.session.policy.no_proxy_hosts == frozenset({"backend"})
+    assert "backend" in client.session.policy.no_proxy_hosts
+    assert "api.ofox.ai" not in client.session.policy.no_proxy_hosts
 
 
 def test_openai_image_reference_sources_keep_legacy_image_compatibility():

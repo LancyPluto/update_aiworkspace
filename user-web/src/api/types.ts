@@ -253,8 +253,10 @@ export interface ToolCategory {
   sortOrder: number
 }
 
-/** GET /api/v1/tools 列表项 */
-export interface ToolSummary {
+export type ToolListView = "compact" | "summary"
+
+/** GET /api/v1/tools?view=compact 列表项 */
+export interface ToolCompact {
   toolCode: string
   toolName: string
   categoryCode?: string | null
@@ -269,7 +271,20 @@ export interface ToolSummary {
   /** 交互式工作流：展示「算力不详」，按步骤实际模型成本×1.2 扣费 */
   variableCreditPricing?: boolean | null
   modelDisplayName?: string | null
-  frontendStyle?: ToolFrontendStyle | null
+}
+
+export interface ToolCardMedia {
+  mediaDisplayMode: "icon" | "effect" | "comparison"
+  modelIconUrl?: string | null
+  comparisonOriginalUrl?: string | null
+  comparisonEffectUrl?: string | null
+  demoThumbnails?: string[] | null
+  heroSubtitle?: string | null
+}
+
+/** GET /api/v1/tools?view=summary 列表项 */
+export interface ToolSummary extends ToolCompact {
+  cardMedia: ToolCardMedia
 }
 
 /** 动态字段选项 */
@@ -329,8 +344,9 @@ export interface ToolFrontendStyle {
   afterVideoUrl?: string | null
 }
 
-/** GET /api/v1/tools/{toolCode} —— 包含字段配置 */
-export interface ToolDetail extends ToolSummary {
+/** GET /api/v1/tools/{toolCode} —— 包含完整前端样式与字段配置 */
+export interface ToolDetail extends ToolCompact {
+  frontendStyle?: ToolFrontendStyle | null
   /** 动态字段列表 */
   fields: ToolField[]
 }

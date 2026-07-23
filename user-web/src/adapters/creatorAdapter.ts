@@ -387,7 +387,7 @@ export function buildComposerModelOptions(tools: ToolSummary[], mode: CreatorMod
       label,
       toolCode: tool.toolCode,
       description: tool.description ?? null,
-      iconUrl: tool.frontendStyle?.modelIconUrl || tool.coverUrl || null,
+      iconUrl: tool.cardMedia?.modelIconUrl || tool.coverUrl || null,
       estimatedCreditCost: tool.estimatedCreditCost ?? undefined,
       variableCreditPricing: tool.variableCreditPricing,
     }
@@ -481,7 +481,7 @@ export function buildComposerModelGroupsFromTools(tools: ToolSummary[], mode: Cr
       label,
       toolCode: tool.toolCode,
       description: tool.description ?? null,
-      iconUrl: tool.frontendStyle?.modelIconUrl || tool.coverUrl || null,
+      iconUrl: tool.cardMedia?.modelIconUrl || tool.coverUrl || null,
       vendorCode: vendor.key,
       vendorLabel: vendor.label,
       imageParameters: inferImageParametersFromText(`${vendor.key} ${vendor.label} ${label} ${tool.modelDisplayName || ""} ${tool.toolCode || ""} ${tool.toolName || ""}`),

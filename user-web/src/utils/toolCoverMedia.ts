@@ -90,7 +90,7 @@ export interface ToolCoverSource {
   toolName: string
   coverUrl?: string | null
   outputModality?: string | null
-  frontendStyle?: {
+  cardMedia?: {
     comparisonEffectUrl?: string | null
     demoThumbnails?: string[] | null
   } | null
@@ -98,8 +98,8 @@ export interface ToolCoverSource {
 
 function collectCoverCandidates(tool: ToolCoverSource): string[] {
   return [
-    tool.frontendStyle?.comparisonEffectUrl,
-    tool.frontendStyle?.demoThumbnails?.[0],
+    tool.cardMedia?.comparisonEffectUrl,
+    tool.cardMedia?.demoThumbnails?.[0],
     tool.coverUrl,
   ]
     .map((value) => value?.trim())

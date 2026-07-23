@@ -1,6 +1,19 @@
 import { apiRequest } from "./client"
 import type { AITool, Capability } from "./aiToolTypes"
-import type { PageResult, ToolCategory, ToolDetail, ToolSummary, UserUploadAsset } from "./types"
+import type {
+  PageResult,
+  ToolCategory,
+  ToolCompact,
+  ToolDetail,
+  ToolSummary,
+  UserUploadAsset,
+} from "./types"
+import {
+  createToolCatalogFetcher,
+  normalizeToolCatalogQuery,
+  type ToolCatalogFetchOptions,
+  type ToolCatalogQuery,
+} from "./toolCatalogCache"
 import { compressImage } from "@/utils/imageCompressor"
 import {
   isMarketplaceMockToolId,
@@ -9,7 +22,7 @@ import {
   mockFetchEnabledAITools,
 } from "./aiToolMock"
 
-function capabilitiesFromTool(tool: ToolSummary): Capability[] {
+function capabilitiesFromTool(tool: ToolCompact): Capability[] {
   const capabilities: Capability[] = []
   const input = (tool.inputModality || "").toUpperCase()
   const output = (tool.outputModality || "").toUpperCase()
@@ -38,9 +51,11 @@ function capabilitiesFromTool(tool: ToolSummary): Capability[] {
 }
 
 export function mapToolToAITool(tool: ToolSummary | ToolDetail, order = 0): AITool {
-  const style = tool.frontendStyle || {}
+  const style = "frontendStyle" in tool ? tool.frontendStyle || {} : {}
+  const cardMedia = "cardMedia" in tool ? tool.cardMedia : null
   const outputModality = (tool.outputModality || "").trim().toUpperCase()
-  const rawMediaDisplayMode = style.mediaDisplayMode ?? (outputModality === "VIDEO" ? "effect" : "icon")
+  const rawMediaDisplayMode =
+    style.mediaDisplayMode ?? cardMedia?.mediaDisplayMode ?? (outputModality === "VIDEO" ? "effect" : "icon")
   const mediaDisplayMode =
     rawMediaDisplayMode === "comparison" ? "comparison" : rawMediaDisplayMode === "effect" ? "effect" : "icon"
   return {
@@ -53,11 +68,14 @@ export function mapToolToAITool(tool: ToolSummary | ToolDetail, order = 0): AITo
     primaryColor: style.primaryColor ?? undefined,
     welcomeMessage: style.welcomeMessage ?? undefined,
     mediaDisplayMode,
-    modelIconUrl: style.modelIconUrl ?? undefined,
-    comparisonOriginalUrl: style.comparisonOriginalUrl ?? undefined,
-    comparisonEffectUrl: style.comparisonEffectUrl ?? undefined,
+    modelIconUrl: style.modelIconUrl ?? cardMedia?.modelIconUrl ?? undefined,
+    comparisonOriginalUrl: style.comparisonOriginalUrl ?? cardMedia?.comparisonOriginalUrl ?? undefined,
+    comparisonEffectUrl: style.comparisonEffectUrl ?? cardMedia?.comparisonEffectUrl ?? undefined,
     audioPreviewUrl: style.audioPreviewUrl ?? undefined,
-    frontendStyle: style,
+    cardMedia,
+    frontendStyle: "frontendStyle" in tool ? tool.frontendStyle : undefined,
+    heroSubtitle: style.heroSubtitle ?? cardMedia?.heroSubtitle,
+    demoThumbnails: style.demoThumbnails ?? cardMedia?.demoThumbnails,
     capabilities: capabilitiesFromTool(tool),
     inputModality: tool.inputModality,
     outputModality: tool.outputModality,
@@ -75,25 +93,36 @@ export async function fetchToolCategories(options?: { token?: string | null }): 
   return apiRequest<ToolCategory[]>("GET", "/api/v1/tool-categories", { token: options?.token })
 }
 
-/** GET /api/v1/tools —— 返回分页结果 */
-export async function fetchTools(options?: {
-  token?: string | null
-  query?: Record<string, string | number | boolean | undefined>
-}): Promise<PageResult<ToolSummary>> {
-  return apiRequest<PageResult<ToolSummary>>("GET", "/api/v1/tools", {
-    token: options?.token,
-    query: options?.query,
-  })
+type CompactToolCatalogFetchOptions = Omit<ToolCatalogFetchOptions, "query"> & {
+  query: ToolCatalogQuery & { view: "compact" }
 }
 
-/** GET /api/v1/tools/search —— 搜索工具，返回分页结果 */
-export async function searchTools(options?: {
-  token?: string | null
-  query?: Record<string, string | number | boolean | undefined>
-}): Promise<PageResult<ToolSummary>> {
-  return apiRequest<PageResult<ToolSummary>>("GET", "/api/v1/tools/search", {
+type SummaryToolCatalogFetchOptions = Omit<ToolCatalogFetchOptions, "query"> & {
+  query?: ToolCatalogQuery & { view?: "summary" }
+}
+
+const fetchToolCatalogPage = createToolCatalogFetcher<PageResult<ToolCompact | ToolSummary>>(
+  ({ token, query }) => apiRequest("GET", "/api/v1/tools", { token, query }),
+)
+
+/** GET /api/v1/tools —— 按列表契约返回分页结果，共享公开目录短时缓存。 */
+export function fetchTools(options: CompactToolCatalogFetchOptions): Promise<PageResult<ToolCompact>>
+export function fetchTools(options?: SummaryToolCatalogFetchOptions): Promise<PageResult<ToolSummary>>
+export function fetchTools(
+  options?: ToolCatalogFetchOptions,
+): Promise<PageResult<ToolCompact | ToolSummary>> {
+  return fetchToolCatalogPage(options)
+}
+
+/** GET /api/v1/tools/search —— 搜索结果不进入目录缓存。 */
+export function searchTools(options: CompactToolCatalogFetchOptions): Promise<PageResult<ToolCompact>>
+export function searchTools(options?: SummaryToolCatalogFetchOptions): Promise<PageResult<ToolSummary>>
+export function searchTools(
+  options?: ToolCatalogFetchOptions,
+): Promise<PageResult<ToolCompact | ToolSummary>> {
+  return apiRequest<PageResult<ToolCompact | ToolSummary>>("GET", "/api/v1/tools/search", {
     token: options?.token,
-    query: options?.query,
+    query: normalizeToolCatalogQuery(options?.query),
   })
 }
 
@@ -108,7 +137,10 @@ export async function fetchToolByCode(
 
 export async function fetchEnabledAITools(options?: { token?: string | null }): Promise<AITool[]> {
   if (isMockMode()) return mockFetchEnabledAITools()
-  const page = await fetchTools({ token: options?.token, query: { pageNo: 1, pageSize: 100 } })
+  const page = await fetchTools({
+    token: options?.token,
+    query: { view: "summary", pageNo: 1, pageSize: 100 },
+  })
   return [...page.list].reverse().map((tool, index) => mapToolToAITool(tool, index))
 }
 

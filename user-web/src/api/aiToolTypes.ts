@@ -1,4 +1,4 @@
-import type { ToolField, ToolFrontendStyle } from "./types"
+import type { ToolCardMedia, ToolField, ToolFrontendStyle } from "./types"
 
 export type CapabilityType =
   | "imageGeneration"
@@ -26,6 +26,7 @@ export interface AITool {
   comparisonOriginalUrl?: string
   comparisonEffectUrl?: string
   audioPreviewUrl?: string
+  cardMedia?: ToolCardMedia | null
   frontendStyle?: ToolFrontendStyle | null
   heroTitle?: string | null
   heroSubtitle?: string | null

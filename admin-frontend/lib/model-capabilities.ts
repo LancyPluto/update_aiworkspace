@@ -45,8 +45,6 @@ const capabilityLabels: Record<string, string> = {
   MUSIC_GENERATION: "音乐生成",
   AUDIO_GENERATION: "音频生成",
   VISION_INPUT: "图片视觉",
-  EMBEDDING: "Embedding",
-  RERANK: "Rerank",
 }
 
 const LEGACY_HIDDEN_CAPABILITIES = new Set(["DIGITAL_HUMAN"])
@@ -68,8 +66,6 @@ const KNOWN_MODEL_CAPABILITIES = new Set([
   "SPEECH_TO_TEXT",
   "MUSIC_GENERATION",
   "AUDIO_GENERATION",
-  "EMBEDDING",
-  "RERANK",
 ])
 
 export function normalizeModelCapabilities(capabilities: readonly string[] | null | undefined): string[] {

@@ -23,29 +23,6 @@ public record PublicToolFrontendStyleResponse(
         String beforeVideoUrl,
         String afterVideoUrl
 ) {
-    public static PublicToolFrontendStyleResponse summaryFrom(ToolFrontendStyleConfig style) {
-        if (style == null) {
-            return null;
-        }
-        return new PublicToolFrontendStyleResponse(
-                style.primaryColor(),
-                null,
-                style.mediaDisplayMode(),
-                style.modelIconUrl(),
-                style.comparisonOriginalUrl(),
-                style.comparisonEffectUrl(),
-                null,
-                null,
-                style.heroSubtitle(),
-                firstItem(style.demoThumbnails()),
-                null,
-                null,
-                null,
-                null,
-                null
-        );
-    }
-
     public static PublicToolFrontendStyleResponse detailFrom(ToolFrontendStyleConfig style) {
         if (style == null) {
             return null;
@@ -67,12 +44,5 @@ public record PublicToolFrontendStyleResponse(
                 style.beforeVideoUrl(),
                 style.afterVideoUrl()
         );
-    }
-
-    private static List<String> firstItem(List<String> values) {
-        if (values == null || values.isEmpty()) {
-            return List.of();
-        }
-        return List.of(values.get(0));
     }
 }

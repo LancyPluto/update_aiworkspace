@@ -82,33 +82,43 @@ export function ProxyDomainAllowlist({ onApplied }: { onApplied?: () => void }) 
     onApplied?.()
   }
 
-  async function testAndEnable() {
+  async function addAndTest() {
     const domain = normalizeProxyDomain(newDomain)
     if (!domain) {
       setError("请输入有效的公网域名或网站地址")
       return
     }
-    setTesting(domain)
+    const nextDomains = addProxyDomain(domains, domain)
+    const savedDomain = nextDomains.find((item) => domain === item || domain.endsWith(`.${item}`)) || domain
+    const changed = JSON.stringify(nextDomains) !== JSON.stringify(domains)
+    const configuredMessage = changed
+      ? `${savedDomain} 已添加并启用`
+      : domain === savedDomain
+        ? `${savedDomain} 已在代理名单中`
+        : `${domain} 已由 ${savedDomain} 的代理规则覆盖`
+
+    setTesting(savedDomain)
     setError(null)
     setMessage(null)
     try {
-      const result = await testProxyDomain(domain)
-      const effectiveDomain = domains.find((item) => domain === item || domain.endsWith(`.${item}`)) || domain
-      if (!result.proxy.success) {
-        setResults((current) => ({ ...current, [effectiveDomain]: summarizeTest(result) }))
-        setError(`未启用 ${domain}：Mihomo 连接测试失败（${result.proxy.error || "连接不可用"}）`)
-        return
-      }
-      const nextDomains = addProxyDomain(domains, domain)
-      const savedDomain = nextDomains.find((item) => domain === item || domain.endsWith(`.${item}`)) || domain
-      setResults((current) => ({ ...current, [savedDomain]: summarizeTest(result) }))
-      if (JSON.stringify(nextDomains) !== JSON.stringify(domains)) {
+      if (changed) {
         await persist(nextDomains)
       }
       setNewDomain("")
-      setMessage(`${domain} 添加成功`)
-    } catch (testError) {
-      setError(formatError(testError, "添加失败"))
+
+      try {
+        const result = await testProxyDomain(domain)
+        setResults((current) => ({ ...current, [savedDomain]: summarizeTest(result) }))
+        if (result.proxy.success) {
+          setMessage(`${configuredMessage}，连接测试通过`)
+        } else {
+          setError(`${configuredMessage}；Mihomo 连接测试失败（${result.proxy.error || "连接不可用"}），规则仍保持启用`)
+        }
+      } catch (testError) {
+        setError(`${configuredMessage}；${formatError(testError, "连接测试未完成")}，规则仍保持启用`)
+      }
+    } catch (saveError) {
+      setError(formatError(saveError, "添加失败"))
     } finally {
       setTesting(null)
     }
@@ -165,13 +175,13 @@ export function ProxyDomainAllowlist({ onApplied }: { onApplied?: () => void }) 
             value={newDomain}
             onChange={(event) => setNewDomain(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && !testing) void testAndEnable()
+              if (event.key === "Enter" && !testing) void addAndTest()
             }}
             placeholder="例如 ofox.ai"
             className="min-w-0 font-mono"
             aria-label="网站域名"
           />
-          <Button onClick={() => void testAndEnable()} disabled={Boolean(testing) || !newDomain.trim()} className="shrink-0">
+          <Button onClick={() => void addAndTest()} disabled={Boolean(testing) || !newDomain.trim()} className="shrink-0">
             {testing === normalizeProxyDomain(newDomain) ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             添加
           </Button>

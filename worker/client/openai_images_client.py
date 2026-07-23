@@ -758,8 +758,7 @@ class OpenAIImagesClient:
                 ) from exc
             raise OpenAIImagesError(
                 "openai images proxy connection failed. "
-                "The request is using a configured proxy or extraAuthJson trustEnv=true; "
-                "disable trustEnv or configure proxyUrl explicitly. "
+                "Verify the project Mihomo gateway, selected node, and domain routing. "
                 f"detail={exc}"
             ) from exc
         except RequestsConnectionError as exc:
@@ -864,8 +863,7 @@ class OpenAIImagesClient:
                 ) from exc
             raise OpenAIImagesError(
                 "openai images proxy connection failed. "
-                "The request is using a configured proxy or extraAuthJson trustEnv=true; "
-                "disable trustEnv or configure proxyUrl explicitly. "
+                "Verify the project Mihomo gateway, selected node, and domain routing. "
                 f"detail={exc}"
             ) from exc
         except RequestsConnectionError as exc:

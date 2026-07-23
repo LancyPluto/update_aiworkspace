@@ -711,6 +711,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Keyword"
         - $ref: "#/components/parameters/CategoryId"
+        - $ref: "#/components/parameters/ToolView"
         - $ref: "#/components/parameters/PageNo"
         - $ref: "#/components/parameters/PageSize"
       responses:
@@ -728,6 +729,7 @@ paths:
       operationId: searchUserTools
       parameters:
         - $ref: "#/components/parameters/KeywordRequired"
+        - $ref: "#/components/parameters/ToolView"
         - $ref: "#/components/parameters/PageNo"
         - $ref: "#/components/parameters/PageSize"
       responses:
@@ -1987,6 +1989,14 @@ components:
         minimum: 1
         maximum: 100
         default: 20
+    ToolView:
+      name: view
+      in: query
+      description: Response projection for tool list items.
+      schema:
+        type: string
+        enum: [summary, compact]
+        default: summary
     Keyword:
       name: keyword
       in: query
@@ -2447,7 +2457,9 @@ components:
           type: array
           description: Ordered by the server; no internal tool ordering identifier is exposed.
           items:
-            $ref: "#/components/schemas/PublicToolSummary"
+            oneOf:
+              - $ref: "#/components/schemas/PublicToolCompact"
+              - $ref: "#/components/schemas/PublicToolSummary"
         total:
           type: integer
           format: int64
@@ -2458,7 +2470,7 @@ components:
         hasNext:
           type: boolean
 
-    PublicToolSummary:
+    PublicToolCompact:
       type: object
       additionalProperties: false
       required: [toolCode, toolName]
@@ -2500,8 +2512,51 @@ components:
         modelDisplayName:
           type: string
           nullable: true
-        frontendStyle:
-          $ref: "#/components/schemas/PublicToolSummaryFrontendStyle"
+
+    PublicToolSummary:
+      type: object
+      additionalProperties: false
+      required: [toolCode, toolName, cardMedia]
+      properties:
+        toolCode:
+          type: string
+          example: xiaohongshu_copywriting
+        toolName:
+          type: string
+        categoryCode:
+          type: string
+          nullable: true
+        categoryName:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        coverUrl:
+          type: string
+          nullable: true
+        toolType:
+          type: string
+          nullable: true
+        inputModality:
+          type: string
+          nullable: true
+        outputModality:
+          type: string
+          nullable: true
+        toolKind:
+          type: string
+          enum: [text, image, video, digitalHuman, audio, agent, other]
+        estimatedCreditCost:
+          type: integer
+          nullable: true
+        variableCreditPricing:
+          type: boolean
+        modelDisplayName:
+          type: string
+          nullable: true
+        cardMedia:
+          $ref: "#/components/schemas/PublicToolCardMedia"
 
     PublicToolDetailApiResponse:
       allOf:
@@ -2708,27 +2763,27 @@ components:
           items:
             type: string
 
-    PublicToolSummaryFrontendStyle:
+    PublicToolCardMedia:
       type: object
       additionalProperties: false
+      required: [mediaDisplayMode]
       properties:
-        primaryColor:
-          type: string
         mediaDisplayMode:
           type: string
+          enum: [icon, effect, comparison]
         modelIconUrl:
           type: string
         comparisonOriginalUrl:
           type: string
         comparisonEffectUrl:
           type: string
-        heroSubtitle:
-          type: string
         demoThumbnails:
           type: array
           maxItems: 1
           items:
             type: string
+        heroSubtitle:
+          type: string
 
     PublicToolFrontendStyle:
       type: object
@@ -2831,7 +2886,7 @@ components:
           nullable: true
         toolType:
           type: string
-          enum: [TEXT_GENERATION, IMAGE_GENERATION, IMAGE_TO_IMAGE, IMAGE_UNDERSTANDING, SPEECH_TO_TEXT, TEXT_TO_SPEECH, MUSIC_GENERATION, VIDEO_GENERATION, EMBEDDING, RERANK, AGENT]
+          enum: [TEXT_GENERATION, IMAGE_GENERATION, IMAGE_TO_IMAGE, IMAGE_UNDERSTANDING, SPEECH_TO_TEXT, TEXT_TO_SPEECH, MUSIC_GENERATION, VIDEO_GENERATION, AGENT]
           example: TEXT_GENERATION
         inputModality:
           type: string
@@ -2870,7 +2925,7 @@ components:
           uniqueItems: true
           items:
             type: string
-            enum: [TEXT_GENERATION, VISION_INPUT, IMAGE_GENERATION, VIDEO_GENERATION, TEXT_TO_SPEECH, SPEECH_TO_TEXT, MUSIC_GENERATION, AUDIO_GENERATION, EMBEDDING, RERANK]
+            enum: [TEXT_GENERATION, VISION_INPUT, IMAGE_GENERATION, VIDEO_GENERATION, TEXT_TO_SPEECH, SPEECH_TO_TEXT, MUSIC_GENERATION, AUDIO_GENERATION]
           description: Normalized model capabilities that a bound or automatically selected model must all support.
 
     ToolDetailApiResponse:
@@ -2964,7 +3019,7 @@ components:
           nullable: true
         toolType:
           type: string
-          enum: [TEXT_GENERATION, IMAGE_GENERATION, IMAGE_TO_IMAGE, IMAGE_UNDERSTANDING, SPEECH_TO_TEXT, TEXT_TO_SPEECH, MUSIC_GENERATION, VIDEO_GENERATION, EMBEDDING, RERANK, AGENT]
+          enum: [TEXT_GENERATION, IMAGE_GENERATION, IMAGE_TO_IMAGE, IMAGE_UNDERSTANDING, SPEECH_TO_TEXT, TEXT_TO_SPEECH, MUSIC_GENERATION, VIDEO_GENERATION, AGENT]
         inputModality:
           type: string
           enum: [TEXT, IMAGE, AUDIO, VIDEO, JSON, FILE, MULTIMODAL]
@@ -2990,7 +3045,7 @@ components:
           uniqueItems: true
           items:
             type: string
-            enum: [TEXT_GENERATION, VISION_INPUT, IMAGE_GENERATION, VIDEO_GENERATION, TEXT_TO_SPEECH, SPEECH_TO_TEXT, MUSIC_GENERATION, AUDIO_GENERATION, EMBEDDING, RERANK]
+            enum: [TEXT_GENERATION, VISION_INPUT, IMAGE_GENERATION, VIDEO_GENERATION, TEXT_TO_SPEECH, SPEECH_TO_TEXT, MUSIC_GENERATION, AUDIO_GENERATION]
           description: All capabilities must be supported by the selected or default model. Omit to derive a legacy-compatible default.
         templateCode:
           type: string
@@ -4227,7 +4282,7 @@ components:
           type: string
         toolType:
           type: string
-          enum: [TEXT_GENERATION, IMAGE_GENERATION, IMAGE_TO_IMAGE, IMAGE_UNDERSTANDING, SPEECH_TO_TEXT, TEXT_TO_SPEECH, MUSIC_GENERATION, VIDEO_GENERATION, EMBEDDING, RERANK, AGENT]
+          enum: [TEXT_GENERATION, IMAGE_GENERATION, IMAGE_TO_IMAGE, IMAGE_UNDERSTANDING, SPEECH_TO_TEXT, TEXT_TO_SPEECH, MUSIC_GENERATION, VIDEO_GENERATION, AGENT]
         inputModality:
           type: string
           enum: [TEXT, IMAGE, AUDIO, VIDEO, JSON, FILE, MULTIMODAL]

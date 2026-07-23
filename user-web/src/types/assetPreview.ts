@@ -1,4 +1,4 @@
-import type { ToolSummary } from "@/api/types"
+import type { ToolCompact } from "@/api/types"
 
 export type AssetPreviewKind = "image" | "video" | "audio" | "text" | "other"
 
@@ -38,4 +38,4 @@ export interface AssetPreviewItem {
   coverUrl?: string
 }
 
-export type AssetPreviewRecommendation = ToolSummary
+export type AssetPreviewRecommendation = ToolCompact

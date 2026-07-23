@@ -323,9 +323,17 @@ class SunoMusicClientTest(unittest.TestCase):
         create_payload = request.call_args_list[0].kwargs["json"]
         self.assertEqual(create_payload["uploadUrl"], "https://tempfile.redpandaai.co/ref.mp3")
 
-    def test_extra_auth_proxy_url_configures_suno_requests(self):
+    def test_project_gateway_configures_suno_requests(self):
         client = SunoMusicClient()
-        with patch.object(OutboundRequestsClient, "request", autospec=True, side_effect=[FakeCreateResponse(), FakeRecordResponse()]) as request:
+        with (
+            patch.dict(os.environ, {"PROJECT_MIHOMO_PROXY_URL": "http://mihomo:7890"}),
+            patch.object(
+                OutboundRequestsClient,
+                "request",
+                autospec=True,
+                side_effect=[FakeCreateResponse(), FakeRecordResponse()],
+            ) as request,
+        ):
             client.generate(
                 model="V5",
                 prompt="city sunrise pop",

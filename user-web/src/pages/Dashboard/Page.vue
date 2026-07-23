@@ -575,7 +575,7 @@ async function loadDashboard() {
   try {
     const [creditRes, toolRes, taskRes] = await Promise.all([
       fetchCreditAccount({ token: auth.token }),
-      fetchTools({ token: auth.token, query: { pageNo: 1, pageSize: 120 } }),
+      fetchTools({ token: auth.token, query: { view: "summary", pageNo: 1, pageSize: 100 } }),
       fetchTasks({ token: auth.token, query: { pageNo: 1, pageSize: 12 } }),
     ])
     credit.value = creditRes
@@ -1231,6 +1231,7 @@ function toolSummaryForRetry(task: TaskDetail): ToolSummary {
     toolType: task.toolType,
     inputModality: task.inputModality,
     outputModality: task.outputModality,
+    cardMedia: { mediaDisplayMode: "icon" },
   }
 }
 
@@ -1511,7 +1512,7 @@ function historyCardClass(task: TaskDetail, blocks: ResultBlock[]): string {
 
 /**
  * Resolve the best available cover URL for a tool card.
- * Falls back through frontendStyle.comparisonEffectUrl → demoThumbnails → coverUrl
+ * Falls back through cardMedia.comparisonEffectUrl → demoThumbnails → coverUrl
  * to handle cases where the OSS cover URL is inaccessible (e.g. encoding issues).
  */
 const brokenToolCoverIds = ref<Set<string>>(new Set())
@@ -1520,8 +1521,8 @@ function toolCardCover(tool: ToolSummary): string {
   if (brokenToolCoverIds.value.has(tool.toolCode)) {
     return resolveSummaryToolCoverUrl({
       ...tool,
-      frontendStyle: {
-        ...tool.frontendStyle,
+      cardMedia: {
+        ...tool.cardMedia,
         comparisonEffectUrl: "",
         demoThumbnails: [],
       },
@@ -1537,9 +1538,9 @@ function onToolCoverError(tool: ToolSummary) {
 }
 
 function usesComparisonToolCover(tool: ToolSummary): boolean {
-  return tool.frontendStyle?.mediaDisplayMode === "comparison"
-    && Boolean(tool.frontendStyle?.comparisonOriginalUrl)
-    && Boolean(tool.frontendStyle?.comparisonEffectUrl)
+  return tool.cardMedia.mediaDisplayMode === "comparison"
+    && Boolean(tool.cardMedia.comparisonOriginalUrl)
+    && Boolean(tool.cardMedia.comparisonEffectUrl)
     && !brokenToolCoverIds.value.has(tool.toolCode)
 }
 
@@ -2060,8 +2061,8 @@ onUnmounted(() => {
                   <div class="marketplace-tool-media">
                     <ToolComparisonCover
                       v-if="usesComparisonToolCover(tool)"
-                      :before-src="tool.frontendStyle?.comparisonOriginalUrl || ''"
-                      :after-src="tool.frontendStyle?.comparisonEffectUrl || ''"
+                      :before-src="tool.cardMedia.comparisonOriginalUrl || ''"
+                      :after-src="tool.cardMedia.comparisonEffectUrl || ''"
                       :alt="tool.toolName"
                     />
                     <video
@@ -3288,8 +3289,8 @@ onUnmounted(() => {
                           <div class="marketplace-tool-media">
                             <ToolComparisonCover
                               v-if="usesComparisonToolCover(tool)"
-                              :before-src="tool.frontendStyle?.comparisonOriginalUrl || ''"
-                              :after-src="tool.frontendStyle?.comparisonEffectUrl || ''"
+                              :before-src="tool.cardMedia.comparisonOriginalUrl || ''"
+                              :after-src="tool.cardMedia.comparisonEffectUrl || ''"
                               :alt="tool.toolName"
                             />
                             <video

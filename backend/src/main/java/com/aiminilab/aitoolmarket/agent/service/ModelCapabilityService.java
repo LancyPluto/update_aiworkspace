@@ -13,9 +13,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class ModelCapabilityService {
@@ -135,6 +139,53 @@ public class ModelCapabilityService {
         }
         List<String> requiredCapabilities = resolveRequiredCapabilities(tool);
         return agentModelConfigMapper.findAllActive().stream()
+                .filter(config -> Boolean.TRUE.equals(config.getEnabled()))
+                .filter(config -> supportsTool(tool, config, requiredCapabilities))
+                .sorted(Comparator
+                        .comparing((AgentModelConfig config) -> Boolean.TRUE.equals(config.getDefault()) ? 0 : 1)
+                        .thenComparing(AgentModelConfig::getId, Comparator.reverseOrder()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    public Map<Long, AgentModelConfig> resolveModelConfigsForTools(List<AiTool> tools) {
+        if (tools == null || tools.isEmpty()) {
+            return Map.of();
+        }
+        List<AgentModelConfig> activeConfigs = agentModelConfigMapper.findAllActive();
+        Map<Long, AgentModelConfig> configsById = activeConfigs.stream()
+                .filter(config -> config.getId() != null)
+                .collect(Collectors.toMap(
+                        AgentModelConfig::getId,
+                        Function.identity(),
+                        (left, right) -> left
+                ));
+        Map<Long, AgentModelConfig> resolvedByToolId = new LinkedHashMap<>();
+        for (AiTool tool : tools) {
+            if (tool == null || tool.getId() == null) {
+                continue;
+            }
+            AgentModelConfig resolved = resolveModelConfigFromSnapshot(tool, activeConfigs, configsById);
+            if (resolved != null) {
+                resolvedByToolId.put(tool.getId(), resolved);
+            }
+        }
+        return Map.copyOf(resolvedByToolId);
+    }
+
+    private AgentModelConfig resolveModelConfigFromSnapshot(
+            AiTool tool,
+            List<AgentModelConfig> activeConfigs,
+            Map<Long, AgentModelConfig> configsById
+    ) {
+        if (tool.getModelConfigId() != null) {
+            AgentModelConfig bound = configsById.get(tool.getModelConfigId());
+            if (bound != null) {
+                return bound;
+            }
+        }
+        List<String> requiredCapabilities = resolveRequiredCapabilities(tool);
+        return activeConfigs.stream()
                 .filter(config -> Boolean.TRUE.equals(config.getEnabled()))
                 .filter(config -> supportsTool(tool, config, requiredCapabilities))
                 .sorted(Comparator

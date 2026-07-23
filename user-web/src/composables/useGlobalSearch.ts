@@ -3,7 +3,7 @@ import type { RouteLocationRaw } from "vue-router"
 import { searchTools } from "@/api/toolApi"
 import { searchCommunityPosts } from "@/api/communityApi"
 import { fetchTasks } from "@/api/taskApi"
-import type { CommunityPost, ToolSummary } from "@/api/types"
+import type { CommunityPost, ToolCompact } from "@/api/types"
 import { userRoutes } from "@/router/userRoutes"
 import { useAuthStore } from "@/store/authStore"
 import { communityDisplayTitle } from "@/utils/communityDisplay"
@@ -27,7 +27,7 @@ const scopeLabels: Record<GlobalSearchScope, string> = {
   materials: "素材",
 }
 
-export function isAgentTool(tool: Pick<ToolSummary, "toolCode" | "toolType" | "toolKind" | "categoryCode">): boolean {
+export function isAgentTool(tool: Pick<ToolCompact, "toolCode" | "toolType" | "toolKind" | "categoryCode">): boolean {
   const type = (tool.toolType || "").toUpperCase()
   const kind = (tool.toolKind || "").toLowerCase()
   const category = (tool.categoryCode || "").toLowerCase()
@@ -36,7 +36,7 @@ export function isAgentTool(tool: Pick<ToolSummary, "toolCode" | "toolType" | "t
   return code.includes("agent")
 }
 
-function toolHref(tool: ToolSummary, loggedIn: boolean): RouteLocationRaw {
+function toolHref(tool: ToolCompact, loggedIn: boolean): RouteLocationRaw {
   if (loggedIn) {
     return { path: "/dashboard", query: { tool: tool.toolCode } }
   }
@@ -120,7 +120,7 @@ export function useGlobalSearch() {
         jobs.push(
           searchTools({
             token: auth.token,
-            query: { keyword: q, pageNo: 1, pageSize: 12 },
+            query: { view: "compact", keyword: q, pageNo: 1, pageSize: 12 },
           }).then((page) => {
             for (const tool of page.list) {
               const agent = isAgentTool(tool)

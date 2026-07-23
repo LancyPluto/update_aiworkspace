@@ -1,4 +1,4 @@
-import type { TaskDetail, ToolSummary } from "@/api/types"
+import type { TaskDetail, ToolCompact } from "@/api/types"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
 
 const DEFAULT_RECOMMENDATION_LIMIT = 8
@@ -17,11 +17,11 @@ export function buildToolUsageCounts(tasks: ToolUsageTask[]): Map<string, number
 
 export function recommendToolsForAsset(
   asset: AssetPreviewItem,
-  tools: ToolSummary[],
+  tools: ToolCompact[],
   options: {
     tasks?: ToolUsageTask[]
     usageCounts?: Map<string, number>
-    fallbackTools?: ToolSummary[]
+    fallbackTools?: ToolCompact[]
     limit?: number
   } = {},
 ): AssetPreviewRecommendation[] {
@@ -41,7 +41,7 @@ export function recommendToolsForAsset(
     .map(({ tool }) => tool)
 }
 
-function supportsAssetInput(tool: ToolSummary, asset: AssetPreviewItem): boolean {
+function supportsAssetInput(tool: ToolCompact, asset: AssetPreviewItem): boolean {
   const target = assetInputTarget(asset)
   const input = normalizeModality(tool.inputModality)
   const text = `${tool.toolName} ${tool.description || ""} ${tool.modelDisplayName || ""} ${tool.toolCode}`
@@ -65,7 +65,7 @@ function assetKeyword(asset: AssetPreviewItem): RegExp {
   return /创作|生成|工具|model|tool/i
 }
 
-function toolUsageCount(tool: ToolSummary, usageCounts: Map<string, number>): number {
+function toolUsageCount(tool: ToolCompact, usageCounts: Map<string, number>): number {
   return usageCounts.get(normalizeToolCode(tool.toolCode)) || 0
 }
 

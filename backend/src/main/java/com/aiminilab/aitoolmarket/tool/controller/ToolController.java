@@ -3,7 +3,7 @@ package com.aiminilab.aitoolmarket.tool.controller;
 import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.tool.dto.PublicToolDetailResponse;
-import com.aiminilab.aitoolmarket.tool.dto.PublicToolSummaryResponse;
+import com.aiminilab.aitoolmarket.tool.dto.PublicToolView;
 import com.aiminilab.aitoolmarket.tool.dto.ToolCategoryResponse;
 import com.aiminilab.aitoolmarket.tool.service.ToolService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,22 +30,36 @@ public class ToolController {
     }
 
     @GetMapping("/tools")
-    public ApiResponse<PageResponse<PublicToolSummaryResponse>> tools(
+    public ApiResponse<PageResponse<?>> tools(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) Long categoryId,
             @RequestParam(required = false) Integer pageNo,
-            @RequestParam(required = false) Integer pageSize
+            @RequestParam(required = false) Integer pageSize,
+            @RequestParam(required = false) String view
     ) {
-        return ApiResponse.success(toolService.userTools(keyword, categoryId, pageNo, pageSize));
+        return ApiResponse.success(toolService.userTools(
+                keyword,
+                categoryId,
+                pageNo,
+                pageSize,
+                PublicToolView.from(view)
+        ));
     }
 
     @GetMapping("/tools/search")
-    public ApiResponse<PageResponse<PublicToolSummaryResponse>> search(
+    public ApiResponse<PageResponse<?>> search(
             @RequestParam String keyword,
             @RequestParam(required = false) Integer pageNo,
-            @RequestParam(required = false) Integer pageSize
+            @RequestParam(required = false) Integer pageSize,
+            @RequestParam(required = false) String view
     ) {
-        return ApiResponse.success(toolService.userTools(keyword, null, pageNo, pageSize));
+        return ApiResponse.success(toolService.userTools(
+                keyword,
+                null,
+                pageNo,
+                pageSize,
+                PublicToolView.from(view)
+        ));
     }
 
     @GetMapping("/tools/{toolCode}")

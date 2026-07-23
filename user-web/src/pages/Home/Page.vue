@@ -204,14 +204,14 @@ function toolCover(tool: ToolSummary) {
 }
 
 function usesComparison(tool: ToolSummary): boolean {
-  return tool.frontendStyle?.mediaDisplayMode === "comparison"
-    && Boolean(tool.frontendStyle?.comparisonOriginalUrl)
-    && Boolean(tool.frontendStyle?.comparisonEffectUrl)
+  return tool.cardMedia.mediaDisplayMode === "comparison"
+    && Boolean(tool.cardMedia.comparisonOriginalUrl)
+    && Boolean(tool.cardMedia.comparisonEffectUrl)
 }
 
 
 function toolDescription(tool: ToolSummary) {
-  return tool.description?.trim() || tool.frontendStyle?.heroSubtitle?.trim() || "进入工具，使用真实配置开始创作。"
+  return tool.description?.trim() || tool.cardMedia.heroSubtitle?.trim() || "进入工具，使用真实配置开始创作。"
 }
 
 function costLabel(tool: ToolSummary) {
@@ -295,7 +295,7 @@ async function loadHomeData() {
   error.value = ""
   try {
     const [toolPage, taskPage, communityPage] = await Promise.all([
-      fetchTools({ token: auth.token, query: { pageNo: 1, pageSize: 120 } }),
+      fetchTools({ token: auth.token, query: { view: "summary", pageNo: 1, pageSize: 100 } }),
       fetchTasks({ token: auth.token, query: { pageNo: 1, pageSize: 80 } }).catch(() => null as PageResult<TaskDetail> | null),
       searchCommunityPosts({
         token: auth.token,
@@ -490,8 +490,8 @@ watch(
             <div class="tool-cover">
               <ToolComparisonCover
                 v-if="usesComparison(tool)"
-                :before-src="tool.frontendStyle?.comparisonOriginalUrl || ''"
-                :after-src="tool.frontendStyle?.comparisonEffectUrl || ''"
+                :before-src="tool.cardMedia.comparisonOriginalUrl || ''"
+                :after-src="tool.cardMedia.comparisonEffectUrl || ''"
                 :alt="tool.toolName"
                 image-class="tool-cover-comparison-media"
                 effect-class="tool-cover-comparison-effect"

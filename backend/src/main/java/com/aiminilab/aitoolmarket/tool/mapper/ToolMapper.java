@@ -51,6 +51,71 @@ public interface ToolMapper extends BaseMapper<AiTool> {
 
     @Select("""
             <script>
+            SELECT t.id, t.tool_code, t.tool_name, t.category_id,
+                   t.description, t.cover_url, t.tool_type,
+                   t.input_modality, t.output_modality,
+                   t.estimated_credit_cost, t.model_config_id,
+                   t.execution_handler, t.required_model_capabilities,
+                   c.category_name, c.category_code,
+                   m.display_name AS model_display_name
+            FROM ai_tools t
+            LEFT JOIN tool_categories c ON c.id = t.category_id
+            LEFT JOIN agent_model_configs m ON m.id = t.model_config_id AND COALESCE(m.is_deleted, 0) = 0
+            WHERE t.is_deleted = 0 AND t.status = 'ONLINE'
+            <if test="categoryId != null">
+              AND t.category_id = #{categoryId}
+            </if>
+            <if test="keyword != null and keyword.trim() != ''">
+              AND (
+                LOWER(t.tool_code) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+                OR LOWER(t.tool_name) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+                OR LOWER(t.description) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+              )
+            </if>
+            ORDER BY t.id DESC
+            LIMIT #{limit} OFFSET #{offset}
+            </script>
+            """)
+    List<AiTool> findPublicCompactTools(@Param("keyword") String keyword,
+                                        @Param("categoryId") Long categoryId,
+                                        @Param("limit") int limit,
+                                        @Param("offset") int offset);
+
+    @Select("""
+            <script>
+            SELECT t.id, t.tool_code, t.tool_name, t.category_id,
+                   t.description, t.cover_url, t.tool_type,
+                   t.input_modality, t.output_modality,
+                   t.estimated_credit_cost, t.model_config_id,
+                   t.execution_handler, t.required_model_capabilities,
+                   t.config_note,
+                   c.category_name, c.category_code,
+                   m.display_name AS model_display_name
+            FROM ai_tools t
+            LEFT JOIN tool_categories c ON c.id = t.category_id
+            LEFT JOIN agent_model_configs m ON m.id = t.model_config_id AND COALESCE(m.is_deleted, 0) = 0
+            WHERE t.is_deleted = 0 AND t.status = 'ONLINE'
+            <if test="categoryId != null">
+              AND t.category_id = #{categoryId}
+            </if>
+            <if test="keyword != null and keyword.trim() != ''">
+              AND (
+                LOWER(t.tool_code) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+                OR LOWER(t.tool_name) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+                OR LOWER(t.description) LIKE CONCAT('%', LOWER(#{keyword}), '%')
+              )
+            </if>
+            ORDER BY t.id DESC
+            LIMIT #{limit} OFFSET #{offset}
+            </script>
+            """)
+    List<AiTool> findPublicSummaryTools(@Param("keyword") String keyword,
+                                        @Param("categoryId") Long categoryId,
+                                        @Param("limit") int limit,
+                                        @Param("offset") int offset);
+
+    @Select("""
+            <script>
             SELECT COUNT(*)
             FROM ai_tools t
             LEFT JOIN tool_categories c ON c.id = t.category_id

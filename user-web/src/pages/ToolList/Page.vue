@@ -72,15 +72,15 @@ function coverForTopTool(modality: string): string {
 }
 
 function comparisonModeForTool(tool: AITool): string | undefined {
-  return tool.frontendStyle?.mediaDisplayMode || tool.mediaDisplayMode
+  return tool.cardMedia?.mediaDisplayMode || tool.mediaDisplayMode
 }
 
 function comparisonOriginalForTool(tool: AITool): string {
-  return tool.frontendStyle?.comparisonOriginalUrl || tool.comparisonOriginalUrl || ""
+  return tool.cardMedia?.comparisonOriginalUrl || tool.comparisonOriginalUrl || ""
 }
 
 function comparisonEffectForTool(tool: AITool): string {
-  return tool.frontendStyle?.comparisonEffectUrl || tool.comparisonEffectUrl || ""
+  return tool.cardMedia?.comparisonEffectUrl || tool.comparisonEffectUrl || ""
 }
 
 function usesComparisonMedia(tool: AITool): boolean {

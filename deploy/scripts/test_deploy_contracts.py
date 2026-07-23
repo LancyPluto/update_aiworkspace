@@ -813,19 +813,67 @@ class DeployContractTests(unittest.TestCase):
         for deploy in selective_deploys:
             self.assertIn("mihomo|mihomo-init)", deploy)
 
-    def test_project_proxy_overlay_does_not_force_global_application_proxy(self) -> None:
+    def test_project_proxy_overlay_routes_application_egress_through_mihomo(self) -> None:
         overlay = self.read("deploy/docker-compose.proxy.yml")
         base = self.read("deploy/docker-compose.yml")
+
+        def service_environment(document: str, service: str) -> dict[str, str]:
+            service_match = re.search(
+                rf"^  {re.escape(service)}:\r?\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\r?\n|^[A-Za-z0-9_-]+:\r?\n|\Z)",
+                document,
+                re.MULTILINE | re.DOTALL,
+            )
+            self.assertIsNotNone(service_match, f"compose service {service} is missing")
+            environment_match = re.search(
+                r"^    environment:\r?\n(?P<body>(?:^      [^\r\n]*(?:\r?\n|\Z))*)",
+                service_match.group("body"),
+                re.MULTILINE,
+            )
+            self.assertIsNotNone(environment_match, f"compose service {service} has no environment mapping")
+            environment: dict[str, str] = {}
+            for line in environment_match.group("body").splitlines():
+                normalized = line.strip()
+                if not normalized or normalized.startswith("#"):
+                    continue
+                key, value = normalized.split(":", 1)
+                environment[key] = value.strip().strip('"').strip("'")
+            return environment
+
         self.assertIn('"127.0.0.1:${MIHOMO_PROXY_PORT:-7890}:7890"', overlay)
         self.assertNotIn("network_mode: host", overlay)
-        for service in ("backend:", "worker:", "agent-service:"):
-            self.assertIn(service, overlay)
-        self.assertNotIn("HTTP_PROXY: http://mihomo:7890", overlay)
-        self.assertNotIn("HTTPS_PROXY: http://mihomo:7890", overlay)
+        proxy_keys = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
+        disabled_proxy_keys = ("ALL_PROXY", "all_proxy")
+        expected_no_proxy = (
+            "localhost,127.0.0.1,::1,mysql,redis,rabbitmq,backend,worker,agent-service,"
+            "admin-frontend,user-web,nginx,mihomo,host.docker.internal"
+        )
+        expected_java_no_proxy = (
+            "localhost|127.*|[::1]|mysql|redis|rabbitmq|backend|worker|agent-service|"
+            "admin-frontend|user-web|nginx|mihomo|host.docker.internal"
+        )
+        for service in ("backend", "worker", "agent-service"):
+            environment = service_environment(overlay, service)
+            for key in proxy_keys:
+                self.assertEqual(environment.get(key), "http://mihomo:7890", f"{service}.{key}")
+            for key in disabled_proxy_keys:
+                self.assertEqual(environment.get(key), "", f"{service}.{key}")
+            self.assertEqual(environment.get("PROJECT_MIHOMO_PROXY_URL"), "http://mihomo:7890")
+            self.assertEqual(environment.get("NO_PROXY"), expected_no_proxy)
+            self.assertEqual(environment.get("no_proxy"), expected_no_proxy)
+
+        for service in ("admin-frontend", "user-web"):
+            environment = service_environment(base, service)
+            for key in (*proxy_keys, *disabled_proxy_keys):
+                self.assertEqual(environment.get(key), "", f"{service}.{key}")
+
+        self.assertNotIn("PROJECT_MIHOMO_NO_PROXY", overlay)
         self.assertNotIn("ALL_PROXY: http", overlay)
-        for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
-            self.assertEqual(overlay.count(f'{key}: ""'), 3)
-            self.assertEqual(base.count(f'{key}: ""'), 5)
+        backend_environment = service_environment(overlay, "backend")
+        self.assertIn("-Dhttp.proxyHost=mihomo", backend_environment["JAVA_TOOL_OPTIONS"])
+        self.assertIn("-Dhttps.proxyHost=mihomo", backend_environment["JAVA_TOOL_OPTIONS"])
+        self.assertIn("-Dhttp.nonProxyHosts=" + expected_java_no_proxy, backend_environment["JAVA_TOOL_OPTIONS"])
+        self.assertNotIn("PROJECT_MIHOMO_JAVA_NON_PROXY_HOSTS", overlay)
+        self.assertIn("${BACKEND_JAVA_TOOL_OPTIONS:", backend_environment["JAVA_TOOL_OPTIONS"])
 
         deploys = (
             self.read("deploy/scripts/ci_remote_deploy_light.sh"),
