@@ -76,7 +76,7 @@ elif mode == "verify":
             paths += 1
             if not value or any(char in value for char in "\x00\r\n"):
                 raise SystemExit(1)
-        elif value:
+        else:
             raise SystemExit(1)
     if paths != 1:
         raise SystemExit(1)
@@ -167,10 +167,32 @@ cleanup_capture() {
 }
 trap cleanup_capture EXIT
 
-worker_config_matches_contract() {
-  local object_type="$1"
-  local object="$2"
-  local cmd entrypoint workdir user healthcheck
+rollback_service_cmd() {
+  case "$1" in
+    worker) printf '%s' '["python","main.py"]' ;;
+    agent-service)
+      printf '%s' '["uvicorn","app.main:app","--host","0.0.0.0","--port","8090"]'
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+rollback_service_comment() {
+  case "$1" in
+    worker|agent-service)
+      printf 'ai-tool-market local-only %s rollback' "$1"
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+service_config_matches_contract() {
+  local service="$1"
+  local object_type="$2"
+  local object="$3"
+  local expected_cmd cmd entrypoint workdir user healthcheck
+
+  expected_cmd="$(rollback_service_cmd "$service")" || return 1
 
   cmd="$(docker "$object_type" inspect --format '{{json .Config.Cmd}}' "$object")" \
     || return 1
@@ -183,30 +205,35 @@ worker_config_matches_contract() {
   healthcheck="$(docker "$object_type" inspect --format '{{json .Config.Healthcheck}}' "$object")" \
     || return 1
 
-  [ "$cmd" = '["python","main.py"]' ] \
+  [ "$cmd" = "$expected_cmd" ] \
     && { [ "$entrypoint" = "null" ] || [ "$entrypoint" = "[]" ]; } \
     && [ "$workdir" = "/app" ] \
     && { [ -z "$user" ] || [ "$user" = "0" ] || [ "$user" = "root" ]; } \
     && [ "$healthcheck" = "null" ]
 }
 
-import_worker_rootfs() {
-  local container="$1"
-  local candidate_ref="$2"
-  local path_value imported_image_id
-  local -a import_args=(--message "ai-tool-market local-only worker rollback")
+import_service_rootfs() {
+  local service="$1"
+  local container="$2"
+  local candidate_ref="$3"
+  local expected_cmd image_comment path_value imported_image_id
+  local -a import_args=()
+
+  expected_cmd="$(rollback_service_cmd "$service")" || return 1
+  image_comment="$(rollback_service_comment "$service")" || return 1
+  import_args+=(--message "$image_comment")
 
   if ! path_value="$(
     docker container inspect --format '{{json .Config.Env}}' "$container" \
       | parse_environment_metadata path
   )"; then
-    echo "ERROR: unable to read worker PATH for rootfs recovery" >&2
+    echo "ERROR: unable to read $service PATH for rootfs recovery" >&2
     return 1
   fi
 
   import_args+=(--change "ENV PATH=$path_value")
   import_args+=(--change "WORKDIR /app")
-  import_args+=(--change 'CMD ["python","main.py"]')
+  import_args+=(--change "CMD $expected_cmd")
 
   if imported_image_id="$(
     docker export "$container" \
@@ -217,83 +244,97 @@ import_worker_rootfs() {
     if valid_image_id "${imported_image_id:-}"; then
       discard_candidate_image "$imported_image_id"
     fi
-    echo "ERROR: unable to import the running worker rootfs" >&2
+    echo "ERROR: unable to import the running $service rootfs" >&2
     return 1
   fi
   if ! valid_image_id "$imported_image_id"; then
-    echo "ERROR: imported worker rootfs returned an invalid image ID" >&2
+    echo "ERROR: imported $service rootfs returned an invalid image ID" >&2
     return 1
   fi
 
   printf '%s' "$imported_image_id"
 }
 
-smoke_worker_candidate() {
-  local image_id="$1"
-  local smoke_name="ai-tool-market-rollback-worker-smoke-$$"
+smoke_service_candidate() {
+  local service="$1"
+  local image_id="$2"
+  local smoke_name="ai-tool-market-rollback-${service}-smoke-$$"
+  local smoke_code
   local status=0
+
+  case "$service" in
+    worker)
+      smoke_code='from pathlib import Path; import dotenv, httpx, openai, oss2, pika, prometheus_client, redis, requests; assert Path("/app/main.py").is_file()'
+      ;;
+    agent-service)
+      smoke_code='from pathlib import Path; import deepagents, dotenv, fastapi, fitz, httpx, langchain_anthropic, langchain_community, langchain_openai, prometheus_client, pydantic, tiktoken, uvicorn; assert Path("/app/app/main.py").is_file()'
+      ;;
+    *) return 1 ;;
+  esac
 
   docker rm -f "$smoke_name" >/dev/null 2>&1 || true
   timeout --kill-after=5s 30s docker run --rm --name "$smoke_name" \
     --network none --read-only \
     --cpus 1 --memory 512m --pids-limit 64 \
     --env PYTHONDONTWRITEBYTECODE=1 \
-    --entrypoint python "$image_id" -c \
-    'from pathlib import Path; import dotenv, httpx, openai, oss2, pika, prometheus_client, redis, requests; assert Path("/app/main.py").is_file()' \
+    --entrypoint python "$image_id" -c "$smoke_code" \
     || status="$?"
   docker rm -f "$smoke_name" >/dev/null 2>&1 || true
   return "$status"
 }
 
-recover_worker_rollback_image() {
-  local container="$1"
-  local candidate_ref="$2"
-  local candidate_image_id inspected_image_id image_comment
+recover_service_rollback_image() {
+  local service="$1"
+  local container="$2"
+  local candidate_ref="$3"
+  local expected_comment candidate_image_id inspected_image_id image_comment
 
-  if ! worker_config_matches_contract container "$container"; then
-    echo "ERROR: running worker configuration is incompatible with rollback recovery" >&2
+  expected_comment="$(rollback_service_comment "$service")" || return 1
+
+  if ! service_config_matches_contract "$service" container "$container"; then
+    echo "ERROR: running $service configuration is incompatible with rollback recovery" >&2
     return 1
   fi
-  if ! candidate_image_id="$(import_worker_rootfs "$container" "$candidate_ref")"; then
-    echo "ERROR: unable to recover rollback image for worker" >&2
+  if ! candidate_image_id="$(import_service_rootfs "$service" "$container" "$candidate_ref")"; then
+    echo "ERROR: unable to recover rollback image for $service" >&2
     return 1
   fi
 
   if ! valid_image_id "$candidate_image_id"; then
-    echo "ERROR: recovered rollback image for worker has an invalid image ID" >&2
+    echo "ERROR: recovered rollback image for $service has an invalid image ID" >&2
     return 1
   fi
   if ! inspected_image_id="$(docker image inspect --format '{{.Id}}' "$candidate_image_id")" \
       || ! valid_image_id "$inspected_image_id" \
       || [ "$inspected_image_id" != "$candidate_image_id" ]; then
     discard_candidate_image "$candidate_image_id"
-    echo "ERROR: recovered rollback image for worker has an invalid image ID" >&2
+    echo "ERROR: recovered rollback image for $service has an invalid image ID" >&2
     return 1
   fi
-  if ! worker_config_matches_contract image "$inspected_image_id"; then
+  if ! service_config_matches_contract "$service" image "$inspected_image_id"; then
     discard_candidate_image "$candidate_image_id"
-    echo "ERROR: recovered worker image has incompatible runtime metadata" >&2
+    echo "ERROR: recovered $service image has incompatible runtime metadata" >&2
     return 1
   fi
   if ! docker image inspect --format '{{json .Config.Env}}' "$inspected_image_id" \
       | parse_environment_metadata verify; then
     discard_candidate_image "$candidate_image_id"
-    echo "ERROR: recovered worker image retained invalid runtime environment metadata" >&2
+    echo "ERROR: recovered $service image retained invalid runtime environment metadata" >&2
     return 1
   fi
   if ! image_comment="$(docker image inspect --format '{{.Comment}}' "$inspected_image_id")" \
-      || [ "$image_comment" != "ai-tool-market local-only worker rollback" ]; then
+      || [ "$image_comment" != "$expected_comment" ]; then
     discard_candidate_image "$candidate_image_id"
-    echo "ERROR: recovered worker image is missing the local-only marker" >&2
+    echo "ERROR: recovered $service image is missing the local-only marker" >&2
     return 1
   fi
-  if ! smoke_worker_candidate "$inspected_image_id"; then
+  if ! smoke_service_candidate "$service" "$inspected_image_id"; then
     discard_candidate_image "$candidate_image_id"
-    echo "ERROR: recovered worker image failed the isolated runtime smoke check" >&2
+    echo "ERROR: recovered $service image failed the isolated runtime smoke check" >&2
     return 1
   fi
 
-  echo "Recovered worker rollback candidate using flattened-rootfs" >&2
+  echo "Recovered $service rollback candidate using flattened-rootfs" >&2
   printf '%s' "$inspected_image_id"
 }
 
@@ -320,14 +361,18 @@ for service in $DEPLOY_SERVICES; do
   if docker image inspect "$image_id" >/dev/null 2>&1; then
     echo "Validated rollback image for $service: $image_id"
   else
-    if [ "$service" != "worker" ]; then
-      echo "ERROR: rollback image for $service is missing from the local image store" >&2
-      exit 1
-    fi
-    if ! image_id="$(recover_worker_rollback_image "$container" "$candidate_ref")"; then
-      exit 1
-    fi
-    echo "Recovered rollback image for worker: $image_id"
+    case "$service" in
+      worker|agent-service)
+        if ! image_id="$(recover_service_rollback_image "$service" "$container" "$candidate_ref")"; then
+          exit 1
+        fi
+        echo "Recovered rollback image for $service: $image_id"
+        ;;
+      *)
+        echo "ERROR: rollback image for $service is missing from the local image store" >&2
+        exit 1
+        ;;
+    esac
   fi
 
   docker image tag "$image_id" "$candidate_ref"

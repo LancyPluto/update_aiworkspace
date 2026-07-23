@@ -1,17 +1,36 @@
 # CI/CD 说明
 
-主仓库通过 GitHub Actions 编排、由当前 Windows 主机内两个隔离的 WSL2 self-hosted Runner 执行 **dev 分支持续集成 + 轻量持续交付**：
+主仓库通过 GitHub Actions 编排、由当前 Windows 主机内两个隔离的 WSL2 环境中的四个 self-hosted Runner 实例执行 **dev 分支持续集成 + 轻量持续交付**：
 
-- `ci-isolated` 仅运行 CI，无生产凭据，并阻断生产地址与本地 LAN。
-- `production-deploy` 仅运行生产 CD，生产连接凭据只保存在该 WSL 的本地文件中。
+- CI WSL 中运行 3 个带 `ci-isolated` 标签的 Runner 实例，仅运行 CI，无生产凭据，并阻断生产地址与本地 LAN。
+- CD WSL 中仍只运行 1 个带 `production-deploy` 标签的 Runner 实例，仅运行生产 CD，生产连接凭据只保存在该 WSL 的本地文件中。
 
-两个 WSL 发行版共享同一个网络命名空间，因此 Runner 必须使用不同的宿主 UID：CI 为 `1000`，CD 为 `1100`。CI 出口规则使用 `iptables -m owner --uid-owner 1000`，禁止改回不带 UID 的全局规则，否则会同时阻断 CD。
+两个 WSL 发行版共享同一个网络命名空间，因此 CI 与 CD Runner 必须使用不同的宿主 UID：CI 为 `1000`，CD 为 `1100`。CI 出口规则使用 `iptables -m owner --uid-owner 1000`，禁止改回不带 UID 的全局规则，否则会同时阻断 CD。
+
+### Runner 拓扑与资源隔离
+
+| 实例 | 标签 | 安装目录 | `_work` 目录 | 职责 |
+|------|------|------------------|-----------------------|------|
+| `local-ci-isolated` | `ci-isolated` | `/opt/actions-runner` | `/opt/actions-runner/_work` | CI |
+| `local-ci-isolated-2` | `ci-isolated` | `/opt/actions-runner-2` | `/opt/actions-runner-2/_work` | CI |
+| `local-ci-isolated-3` | `ci-isolated` | `/opt/actions-runner-3` | `/opt/actions-runner-3/_work` | CI |
+| `local-production-deploy` | `production-deploy` | `/opt/actions-runner`（独立 WSL） | `/opt/actions-runner/_work`（独立 WSL） | 生产 CD |
+
+3 个 CI Runner 使用唯一名称、各自独立的安装目录和 `_work` 目录，并归入 `ci-runners.slice`。每个 Runner service 限制为 `CPUQuota=250%`、`MemoryMax=6G`；slice 聚合限制为 `CPUQuota=600%`、`MemoryHigh=8G`、`MemoryMax=10G`，避免并发构建挤占 CD 与宿主系统资源。后端命令固定使用 `mvn -T 2`，不再按 8 核自动扩展 Maven reactor 线程。
+
+3 个 CI 实例使用同一个无生产权限的 CI 用户，因此共享持久化的本机 Maven、pip 和 npm 缓存：`~/.m2/repository`、`~/.cache/pip`、`~/.npm`。workflow 保留运行时版本设置，但不再启用 setup actions 的 GitHub 远端缓存恢复与上传。各实例的 `_work` 目录不能共享；本机包缓存目录必须由 CI 用户拥有，并纳入定期容量清理。
+
+`production-deploy` 继续使用独立用户、独立 Runner 凭据、独立工作目录和现有单实例配置，不加入 `ci-isolated` 标签，也不参与 CI 调度。3 个 CI 实例不得添加 `production-deploy` 标签或读取 CD 凭据目录。
+
+### GitHub 网络路由
+
+Windows Mihomo 为 GitHub 相关域名配置 `GitHub-Route` fallback 组，使用现有自动选择代理组作为主路由、`DIRECT` 作为备用。健康检查直接访问 GitHub，配置为 `interval=30`、`lazy=false`、`timeout=7000`、`max-failed-times=1`，以便主路由出现 GitHub TLS 异常时及时切换。Dante 节点不参与当前 CI/CD 路由。
 
 ## 工作流
 
 | 文件 | 触发 | 行为 |
 |------|------|------|
-| `.github/workflows/dev-delivery.yml` | 同仓库 PR → `dev` | 仅跑 CI（测试 + 前端构建），**不部署生产**；fork PR 明确拒绝 |
+| `.github/workflows/dev-delivery.yml` | 同仓库 PR → `dev` 的 `synchronize` / `ready_for_review` | 仅跑 CI（测试 + 前端构建），**不部署生产**；`opened` / `reopened` 不触发，fork PR 在受支持事件上明确拒绝 |
 | 同上 | `push` → `dev`（含 PR merge 后的 push） | CI 通过后 **git 同步 + Docker 重建** |
 | 同上 | `workflow_dispatch`（仅 `dev` ref） | 手动触发 `git` 模式部署；其他 ref 不进入 CD Runner |
 
@@ -19,7 +38,7 @@
 
 ```
 push dev / PR merge → dev
-  → backend: mvn test
+  → backend: mvn test -T 2
   → agent-service / worker: pytest
   → admin-frontend + user-web: npm ci && build
   → 检测变更服务 → 生产机 git fetch/checkout → 仅重建变更的 Docker 服务
