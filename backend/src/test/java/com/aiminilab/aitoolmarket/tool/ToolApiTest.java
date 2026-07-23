@@ -351,6 +351,11 @@ class ToolApiTest {
                                   "timeoutSeconds": 60,
                                   "billingUnit": "PER_CALL",
                                   "unitPrice": 0.03,
+                                  "requestSchemaJson": "{\\"version\\":\\"1\\",\\"fields\\":[]}",
+                                  "requestMappingJson": "{\\"version\\":\\"1\\",\\"fieldMap\\":{}}",
+                                  "responseMappingJson": "{\\"version\\":\\"1\\",\\"resultPath\\":\\"data\\"}",
+                                  "apiContractVersion": "1",
+                                  "contractStatus": "READY",
                                   "enabled": true
                                 }
                                 """))
@@ -562,14 +567,21 @@ class ToolApiTest {
         String summaryCacheKey = CacheNamespaces.toolList(7, "summary", "same-query");
         String compactCacheKey = CacheNamespaces.toolList(7, "compact", "same-query");
         assertThat(summaryCacheKey)
-                .contains("tool:list:v3:summary")
+                .contains("tool:list:v4:summary")
                 .isNotEqualTo(compactCacheKey);
-        assertThat(compactCacheKey).contains("tool:list:v3:compact");
+        assertThat(compactCacheKey).contains("tool:list:v4:compact");
 
         ResultActions detailResponse = mockMvc.perform(get("/api/v1/tools/public_secret_guard_tool"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.toolCode").value("public_secret_guard_tool"))
                 .andExpect(jsonPath("$.data.modelDisplayName").value("Public Contract Model"))
+                .andExpect(jsonPath("$.data.defaultModelConfigId").value(modelConfigId.intValue()))
+                .andExpect(jsonPath("$.data.supportedModels[0].modelConfigId").value(modelConfigId.intValue()))
+                .andExpect(jsonPath("$.data.supportedModels[0].displayName").value("Public Contract Model"))
+                .andExpect(jsonPath("$.data.supportedModels[0].contractStatus").value("READY"))
+                .andExpect(jsonPath("$.data.supportedModels[0].isDefault").value(true))
+                .andExpect(jsonPath("$.data.supportedModels[0].apiKey").doesNotExist())
+                .andExpect(jsonPath("$.data.supportedModels[0].baseUrl").doesNotExist())
                 .andExpect(jsonPath("$.data.frontendStyle.heroTitle").value("Safe Hero"))
                 .andExpect(jsonPath("$.data.frontendStyle.demoThumbnails[1]").value("https://cdn.example.com/two.webp"))
                 .andExpect(jsonPath("$.data.fields[0].fieldKey").value("productName"))
@@ -583,7 +595,7 @@ class ToolApiTest {
                 .andExpect(jsonPath("$.data.fields[0].riskLevel").doesNotExist())
                 .andExpect(jsonPath("$.data.integration").doesNotExist())
                 .andExpect(jsonPath("$.data.workflow").doesNotExist());
-        assertPublicToolContract(detailResponse, "$.data", 15);
+        assertPublicToolContract(detailResponse, "$.data", 17);
 
         mockMvc.perform(get("/api/admin/v1/tools/{toolId}", toolId)
                         .header("Authorization", "Bearer " + adminToken))
@@ -704,6 +716,11 @@ class ToolApiTest {
                                   "billingUnit": "TOKEN_PER_M",
                                   "unitPrice": 0,
                                   "capabilities": ["TEXT_GENERATION"],
+                                  "requestSchemaJson": "{\\"version\\":\\"1\\",\\"fields\\":[]}",
+                                  "requestMappingJson": "{\\"version\\":\\"1\\",\\"fieldMap\\":{}}",
+                                  "responseMappingJson": "{\\"version\\":\\"1\\",\\"resultPath\\":\\"data\\"}",
+                                  "apiContractVersion": "1",
+                                  "contractStatus": "READY",
                                   "enabled": true,
                                   "agentEnabled": true,
                                   "isDefault": false

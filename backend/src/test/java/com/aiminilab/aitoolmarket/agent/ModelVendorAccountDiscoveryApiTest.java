@@ -401,7 +401,7 @@ class ModelVendorAccountDiscoveryApiTest {
     }
 
     @Test
-    void discoveryDoesNotPersistCapabilitiesOutsideTheSelectedProviderContract() throws Exception {
+    void discoveryPersistsOnlyCapabilitiesDeclaredByTheSelectedProviderContract() throws Exception {
         HttpServer server = modelsServer("""
                 {
                   "object": "list",
@@ -425,11 +425,12 @@ class ModelVendorAccountDiscoveryApiTest {
                     .andExpect(jsonPath("$.data.imported").value(1))
                     .andExpect(jsonPath("$.data.models[0].provider").value("openai_compatible"))
                     .andExpect(jsonPath("$.data.models[0].capabilities[0]").value("TEXT_GENERATION"))
-                    .andExpect(jsonPath("$.data.models[0].capabilities[1]").doesNotExist());
+                    .andExpect(jsonPath("$.data.models[0].capabilities[1]").value("VISION_INPUT"))
+                    .andExpect(jsonPath("$.data.models[0].capabilities[2]").doesNotExist());
 
             AgentModelConfig chat = agentModelConfigMapper.findActiveByVendorAccountAndModelName(accountId, "doubao-seed-2.0-lite");
             assertThat(chat.getProvider()).isEqualTo("openai_compatible");
-            assertThat(chat.getCapabilities()).isEqualTo("[\"TEXT_GENERATION\"]");
+            assertThat(chat.getCapabilities()).isEqualTo("[\"TEXT_GENERATION\",\"VISION_INPUT\"]");
         } finally {
             server.stop(0);
         }

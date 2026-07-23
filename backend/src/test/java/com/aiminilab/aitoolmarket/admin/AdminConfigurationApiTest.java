@@ -1237,6 +1237,11 @@ class AdminConfigurationApiTest {
                                   "apiKey": "fake-key",
                                   "timeoutSeconds": 60,
                                   "capabilities": ["VIDEO_GENERATION"],
+                                  "requestSchemaJson": "{\\"version\\":\\"1\\",\\"fields\\":[]}",
+                                  "requestMappingJson": "{\\"version\\":\\"1\\",\\"fieldMap\\":{}}",
+                                  "responseMappingJson": "{\\"version\\":\\"1\\",\\"resultPath\\":\\"data\\"}",
+                                  "apiContractVersion": "1",
+                                  "contractStatus": "READY",
                                   "enabled": true,
                                   "isDefault": false
                                 }
@@ -1365,9 +1370,15 @@ class AdminConfigurationApiTest {
         jdbcTemplate.update("""
                 INSERT INTO agent_model_configs(
                     vendor_account_id, routing_pool_id, display_name, config_code, provider, model_name,
-                    billing_unit, unit_price, capabilities, enabled, agent_enabled, is_default, is_deleted
+                    billing_unit, unit_price, capabilities,
+                    request_schema_json, request_mapping_json, response_mapping_json,
+                    api_contract_version, contract_status, contract_verified_at,
+                    enabled, agent_enabled, is_default, is_deleted
                 ) VALUES (?, ?, 'Selected export source', 'selected_export_source_model', 'mock', 'shared-upstream-model',
-                          'PER_CALL', 1.25, '["TEXT_GENERATION"]', 1, 1, 0, 0)
+                          'PER_CALL', 1.25, '["TEXT_GENERATION"]',
+                          '{"version":"1","fields":[]}', '{"version":"1","fieldMap":{}}',
+                          '{"version":"1","resultPath":"data"}', '1', 'READY', CURRENT_TIMESTAMP,
+                          1, 1, 0, 0)
                 """, sourceAccountId, poolId);
         jdbcTemplate.update("""
                 INSERT INTO agent_model_configs(

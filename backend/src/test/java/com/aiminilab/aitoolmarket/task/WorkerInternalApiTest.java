@@ -1103,6 +1103,11 @@ class WorkerInternalApiTest {
                                   "billingUnit": "PER_CALL",
                                   "unitPrice": 0.03,
                                   "capabilities": ["IMAGE_GENERATION"],
+                                  "requestSchemaJson": "{\\"version\\":\\"1\\",\\"fields\\":[]}",
+                                  "requestMappingJson": "{\\"version\\":\\"1\\",\\"fieldMap\\":{}}",
+                                  "responseMappingJson": "{\\"version\\":\\"1\\",\\"resultPath\\":\\"data\\"}",
+                                  "apiContractVersion": "1",
+                                  "contractStatus": "READY",
                                   "enabled": true,
                                   "agentEnabled": true,
                                   "isDefault": false

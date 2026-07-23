@@ -878,6 +878,10 @@ public class ToolServiceImpl implements ToolService {
         if (config == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "model config not found");
         }
+        if (Boolean.FALSE.equals(config.getEnabled())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "bound model config is disabled: " + displayModelName(config));
+        }
         modelCapabilityService.validateToolModelCapabilities(tool, config);
         ExistingModelSelection previous = existingModelSelection(existing);
         if (!hasValidReadyContract(config)
@@ -885,6 +889,13 @@ public class ToolServiceImpl implements ToolService {
             throw new BusinessException(ErrorCode.PARAM_ERROR,
                     "model API contract is not READY: " + tool.getModelConfigId());
         }
+    }
+
+    private String displayModelName(AgentModelConfig config) {
+        if (config.getDisplayName() != null && !config.getDisplayName().isBlank()) {
+            return config.getDisplayName();
+        }
+        return config.getModelName() == null ? "unknown" : config.getModelName();
     }
 
     private boolean hasValidReadyContract(AgentModelConfig config) {

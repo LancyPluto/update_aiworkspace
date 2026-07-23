@@ -44,7 +44,7 @@ class ModelProviderRegistryTest {
         assertThat(chat).isPresent();
         assertThat(chat.get().defaultBaseUrl()).isEqualTo("https://apihub.agnes-ai.com/v1");
         assertThat(chat.get().defaultModel()).isEqualTo("agnes-2.0-flash");
-        assertThat(chat.get().capabilities()).containsExactly("TEXT_GENERATION");
+        assertThat(chat.get().capabilities()).containsExactly("TEXT_GENERATION", "VISION_INPUT");
 
         assertThat(images).isPresent();
         assertThat(images.get().defaultBaseUrl()).isEqualTo("https://apihub.agnes-ai.com/v1");
