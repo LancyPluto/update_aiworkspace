@@ -49,7 +49,8 @@ def test_openai_images_ignores_http_proxy_env_when_configured(monkeypatch):
     assert client.session.proxies == {}
 
 
-def test_openai_images_uses_execution_proxy_policy():
+def test_openai_images_uses_project_gateway_and_ignores_execution_routing(monkeypatch):
+    monkeypatch.setenv("PROJECT_MIHOMO_PROXY_URL", "http://mihomo:7890")
     client = OpenAIImagesClient(
         base_url="https://api.ofox.ai/v1",
         api_key="test-key",
@@ -58,7 +59,7 @@ def test_openai_images_uses_execution_proxy_policy():
                 "proxyPolicy": {
                     "enabled": True,
                     "projectProxyUrl": "http://mihomo:7890",
-                    "noProxyHosts": ["backend"],
+                    "noProxyHosts": ["backend", "api.ofox.ai"],
                     "routingRules": [
                         {"id": "ofox", "patternType": "EXACT", "pattern": "api.ofox.ai", "strategy": "PROXY", "priority": 100, "enabled": True}
                     ],
@@ -69,7 +70,8 @@ def test_openai_images_uses_execution_proxy_policy():
     assert client.session.trust_env is False
     assert client.session.proxies["http"] == "http://mihomo:7890"
     assert client.session.proxies["https"] == "http://mihomo:7890"
-    assert client.session.policy.no_proxy_hosts == frozenset({"backend"})
+    assert "backend" in client.session.policy.no_proxy_hosts
+    assert "api.ofox.ai" not in client.session.policy.no_proxy_hosts
 
 
 def test_openai_images_multipart_request_uses_form_data_content_type() -> None:

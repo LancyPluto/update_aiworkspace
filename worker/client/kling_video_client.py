@@ -18,6 +18,7 @@ from client.provider_error import (
     transport_failure_metadata,
 )
 from config import settings
+from utils.outbound_http import OutboundRequestsClient
 
 
 LOGGER = logging.getLogger(__name__)
@@ -74,9 +75,7 @@ class KlingVideoClient:
         self.poll_interval_seconds = poll_interval_seconds or settings.kling_poll_interval_seconds
         self.timeout_seconds = timeout_seconds or settings.kling_timeout_seconds
         self.timeout = (10, 300)
-        self.session = requests.Session()
-        # Kling's Beijing endpoint is domestic and should not inherit the global Mihomo proxy.
-        self.session.trust_env = False
+        self.session = OutboundRequestsClient()
         self.max_input_image_bytes = 20 * 1024 * 1024
 
     def generate_video(

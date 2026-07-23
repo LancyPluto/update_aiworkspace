@@ -45,34 +45,41 @@ services:
       MIHOMO_CONFIG_PATH: /data/mihomo/config.yaml
       MIHOMO_RELOAD_PATH: /root/.config/mihomo/config.yaml
       PROJECT_MIHOMO_PROXY_URL: http://mihomo:7890
-      HTTP_PROXY: ""
-      HTTPS_PROXY: ""
+      HTTP_PROXY: http://mihomo:7890
+      HTTPS_PROXY: http://mihomo:7890
       ALL_PROXY: ""
-      http_proxy: ""
-      https_proxy: ""
+      http_proxy: http://mihomo:7890
+      https_proxy: http://mihomo:7890
       all_proxy: ""
+      NO_PROXY: "localhost,127.0.0.1,::1,mysql,redis,rabbitmq,backend,worker,agent-service,admin-frontend,user-web,nginx,mihomo,host.docker.internal"
+      no_proxy: "localhost,127.0.0.1,::1,mysql,redis,rabbitmq,backend,worker,agent-service,admin-frontend,user-web,nginx,mihomo,host.docker.internal"
+      JAVA_TOOL_OPTIONS: "${BACKEND_JAVA_TOOL_OPTIONS:--XX:InitialRAMPercentage=10.0 -XX:MaxRAMPercentage=50.0 -XX:+UseG1GC -XX:+UseStringDeduplication -XX:MaxGCPauseMillis=200 -Djava.security.egd=file:/dev/./urandom} -Dhttp.proxyHost=mihomo -Dhttp.proxyPort=7890 -Dhttps.proxyHost=mihomo -Dhttps.proxyPort=7890 -Dhttp.nonProxyHosts=localhost|127.*|[::1]|mysql|redis|rabbitmq|backend|worker|agent-service|admin-frontend|user-web|nginx|mihomo|host.docker.internal"
     volumes:
       - mihomo_config:/data/mihomo
 
   worker:
     environment:
       PROJECT_MIHOMO_PROXY_URL: http://mihomo:7890
-      HTTP_PROXY: ""
-      HTTPS_PROXY: ""
+      HTTP_PROXY: http://mihomo:7890
+      HTTPS_PROXY: http://mihomo:7890
       ALL_PROXY: ""
-      http_proxy: ""
-      https_proxy: ""
+      http_proxy: http://mihomo:7890
+      https_proxy: http://mihomo:7890
       all_proxy: ""
+      NO_PROXY: "localhost,127.0.0.1,::1,mysql,redis,rabbitmq,backend,worker,agent-service,admin-frontend,user-web,nginx,mihomo,host.docker.internal"
+      no_proxy: "localhost,127.0.0.1,::1,mysql,redis,rabbitmq,backend,worker,agent-service,admin-frontend,user-web,nginx,mihomo,host.docker.internal"
 
   agent-service:
     environment:
       PROJECT_MIHOMO_PROXY_URL: http://mihomo:7890
-      HTTP_PROXY: ""
-      HTTPS_PROXY: ""
+      HTTP_PROXY: http://mihomo:7890
+      HTTPS_PROXY: http://mihomo:7890
       ALL_PROXY: ""
-      http_proxy: ""
-      https_proxy: ""
+      http_proxy: http://mihomo:7890
+      https_proxy: http://mihomo:7890
       all_proxy: ""
+      NO_PROXY: "localhost,127.0.0.1,::1,mysql,redis,rabbitmq,backend,worker,agent-service,admin-frontend,user-web,nginx,mihomo,host.docker.internal"
+      no_proxy: "localhost,127.0.0.1,::1,mysql,redis,rabbitmq,backend,worker,agent-service,admin-frontend,user-web,nginx,mihomo,host.docker.internal"
 
 volumes:
   mihomo_config:

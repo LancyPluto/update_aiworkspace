@@ -1,3 +1,4 @@
+import os
 import sys
 import threading
 from pathlib import Path
@@ -16,211 +17,207 @@ class FakeResponse:
     status_code = 200
 
 
-def test_outbound_client_routes_each_request_by_target_hostname():
-    client = OutboundRequestsClient.from_model_config(
-        {
-            "proxyPolicy": {
-                "enabled": True,
-                "proxyUrl": "http://mihomo:7890",
-                "noProxyHosts": ["localhost", "backend"],
-                "routingRules": [
-                    {
-                        "id": "ofox",
-                        "patternType": "EXACT",
-                        "pattern": "api.ofox.ai",
-                        "strategy": "PROXY",
-                        "priority": 100,
-                        "enabled": True,
-                    }
-                ],
-                "businessFallback": "DIRECT",
-            }
+def test_listed_and_unlisted_public_domains_both_enter_project_mihomo() -> None:
+    model_config = {
+        "proxyPolicy": {
+            "enabled": True,
+            "projectProxyUrl": "http://mihomo:7890",
+            "routingRules": [
+                {
+                    "id": "suno",
+                    "patternType": "EXACT",
+                    "pattern": "api.sunoapi.org",
+                    "strategy": "PROXY",
+                    "enabled": True,
+                }
+            ],
+            "businessFallback": "DIRECT",
         }
-    )
+    }
 
-    with patch("utils.outbound_http.requests.Session") as session_factory:
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "PROJECT_MIHOMO_PROXY_URL": "http://mihomo:7890",
+                "NO_PROXY": "backend,.cn,api.deepseek.com",
+                "HTTP_PROXY": "http://user:secret@host-proxy.example:3128",
+                "HTTPS_PROXY": "http://user:secret@host-proxy.example:3128",
+            },
+            clear=True,
+        ),
+        patch("utils.outbound_http.requests.Session") as session_factory,
+    ):
         session = session_factory.return_value
-        session.proxies = {}
         session.request.return_value = FakeResponse()
+        client = OutboundRequestsClient.from_model_config(model_config)
 
-        client.get("https://api.ofox.ai/v1/images/edits")
-        assert session.trust_env is False
-        assert session.request.call_args.kwargs["proxies"]["https"] == "http://mihomo:7890"
-        client.get("https://storage.example.net/images/result.png")
-        assert session.trust_env is False
-        assert session.request.call_args.kwargs["proxies"] == {}
-        assert session.proxies == {}
+        client.get("https://api.sunoapi.org/api/v1/generate/record-info")
+        client.get("https://unlisted-public.example/assets/result.mp4")
+        client.get("https://api.deepseek.com/v1/chat/completions")
+        client.get("https://example.cn/v1/status")
 
-
-def test_outbound_client_bypasses_proxy_for_no_proxy_hosts():
-    client = OutboundRequestsClient.from_model_config(
-        {
-            "proxyPolicy": {
-                "enabled": True,
-                "proxyUrl": "http://mihomo:7890",
-                "noProxyHosts": ["backend"],
-                "routingRules": [{"id": "all", "patternType": "SUFFIX", "pattern": "example.com", "strategy": "PROXY", "priority": 1, "enabled": True}],
-            }
-        }
-    )
-
-    with patch("utils.outbound_http.requests.Session") as session_factory:
-        session = session_factory.return_value
-        session.proxies = {}
-        session.request.return_value = FakeResponse()
-
-        client.get("http://backend:8080/generated/audio/ref.mp3")
-
+    expected = {"http": "http://mihomo:7890", "https": "http://mihomo:7890"}
+    assert [call.kwargs["proxies"] for call in session.request.call_args_list] == [
+        expected,
+        expected,
+        expected,
+        expected,
+    ]
     assert session.trust_env is False
-    assert session.proxies == {}
 
 
-def test_outbound_client_bypasses_proxy_for_ipv6_loopback_by_default():
-    client = OutboundRequestsClient.from_model_config(
-        {
-            "proxyPolicy": {
-                "enabled": True,
-                "proxyUrl": "http://mihomo:7890",
-            }
-        }
-    )
-
-    with patch("utils.outbound_http.requests.Session") as session_factory:
+def test_internal_hosts_and_private_addresses_bypass_project_mihomo() -> None:
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "PROJECT_MIHOMO_PROXY_URL": "http://mihomo:7890",
+                "NO_PROXY": "backend,custom-service,10.20.30.40,api.public.example",
+            },
+            clear=True,
+        ),
+        patch("utils.outbound_http.requests.Session") as session_factory,
+    ):
         session = session_factory.return_value
-        session.proxies = {}
         session.request.return_value = FakeResponse()
+        client = OutboundRequestsClient.from_model_config()
 
-        client.get("http://[::1]:8080/generated/audio/ref.mp3")
+        client.get("http://backend:8080/internal/tasks")
+        client.get("http://custom-service:9000/health")
+        client.get("http://10.20.30.40:8080/file")
+        client.get("http://[::1]:8080/health")
+        client.get("https://api.public.example/v1")
+        client.get("https://[2606:4700:4700::1111]/dns-query")
 
-    assert session.trust_env is False
-    assert session.proxies == {}
+    assert [call.kwargs["proxies"] for call in session.request.call_args_list[:4]] == [{}, {}, {}, {}]
+    assert session.request.call_args_list[4].kwargs["proxies"] == {
+        "http": "http://mihomo:7890",
+        "https": "http://mihomo:7890",
+    }
+    assert session.request.call_args_list[5].kwargs["proxies"] == {
+        "http": "http://mihomo:7890",
+        "https": "http://mihomo:7890",
+    }
 
 
-def test_outbound_client_rejects_legacy_upstream_socks_snapshot():
-    client = OutboundRequestsClient.from_model_config(
-        {
-            "proxyPolicy": {
-                "enabled": True,
-                "proxyUrl": "socks5://proxy.example:1080",
-                "noProxyHosts": ["localhost", "backend"],
-            }
+def test_model_and_request_proxy_urls_cannot_override_project_gateway() -> None:
+    malicious_model_config = {
+        "proxyPolicy": {
+            "enabled": False,
+            "proxyUrl": "http://attacker:password@evil.example:8080",
+            "projectProxyUrl": "http://evil.example:7890",
+            "routingEnabled": False,
+            "routingRules": [],
         }
-    )
+    }
 
-    with patch("utils.outbound_http.requests.Session") as session_factory:
+    with (
+        patch.dict(os.environ, {"PROJECT_MIHOMO_PROXY_URL": "http://mihomo:7890"}, clear=True),
+        patch("utils.outbound_http.requests.Session") as session_factory,
+    ):
         session = session_factory.return_value
-        session.proxies = {}
         session.request.return_value = FakeResponse()
+        client = OutboundRequestsClient.from_model_config(malicious_model_config)
+        client.get(
+            "https://api.example.com/v1",
+            proxies={"https": "http://request-user:request-password@evil.example:3128"},
+        )
 
-        client.get("https://api.ofox.ai/v1/images/edits")
-
-    assert session.trust_env is False
-    assert session.proxies == {}
-
-
-def test_worker_does_not_install_upstream_socks_support():
-    requirements = (WORKER_ROOT / "requirements.txt").read_text(encoding="utf-8").lower().splitlines()
-
-    assert not any(line.strip().startswith("requests[socks]") for line in requirements)
+    assert session.request.call_args.kwargs["proxies"] == {
+        "http": "http://mihomo:7890",
+        "https": "http://mihomo:7890",
+    }
 
 
-def test_wildcard_excludes_root_and_longer_more_specific_rule_wins():
-    policy = resolve_outbound_proxy_policy(
-        {
-            "proxyPolicy": {
-                "projectProxyUrl": "http://mihomo:7890",
-                "routingRules": [
-                    {"id": "root", "patternType": "SUFFIX", "pattern": "example.com", "strategy": "PROXY", "priority": 900, "enabled": True},
-                    {"id": "long", "patternType": "SUFFIX", "pattern": "api.example.com", "strategy": "DIRECT", "priority": 1, "enabled": True},
-                    {"id": "broad-wild", "patternType": "WILDCARD", "pattern": "*.example.org", "strategy": "PROXY", "priority": 900, "enabled": True},
-                    {"id": "specific-suffix", "patternType": "SUFFIX", "pattern": "api.example.org", "strategy": "DIRECT", "priority": 1, "enabled": True},
-                    {"id": "wild", "patternType": "WILDCARD", "pattern": "*.media.example.net", "strategy": "PROXY", "priority": 500, "enabled": True},
-                ],
+def test_non_project_gateway_environment_value_is_rejected() -> None:
+    with patch.dict(
+        os.environ,
+        {"PROJECT_MIHOMO_PROXY_URL": "http://user:secret@external-proxy.example:7890"},
+        clear=True,
+    ):
+        policy = resolve_outbound_proxy_policy()
+
+    assert policy.enabled is False
+    assert policy.proxy_url == ""
+    assert policy.proxies == {}
+
+
+def test_gateway_is_disabled_without_environment_even_if_model_snapshot_requests_it() -> None:
+    with patch.dict(os.environ, {}, clear=True):
+        policy = resolve_outbound_proxy_policy(
+            {
+                "proxyPolicy": {
+                    "enabled": True,
+                    "projectProxyUrl": "http://mihomo:7890",
+                    "routingRules": [
+                        {
+                            "patternType": "EXACT",
+                            "pattern": "api.sunoapi.org",
+                            "strategy": "PROXY",
+                            "enabled": True,
+                        }
+                    ],
+                }
             }
-        }
-    )
-    client = OutboundRequestsClient(policy)
+        )
 
-    assert client._should_proxy("https://api.example.com/v1") is False
-    assert client._should_proxy("https://sub.api.example.org/v1") is False
-    assert client._should_proxy("https://example.com/") is True
-    assert client._should_proxy("https://media.example.net/") is False
-    assert client._should_proxy("https://cdn.media.example.net/file") is True
+    assert policy.enabled is False
+    assert policy.proxy_url == ""
+    assert policy.proxies == {}
 
 
-def test_streaming_response_remains_open_until_client_is_closed():
-    client = OutboundRequestsClient.from_model_config(
-        {
-            "proxyPolicy": {
-                "projectProxyUrl": "http://mihomo:7890",
-                "routingRules": [
-                    {"id": "media", "patternType": "SUFFIX", "pattern": "media.example.com", "strategy": "PROXY", "priority": 1, "enabled": True}
-                ],
-            }
-        }
-    )
-
-    with patch("utils.outbound_http.requests.Session") as session_factory:
+def test_redirect_re_evaluates_public_and_internal_targets() -> None:
+    with (
+        patch.dict(os.environ, {"PROJECT_MIHOMO_PROXY_URL": "http://mihomo:7890"}, clear=True),
+        patch("utils.outbound_http.requests.Session") as session_factory,
+    ):
         session = session_factory.return_value
-        response = FakeResponse()
-        session.request.return_value = response
-        fresh_client = OutboundRequestsClient(client.policy)
-
-        returned = fresh_client.get("https://media.example.com/large.bin", stream=True)
-
-        assert returned is response
-        session.close.assert_not_called()
-        fresh_client.close()
-        session.close.assert_called_once()
-
-
-def test_redirect_reselects_proxy_for_each_target_hostname():
-    client = OutboundRequestsClient.from_model_config(
-        {
-            "proxyPolicy": {
-                "projectProxyUrl": "http://mihomo:7890",
-                "routingRules": [
-                    {"id": "api", "patternType": "EXACT", "pattern": "api.example.com", "strategy": "PROXY", "priority": 1, "enabled": True}
-                ],
-            }
-        }
-    )
-
-    with patch("utils.outbound_http.requests.Session") as session_factory:
-        session = session_factory.return_value
-        session.proxies = {}
         session.request.return_value = FakeResponse()
+        client = OutboundRequestsClient.from_model_config()
+        client.get("https://public.example/start")
 
-        client.get("https://api.example.com/start")
+        internal_request = SimpleNamespace(
+            url="http://backend:8080/generated/result.mp4",
+            headers={"Proxy-Authorization": "Basic must-not-leak"},
+        )
+        public_request = SimpleNamespace(url="https://cdn.public.example/result.mp4", headers={})
 
-        assert session.rebuild_proxies(SimpleNamespace(url="https://cdn.example.net/result", headers={}), {}) == {}
-        assert session.rebuild_proxies(SimpleNamespace(url="https://api.example.com/next", headers={}), {}) == {
+        assert session.rebuild_proxies(internal_request, client.proxies) == {}
+        assert "Proxy-Authorization" not in internal_request.headers
+        assert session.rebuild_proxies(public_request, {}) == {
             "http": "http://mihomo:7890",
             "https": "http://mihomo:7890",
         }
 
 
-def test_concurrent_requests_use_thread_local_sessions_and_request_local_proxies():
-    client = OutboundRequestsClient.from_model_config(
-        {
-            "proxyPolicy": {
-                "projectProxyUrl": "http://mihomo:7890",
-                "routingRules": [
-                    {"id": "api", "patternType": "EXACT", "pattern": "api.example.com", "strategy": "PROXY", "priority": 1, "enabled": True}
-                ],
-            }
-        }
-    )
+def test_streaming_response_remains_open_until_client_is_closed() -> None:
+    with (
+        patch.dict(os.environ, {"PROJECT_MIHOMO_PROXY_URL": "http://mihomo:7890"}, clear=True),
+        patch("utils.outbound_http.requests.Session") as session_factory,
+    ):
+        session = session_factory.return_value
+        response = FakeResponse()
+        session.request.return_value = response
+        client = OutboundRequestsClient.from_model_config()
+
+        returned = client.get("https://media.example.com/large.bin", stream=True)
+
+        assert returned is response
+        session.close.assert_not_called()
+        client.close()
+        session.close.assert_called_once()
+
+
+def test_concurrent_public_requests_use_thread_local_sessions() -> None:
     barrier = threading.Barrier(2)
     sessions = []
 
     class FakeSession:
-        def __init__(self):
+        def __init__(self) -> None:
             self.trust_env = True
-            self.proxies = {}
             self.headers = {}
             self.calls = []
-            self.closed = False
             sessions.append(self)
 
         def request(self, method, url, **kwargs):
@@ -228,10 +225,14 @@ def test_concurrent_requests_use_thread_local_sessions_and_request_local_proxies
             self.calls.append((method, url, kwargs))
             return FakeResponse()
 
-        def close(self):
-            self.closed = True
+        def close(self) -> None:
+            return None
 
-    with patch("utils.outbound_http.requests.Session", side_effect=FakeSession):
+    with (
+        patch.dict(os.environ, {"PROJECT_MIHOMO_PROXY_URL": "http://mihomo:7890"}, clear=True),
+        patch("utils.outbound_http.requests.Session", side_effect=FakeSession),
+    ):
+        client = OutboundRequestsClient.from_model_config()
         threads = [
             threading.Thread(target=client.get, args=("https://api.example.com/start",)),
             threading.Thread(target=client.get, args=("https://cdn.example.net/result",)),
@@ -243,7 +244,15 @@ def test_concurrent_requests_use_thread_local_sessions_and_request_local_proxies
 
     assert all(not thread.is_alive() for thread in threads)
     assert len(sessions) == 2
-    calls = {session.calls[0][1]: session.calls[0][2]["proxies"] for session in sessions}
-    assert calls["https://api.example.com/start"]["https"] == "http://mihomo:7890"
-    assert calls["https://cdn.example.net/result"] == {}
-    assert all(session.proxies == {} for session in sessions)
+    assert all(
+        session.calls[0][2]["proxies"]
+        == {"http": "http://mihomo:7890", "https": "http://mihomo:7890"}
+        for session in sessions
+    )
+    assert all(session.trust_env is False for session in sessions)
+
+
+def test_worker_does_not_install_upstream_socks_support() -> None:
+    requirements = (WORKER_ROOT / "requirements.txt").read_text(encoding="utf-8").lower().splitlines()
+
+    assert not any(line.strip().startswith("requests[socks]") for line in requirements)

@@ -13,6 +13,7 @@ import requests
 
 from storage.asset_storage import asset_storage
 from observability.metrics import record_media_derivative, record_media_persist, record_video_preview
+from utils.outbound_http import OutboundRequestsClient
 from utils.url_security import safe_get, UrlSecurityError
 
 logger = logging.getLogger(__name__)
@@ -60,8 +61,7 @@ class GeneratedVideoPersister:
     def __init__(self) -> None:
         self.output_dir = asset_storage.local_root
         self.timeout = (10, 300)
-        self.session = requests.Session()
-        self.session.trust_env = False
+        self.session = OutboundRequestsClient()
 
     def persist_video_url(self, *, task_id: int, source_url: str, index: int = 1) -> dict[str, str]:
         video_bytes, content_type = self._download(source_url)
