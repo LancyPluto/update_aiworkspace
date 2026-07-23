@@ -901,7 +901,9 @@ class DeployContractTests(unittest.TestCase):
         self,
         mode: str,
         initial_snapshot: str | None = None,
-    ) -> tuple[subprocess.CompletedProcess[str], str | None, str]:
+        deploy_services: str = "worker",
+        initial_stable_images: dict[str, str] | None = None,
+    ) -> tuple[subprocess.CompletedProcess[str], str | None, str, dict[str, str]]:
         bash = shutil.which("bash") or "bash"
         if os.name == "nt":
             git_command = shutil.which("git")
@@ -922,17 +924,44 @@ class DeployContractTests(unittest.TestCase):
 
             fake_bin = temp / "bin"
             fake_bin.mkdir()
+            docker_state = temp / "docker-state"
+            docker_state.mkdir()
             docker_log = temp / "docker.log"
+            for image_ref, image_id in (initial_stable_images or {}).items():
+                state_key = re.sub(r"[^A-Za-z0-9_.-]", "_", image_ref)
+                (docker_state / state_key).write_text(image_id, encoding="utf-8")
             fake_docker = fake_bin / "docker"
             fake_docker.write_text(
                 """#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
 
+state_path() {
+  local key
+  key="$(printf '%s' "$1" | sed 's/[^A-Za-z0-9_.-]/_/g')"
+  printf '%s/%s' "$FAKE_DOCKER_STATE" "$key"
+}
+
+resolve_image() {
+  local ref="$1"
+  local path
+  if [[ "$ref" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    if [ "$ref" = "$FAKE_WORKER_IMAGE_ID" ] && [ "$FAKE_DOCKER_MODE" != existing ]; then
+      return 1
+    fi
+    printf '%s' "$ref"
+    return 0
+  fi
+  path="$(state_path "$ref")"
+  [ -f "$path" ] || return 1
+  cat "$path"
+}
+
 if [ "$1" = container ] && [ "$2" = inspect ]; then
   if [ "${3:-}" != --format ]; then
     exit 0
   fi
+  container="${5:-}"
   case "${4:-}" in
     *Config.Env*)
       printf '%s\\n' \
@@ -940,8 +969,25 @@ if [ "$1" = container ] && [ "$2" = inspect ]; then
         '"INTERNAL_API_TOKEN=container-secret",' \
         '"RABBITMQ_PASSWORD=container-password"]'
       ;;
-    *Config.Image*) printf '%s\\n' 'deploy-worker:latest' ;;
-    *Image*) printf '%s\\n' "$FAKE_OLD_IMAGE_ID" ;;
+    *Config.Image*)
+      if [ "$container" = ai-supermarket-backend ]; then
+        printf '%s\\n' 'deploy-backend:latest'
+      else
+        printf '%s\\n' 'deploy-worker:latest'
+      fi
+      ;;
+    *Config.Cmd*) printf '%s\\n' '["python","main.py"]' ;;
+    *Config.Entrypoint*) printf '%s\\n' 'null' ;;
+    *Config.WorkingDir*) printf '%s\\n' '/app' ;;
+    *Config.User*) printf '\\n' ;;
+    *Config.Healthcheck*) printf '%s\\n' 'null' ;;
+    *Image*)
+      if [ "$container" = ai-supermarket-backend ]; then
+        printf '%s\\n' "$FAKE_BACKEND_IMAGE_ID"
+      else
+        printf '%s\\n' "$FAKE_WORKER_IMAGE_ID"
+      fi
+      ;;
     *) exit 2 ;;
   esac
   exit 0
@@ -949,6 +995,23 @@ fi
 
 if [ "$1" = image ] && [ "$2" = inspect ]; then
   if [ "${3:-}" = --format ]; then
+    inspected_ref="${5:-}"
+    if [ "$FAKE_DOCKER_MODE" = stable-inspect-error ] \
+        && [ "$inspected_ref" = ai-tool-market-rollback-backend:previous ]; then
+      echo 'Error response from daemon: transient metadata failure' >&2
+      exit 1
+    fi
+    if [ "$FAKE_DOCKER_MODE" = stable-content-missing ] \
+        && [ "$inspected_ref" = ai-tool-market-rollback-worker:previous ] \
+        && [ ! -e "$FAKE_DOCKER_STATE/stable-content-missing-reported" ]; then
+      touch "$FAKE_DOCKER_STATE/stable-content-missing-reported"
+      echo "Error response from daemon: NotFound: content digest $FAKE_MISSING_DIGEST: not found" >&2
+      exit 1
+    fi
+    if ! inspected_id="$(resolve_image "$inspected_ref")"; then
+      echo "Error response from daemon: No such image: $inspected_ref" >&2
+      exit 1
+    fi
     case "${4:-}" in
       *Config.Env*)
         if [ "$FAKE_DOCKER_MODE" = unsafe-image-env ]; then
@@ -963,53 +1026,126 @@ if [ "$1" = image ] && [ "$2" = inspect ]; then
             '"RABBITMQ_PASSWORD="]'
         fi
         ;;
+      *Config.Cmd*) printf '%s\\n' '["python","main.py"]' ;;
+      *Config.Entrypoint*) printf '%s\\n' 'null' ;;
+      *Config.WorkingDir*) printf '%s\\n' '/app' ;;
+      *Config.User*) printf '\\n' ;;
+      *Config.Healthcheck*) printf '%s\\n' 'null' ;;
       *Config.Labels*) printf '%s\\n' 'true' ;;
+      *Comment*) printf '%s\\n' 'ai-tool-market local-only worker rollback' ;;
       *Id*)
         if [ "$FAKE_DOCKER_MODE" = mismatched-image-id ] \
-            && [ "${5:-}" = "$FAKE_NEW_IMAGE_ID" ]; then
+            && [ "$inspected_ref" = "$FAKE_NEW_IMAGE_ID" ]; then
           printf '%s\\n' "$FAKE_MISMATCH_IMAGE_ID"
         else
-          printf '%s\\n' "$FAKE_NEW_IMAGE_ID"
+          printf '%s\\n' "$inspected_id"
         fi
         ;;
       *) exit 2 ;;
     esac
     exit 0
   fi
-  if [ "${3:-}" = "$FAKE_OLD_IMAGE_ID" ] && [ "$FAKE_DOCKER_MODE" = existing ]; then
-    exit 0
+  if ! resolve_image "${3:-}" >/dev/null; then
+    echo "Error response from daemon: No such image: ${3:-}" >&2
+    exit 1
   fi
-  if [ "${3:-}" = "$FAKE_NEW_IMAGE_ID" ]; then
-    exit 0
-  fi
-  exit 1
+  exit 0
 fi
 
 if [ "$1" = image ] && [ "$2" = tag ]; then
+  source_ref="${3:-}"
+  target_ref="${4:-}"
+  if { [ "$FAKE_DOCKER_MODE" = publish-worker-fails ] \
+        || [ "$FAKE_DOCKER_MODE" = restore-backend-fails ]; } \
+      && [[ "$source_ref" = ai-tool-market-rollback-worker:candidate-* ]] \
+      && [ "$target_ref" = ai-tool-market-rollback-worker:previous ]; then
+    exit 45
+  fi
+  if [ "$FAKE_DOCKER_MODE" = restore-backend-fails ] \
+      && [[ "$source_ref" = ai-tool-market-rollback-backend:backup-* ]] \
+      && [ "$target_ref" = ai-tool-market-rollback-backend:previous ]; then
+    exit 47
+  fi
+  source_id="$(resolve_image "$source_ref")" || exit 1
+  printf '%s' "$source_id" > "$(state_path "$target_ref")"
   exit 0
 fi
 
 if [ "$1" = image ] && [ "$2" = rm ]; then
+  rm -f "$(state_path "${3:-}")"
   exit 0
 fi
 
 if [ "$1" = commit ]; then
-  if [ "$FAKE_DOCKER_MODE" = commit-fails ]; then
-    exit 42
+  echo 'Error response from daemon: NotFound: content digest sha256:31af3004: not found' >&2
+  exit 42
+fi
+
+if [ "$1" = export ]; then
+  [ "${2:-}" = ai-supermarket-worker ] || exit 64
+  if [ "$FAKE_DOCKER_MODE" = recovery-fails ]; then
+    exit 43
   fi
+  printf '%s' 'fake-worker-rootfs'
+  exit 0
+fi
+
+if [ "$1" = import ]; then
   shift
-  [ "${1:-}" = --pause=true ] || exit 64
-  shift
+  [ "${1:-}" = --message ] || exit 64
+  [ "${2:-}" = 'ai-tool-market local-only worker rollback' ] || exit 64
+  shift 2
+  saw_path=false
+  saw_workdir=false
+  saw_cmd=false
+  saw_label=false
   while [ "${1:-}" = --change ]; do
     [ "$#" -ge 2 ] || exit 64
     case "$2" in
-      'ENV INTERNAL_API_TOKEN='|'ENV RABBITMQ_PASSWORD='|'LABEL com.aiminilab.rollback.local-only=true') ;;
+      'ENV PATH=/usr/local/bin:/usr/bin:/bin') saw_path=true ;;
+      'WORKDIR /app') saw_workdir=true ;;
+      'CMD ["python","main.py"]') saw_cmd=true ;;
+      'LABEL com.aiminilab.rollback.local-only=true') saw_label=true ;;
       *) exit 64 ;;
     esac
     shift 2
   done
-  [ "$#" -eq 1 ] && [ "$1" = ai-supermarket-worker ] || exit 64
+  [ "$#" -eq 2 ] && [ "$1" = - ] || exit 64
+  candidate_ref="$2"
+  cat >/dev/null
+  if [ "$FAKE_DOCKER_MODE" = recovery-fails ]; then
+    exit 44
+  fi
+  [ "$saw_path" = true ] && [ "$saw_workdir" = true ] \
+    && [ "$saw_cmd" = true ] && [ "$saw_label" = true ] || exit 64
+  printf '%s' "$FAKE_NEW_IMAGE_ID" > "$(state_path "$candidate_ref")"
   printf '%s\\n' "$FAKE_NEW_IMAGE_ID"
+  exit 0
+fi
+
+if [ "$1" = run ]; then
+  [ "$#" -eq 20 ] || exit 64
+  [ "$2" = --rm ] || exit 64
+  [ "$3" = --name ] \
+    && [[ "$4" = ai-tool-market-rollback-worker-smoke-* ]] || exit 64
+  [ "$5" = --network ] && [ "$6" = none ] || exit 64
+  [ "$7" = --read-only ] || exit 64
+  [ "$8" = --cpus ] && [ "$9" = 1 ] || exit 64
+  [ "${10}" = --memory ] && [ "${11}" = 512m ] || exit 64
+  [ "${12}" = --pids-limit ] && [ "${13}" = 64 ] || exit 64
+  [ "${14}" = --env ] && [ "${15}" = PYTHONDONTWRITEBYTECODE=1 ] || exit 64
+  [ "${16}" = --entrypoint ] && [ "${17}" = python ] || exit 64
+  resolve_image "${18}" >/dev/null || exit 64
+  [ "${19}" = -c ] || exit 64
+  [[ "${20}" = *'/app/main.py'* ]] || exit 64
+  if [ "$FAKE_DOCKER_MODE" = smoke-fails ]; then
+    exit 46
+  fi
+  exit 0
+fi
+
+if [ "$1" = rm ] && [ "${2:-}" = -f ] \
+    && [[ "${3:-}" = ai-tool-market-rollback-worker-smoke-* ]]; then
   exit 0
 fi
 
@@ -1029,6 +1165,7 @@ exit 2
             old_image_id = "sha256:" + "a" * 64
             new_image_id = "sha256:" + "b" * 64
             mismatch_image_id = "sha256:" + "c" * 64
+            backend_image_id = "sha256:" + "d" * 64
             env = os.environ.copy()
             env.update(
                 {
@@ -1038,13 +1175,16 @@ exit 2
                         "/usr/bin:/bin"
                     ),
                     "REMOTE_DIR": bash_path(remote),
-                    "DEPLOY_SERVICES": "worker",
+                    "DEPLOY_SERVICES": deploy_services,
                     "PYTHON_BIN": bash_path(pathlib.Path(sys.executable)),
                     "FAKE_DOCKER_MODE": mode,
                     "FAKE_DOCKER_LOG": bash_path(docker_log),
-                    "FAKE_OLD_IMAGE_ID": old_image_id,
+                    "FAKE_DOCKER_STATE": bash_path(docker_state),
+                    "FAKE_WORKER_IMAGE_ID": old_image_id,
+                    "FAKE_BACKEND_IMAGE_ID": backend_image_id,
                     "FAKE_NEW_IMAGE_ID": new_image_id,
                     "FAKE_MISMATCH_IMAGE_ID": mismatch_image_id,
+                    "FAKE_MISSING_DIGEST": "sha256:" + "9" * 64,
                 }
             )
             result = subprocess.run(
@@ -1059,69 +1199,262 @@ exit 2
             )
             snapshot_text = snapshot.read_text(encoding="utf-8") if snapshot.exists() else None
             docker_calls = docker_log.read_text(encoding="utf-8") if docker_log.exists() else ""
-            return result, snapshot_text, docker_calls
+            stable_images = {}
+            for service in deploy_services.split():
+                image_ref = f"ai-tool-market-rollback-{service}:previous"
+                state_key = re.sub(r"[^A-Za-z0-9_.-]", "_", image_ref)
+                state_file = docker_state / state_key
+                if state_file.exists():
+                    stable_images[image_ref] = state_file.read_text(encoding="utf-8")
+            for image_ref in set(
+                re.findall(
+                    r"ai-tool-market-rollback-[A-Za-z0-9-]+:backup-\d+",
+                    docker_calls,
+                )
+            ):
+                state_key = re.sub(r"[^A-Za-z0-9_.-]", "_", image_ref)
+                state_file = docker_state / state_key
+                if state_file.exists():
+                    stable_images[image_ref] = state_file.read_text(encoding="utf-8")
+            return result, snapshot_text, docker_calls, stable_images
 
     def test_capture_recovers_when_container_backing_image_is_missing(self) -> None:
         old_image_id = "sha256:" + "a" * 64
         new_image_id = "sha256:" + "b" * 64
+        backend_image_id = "sha256:" + "d" * 64
+        previous_backend_id = "sha256:" + "e" * 64
+        previous_worker_id = "sha256:" + "f" * 64
         rollback_ref = "ai-tool-market-rollback-worker:previous"
+        backend_rollback_ref = "ai-tool-market-rollback-backend:previous"
 
-        existing, snapshot, calls = self._run_capture_rollback_scenario("existing")
+        existing, snapshot, calls, stable_images = self._run_capture_rollback_scenario("existing")
         self.assertEqual(0, existing.returncode, existing.stdout + existing.stderr)
         self.assertEqual(f"worker\t{old_image_id}\tdeploy-worker:latest\n", snapshot)
-        self.assertIn(f"image tag {old_image_id} {rollback_ref}", calls)
-        self.assertNotIn("commit ", calls)
-
-        recovered, snapshot, calls = self._run_capture_rollback_scenario("missing")
-        self.assertEqual(0, recovered.returncode, recovered.stdout + recovered.stderr)
-        self.assertEqual(f"worker\t{new_image_id}\tdeploy-worker:latest\n", snapshot)
-        self.assertIn("commit --pause=true", calls)
-        self.assertIn("--change ENV INTERNAL_API_TOKEN=", calls)
-        self.assertIn("--change ENV RABBITMQ_PASSWORD=", calls)
-        self.assertIn("--change LABEL com.aiminilab.rollback.local-only=true", calls)
-        self.assertNotIn(f"commit --pause=true ai-supermarket-worker {rollback_ref}", calls)
-        self.assertIn(f"image tag {new_image_id} {rollback_ref}", calls)
-        self.assertNotIn("container-secret", recovered.stdout + recovered.stderr)
-        self.assertNotIn("container-password", recovered.stdout + recovered.stderr)
-        self.assertNotRegex(
+        self.assertEqual({rollback_ref: old_image_id}, stable_images)
+        existing_candidate = re.search(
+            rf"(?m)^image tag {re.escape(old_image_id)} "
+            rf"(ai-tool-market-rollback-worker:candidate-\d+)$",
             calls,
-            r"(?m)^(?:container )?(?:stop|restart|rm)(?:\s|$)",
         )
-        self.assertNotRegex(calls, r"(?m)^compose(?:\s|$)")
-        self.assertIn("Recovered rollback image for worker", recovered.stdout)
+        self.assertIsNotNone(existing_candidate)
+        assert existing_candidate is not None
+        self.assertIn(f"image tag {existing_candidate.group(1)} {rollback_ref}", calls)
+        self.assertIn(f"image rm {existing_candidate.group(1)}", calls)
+        self.assertNotIn("commit ", calls)
+        self.assertNotIn("export ", calls)
 
-        failed, snapshot, calls = self._run_capture_rollback_scenario(
-            "commit-fails",
+        flattened, snapshot, calls, stable_images = self._run_capture_rollback_scenario(
+            "missing-layer"
+        )
+        self.assertEqual(0, flattened.returncode, flattened.stdout + flattened.stderr)
+        self.assertEqual(f"worker\t{new_image_id}\tdeploy-worker:latest\n", snapshot)
+        self.assertEqual({rollback_ref: new_image_id}, stable_images)
+        self.assertNotIn("commit ", calls)
+        self.assertIn("export ai-supermarket-worker", calls)
+        self.assertIn(
+            "import --message ai-tool-market local-only worker rollback",
+            calls,
+        )
+        self.assertIn("--change ENV PATH=/usr/local/bin:/usr/bin:/bin", calls)
+        self.assertIn("--change WORKDIR /app", calls)
+        self.assertIn('--change CMD ["python","main.py"]', calls)
+        self.assertIn("--change LABEL com.aiminilab.rollback.local-only=true", calls)
+        self.assertRegex(
+            calls,
+            rf"(?m)^run --rm --name ai-tool-market-rollback-worker-smoke-\d+ "
+            rf"--network none --read-only --cpus 1 --memory 512m --pids-limit 64 "
+            rf"--env PYTHONDONTWRITEBYTECODE=1 --entrypoint python "
+            rf"{re.escape(new_image_id)} -c",
+        )
+        flattened_candidate = re.search(
+            rf"(?m)^image tag {re.escape(new_image_id)} "
+            rf"(ai-tool-market-rollback-worker:candidate-\d+)$",
+            calls,
+        )
+        self.assertIsNotNone(flattened_candidate)
+        assert flattened_candidate is not None
+        self.assertIn(f"image tag {flattened_candidate.group(1)} {rollback_ref}", calls)
+        self.assertIn(f"image rm {flattened_candidate.group(1)}", calls)
+        flattened_calls = calls
+
+        failed, snapshot, calls, stable_images = self._run_capture_rollback_scenario(
+            "recovery-fails",
             initial_snapshot="sentinel\n",
         )
         self.assertNotEqual(0, failed.returncode)
         self.assertEqual("sentinel\n", snapshot)
-        self.assertIn("commit --pause=true", calls)
-        self.assertNotIn(f"image tag {new_image_id} {rollback_ref}", calls)
+        self.assertEqual({}, stable_images)
+        self.assertIn("export ai-supermarket-worker", calls)
         self.assertIn("unable to recover rollback image for worker", failed.stderr)
 
-        unsafe, snapshot, calls = self._run_capture_rollback_scenario(
+        unsafe, snapshot, calls, stable_images = self._run_capture_rollback_scenario(
             "unsafe-image-env",
             initial_snapshot="sentinel\n",
         )
         self.assertNotEqual(0, unsafe.returncode)
         self.assertEqual("sentinel\n", snapshot)
-        self.assertNotIn(f"image tag {new_image_id} {rollback_ref}", calls)
-        self.assertIn(f"image rm {new_image_id}", calls)
-        self.assertIn(
-            "recovered worker image retained invalid runtime environment metadata",
-            unsafe.stderr,
+        self.assertEqual({}, stable_images)
+        self.assertNotRegex(
+            calls,
+            rf"(?m)^image tag .* {re.escape(rollback_ref)}$",
         )
+        self.assertIn(f"image rm {new_image_id}", calls)
 
-        mismatched, snapshot, calls = self._run_capture_rollback_scenario(
+        mismatched, snapshot, calls, stable_images = self._run_capture_rollback_scenario(
             "mismatched-image-id",
             initial_snapshot="sentinel\n",
         )
         self.assertNotEqual(0, mismatched.returncode)
         self.assertEqual("sentinel\n", snapshot)
-        self.assertNotIn(f"image tag {new_image_id} {rollback_ref}", calls)
+        self.assertEqual({}, stable_images)
+        self.assertNotRegex(
+            calls,
+            rf"(?m)^image tag .* {re.escape(rollback_ref)}$",
+        )
         self.assertIn(f"image rm {new_image_id}", calls)
         self.assertIn("invalid image ID", mismatched.stderr)
+
+        smoke_failed, snapshot, calls, stable_images = self._run_capture_rollback_scenario(
+            "smoke-fails",
+            initial_snapshot="sentinel\n",
+        )
+        self.assertNotEqual(0, smoke_failed.returncode)
+        self.assertEqual("sentinel\n", snapshot)
+        self.assertEqual({}, stable_images)
+        self.assertIn("failed the isolated runtime smoke check", smoke_failed.stderr)
+        self.assertIn(f"image rm {new_image_id}", calls)
+
+        previous_images = {
+            backend_rollback_ref: previous_backend_id,
+            rollback_ref: previous_worker_id,
+        }
+        staged_then_failed, snapshot, calls, stable_images = (
+            self._run_capture_rollback_scenario(
+                "recovery-fails",
+                initial_snapshot="sentinel\n",
+                deploy_services="backend worker",
+                initial_stable_images=previous_images,
+            )
+        )
+        self.assertNotEqual(0, staged_then_failed.returncode)
+        self.assertEqual("sentinel\n", snapshot)
+        self.assertEqual(previous_images, stable_images)
+        backend_candidate = re.search(
+            rf"(?m)^image tag {re.escape(backend_image_id)} "
+            rf"(ai-tool-market-rollback-backend:candidate-\d+)$",
+            calls,
+        )
+        self.assertIsNotNone(backend_candidate)
+        assert backend_candidate is not None
+        self.assertNotIn(
+            f"image tag {backend_candidate.group(1)} {backend_rollback_ref}",
+            calls,
+        )
+        self.assertIn(f"image rm {backend_candidate.group(1)}", calls)
+
+        publish_failed, snapshot, calls, stable_images = self._run_capture_rollback_scenario(
+            "publish-worker-fails",
+            initial_snapshot="sentinel\n",
+            deploy_services="backend worker",
+            initial_stable_images=previous_images,
+        )
+        self.assertNotEqual(0, publish_failed.returncode)
+        self.assertEqual("sentinel\n", snapshot)
+        self.assertEqual(previous_images, stable_images)
+        self.assertIn("unable to publish rollback image for worker", publish_failed.stderr)
+        self.assertRegex(
+            calls,
+            rf"(?m)^image tag ai-tool-market-rollback-backend:backup-\d+ "
+            rf"{re.escape(backend_rollback_ref)}$",
+        )
+        self.assertRegex(
+            calls,
+            rf"(?m)^image tag ai-tool-market-rollback-worker:backup-\d+ "
+            rf"{re.escape(rollback_ref)}$",
+        )
+        self.assertRegex(
+            calls,
+            r"(?m)^image rm ai-tool-market-rollback-backend:backup-\d+$",
+        )
+        self.assertRegex(
+            calls,
+            r"(?m)^image rm ai-tool-market-rollback-worker:backup-\d+$",
+        )
+
+        restore_failed, snapshot, calls, retained_images = (
+            self._run_capture_rollback_scenario(
+                "restore-backend-fails",
+                initial_snapshot="sentinel\n",
+                deploy_services="backend worker",
+                initial_stable_images=previous_images,
+            )
+        )
+        self.assertNotEqual(0, restore_failed.returncode)
+        self.assertEqual("sentinel\n", snapshot)
+        self.assertEqual(backend_image_id, retained_images[backend_rollback_ref])
+        self.assertEqual(previous_worker_id, retained_images[rollback_ref])
+        retained_backups = {
+            image_ref: image_id
+            for image_ref, image_id in retained_images.items()
+            if ":backup-" in image_ref
+        }
+        self.assertEqual({previous_backend_id, previous_worker_id}, set(retained_backups.values()))
+        self.assertIn("unable to restore rollback image for backend", restore_failed.stderr)
+        self.assertIn("preserving rollback backup after failed restore", restore_failed.stderr)
+        self.assertNotRegex(
+            calls,
+            r"(?m)^image rm ai-tool-market-rollback-(?:backend|worker):backup-\d+$",
+        )
+
+        inspect_failed, snapshot, calls, stable_images = self._run_capture_rollback_scenario(
+            "stable-inspect-error",
+            initial_snapshot="sentinel\n",
+            deploy_services="backend",
+            initial_stable_images={backend_rollback_ref: previous_backend_id},
+        )
+        self.assertNotEqual(0, inspect_failed.returncode)
+        self.assertEqual("sentinel\n", snapshot)
+        self.assertEqual({backend_rollback_ref: previous_backend_id}, stable_images)
+        self.assertIn("unable to inspect existing rollback image for backend", inspect_failed.stderr)
+        self.assertNotRegex(
+            calls,
+            rf"(?m)^image tag .* {re.escape(backend_rollback_ref)}$",
+        )
+
+        content_recovered, snapshot, calls, stable_images = (
+            self._run_capture_rollback_scenario(
+                "stable-content-missing",
+                initial_snapshot="sentinel\n",
+                initial_stable_images={rollback_ref: previous_worker_id},
+            )
+        )
+        self.assertEqual(
+            0,
+            content_recovered.returncode,
+            content_recovered.stdout + content_recovered.stderr,
+        )
+        self.assertEqual(f"worker\t{new_image_id}\tdeploy-worker:latest\n", snapshot)
+        self.assertEqual({rollback_ref: new_image_id}, stable_images)
+        self.assertIn("has missing content and will be replaced", content_recovered.stderr)
+        self.assertNotRegex(
+            calls,
+            r"(?m)^image tag ai-tool-market-rollback-worker:previous "
+            r"ai-tool-market-rollback-worker:backup-\d+$",
+        )
+
+        self.assertNotIn("container-secret", flattened.stdout + flattened.stderr)
+        self.assertNotIn("container-password", flattened.stdout + flattened.stderr)
+        for calls in (flattened_calls,):
+            destructive_calls = re.findall(
+                r"(?m)^(?:container )?(?:stop|restart|rm)(?:\s.*)?$",
+                calls,
+            )
+            for call in destructive_calls:
+                self.assertRegex(
+                    call,
+                    r"^rm -f ai-tool-market-rollback-worker-smoke-\d+$",
+                )
+            self.assertNotRegex(calls, r"(?m)^compose(?:\s|$)")
 
     def test_deploy_snapshots_old_images_and_rollback_never_rebuilds(self) -> None:
         capture = self.read("deploy/scripts/capture_rollback_images.sh")
