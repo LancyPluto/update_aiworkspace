@@ -52,6 +52,35 @@ class DeployContractTests(unittest.TestCase):
             r"ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 "
             r"COLLATE=utf8mb4_unicode_ci;",
         )
+        config_code_joins = re.findall(
+            r"seed\.config_code COLLATE utf8mb4_unicode_ci\s*"
+            r"= model\.config_code COLLATE utf8mb4_unicode_ci",
+            migration,
+        )
+        self.assertEqual(3, len(config_code_joins))
+        self.assertRegex(
+            migration,
+            r"model\.api_contract_version COLLATE utf8mb4_unicode_ci\s*"
+            r"= @contract_version COLLATE utf8mb4_unicode_ci",
+        )
+        for field in (
+            "contract_status",
+            "request_schema_json",
+            "request_mapping_json",
+            "response_mapping_json",
+            "docs_url",
+        ):
+            self.assertRegex(
+                migration,
+                rf"model\.{field} COLLATE utf8mb4_unicode_ci\s*"
+                rf"= seed\.{field} COLLATE utf8mb4_unicode_ci",
+            )
+        for field in ("provider", "model_name", "capabilities"):
+            self.assertIn(
+                f"COALESCE(seed.{field} COLLATE utf8mb4_unicode_ci, "
+                f"model.{field} COLLATE utf8mb4_unicode_ci)",
+                migration,
+            )
 
     def test_backend_build_uses_strict_persistent_maven_cache(self) -> None:
         dockerfile = self.read("backend/Dockerfile")
