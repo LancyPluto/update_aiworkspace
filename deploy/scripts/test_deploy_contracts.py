@@ -1068,7 +1068,7 @@ if [ "$1" = image ] && [ "$2" = inspect ]; then
       exit 1
     fi
     if ! inspected_id="$(resolve_image "$inspected_ref")"; then
-      echo "Error response from daemon: No such image: $inspected_ref" >&2
+      printf '\nError response from daemon: No such image: %s\r\n' "$inspected_ref" >&2
       exit 1
     fi
     is_agent=false

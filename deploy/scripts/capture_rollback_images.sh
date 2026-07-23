@@ -35,8 +35,15 @@ valid_image_id() {
 }
 
 image_not_found_error() {
-  [[ "$1" == "Error response from daemon: No such image:"* ]] \
-    || [[ "$1" == "No such image:"* ]]
+  local line
+  while IFS= read -r line; do
+    line="${line%$'\r'}"
+    [ -n "$line" ] || continue
+    case "$line" in
+      "Error response from daemon: No such image:"*|"No such image:"*) return 0 ;;
+    esac
+  done <<< "$1"
+  return 1
 }
 
 image_content_missing_error() {
