@@ -955,6 +955,10 @@ resolve_image() {
         && [ "$FAKE_DOCKER_MODE" = agent-missing-layer ]; then
       return 1
     fi
+    if [ "$ref" = "$FAKE_USER_WEB_IMAGE_ID" ] \
+        && [ "$FAKE_DOCKER_MODE" = user-web-missing-layer ]; then
+      return 1
+    fi
     if [ "$ref" = "$FAKE_BACKEND_IMAGE_ID" ] \
         && [ "$FAKE_DOCKER_MODE" = unsupported-missing-layer ]; then
       return 1
@@ -984,6 +988,8 @@ if [ "$1" = container ] && [ "$2" = inspect ]; then
         printf '%s\\n' 'deploy-backend:latest'
       elif [ "$container" = ai-supermarket-agent-service ]; then
         printf '%s\\n' 'deploy-agent-service:latest'
+      elif [ "$container" = ai-supermarket-user-web ]; then
+        printf '%s\\n' 'deploy-user-web:latest'
       else
         printf '%s\\n' 'deploy-worker:latest'
       fi
@@ -991,19 +997,35 @@ if [ "$1" = container ] && [ "$2" = inspect ]; then
     *Config.Cmd*)
       if [ "$container" = ai-supermarket-agent-service ]; then
         printf '%s\\n' '["uvicorn","app.main:app","--host","0.0.0.0","--port","8090"]'
+      elif [ "$container" = ai-supermarket-user-web ]; then
+        printf '%s\\n' 'null'
       else
         printf '%s\\n' '["python","main.py"]'
       fi
       ;;
-    *Config.Entrypoint*) printf '%s\\n' 'null' ;;
+    *Config.Entrypoint*)
+      if [ "$container" = ai-supermarket-user-web ]; then
+        printf '%s\\n' '["/entrypoint.sh"]'
+      else
+        printf '%s\\n' 'null'
+      fi
+      ;;
     *Config.WorkingDir*) printf '%s\\n' '/app' ;;
     *Config.User*) printf '\\n' ;;
-    *Config.Healthcheck*) printf '%s\\n' 'null' ;;
+    *Config.Healthcheck*)
+      if [ "$container" = ai-supermarket-user-web ]; then
+        printf '%s\\n' '{"Test":["CMD-SHELL","test -f /dist-out/index.html"],"Interval":5000000000,"Timeout":3000000000,"StartPeriod":30000000000,"Retries":12}'
+      else
+        printf '%s\\n' 'null'
+      fi
+      ;;
     *Image*)
       if [ "$container" = ai-supermarket-backend ]; then
         printf '%s\\n' "$FAKE_BACKEND_IMAGE_ID"
       elif [ "$container" = ai-supermarket-agent-service ]; then
         printf '%s\\n' "$FAKE_AGENT_IMAGE_ID"
+      elif [ "$container" = ai-supermarket-user-web ]; then
+        printf '%s\\n' "$FAKE_USER_WEB_IMAGE_ID"
       else
         printf '%s\\n' "$FAKE_WORKER_IMAGE_ID"
       fi
@@ -1033,6 +1055,11 @@ if [ "$1" = image ] && [ "$2" = inspect ]; then
       echo 'Error response from daemon: transient metadata failure' >&2
       exit 1
     fi
+    if [ "$FAKE_DOCKER_MODE" = source-inspect-error ] \
+        && [ "$inspected_ref" = "$FAKE_WORKER_IMAGE_ID" ]; then
+      echo 'Error response from daemon: transient metadata failure' >&2
+      exit 1
+    fi
     if [ "$FAKE_DOCKER_MODE" = stable-content-missing ] \
         && [ "$inspected_ref" = ai-tool-market-rollback-worker:previous ] \
         && [ ! -e "$FAKE_DOCKER_STATE/stable-content-missing-reported" ]; then
@@ -1050,6 +1077,12 @@ if [ "$1" = image ] && [ "$2" = inspect ]; then
         || [[ "$inspected_ref" = ai-tool-market-rollback-agent-service:* ]]; then
       is_agent=true
     fi
+    is_user_web=false
+    if [ "$inspected_id" = "$FAKE_USER_WEB_NEW_IMAGE_ID" ] \
+        || [ "$inspected_id" = "$FAKE_USER_WEB_IMAGE_ID" ] \
+        || [[ "$inspected_ref" = ai-tool-market-rollback-user-web:* ]]; then
+      is_user_web=true
+    fi
     case "${4:-}" in
       *Config.Env*)
         if [ "$FAKE_DOCKER_MODE" = unsafe-image-env ]; then
@@ -1058,7 +1091,8 @@ if [ "$1" = image ] && [ "$2" = inspect ]; then
             '"INTERNAL_API_TOKEN=\\nPATH=retained-secret",' \
             '"RABBITMQ_PASSWORD="]'
         elif [ "$inspected_id" = "$FAKE_NEW_IMAGE_ID" ] \
-            || [ "$inspected_id" = "$FAKE_AGENT_NEW_IMAGE_ID" ]; then
+            || [ "$inspected_id" = "$FAKE_AGENT_NEW_IMAGE_ID" ] \
+            || [ "$inspected_id" = "$FAKE_USER_WEB_NEW_IMAGE_ID" ]; then
           printf '%s\\n' '["PATH=/usr/local/bin:/usr/bin:/bin"]'
         else
           printf '%s\\n' \
@@ -1068,18 +1102,28 @@ if [ "$1" = image ] && [ "$2" = inspect ]; then
         fi
         ;;
       *Config.Cmd*)
-        if [ "$is_agent" = true ]; then
+        if [ "$is_user_web" = true ]; then
+          printf '%s\\n' 'null'
+        elif [ "$is_agent" = true ]; then
           printf '%s\\n' '["uvicorn","app.main:app","--host","0.0.0.0","--port","8090"]'
         else
           printf '%s\\n' '["python","main.py"]'
         fi
         ;;
-      *Config.Entrypoint*) printf '%s\\n' 'null' ;;
+      *Config.Entrypoint*)
+        if [ "$is_user_web" = true ]; then
+          printf '%s\\n' '["/entrypoint.sh"]'
+        else
+          printf '%s\\n' 'null'
+        fi
+        ;;
       *Config.WorkingDir*) printf '%s\\n' '/app' ;;
       *Config.User*) printf '\\n' ;;
       *Config.Healthcheck*) printf '%s\\n' 'null' ;;
       *Comment*)
-        if [ "$is_agent" = true ]; then
+        if [ "$is_user_web" = true ]; then
+          printf '%s\\n' 'ai-tool-market local-only user-web rollback'
+        elif [ "$is_agent" = true ]; then
           printf '%s\\n' 'ai-tool-market local-only agent-service rollback'
         else
           printf '%s\\n' 'ai-tool-market local-only worker rollback'
@@ -1143,6 +1187,7 @@ if [ "$1" = export ]; then
   case "${2:-}" in
     ai-supermarket-worker) exported_rootfs='fake-worker-rootfs' ;;
     ai-supermarket-agent-service) exported_rootfs='fake-agent-service-rootfs' ;;
+    ai-supermarket-user-web) exported_rootfs='fake-user-web-rootfs' ;;
     *) exit 64 ;;
   esac
   if [ "$FAKE_DOCKER_MODE" = recovery-fails ]; then
@@ -1167,6 +1212,7 @@ if [ "$1" = import ]; then
       'WORKDIR /app') saw_workdir=true ;;
       'CMD ["python","main.py"]') imported_service=worker ;;
       'CMD ["uvicorn","app.main:app","--host","0.0.0.0","--port","8090"]') imported_service=agent-service ;;
+      'ENTRYPOINT ["/entrypoint.sh"]') imported_service=user-web ;;
       *) exit 64 ;;
     esac
     shift 2
@@ -1181,6 +1227,8 @@ if [ "$1" = import ]; then
   [ "$image_comment" = "ai-tool-market local-only $imported_service rollback" ] || exit 64
   if [ "$imported_service" = agent-service ]; then
     imported_image_id="$FAKE_AGENT_NEW_IMAGE_ID"
+  elif [ "$imported_service" = user-web ]; then
+    imported_image_id="$FAKE_USER_WEB_NEW_IMAGE_ID"
   elif [ "$imported_service" = worker ]; then
     imported_image_id="$FAKE_NEW_IMAGE_ID"
   else
@@ -1202,15 +1250,23 @@ if [ "$1" = run ]; then
   [ "${10}" = --memory ] && [ "${11}" = 512m ] || exit 64
   [ "${12}" = --pids-limit ] && [ "${13}" = 64 ] || exit 64
   [ "${14}" = --env ] && [ "${15}" = PYTHONDONTWRITEBYTECODE=1 ] || exit 64
-  [ "${16}" = --entrypoint ] && [ "${17}" = python ] || exit 64
+  [ "${16}" = --entrypoint ] || exit 64
   inspected_id="$(resolve_image "${18}")" || exit 64
   [ "${19}" = -c ] || exit 64
-  if [ "$inspected_id" = "$FAKE_AGENT_NEW_IMAGE_ID" ]; then
+  if [ "$inspected_id" = "$FAKE_USER_WEB_NEW_IMAGE_ID" ]; then
+    [ "${17}" = sh ] || exit 64
+    [[ "$4" = ai-tool-market-rollback-user-web-smoke-* ]] || exit 64
+    [[ "${20}" = *'/entrypoint.sh'* ]] || exit 64
+    [[ "${20}" = *'/prebuilt-dist/index.html'* ]] || exit 64
+    [[ "${20}" = *'command -v tail'* ]] || exit 64
+  elif [ "$inspected_id" = "$FAKE_AGENT_NEW_IMAGE_ID" ]; then
+    [ "${17}" = python ] || exit 64
     [[ "$4" = ai-tool-market-rollback-agent-service-smoke-* ]] || exit 64
     [[ "${20}" = *'/app/app/main.py'* ]] || exit 64
     [[ "${20}" = *'fastapi'* ]] || exit 64
     [[ "${20}" = *'uvicorn'* ]] || exit 64
   else
+    [ "${17}" = python ] || exit 64
     [[ "$4" = ai-tool-market-rollback-worker-smoke-* ]] || exit 64
     [[ "${20}" = *'/app/main.py'* ]] || exit 64
   fi
@@ -1244,6 +1300,8 @@ exit 2
             backend_image_id = "sha256:" + "d" * 64
             agent_image_id = "sha256:" + "1" * 64
             agent_new_image_id = "sha256:" + "2" * 64
+            user_web_image_id = "sha256:" + "3" * 64
+            user_web_new_image_id = "sha256:" + "4" * 64
             env = os.environ.copy()
             env.update(
                 {
@@ -1262,6 +1320,8 @@ exit 2
                     "FAKE_BACKEND_IMAGE_ID": backend_image_id,
                     "FAKE_AGENT_IMAGE_ID": agent_image_id,
                     "FAKE_AGENT_NEW_IMAGE_ID": agent_new_image_id,
+                    "FAKE_USER_WEB_IMAGE_ID": user_web_image_id,
+                    "FAKE_USER_WEB_NEW_IMAGE_ID": user_web_new_image_id,
                     "FAKE_NEW_IMAGE_ID": new_image_id,
                     "FAKE_MISMATCH_IMAGE_ID": mismatch_image_id,
                     "FAKE_MISSING_DIGEST": "sha256:" + "9" * 64,
@@ -1297,6 +1357,79 @@ exit 2
                 if state_file.exists():
                     stable_images[image_ref] = state_file.read_text(encoding="utf-8")
             return result, snapshot_text, docker_calls, stable_images
+
+    def test_capture_recovers_user_web_when_container_backing_image_is_missing(self) -> None:
+        new_image_id = "sha256:" + "4" * 64
+        rollback_ref = "ai-tool-market-rollback-user-web:previous"
+
+        recovered, snapshot, calls, stable_images = self._run_capture_rollback_scenario(
+            "user-web-missing-layer",
+            initial_snapshot="sentinel\n",
+            deploy_services="user-web",
+        )
+
+        self.assertEqual(0, recovered.returncode, recovered.stdout + recovered.stderr)
+        self.assertEqual(
+            f"user-web\t{new_image_id}\tdeploy-user-web:latest\n",
+            snapshot,
+        )
+        self.assertEqual({rollback_ref: new_image_id}, stable_images)
+        self.assertIn("export ai-supermarket-user-web", calls)
+        self.assertIn(
+            "import --message ai-tool-market local-only user-web rollback",
+            calls,
+        )
+        self.assertIn("--change ENV PATH=/usr/local/bin:/usr/bin:/bin", calls)
+        self.assertIn("--change WORKDIR /app", calls)
+        self.assertIn('--change ENTRYPOINT ["/entrypoint.sh"]', calls)
+        self.assertNotIn("--change CMD", calls)
+        self.assertRegex(
+            calls,
+            rf"(?m)^run --rm --name ai-tool-market-rollback-user-web-smoke-\d+ "
+            rf"--network none --read-only --cpus 1 --memory 512m --pids-limit 64 "
+            rf"--env PYTHONDONTWRITEBYTECODE=1 --entrypoint sh "
+            rf"{re.escape(new_image_id)} -c",
+        )
+        for required_runtime_path in (
+            "/entrypoint.sh",
+            "/prebuilt-dist/index.html",
+            "command -v cp",
+            "command -v tail",
+        ):
+            self.assertIn(required_runtime_path, calls)
+        for object_type, object_ref in (
+            ("container", "ai-supermarket-user-web"),
+            ("image", new_image_id),
+        ):
+            for inspect_format in (
+                "{{json .Config.Cmd}}",
+                "{{json .Config.Entrypoint}}",
+                "{{.Config.WorkingDir}}",
+                "{{.Config.User}}",
+                "{{json .Config.Healthcheck}}",
+            ):
+                self.assertIn(
+                    f"{object_type} inspect --format {inspect_format} {object_ref}",
+                    calls,
+                )
+        self.assertIn(f"image inspect --format {{{{json .Config.Env}}}} {new_image_id}", calls)
+        self.assertIn(f"image inspect --format {{{{.Comment}}}} {new_image_id}", calls)
+        self.assertNotIn("commit ", calls)
+        self.assertNotIn("container-secret", recovered.stdout + recovered.stderr)
+        self.assertNotIn("container-password", recovered.stdout + recovered.stderr)
+
+    def test_capture_does_not_recover_after_transient_source_inspect_error(self) -> None:
+        failed, snapshot, calls, stable_images = self._run_capture_rollback_scenario(
+            "source-inspect-error",
+            initial_snapshot="sentinel\n",
+        )
+
+        self.assertNotEqual(0, failed.returncode)
+        self.assertEqual("sentinel\n", snapshot)
+        self.assertEqual({}, stable_images)
+        self.assertIn("unable to inspect rollback image for worker", failed.stderr)
+        self.assertIn("transient metadata failure", failed.stderr)
+        self.assertNotIn("export ai-supermarket-worker", calls)
 
     def test_capture_recovers_agent_service_when_container_backing_image_is_missing(self) -> None:
         old_image_id = "sha256:" + "1" * 64
