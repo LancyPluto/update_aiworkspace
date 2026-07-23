@@ -4,6 +4,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -895,6 +896,232 @@ class DeployContractTests(unittest.TestCase):
         )
         self.assertIn("--env-file ../.env", rollback)
         self.assertIn("mihomo|mihomo-init)", rollback)
+
+    def _run_capture_rollback_scenario(
+        self,
+        mode: str,
+        initial_snapshot: str | None = None,
+    ) -> tuple[subprocess.CompletedProcess[str], str | None, str]:
+        bash = shutil.which("bash") or "bash"
+        if os.name == "nt":
+            git_command = shutil.which("git")
+            if git_command:
+                git_bash = pathlib.Path(git_command).resolve().parent.parent / "bin/bash.exe"
+                if git_bash.exists():
+                    bash = str(git_bash)
+
+        temp_root = ROOT / "deploy/logs"
+        temp_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=temp_root) as temp_dir:
+            temp = pathlib.Path(temp_dir)
+            remote = temp / "remote"
+            snapshot = remote / "deploy/logs/last-deploy.images.tsv"
+            snapshot.parent.mkdir(parents=True)
+            if initial_snapshot is not None:
+                snapshot.write_text(initial_snapshot, encoding="utf-8")
+
+            fake_bin = temp / "bin"
+            fake_bin.mkdir()
+            docker_log = temp / "docker.log"
+            fake_docker = fake_bin / "docker"
+            fake_docker.write_text(
+                """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+
+if [ "$1" = container ] && [ "$2" = inspect ]; then
+  if [ "${3:-}" != --format ]; then
+    exit 0
+  fi
+  case "${4:-}" in
+    *Config.Env*)
+      printf '%s\\n' \
+        '["PATH=/usr/local/bin:/usr/bin:/bin",' \
+        '"INTERNAL_API_TOKEN=container-secret",' \
+        '"RABBITMQ_PASSWORD=container-password"]'
+      ;;
+    *Config.Image*) printf '%s\\n' 'deploy-worker:latest' ;;
+    *Image*) printf '%s\\n' "$FAKE_OLD_IMAGE_ID" ;;
+    *) exit 2 ;;
+  esac
+  exit 0
+fi
+
+if [ "$1" = image ] && [ "$2" = inspect ]; then
+  if [ "${3:-}" = --format ]; then
+    case "${4:-}" in
+      *Config.Env*)
+        if [ "$FAKE_DOCKER_MODE" = unsafe-image-env ]; then
+          printf '%s\\n' \
+            '["PATH=/usr/local/bin:/usr/bin:/bin",' \
+            '"INTERNAL_API_TOKEN=\\nPATH=retained-secret",' \
+            '"RABBITMQ_PASSWORD="]'
+        else
+          printf '%s\\n' \
+            '["PATH=/usr/local/bin:/usr/bin:/bin",' \
+            '"INTERNAL_API_TOKEN=",' \
+            '"RABBITMQ_PASSWORD="]'
+        fi
+        ;;
+      *Config.Labels*) printf '%s\\n' 'true' ;;
+      *Id*)
+        if [ "$FAKE_DOCKER_MODE" = mismatched-image-id ] \
+            && [ "${5:-}" = "$FAKE_NEW_IMAGE_ID" ]; then
+          printf '%s\\n' "$FAKE_MISMATCH_IMAGE_ID"
+        else
+          printf '%s\\n' "$FAKE_NEW_IMAGE_ID"
+        fi
+        ;;
+      *) exit 2 ;;
+    esac
+    exit 0
+  fi
+  if [ "${3:-}" = "$FAKE_OLD_IMAGE_ID" ] && [ "$FAKE_DOCKER_MODE" = existing ]; then
+    exit 0
+  fi
+  if [ "${3:-}" = "$FAKE_NEW_IMAGE_ID" ]; then
+    exit 0
+  fi
+  exit 1
+fi
+
+if [ "$1" = image ] && [ "$2" = tag ]; then
+  exit 0
+fi
+
+if [ "$1" = image ] && [ "$2" = rm ]; then
+  exit 0
+fi
+
+if [ "$1" = commit ]; then
+  if [ "$FAKE_DOCKER_MODE" = commit-fails ]; then
+    exit 42
+  fi
+  shift
+  [ "${1:-}" = --pause=true ] || exit 64
+  shift
+  while [ "${1:-}" = --change ]; do
+    [ "$#" -ge 2 ] || exit 64
+    case "$2" in
+      'ENV INTERNAL_API_TOKEN='|'ENV RABBITMQ_PASSWORD='|'LABEL com.aiminilab.rollback.local-only=true') ;;
+      *) exit 64 ;;
+    esac
+    shift 2
+  done
+  [ "$#" -eq 1 ] && [ "$1" = ai-supermarket-worker ] || exit 64
+  printf '%s\\n' "$FAKE_NEW_IMAGE_ID"
+  exit 0
+fi
+
+exit 2
+""",
+                encoding="utf-8",
+                newline="\n",
+            )
+            fake_docker.chmod(0o755)
+
+            def bash_path(path: pathlib.Path) -> str:
+                value = path.resolve().as_posix()
+                if os.name == "nt":
+                    return f"/{value[0].lower()}{value[2:]}"
+                return value
+
+            old_image_id = "sha256:" + "a" * 64
+            new_image_id = "sha256:" + "b" * 64
+            mismatch_image_id = "sha256:" + "c" * 64
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": (
+                        f"{bash_path(fake_bin)}:"
+                        f"{bash_path(pathlib.Path(sys.executable).parent)}:"
+                        "/usr/bin:/bin"
+                    ),
+                    "REMOTE_DIR": bash_path(remote),
+                    "DEPLOY_SERVICES": "worker",
+                    "PYTHON_BIN": bash_path(pathlib.Path(sys.executable)),
+                    "FAKE_DOCKER_MODE": mode,
+                    "FAKE_DOCKER_LOG": bash_path(docker_log),
+                    "FAKE_OLD_IMAGE_ID": old_image_id,
+                    "FAKE_NEW_IMAGE_ID": new_image_id,
+                    "FAKE_MISMATCH_IMAGE_ID": mismatch_image_id,
+                }
+            )
+            result = subprocess.run(
+                [bash, "deploy/scripts/capture_rollback_images.sh"],
+                cwd=ROOT,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            snapshot_text = snapshot.read_text(encoding="utf-8") if snapshot.exists() else None
+            docker_calls = docker_log.read_text(encoding="utf-8") if docker_log.exists() else ""
+            return result, snapshot_text, docker_calls
+
+    def test_capture_recovers_when_container_backing_image_is_missing(self) -> None:
+        old_image_id = "sha256:" + "a" * 64
+        new_image_id = "sha256:" + "b" * 64
+        rollback_ref = "ai-tool-market-rollback-worker:previous"
+
+        existing, snapshot, calls = self._run_capture_rollback_scenario("existing")
+        self.assertEqual(0, existing.returncode, existing.stdout + existing.stderr)
+        self.assertEqual(f"worker\t{old_image_id}\tdeploy-worker:latest\n", snapshot)
+        self.assertIn(f"image tag {old_image_id} {rollback_ref}", calls)
+        self.assertNotIn("commit ", calls)
+
+        recovered, snapshot, calls = self._run_capture_rollback_scenario("missing")
+        self.assertEqual(0, recovered.returncode, recovered.stdout + recovered.stderr)
+        self.assertEqual(f"worker\t{new_image_id}\tdeploy-worker:latest\n", snapshot)
+        self.assertIn("commit --pause=true", calls)
+        self.assertIn("--change ENV INTERNAL_API_TOKEN=", calls)
+        self.assertIn("--change ENV RABBITMQ_PASSWORD=", calls)
+        self.assertIn("--change LABEL com.aiminilab.rollback.local-only=true", calls)
+        self.assertNotIn(f"commit --pause=true ai-supermarket-worker {rollback_ref}", calls)
+        self.assertIn(f"image tag {new_image_id} {rollback_ref}", calls)
+        self.assertNotIn("container-secret", recovered.stdout + recovered.stderr)
+        self.assertNotIn("container-password", recovered.stdout + recovered.stderr)
+        self.assertNotRegex(
+            calls,
+            r"(?m)^(?:container )?(?:stop|restart|rm)(?:\s|$)",
+        )
+        self.assertNotRegex(calls, r"(?m)^compose(?:\s|$)")
+        self.assertIn("Recovered rollback image for worker", recovered.stdout)
+
+        failed, snapshot, calls = self._run_capture_rollback_scenario(
+            "commit-fails",
+            initial_snapshot="sentinel\n",
+        )
+        self.assertNotEqual(0, failed.returncode)
+        self.assertEqual("sentinel\n", snapshot)
+        self.assertIn("commit --pause=true", calls)
+        self.assertNotIn(f"image tag {new_image_id} {rollback_ref}", calls)
+        self.assertIn("unable to recover rollback image for worker", failed.stderr)
+
+        unsafe, snapshot, calls = self._run_capture_rollback_scenario(
+            "unsafe-image-env",
+            initial_snapshot="sentinel\n",
+        )
+        self.assertNotEqual(0, unsafe.returncode)
+        self.assertEqual("sentinel\n", snapshot)
+        self.assertNotIn(f"image tag {new_image_id} {rollback_ref}", calls)
+        self.assertIn(f"image rm {new_image_id}", calls)
+        self.assertIn(
+            "recovered worker image retained invalid runtime environment metadata",
+            unsafe.stderr,
+        )
+
+        mismatched, snapshot, calls = self._run_capture_rollback_scenario(
+            "mismatched-image-id",
+            initial_snapshot="sentinel\n",
+        )
+        self.assertNotEqual(0, mismatched.returncode)
+        self.assertEqual("sentinel\n", snapshot)
+        self.assertNotIn(f"image tag {new_image_id} {rollback_ref}", calls)
+        self.assertIn(f"image rm {new_image_id}", calls)
+        self.assertIn("invalid image ID", mismatched.stderr)
 
     def test_deploy_snapshots_old_images_and_rollback_never_rebuilds(self) -> None:
         capture = self.read("deploy/scripts/capture_rollback_images.sh")
