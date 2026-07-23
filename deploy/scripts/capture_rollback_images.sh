@@ -14,6 +14,7 @@ declare -A candidate_refs=()
 declare -A candidate_ids=()
 declare -A backup_refs=()
 declare -A backup_ids=()
+declare -A published_services=()
 publish_started=false
 snapshot_published=false
 
@@ -31,6 +32,11 @@ container_for_service() {
 
 valid_image_id() {
   [[ "$1" =~ ^sha256:[0-9a-f]{64}$ ]]
+}
+
+image_not_found_error() {
+  [[ "$1" == "Error response from daemon: No such image:"* ]] \
+    || [[ "$1" == "No such image:"* ]]
 }
 
 parse_environment_metadata() {
@@ -84,7 +90,7 @@ discard_candidate_image() {
 }
 
 restore_stable_tags() {
-  local service stable_ref backup_ref restored_id
+  local service stable_ref backup_ref restored_id remove_output inspect_output
   local restore_failed=false
   for service in "${staged_services[@]}"; do
     stable_ref="ai-tool-market-rollback-${service}:previous"
@@ -101,14 +107,22 @@ restore_stable_tags() {
         restore_failed=true
       fi
     else
-      if docker image inspect "$stable_ref" >/dev/null 2>&1 \
-          && ! docker image rm "$stable_ref" >/dev/null 2>&1; then
+      if [ "${published_services[$service]:-false}" != true ]; then
+        continue
+      fi
+      if ! remove_output="$(docker image rm "$stable_ref" 2>&1)" \
+          && ! image_not_found_error "$remove_output"; then
         echo "ERROR: unable to remove newly published rollback image for $service" >&2
+        [ -z "$remove_output" ] || printf '%s\n' "$remove_output" >&2
         restore_failed=true
         continue
       fi
-      if docker image inspect "$stable_ref" >/dev/null 2>&1; then
+      if inspect_output="$(docker image inspect --format '{{.Id}}' "$stable_ref" 2>&1)"; then
         echo "ERROR: newly published rollback image for $service still exists" >&2
+        restore_failed=true
+      elif ! image_not_found_error "$inspect_output"; then
+        echo "ERROR: unable to verify rollback image removal for $service" >&2
+        [ -z "$inspect_output" ] || printf '%s\n' "$inspect_output" >&2
         restore_failed=true
       fi
     fi
@@ -119,23 +133,29 @@ restore_stable_tags() {
 cleanup_capture() {
   local status="$?"
   local service candidate_ref backup_ref
-  local cleanup_backups=true
+  local cleanup_recovery_refs=true
   trap - EXIT
 
   if [ "$publish_started" = true ] && [ "$snapshot_published" != true ]; then
     if [ ! -e "$snapshot_tmp" ]; then
       snapshot_published=true
     elif ! restore_stable_tags; then
-      cleanup_backups=false
+      cleanup_recovery_refs=false
       status=1
     fi
   fi
   for service in "${staged_services[@]}"; do
     candidate_ref="${candidate_refs[$service]:-}"
     backup_ref="${backup_refs[$service]:-}"
-    [ -z "$candidate_ref" ] || docker image rm "$candidate_ref" >/dev/null 2>&1 || true
+    if [ -n "$candidate_ref" ]; then
+      if [ "$cleanup_recovery_refs" = true ]; then
+        docker image rm "$candidate_ref" >/dev/null 2>&1 || true
+      else
+        echo "ERROR: preserving rollback candidate after failed restore: $candidate_ref" >&2
+      fi
+    fi
     if [ -n "$backup_ref" ]; then
-      if [ "$cleanup_backups" = true ]; then
+      if [ "$cleanup_recovery_refs" = true ]; then
         docker image rm "$backup_ref" >/dev/null 2>&1 || true
       else
         echo "ERROR: preserving rollback backup after failed restore: $backup_ref" >&2
@@ -187,7 +207,6 @@ import_worker_rootfs() {
   import_args+=(--change "ENV PATH=$path_value")
   import_args+=(--change "WORKDIR /app")
   import_args+=(--change 'CMD ["python","main.py"]')
-  import_args+=(--change "LABEL com.aiminilab.rollback.local-only=true")
 
   if imported_image_id="$(
     docker export "$container" \
@@ -229,7 +248,7 @@ smoke_worker_candidate() {
 recover_worker_rollback_image() {
   local container="$1"
   local candidate_ref="$2"
-  local candidate_image_id inspected_image_id image_comment label_value
+  local candidate_image_id inspected_image_id image_comment
 
   if ! worker_config_matches_contract container "$container"; then
     echo "ERROR: running worker configuration is incompatible with rollback recovery" >&2
@@ -262,16 +281,6 @@ recover_worker_rollback_image() {
     echo "ERROR: recovered worker image retained invalid runtime environment metadata" >&2
     return 1
   fi
-  if ! label_value="$(
-    docker image inspect \
-      --format '{{index .Config.Labels "com.aiminilab.rollback.local-only"}}' \
-      "$inspected_image_id"
-  )" || [ "$label_value" != "true" ]; then
-    discard_candidate_image "$candidate_image_id"
-    echo "ERROR: recovered worker image is missing the local-only label" >&2
-    return 1
-  fi
-
   if ! image_comment="$(docker image inspect --format '{{.Comment}}' "$inspected_image_id")" \
       || [ "$image_comment" != "ai-tool-market local-only worker rollback" ]; then
     discard_candidate_image "$candidate_image_id"
@@ -344,8 +353,7 @@ for service in "${staged_services[@]}"; do
       echo "ERROR: rollback backup for $service failed ID verification" >&2
       exit 1
     fi
-  elif [[ "$stable_inspect_output" == "Error response from daemon: No such image:"* ]] \
-      || [[ "$stable_inspect_output" == "No such image:"* ]]; then
+  elif image_not_found_error "$stable_inspect_output"; then
     backup_refs["$service"]=""
     backup_ids["$service"]=""
   elif [[ "$stable_inspect_output" =~ content[[:space:]]digest[[:space:]]sha256:[0-9a-f]{64}.*not[[:space:]]found ]]; then
@@ -366,6 +374,7 @@ for service in "${staged_services[@]}"; do
     echo "ERROR: unable to publish rollback image for $service" >&2
     exit 1
   fi
+  published_services["$service"]=true
   published_id="$(docker image inspect --format '{{.Id}}' "$stable_ref")"
   if [ "$published_id" != "${candidate_ids[$service]}" ]; then
     echo "ERROR: retained rollback image for $service changed unexpectedly" >&2

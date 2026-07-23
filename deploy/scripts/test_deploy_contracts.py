@@ -996,6 +996,18 @@ fi
 if [ "$1" = image ] && [ "$2" = inspect ]; then
   if [ "${3:-}" = --format ]; then
     inspected_ref="${5:-}"
+    if [ "$FAKE_DOCKER_MODE" = restore-no-backup-inspect-error ] \
+        && [ "$inspected_ref" = ai-tool-market-rollback-worker:previous ]; then
+      if [ -e "$FAKE_DOCKER_STATE/restore-no-backup-published" ]; then
+        echo 'Error response from daemon: transient restore verification failure' >&2
+        exit 1
+      fi
+      if [ -f "$(state_path "$inspected_ref")" ]; then
+        touch "$FAKE_DOCKER_STATE/restore-no-backup-published"
+        printf '%s\\n' "$FAKE_MISMATCH_IMAGE_ID"
+        exit 0
+      fi
+    fi
     if [ "$FAKE_DOCKER_MODE" = stable-inspect-error ] \
         && [ "$inspected_ref" = ai-tool-market-rollback-backend:previous ]; then
       echo 'Error response from daemon: transient metadata failure' >&2
@@ -1031,7 +1043,6 @@ if [ "$1" = image ] && [ "$2" = inspect ]; then
       *Config.WorkingDir*) printf '%s\\n' '/app' ;;
       *Config.User*) printf '\\n' ;;
       *Config.Healthcheck*) printf '%s\\n' 'null' ;;
-      *Config.Labels*) printf '%s\\n' 'true' ;;
       *Comment*) printf '%s\\n' 'ai-tool-market local-only worker rollback' ;;
       *Id*)
         if [ "$FAKE_DOCKER_MODE" = mismatched-image-id ] \
@@ -1044,6 +1055,12 @@ if [ "$1" = image ] && [ "$2" = inspect ]; then
       *) exit 2 ;;
     esac
     exit 0
+  fi
+  if [ "$FAKE_DOCKER_MODE" = restore-no-backup-inspect-error ] \
+      && [ "${3:-}" = ai-tool-market-rollback-worker:previous ] \
+      && [ -e "$FAKE_DOCKER_STATE/restore-no-backup-published" ]; then
+    echo 'Error response from daemon: transient restore verification failure' >&2
+    exit 1
   fi
   if ! resolve_image "${3:-}" >/dev/null; then
     echo "Error response from daemon: No such image: ${3:-}" >&2
@@ -1098,14 +1115,12 @@ if [ "$1" = import ]; then
   saw_path=false
   saw_workdir=false
   saw_cmd=false
-  saw_label=false
   while [ "${1:-}" = --change ]; do
     [ "$#" -ge 2 ] || exit 64
     case "$2" in
       'ENV PATH=/usr/local/bin:/usr/bin:/bin') saw_path=true ;;
       'WORKDIR /app') saw_workdir=true ;;
       'CMD ["python","main.py"]') saw_cmd=true ;;
-      'LABEL com.aiminilab.rollback.local-only=true') saw_label=true ;;
       *) exit 64 ;;
     esac
     shift 2
@@ -1116,8 +1131,7 @@ if [ "$1" = import ]; then
   if [ "$FAKE_DOCKER_MODE" = recovery-fails ]; then
     exit 44
   fi
-  [ "$saw_path" = true ] && [ "$saw_workdir" = true ] \
-    && [ "$saw_cmd" = true ] && [ "$saw_label" = true ] || exit 64
+  [ "$saw_path" = true ] && [ "$saw_workdir" = true ] && [ "$saw_cmd" = true ] || exit 64
   printf '%s' "$FAKE_NEW_IMAGE_ID" > "$(state_path "$candidate_ref")"
   printf '%s\\n' "$FAKE_NEW_IMAGE_ID"
   exit 0
@@ -1258,7 +1272,6 @@ exit 2
         self.assertIn("--change ENV PATH=/usr/local/bin:/usr/bin:/bin", calls)
         self.assertIn("--change WORKDIR /app", calls)
         self.assertIn('--change CMD ["python","main.py"]', calls)
-        self.assertIn("--change LABEL com.aiminilab.rollback.local-only=true", calls)
         self.assertRegex(
             calls,
             rf"(?m)^run --rm --name ai-tool-market-rollback-worker-smoke-\d+ "
@@ -1420,6 +1433,27 @@ exit 2
             calls,
             rf"(?m)^image tag .* {re.escape(backend_rollback_ref)}$",
         )
+
+        restore_unverified, snapshot, calls, retained_images = (
+            self._run_capture_rollback_scenario(
+                "restore-no-backup-inspect-error",
+                initial_snapshot="sentinel\n",
+            )
+        )
+        self.assertNotEqual(0, restore_unverified.returncode)
+        self.assertEqual("sentinel\n", snapshot)
+        self.assertEqual({}, retained_images)
+        unverified_candidate = re.search(
+            rf"(?m)^image tag {re.escape(new_image_id)} "
+            rf"(ai-tool-market-rollback-worker:candidate-\d+)$",
+            calls,
+        )
+        self.assertIsNotNone(unverified_candidate)
+        assert unverified_candidate is not None
+        self.assertIn(f"image rm {rollback_ref}", calls)
+        self.assertNotIn(f"image rm {unverified_candidate.group(1)}", calls)
+        self.assertIn("unable to verify rollback image removal", restore_unverified.stderr)
+        self.assertIn("preserving rollback candidate", restore_unverified.stderr)
 
         content_recovered, snapshot, calls, stable_images = (
             self._run_capture_rollback_scenario(
