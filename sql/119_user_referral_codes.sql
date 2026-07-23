@@ -58,7 +58,12 @@ BEGIN
       );
       IF candidate_code NOT REGEXP '[2-9]'
         OR candidate_code NOT REGEXP '[A-HJ-NP-Z]'
-        OR EXISTS (SELECT 1 FROM users WHERE referral_code = candidate_code) THEN
+        OR EXISTS (
+          SELECT 1
+          FROM users
+          WHERE referral_code COLLATE utf8mb4_unicode_ci
+            = candidate_code COLLATE utf8mb4_unicode_ci
+        ) THEN
         SET candidate_code = NULL;
       END IF;
       SET allocation_attempts = allocation_attempts + 1;

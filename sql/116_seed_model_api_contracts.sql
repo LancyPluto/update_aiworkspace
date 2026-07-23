@@ -142,7 +142,6 @@ DROP PROCEDURE IF EXISTS assert_model_contract_seed_116;
 DELIMITER $$
 CREATE PROCEDURE assert_model_contract_seed_116(IN verify_applied TINYINT)
 BEGIN
-  DECLARE active_count INT DEFAULT 0;
   DECLARE matched_count INT DEFAULT 0;
   DECLARE applied_count INT DEFAULT 0;
   DECLARE seed_count INT DEFAULT 0;
@@ -157,21 +156,14 @@ BEGIN
       SET MESSAGE_TEXT = 'model contract seed must contain 48 unique production model IDs';
   END IF;
 
-  SELECT COUNT(*) INTO active_count
-  FROM agent_model_configs
-  WHERE is_deleted = 0;
-
+  -- Discovered and administrator-created models are valid outside this dated
+  -- production snapshot; they keep their existing contract status.
   SELECT COUNT(*) INTO matched_count
   FROM agent_model_configs model
   JOIN tmp_model_contract_seed_116 seed
     ON seed.config_code COLLATE utf8mb4_unicode_ci
      = model.config_code COLLATE utf8mb4_unicode_ci
   WHERE model.is_deleted = 0;
-
-  IF matched_count <> active_count THEN
-    SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'model contract seed does not cover every active model row';
-  END IF;
 
   IF verify_applied = 1 THEN
     SELECT COUNT(*) INTO applied_count
