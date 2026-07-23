@@ -122,14 +122,6 @@ test("tool defaults use fixed known mappings independent of configured provider 
     ["SPEECH_TO_TEXT"],
   )
   assert.deepEqual(
-    defaultRequiredModelCapabilitiesForTool({ toolType: "EMBEDDING" }),
-    ["EMBEDDING"],
-  )
-  assert.deepEqual(
-    defaultRequiredModelCapabilitiesForTool({ toolType: "RERANK" }),
-    ["RERANK"],
-  )
-  assert.deepEqual(
     defaultRequiredModelCapabilitiesForTool({ toolType: "AGENT" }),
     ["TEXT_GENERATION"],
   )

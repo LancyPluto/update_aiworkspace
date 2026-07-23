@@ -242,8 +242,6 @@ const toolTypeOptions = [
   { value: "TEXT_TO_SPEECH", label: "文字转语音", hint: "输入文本，输出音频" },
   { value: "MUSIC_GENERATION", label: "音乐生成", hint: "输入提示词，输出歌曲/音频" },
   { value: "VIDEO_GENERATION", label: "视频生成", hint: "输入文本/素材，输出视频" },
-  { value: "EMBEDDING", label: "Embedding", hint: "向量化，输出结构化 JSON" },
-  { value: "RERANK", label: "Rerank", hint: "重排序，输出结构化 JSON" },
   { value: "AGENT", label: "Agent 编排", hint: "多步骤规划和工具调用" },
 ]
 
@@ -266,8 +264,6 @@ const defaultModalitiesByType: Record<string, { input: string; output: string }>
   TEXT_TO_SPEECH: { input: "TEXT", output: "AUDIO" },
   MUSIC_GENERATION: { input: "TEXT", output: "AUDIO" },
   VIDEO_GENERATION: { input: "TEXT", output: "VIDEO" },
-  EMBEDDING: { input: "TEXT", output: "JSON" },
-  RERANK: { input: "TEXT", output: "JSON" },
   AGENT: { input: "MULTIMODAL", output: "TEXT" },
 }
 

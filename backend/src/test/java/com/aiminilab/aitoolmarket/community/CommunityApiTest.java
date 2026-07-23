@@ -86,6 +86,50 @@ class CommunityApiTest {
     }
 
     @Test
+    void autoPublishVideoUsesVideosArrayUrlWithoutJsonDelimiter() {
+        jdbcTemplate.update("UPDATE users SET auto_publish_assets = 1, prompt_public_by_default = 0 WHERE id = 2");
+        long taskId = insertSuccessVideoTask(2L, "kling_videos_array");
+        AiTask task = taskMapper.findById(taskId).orElseThrow();
+        String videoUrl = "https://cdn.wlcloudai.com/video/305/generated-video.mp4?token=a,b.c#take)";
+
+        communityService.autoPublishTask(task, "VIDEO", """
+                {
+                  "provider": "kling_video",
+                  "status": "succeed",
+                  "videos": [{
+                    "url": "%s",
+                    "sourceUrl": "https://provider.example.com/generated-video.mp4"
+                  }]
+                }
+                """.formatted(videoUrl));
+
+        java.util.Map<String, Object> post = jdbcTemplate.queryForMap(
+                "SELECT modality, cover_url, media_url FROM community_posts WHERE task_id = ?",
+                taskId);
+        org.junit.jupiter.api.Assertions.assertEquals("VIDEO", post.get("modality"));
+        org.junit.jupiter.api.Assertions.assertEquals(videoUrl, post.get("cover_url"));
+        org.junit.jupiter.api.Assertions.assertEquals(videoUrl, post.get("media_url"));
+    }
+
+    @Test
+    void autoPublishVideoFallbackExcludesJsonDelimiters() {
+        jdbcTemplate.update("UPDATE users SET auto_publish_assets = 1, prompt_public_by_default = 0 WHERE id = 2");
+        long taskId = insertSuccessVideoTask(2L, "video_fallback_delimiters");
+        AiTask task = taskMapper.findById(taskId).orElseThrow();
+        String videoUrl = "https://cdn.wlcloudai.com/video/305/fallback-video.mp4?token=a,b.c#take)";
+
+        communityService.autoPublishTask(task, "VIDEO", """
+                {"outputs":[{"asset":"%s"}]}
+                """.formatted(videoUrl));
+
+        java.util.Map<String, Object> post = jdbcTemplate.queryForMap(
+                "SELECT cover_url, media_url FROM community_posts WHERE task_id = ?",
+                taskId);
+        org.junit.jupiter.api.Assertions.assertEquals(videoUrl, post.get("cover_url"));
+        org.junit.jupiter.api.Assertions.assertEquals(videoUrl, post.get("media_url"));
+    }
+
+    @Test
     void autoPublishSkipsWhenUserPreferenceDisabled() {
         jdbcTemplate.update("UPDATE users SET auto_publish_assets = 0 WHERE id = 2");
         long taskId = insertSuccessImageTask(2L, "auto_publish_off");

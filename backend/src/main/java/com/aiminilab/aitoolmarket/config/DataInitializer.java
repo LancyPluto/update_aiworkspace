@@ -1787,8 +1787,6 @@ public class DataInitializer implements CommandLineRunner {
                       WHEN 'MUSIC_GENERATION' THEN '["MUSIC_GENERATION"]'
                       WHEN 'TEXT_TO_SPEECH' THEN '["TEXT_TO_SPEECH"]'
                       WHEN 'SPEECH_TO_TEXT' THEN '["SPEECH_TO_TEXT"]'
-                      WHEN 'EMBEDDING' THEN '["EMBEDDING"]'
-                      WHEN 'RERANK' THEN '["RERANK"]'
                       ELSE '["TEXT_GENERATION"]'
                     END,
                     updated_at = CURRENT_TIMESTAMP

@@ -22,7 +22,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -61,9 +64,7 @@ class ModelCapabilityServiceTest {
                         "TEXT_TO_SPEECH",
                         "SPEECH_TO_TEXT",
                         "MUSIC_GENERATION",
-                        "AUDIO_GENERATION",
-                        "EMBEDDING",
-                        "RERANK"
+                        "AUDIO_GENERATION"
                 )
         ));
         lenient().when(providerMetadataService.get("agnes_chat")).thenReturn(textProvider("agnes_chat"));
@@ -130,6 +131,31 @@ class ModelCapabilityServiceTest {
         AgentModelConfig resolved = modelCapabilityService.resolveModelConfigForTool(digitalHumanTool);
 
         assertThat(resolved).isEqualTo(bound);
+    }
+
+    @Test
+    void resolveModelConfigsForTools_usesOneSnapshotForBoundAndFallbackModels() {
+        AiTool boundTool = new AiTool();
+        boundTool.setId(20L);
+        boundTool.setModelConfigId(99L);
+        boundTool.setToolType("TEXT_GENERATION");
+
+        AiTool fallbackTool = new AiTool();
+        fallbackTool.setId(21L);
+        fallbackTool.setToolType("TEXT_GENERATION");
+
+        AgentModelConfig bound = config(99L, "bound_text", "[\"TEXT_GENERATION\"]", false);
+        bound.setEnabled(false);
+        AgentModelConfig fallback = config(100L, "fallback_text", "[\"TEXT_GENERATION\"]", true);
+        when(agentModelConfigMapper.findAllActive()).thenReturn(List.of(bound, fallback));
+
+        var resolved = modelCapabilityService.resolveModelConfigsForTools(List.of(boundTool, fallbackTool));
+
+        assertThat(resolved)
+                .containsEntry(20L, bound)
+                .containsEntry(21L, fallback);
+        verify(agentModelConfigMapper).findAllActive();
+        verify(agentModelConfigMapper, never()).findActiveById(anyLong());
     }
 
     @Test
@@ -273,8 +299,6 @@ class ModelCapabilityServiceTest {
                 new CapabilityFallback("IMAGE_UNDERSTANDING", List.of("TEXT_GENERATION", "VISION_INPUT")),
                 new CapabilityFallback("SPEECH_TO_TEXT", List.of("SPEECH_TO_TEXT")),
                 new CapabilityFallback("TEXT_TO_SPEECH", List.of("TEXT_TO_SPEECH")),
-                new CapabilityFallback("EMBEDDING", List.of("EMBEDDING")),
-                new CapabilityFallback("RERANK", List.of("RERANK")),
                 new CapabilityFallback("AGENT", List.of("TEXT_GENERATION"))
         );
 
@@ -300,12 +324,6 @@ class ModelCapabilityServiceTest {
         assertThatThrownBy(() -> modelCapabilityService.normalizeRequiredCapabilities(List.of("NOT_A_CAPABILITY")))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("unsupported model capability");
-    }
-
-    @Test
-    void normalizeRequiredCapabilities_acceptsKnownCapabilityWithoutConfiguredProvider() {
-        assertThat(modelCapabilityService.normalizeRequiredCapabilities(List.of(" embedding ", "EMBEDDING")))
-                .containsExactly("EMBEDDING");
     }
 
     @Test

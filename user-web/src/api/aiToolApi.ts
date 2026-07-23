@@ -8,7 +8,8 @@ import type {
   ChatSession,
   FileUploadResult,
 } from "./aiToolTypes"
-import type { PageResult, ToolDetail, ToolSummary } from "./types"
+import type { ToolCompact, ToolDetail, ToolSummary } from "./types"
+import { fetchTools } from "./toolApi"
 import { compressImage } from "@/utils/imageCompressor"
 import {
   isMarketplaceMockToolId,
@@ -54,7 +55,7 @@ async function withSessionMockFallback<T>(
   return request()
 }
 
-function capabilitiesFromTool(tool: ToolSummary): Capability[] {
+function capabilitiesFromTool(tool: ToolCompact): Capability[] {
   const capabilities: Capability[] = []
   const input = (tool.inputModality || "").toUpperCase()
   const output = (tool.outputModality || "").toUpperCase()
@@ -77,9 +78,11 @@ function capabilitiesFromTool(tool: ToolSummary): Capability[] {
 }
 
 function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail, order = 0): AITool {
-  const style = tool.frontendStyle || {}
+  const style = "frontendStyle" in tool ? tool.frontendStyle || {} : {}
+  const cardMedia = "cardMedia" in tool ? tool.cardMedia : null
   const outputModality = (tool.outputModality || "").trim().toUpperCase()
-  const rawMediaDisplayMode = style.mediaDisplayMode ?? (outputModality === "VIDEO" ? "effect" : "icon")
+  const rawMediaDisplayMode =
+    style.mediaDisplayMode ?? cardMedia?.mediaDisplayMode ?? (outputModality === "VIDEO" ? "effect" : "icon")
   const mediaDisplayMode =
     rawMediaDisplayMode === "comparison" ? "comparison" : rawMediaDisplayMode === "effect" ? "effect" : "icon"
   return {
@@ -92,14 +95,15 @@ function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail, order = 0): AITo
     primaryColor: style.primaryColor ?? undefined,
     welcomeMessage: style.welcomeMessage ?? undefined,
     mediaDisplayMode,
-    modelIconUrl: style.modelIconUrl ?? undefined,
-    comparisonOriginalUrl: style.comparisonOriginalUrl ?? undefined,
-    comparisonEffectUrl: style.comparisonEffectUrl ?? undefined,
+    modelIconUrl: style.modelIconUrl ?? cardMedia?.modelIconUrl ?? undefined,
+    comparisonOriginalUrl: style.comparisonOriginalUrl ?? cardMedia?.comparisonOriginalUrl ?? undefined,
+    comparisonEffectUrl: style.comparisonEffectUrl ?? cardMedia?.comparisonEffectUrl ?? undefined,
     audioPreviewUrl: style.audioPreviewUrl ?? undefined,
-    frontendStyle: style,
+    cardMedia,
+    frontendStyle: "frontendStyle" in tool ? tool.frontendStyle : undefined,
     heroTitle: style.heroTitle,
-    heroSubtitle: style.heroSubtitle,
-    demoThumbnails: style.demoThumbnails,
+    heroSubtitle: style.heroSubtitle ?? cardMedia?.heroSubtitle,
+    demoThumbnails: style.demoThumbnails ?? cardMedia?.demoThumbnails,
     useCases: style.useCases,
     steps: style.steps,
     recommendedToolCodes: style.recommendedToolCodes,
@@ -120,9 +124,9 @@ function mapToolSummaryToAITool(tool: ToolSummary | ToolDetail, order = 0): AITo
 export async function fetchEnabledAITools(options?: { token?: string | null }): Promise<AITool[]> {
   return withMockFallback(
     async () => {
-      const page = await apiRequest<PageResult<ToolSummary>>("GET", "/api/v1/tools", {
+      const page = await fetchTools({
         token: options?.token,
-        query: { pageNo: 1, pageSize: 100 },
+        query: { view: "summary", pageNo: 1, pageSize: 100 },
       })
       return [...page.list].reverse().map((tool, index) => mapToolSummaryToAITool(tool, index))
     },

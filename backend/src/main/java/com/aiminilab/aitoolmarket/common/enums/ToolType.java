@@ -11,8 +11,6 @@ public enum ToolType {
     TEXT_TO_SPEECH,
     MUSIC_GENERATION,
     VIDEO_GENERATION,
-    EMBEDDING,
-    RERANK,
     AGENT;
 
     public static ToolType fromNullable(String value) {

@@ -70,7 +70,9 @@ public class CommunityServiceImpl implements CommunityService {
     private static final int MAX_TAGS = 6;
     private static final int MAX_COLLECTION_NAME_LENGTH = 80;
     private static final java.util.regex.Pattern MEDIA_URL_PATTERN = java.util.regex.Pattern
-            .compile("(https?://[^\\s\\\"'<>\\])},]+|/generated/[^\\s\\\"'<>\\])},]+|/api/v1/assets/[^\\s\\\"'<>\\])},]+)");
+            .compile("(https?://[^\\s\\\"<>]+|/generated/[^\\s\\\"<>]+|/api/v1/assets/[^\\s\\\"<>]+)");
+    private static final java.util.regex.Pattern TRAILING_URL_DELIMITER_PATTERN = java.util.regex.Pattern
+            .compile("[\"}\\]]+$");
 
     private static final int MAX_REPORT_REASON_LENGTH = 500;
 
@@ -1744,6 +1746,17 @@ public class CommunityServiceImpl implements CommunityService {
             JsonNode root = objectMapper.readTree(contentText);
             String videoUrl = firstVideoUrl(root, "finalVideoUrl", "videoUrl", "mediaUrl", "url", "src");
             if (videoUrl == null) {
+                JsonNode videos = root.path("videos");
+                if (videos.isArray()) {
+                    for (JsonNode video : videos) {
+                        videoUrl = firstVideoUrl(video, "url", "videoUrl", "mediaUrl", "src");
+                        if (videoUrl != null) {
+                            break;
+                        }
+                    }
+                }
+            }
+            if (videoUrl == null) {
                 JsonNode segments = root.path("segments");
                 if (segments.isArray()) {
                     for (JsonNode segment : segments) {
@@ -1799,9 +1812,7 @@ public class CommunityServiceImpl implements CommunityService {
     }
 
     private String findFirstUrlByPredicate(String contentText, java.util.function.Predicate<String> predicate) {
-        java.util.regex.Matcher matcher = java.util.regex.Pattern
-                .compile("(https?://\\S+|/generated/\\S+)")
-                .matcher(contentText);
+        java.util.regex.Matcher matcher = MEDIA_URL_PATTERN.matcher(contentText);
         while (matcher.find()) {
             String candidate = trimUrl(matcher.group(1));
             if (candidate != null && predicate.test(candidate)) {
@@ -1824,9 +1835,7 @@ public class CommunityServiceImpl implements CommunityService {
         } catch (Exception ignored) {
             // Plain text results can still contain a URL.
         }
-        java.util.regex.Matcher matcher = java.util.regex.Pattern
-                .compile("(https?://\\S+|/generated/\\S+|/api/v1/assets/\\S+)")
-                .matcher(contentText);
+        java.util.regex.Matcher matcher = MEDIA_URL_PATTERN.matcher(contentText);
         return matcher.find() ? trimUrl(matcher.group(1)) : null;
     }
 
@@ -1846,9 +1855,7 @@ public class CommunityServiceImpl implements CommunityService {
         if (parsedJson) {
             return new ArrayList<>(urls);
         }
-        java.util.regex.Matcher matcher = java.util.regex.Pattern
-                .compile("(https?://\\S+|/generated/\\S+|/api/v1/assets/\\S+)")
-                .matcher(contentText);
+        java.util.regex.Matcher matcher = MEDIA_URL_PATTERN.matcher(contentText);
         while (matcher.find()) {
             String candidate = trimUrl(matcher.group(1));
             if (candidate != null && looksLikeImageUrl(candidate)) {
@@ -2000,6 +2007,8 @@ public class CommunityServiceImpl implements CommunityService {
     }
 
     private String trimUrl(String value) {
-        return value == null ? null : value.replaceAll("[\\])},.]+$", "");
+        return value == null
+                ? null
+                : TRAILING_URL_DELIMITER_PATTERN.matcher(value.trim()).replaceAll("");
     }
 }

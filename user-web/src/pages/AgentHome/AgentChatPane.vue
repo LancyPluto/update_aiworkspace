@@ -85,7 +85,7 @@ import type {
   AgentWorkspace,
   AgentWorkspaceMemoryItem,
   TaskDetail,
-  ToolSummary,
+  ToolCompact,
   UserUploadAsset,
 } from "@/api/types"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
@@ -168,7 +168,7 @@ const uploadedFileCache = ref<Record<number, AgentFile>>({})
 const events = ref<AgentRunEvent[]>([])
 const runEventsByRunId = ref<Record<number, AgentRunEvent[]>>({})
 const submittedAttachmentJsonByRunId = ref<Record<number, string>>({})
-const previewTools = ref<ToolSummary[]>([])
+const previewTools = ref<ToolCompact[]>([])
 const agentTools = ref<AgentToolPickerItem[]>([])
 const agentToolsLoading = ref(false)
 const selectedToolCode = ref<string | null>(null)
@@ -1943,7 +1943,10 @@ async function submitMessage(content = input.value) {
 async function loadPreviewTools() {
   if (!auth.isLoggedIn) return
   try {
-    const response = await fetchTools({ token: props.token, query: { pageNo: 1, pageSize: 120 } })
+    const response = await fetchTools({
+      token: props.token,
+      query: { view: "compact", pageNo: 1, pageSize: 100 },
+    })
     previewTools.value = response.list
   } catch {
     previewTools.value = []

@@ -1,6 +1,7 @@
 package com.aiminilab.aitoolmarket.tool;
 
 import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
+import com.aiminilab.aitoolmarket.common.cache.CacheNamespaces;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -20,6 +21,7 @@ import static org.hamcrest.Matchers.aMapWithSize;
 import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -164,6 +166,15 @@ class ToolApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.toolCode").value("search_copywriting"))
                 .andExpect(jsonPath("$.data.fields[0].fieldKey").value("productName"));
+    }
+
+    @Test
+    void publicToolListRejectsUnsupportedView() throws Exception {
+        mockMvc.perform(get("/api/v1/tools")
+                        .param("view", "full"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PARAM_ERROR"))
+                .andExpect(jsonPath("$.message").value("view must be one of: summary, compact"));
     }
 
     @Test
@@ -388,6 +399,73 @@ class ToolApiTest {
     }
 
     @Test
+    void unboundToolUsesStaticEstimatedCreditsAcrossPublicViewsAndDetail() throws Exception {
+        String adminToken = loginAdmin();
+
+        mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName": "Unbound Fallback Guard Model",
+                                  "configCode": "unbound_fallback_guard_model",
+                                  "provider": "siliconflow_images",
+                                  "modelName": "Tongyi-MAI/Z-Image-Turbo",
+                                  "baseUrl": "https://api.siliconflow.cn",
+                                  "apiKey": "fake-key",
+                                  "timeoutSeconds": 60,
+                                  "billingUnit": "PER_CALL",
+                                  "unitPrice": 0.03,
+                                  "capabilities": ["IMAGE_GENERATION"],
+                                  "enabled": true,
+                                  "agentEnabled": false,
+                                  "isDefault": false
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        String createResponse = mockMvc.perform(post("/api/admin/v1/tools")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "toolCode": "unbound_static_credit_tool",
+                                  "toolName": "Unbound Static Credit Tool",
+                                  "categoryId": 2,
+                                  "description": "static fallback credit regression guard",
+                                  "coverUrl": "",
+                                  "toolType": "IMAGE_GENERATION",
+                                  "inputModality": "TEXT",
+                                  "outputModality": "IMAGE",
+                                  "executionHandler": "IMAGE_GENERATION",
+                                  "estimatedCreditCost": 37
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.modelConfigId").doesNotExist())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long toolId = Long.parseLong(createResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+        publishTool(adminToken, toolId);
+
+        mockMvc.perform(get("/api/v1/tools")
+                        .param("keyword", "unbound_static_credit_tool"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].estimatedCreditCost").value(37));
+
+        mockMvc.perform(get("/api/v1/tools")
+                        .param("keyword", "unbound_static_credit_tool")
+                        .param("view", "compact"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].estimatedCreditCost").value(37));
+
+        mockMvc.perform(get("/api/v1/tools/unbound_static_credit_tool"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.estimatedCreditCost").value(37));
+    }
+
+    @Test
     void publicToolResponsesDoNotExposeInternalConfigNotesOrEngineSecrets() throws Exception {
         String adminToken = loginAdmin();
         Long modelConfigId = createPublicContractModelConfig(adminToken);
@@ -451,17 +529,42 @@ class ToolApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].toolCode").value("public_secret_guard_tool"))
                 .andExpect(jsonPath("$.data.list[0].modelDisplayName").value("Public Contract Model"))
-                .andExpect(jsonPath("$.data.list[0].frontendStyle.heroSubtitle").value("Safe subtitle"))
-                .andExpect(jsonPath("$.data.list[0].frontendStyle.demoThumbnails", hasItem("https://cdn.example.com/one.webp")))
-                .andExpect(jsonPath("$.data.list[0].frontendStyle.demoThumbnails[1]").doesNotExist())
-                .andExpect(jsonPath("$.data.list[0].frontendStyle.heroTitle").doesNotExist());
+                .andExpect(jsonPath("$.data.list[0].cardMedia", aMapWithSize(3)))
+                .andExpect(jsonPath("$.data.list[0].cardMedia.mediaDisplayMode").value("icon"))
+                .andExpect(jsonPath("$.data.list[0].cardMedia.heroSubtitle").value("Safe subtitle"))
+                .andExpect(jsonPath("$.data.list[0].cardMedia.demoThumbnails", hasItem("https://cdn.example.com/one.webp")))
+                .andExpect(jsonPath("$.data.list[0].cardMedia.demoThumbnails[1]").doesNotExist())
+                .andExpect(jsonPath("$.data.list[0].cardMedia.heroTitle").doesNotExist())
+                .andExpect(jsonPath("$.data.list[0].cardMedia.primaryColor").doesNotExist())
+                .andExpect(jsonPath("$.data.list[0].frontendStyle").doesNotExist());
         assertPublicToolContract(listResponse, "$.data.list[0]", 14);
 
-        ResultActions searchResponse = mockMvc.perform(get("/api/v1/tools/search")
-                        .param("keyword", "safe public description"))
+        ResultActions compactResponse = mockMvc.perform(get("/api/v1/tools")
+                        .param("keyword", "public_secret_guard_tool")
+                        .param("view", "compact"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.list[0].toolCode").value("public_secret_guard_tool"));
-        assertPublicToolContract(searchResponse, "$.data.list[0]", 14);
+                .andExpect(jsonPath("$.data.list[0].toolCode").value("public_secret_guard_tool"))
+                .andExpect(jsonPath("$.data.list[0].estimatedCreditCost").value(5))
+                .andExpect(jsonPath("$.data.list[0].modelDisplayName").value("Public Contract Model"))
+                .andExpect(jsonPath("$.data.list[0].cardMedia").doesNotExist())
+                .andExpect(jsonPath("$.data.list[0].frontendStyle").doesNotExist());
+        assertPublicToolContract(compactResponse, "$.data.list[0]", 13);
+
+        ResultActions compactSearchResponse = mockMvc.perform(get("/api/v1/tools/search")
+                        .param("keyword", "safe public description")
+                        .param("view", "compact"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].toolCode").value("public_secret_guard_tool"))
+                .andExpect(jsonPath("$.data.list[0].cardMedia").doesNotExist())
+                .andExpect(jsonPath("$.data.list[0].frontendStyle").doesNotExist());
+        assertPublicToolContract(compactSearchResponse, "$.data.list[0]", 13);
+
+        String summaryCacheKey = CacheNamespaces.toolList(7, "summary", "same-query");
+        String compactCacheKey = CacheNamespaces.toolList(7, "compact", "same-query");
+        assertThat(summaryCacheKey)
+                .contains("tool:list:v3:summary")
+                .isNotEqualTo(compactCacheKey);
+        assertThat(compactCacheKey).contains("tool:list:v3:compact");
 
         ResultActions detailResponse = mockMvc.perform(get("/api/v1/tools/public_secret_guard_tool"))
                 .andExpect(status().isOk())

@@ -24,7 +24,7 @@ import {
 import { publishAssetToCommunity, type CommunityPublishPayload } from "@/utils/publishCommunityAsset"
 import { emitCommunityPostUnpublished } from "@/utils/communitySync"
 import { fetchTools } from "@/api/toolApi"
-import type { TaskDetail, ToolSummary } from "@/api/types"
+import type { TaskDetail, ToolCompact } from "@/api/types"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
 import type { ResultBlock } from "@/types/result"
 import { userRoutes } from "@/router/userRoutes"
@@ -60,7 +60,7 @@ const loading = ref(false)
 const error = ref("")
 const tasks = ref<TaskDetail[]>([])
 const usageTasks = ref<TaskDetail[]>([])
-const tools = ref<ToolSummary[]>([])
+const tools = ref<ToolCompact[]>([])
 const selectedModality = ref<MaterialModality>("all")
 const selectTool = ref("all")
 const sortType = ref("desc")
@@ -202,7 +202,7 @@ async function loadMaterials(reset = true) {
     currentPage.value += 1
     if (reset) {
       const [toolResponse, usageResponse] = await Promise.all([
-        fetchTools({ token: auth.token, query: { pageNo: 1, pageSize: 120 } }),
+        fetchTools({ token: auth.token, query: { view: "compact", pageNo: 1, pageSize: 100 } }),
         fetchTasks({ token: auth.token, query: { pageNo: 1, pageSize: 120 } }).catch(() => null),
       ])
       tools.value = toolResponse.list

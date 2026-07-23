@@ -23,24 +23,24 @@ public record PublicToolDetailResponse(
         PublicToolFrontendStyleResponse frontendStyle
 ) {
     public static PublicToolDetailResponse of(
-            PublicToolSummaryResponse summary,
+            PublicToolCompactResponse compact,
             List<PublicToolFieldResponse> fields,
             PublicToolFrontendStyleResponse frontendStyle
     ) {
         return new PublicToolDetailResponse(
-                summary.toolCode(),
-                summary.toolName(),
-                summary.categoryCode(),
-                summary.categoryName(),
-                summary.description(),
-                summary.coverUrl(),
-                summary.toolType(),
-                summary.inputModality(),
-                summary.outputModality(),
-                summary.toolKind(),
-                summary.estimatedCreditCost(),
-                summary.variableCreditPricing(),
-                summary.modelDisplayName(),
+                compact.toolCode(),
+                compact.toolName(),
+                compact.categoryCode(),
+                compact.categoryName(),
+                compact.description(),
+                compact.coverUrl(),
+                compact.toolType(),
+                compact.inputModality(),
+                compact.outputModality(),
+                compact.toolKind(),
+                compact.estimatedCreditCost(),
+                compact.variableCreditPricing(),
+                compact.modelDisplayName(),
                 fields,
                 frontendStyle
         );

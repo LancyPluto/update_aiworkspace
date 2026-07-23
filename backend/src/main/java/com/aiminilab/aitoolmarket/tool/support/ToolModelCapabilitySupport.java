@@ -20,9 +20,7 @@ public final class ToolModelCapabilitySupport {
             "TEXT_TO_SPEECH",
             "SPEECH_TO_TEXT",
             "MUSIC_GENERATION",
-            "AUDIO_GENERATION",
-            "EMBEDDING",
-            "RERANK"
+            "AUDIO_GENERATION"
     );
 
     private ToolModelCapabilitySupport() {

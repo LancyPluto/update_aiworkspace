@@ -1,5 +1,6 @@
 package com.aiminilab.aitoolmarket.tool.service.impl;
 
+import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.common.cache.BypassCacheService;
 import com.aiminilab.aitoolmarket.common.cache.CacheNamespaces;
 import com.aiminilab.aitoolmarket.support.GeneratedMediaPathSupport;
@@ -20,10 +21,12 @@ import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaItemRequest;
 import com.aiminilab.aitoolmarket.tool.dto.FieldSchemaResponse;
 import com.aiminilab.aitoolmarket.tool.dto.PromptResponse;
 import com.aiminilab.aitoolmarket.tool.dto.PromptVersionResponse;
+import com.aiminilab.aitoolmarket.tool.dto.PublicToolCompactResponse;
 import com.aiminilab.aitoolmarket.tool.dto.PublicToolDetailResponse;
 import com.aiminilab.aitoolmarket.tool.dto.PublicToolFieldResponse;
 import com.aiminilab.aitoolmarket.tool.dto.PublicToolFrontendStyleResponse;
 import com.aiminilab.aitoolmarket.tool.dto.PublicToolSummaryResponse;
+import com.aiminilab.aitoolmarket.tool.dto.PublicToolView;
 import com.aiminilab.aitoolmarket.tool.dto.TestGenerateRequest;
 import com.aiminilab.aitoolmarket.tool.dto.TestGenerateResponse;
 import com.aiminilab.aitoolmarket.tool.dto.ToolCategoryResponse;
@@ -190,21 +193,26 @@ public class ToolServiceImpl implements ToolService {
     }
 
     @Override
-    public PageResponse<PublicToolSummaryResponse> userTools(
+    public PageResponse<?> userTools(
             String keyword,
             Long categoryId,
             Integer pageNo,
-            Integer pageSize
+            Integer pageSize,
+            PublicToolView view
     ) {
+        PublicToolView effectiveView = view == null ? PublicToolView.SUMMARY : view;
         String queryHash = toolListQueryHash(keyword, categoryId, pageNo, pageSize);
         long version = bypassCacheService.currentToolListVersion();
+        Class<?> elementType = effectiveView == PublicToolView.COMPACT
+                ? PublicToolCompactResponse.class
+                : PublicToolSummaryResponse.class;
         JavaType type = objectMapper.getTypeFactory()
-                .constructParametricType(PageResponse.class, PublicToolSummaryResponse.class);
+                .constructParametricType(PageResponse.class, elementType);
         return bypassCacheService.getOrLoad(
-                CacheNamespaces.toolList(version, queryHash),
+                CacheNamespaces.toolList(version, effectiveView.cacheKey(), queryHash),
                 bypassCacheService.toolTtl(),
                 type,
-                () -> loadUserTools(keyword, categoryId, pageNo, pageSize)
+                () -> loadUserTools(keyword, categoryId, pageNo, pageSize, effectiveView)
         );
     }
 
@@ -219,18 +227,36 @@ public class ToolServiceImpl implements ToolService {
         );
     }
 
-    private PageResponse<PublicToolSummaryResponse> loadUserTools(
+    private PageResponse<?> loadUserTools(
             String keyword,
             Long categoryId,
             Integer pageNo,
-            Integer pageSize
+            Integer pageSize,
+            PublicToolView view
     ) {
         int normalizedPageSize = PageResponse.normalizePageSize(pageSize);
         int offset = PageResponse.offset(pageNo, pageSize);
-        List<PublicToolSummaryResponse> list = toolMapper
-                .findTools(true, keyword, categoryId, null, normalizedPageSize, offset)
-                .stream()
-                .map(this::toPublicSummary)
+        List<AiTool> tools = view == PublicToolView.COMPACT
+                ? toolMapper.findPublicCompactTools(keyword, categoryId, normalizedPageSize, offset)
+                : toolMapper.findPublicSummaryTools(keyword, categoryId, normalizedPageSize, offset);
+        Map<Long, Boolean> variablePricingByToolId = tools.stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        AiTool::getId,
+                        workflowExecutionService::shouldUseWorkflow
+                ));
+        List<AiTool> boundFixedPriceTools = tools.stream()
+                .filter(tool -> !Boolean.TRUE.equals(variablePricingByToolId.get(tool.getId())))
+                .filter(tool -> tool.getModelConfigId() != null)
+                .toList();
+        Map<Long, AgentModelConfig> modelConfigByToolId =
+                modelCapabilityService.resolveModelConfigsForTools(boundFixedPriceTools);
+        List<?> list = tools.stream()
+                .map(tool -> toPublicListItem(
+                        tool,
+                        view,
+                        Boolean.TRUE.equals(variablePricingByToolId.get(tool.getId())),
+                        modelConfigByToolId.get(tool.getId())
+                ))
                 .toList();
         long total = toolMapper.countTools(true, keyword, categoryId, null);
         return PageResponse.of(list, total, pageNo, pageSize);
@@ -239,12 +265,12 @@ public class ToolServiceImpl implements ToolService {
     private PublicToolDetailResponse loadUserToolDetail(String toolCode) {
         AiTool tool = toolMapper.findOnlineByCode(toolCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TOOL_NOT_FOUND, "工具不存在或未上线"));
-        PublicToolSummaryResponse summary = toPublicSummary(tool);
+        PublicToolCompactResponse compact = toPublicCompact(tool);
         List<PublicToolFieldResponse> publicFields = fields(tool.getId()).stream()
                 .map(PublicToolFieldResponse::from)
                 .toList();
         return PublicToolDetailResponse.of(
-                summary,
+                compact,
                 publicFields,
                 PublicToolFrontendStyleResponse.detailFrom(
                         ToolFrontendStyleConfig.fromConfigNote(tool.getConfigNote(), objectMapper))
@@ -258,17 +284,43 @@ public class ToolServiceImpl implements ToolService {
                 + PageResponse.normalizePageNo(pageNo) + ":" + PageResponse.normalizePageSize(pageSize);
     }
 
-    private PublicToolSummaryResponse toPublicSummary(AiTool tool) {
+    private Object toPublicListItem(
+            AiTool tool,
+            PublicToolView view,
+            boolean variableCreditPricing,
+            AgentModelConfig modelConfig
+    ) {
+        PublicToolCompactResponse compact = toPublicCompact(tool, variableCreditPricing, modelConfig);
+        if (view == PublicToolView.COMPACT) {
+            return compact;
+        }
+        return PublicToolSummaryResponse.from(
+                compact,
+                ToolFrontendStyleConfig.fromConfigNote(tool.getConfigNote(), objectMapper)
+        );
+    }
+
+    private PublicToolCompactResponse toPublicCompact(AiTool tool) {
         boolean variableCreditPricing = workflowExecutionService.shouldUseWorkflow(tool);
+        AgentModelConfig modelConfig = variableCreditPricing || tool.getModelConfigId() == null
+                ? null
+                : modelCapabilityService.resolveModelConfigForTool(tool);
+        return toPublicCompact(tool, variableCreditPricing, modelConfig);
+    }
+
+    private PublicToolCompactResponse toPublicCompact(
+            AiTool tool,
+            boolean variableCreditPricing,
+            AgentModelConfig modelConfig
+    ) {
         Integer estimatedCredits = variableCreditPricing
                 ? null
-                : taskCreditEstimateService.estimateUserFacingTaskCredits(tool);
-        return PublicToolSummaryResponse.from(
+                : taskCreditEstimateService.estimateUserFacingTaskCredits(tool, modelConfig);
+        return PublicToolCompactResponse.from(
                 tool,
                 assetStorageService.rewriteResultUrl(tool.getCoverUrl(), false),
                 estimatedCredits,
-                variableCreditPricing,
-                objectMapper
+                variableCreditPricing
         );
     }
 
@@ -797,7 +849,6 @@ public class ToolServiceImpl implements ToolService {
             case IMAGE_GENERATION, IMAGE_TO_IMAGE -> ToolModality.IMAGE;
             case TEXT_TO_SPEECH, MUSIC_GENERATION -> ToolModality.AUDIO;
             case VIDEO_GENERATION -> ToolModality.VIDEO;
-            case EMBEDDING, RERANK -> ToolModality.JSON;
             default -> ToolModality.TEXT;
         };
     }

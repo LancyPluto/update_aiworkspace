@@ -40,7 +40,7 @@ test("resolveSummaryToolCoverUrl prefers mp4 for video tools over effect jpg", (
     toolName: "HappyHorse-视频编辑",
     outputModality: "VIDEO",
     coverUrl: "https://cdn.example.com/tool-covers/demo.mp4",
-    frontendStyle: {
+    cardMedia: {
       comparisonEffectUrl: "https://cdn.example.com/tool-covers/broken.jpg",
       demoThumbnails: [],
     },

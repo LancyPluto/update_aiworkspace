@@ -1,10 +1,7 @@
 package com.aiminilab.aitoolmarket.tool.dto;
 
-import com.aiminilab.aitoolmarket.tool.entity.AiTool;
 import com.aiminilab.aitoolmarket.tool.support.ToolFrontendStyleConfig;
-import com.aiminilab.aitoolmarket.tool.support.ToolKindSupport;
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record PublicToolSummaryResponse(
@@ -21,31 +18,27 @@ public record PublicToolSummaryResponse(
         Integer estimatedCreditCost,
         Boolean variableCreditPricing,
         String modelDisplayName,
-        PublicToolFrontendStyleResponse frontendStyle
+        PublicToolCardMediaResponse cardMedia
 ) {
     public static PublicToolSummaryResponse from(
-            AiTool tool,
-            String publicCoverUrl,
-            Integer estimatedCreditCost,
-            boolean variableCreditPricing,
-            ObjectMapper objectMapper
+            PublicToolCompactResponse compact,
+            ToolFrontendStyleConfig frontendStyle
     ) {
         return new PublicToolSummaryResponse(
-                tool.getToolCode(),
-                tool.getToolName(),
-                tool.getCategoryCode(),
-                tool.getCategoryName(),
-                tool.getDescription(),
-                publicCoverUrl,
-                tool.getToolType(),
-                tool.getInputModality(),
-                tool.getOutputModality(),
-                ToolKindSupport.resolve(tool),
-                variableCreditPricing ? null : estimatedCreditCost,
-                variableCreditPricing,
-                tool.getModelDisplayName(),
-                PublicToolFrontendStyleResponse.summaryFrom(
-                        ToolFrontendStyleConfig.fromConfigNote(tool.getConfigNote(), objectMapper))
+                compact.toolCode(),
+                compact.toolName(),
+                compact.categoryCode(),
+                compact.categoryName(),
+                compact.description(),
+                compact.coverUrl(),
+                compact.toolType(),
+                compact.inputModality(),
+                compact.outputModality(),
+                compact.toolKind(),
+                compact.estimatedCreditCost(),
+                compact.variableCreditPricing(),
+                compact.modelDisplayName(),
+                PublicToolCardMediaResponse.from(frontendStyle)
         );
     }
 }
