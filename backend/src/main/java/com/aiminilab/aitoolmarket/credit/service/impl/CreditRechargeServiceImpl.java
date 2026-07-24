@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.credit.service.impl;
 
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.enums.RechargeOrderStatus;
+import com.aiminilab.aitoolmarket.common.error.ErrorMessageSanitizer;
 import com.aiminilab.aitoolmarket.common.exception.AppException;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.credit.alipay.AlipayNotification;
@@ -66,6 +67,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
     private static final DateTimeFormatter ORDER_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final int ORDER_EXPIRE_MINUTES = 30;
     private static final int WECHAT_QUERY_THROTTLE_SECONDS = 10;
+    private static final String PAYMENT_FAILURE_USER_MESSAGE = "支付处理失败，请稍后重试";
 
     private final CreditRechargePackageMapper packageMapper;
     private final GiftCardPackageMapper giftCardPackageMapper;
@@ -261,7 +263,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
                 if (orderMapper.bindPayUrl(order.getId(), payBinding, "Alipay page pay order created", LocalDateTime.now()) != 1) {
                     throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed before Alipay pay binding");
                 }
-            } catch (BusinessException exception) {
+            } catch (AppException exception) {
                 orderMapper.transit(order.getId(), RechargeOrderStatus.WAITING_PAYMENT.name(), RechargeOrderStatus.FAILED.name(),
                         statusReason(exception), LocalDateTime.now());
                 throw exception;
@@ -350,7 +352,7 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
                 if (orderMapper.bindPayUrl(order.getId(), payBinding, "Alipay page pay order created", LocalDateTime.now()) != 1) {
                     throw new BusinessException(ErrorCode.PARAM_ERROR, "recharge order status changed before Alipay pay binding");
                 }
-            } catch (BusinessException exception) {
+            } catch (AppException exception) {
                 orderMapper.transit(order.getId(), RechargeOrderStatus.WAITING_PAYMENT.name(), RechargeOrderStatus.FAILED.name(),
                         statusReason(exception), LocalDateTime.now());
                 throw exception;
@@ -897,10 +899,12 @@ public class CreditRechargeServiceImpl implements CreditRechargeService {
     }
 
     private String statusReason(Exception exception) {
-        String message = exception.getMessage();
-        if (message == null || message.isBlank()) {
-            return "payment gateway request failed";
-        }
+        String message = exception instanceof AppException appException
+                ? ErrorMessageSanitizer.sanitizeUserMessage(
+                        appException.getUserMessage(),
+                        appException.getErrorDefinition().defaultUserMessage()
+                )
+                : PAYMENT_FAILURE_USER_MESSAGE;
         return message.length() <= 255 ? message : message.substring(0, 252) + "...";
     }
 

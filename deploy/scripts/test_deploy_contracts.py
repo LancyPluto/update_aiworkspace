@@ -556,6 +556,193 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("run_remote_script <<REMOTE", deploy)
         self.assertNotIn('ssh_cmd "bash -s" <<REMOTE', deploy)
 
+    def _run_compose_image_prepull(
+        self,
+        succeed_on_attempt: int,
+        *,
+        attempts: int = 3,
+        timeout_seconds: int = 5,
+        hang_seconds: int = 0,
+    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+        bash = shutil.which("bash") or "bash"
+        if os.name == "nt":
+            git_command = shutil.which("git")
+            if git_command:
+                git_bash = pathlib.Path(git_command).resolve().parent.parent / "bin/bash.exe"
+                if git_bash.exists():
+                    bash = str(git_bash)
+
+        temp_root = ROOT / "deploy/logs"
+        temp_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=temp_root) as temp_dir:
+            temp = pathlib.Path(temp_dir)
+            fake_bin = temp / "bin"
+            fake_bin.mkdir()
+            docker_log = temp / "docker.log"
+            attempt_file = temp / "attempt"
+            fake_docker = fake_bin / "docker"
+            fake_docker.write_text(
+                """#!/usr/bin/env bash
+set -euo pipefail
+attempt=0
+if [ -f "$FAKE_DOCKER_ATTEMPT_FILE" ]; then
+  attempt="$(cat "$FAKE_DOCKER_ATTEMPT_FILE")"
+fi
+attempt=$((attempt + 1))
+printf '%s' "$attempt" > "$FAKE_DOCKER_ATTEMPT_FILE"
+printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
+if [ "$FAKE_DOCKER_HANG_SECONDS" -gt 0 ]; then
+  sleep "$FAKE_DOCKER_HANG_SECONDS"
+fi
+if [ "$attempt" -lt "$FAKE_DOCKER_SUCCEED_ON_ATTEMPT" ]; then
+  echo 'net/http: TLS handshake timeout' >&2
+  exit 1
+fi
+""",
+                encoding="utf-8",
+                newline="\n",
+            )
+            fake_docker.chmod(0o755)
+
+            def bash_path(path: pathlib.Path) -> str:
+                value = path.resolve().as_posix()
+                if os.name == "nt":
+                    return f"/{value[0].lower()}{value[2:]}"
+                return value
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{bash_path(fake_bin)}:/usr/bin:/bin",
+                    "FAKE_DOCKER_LOG": bash_path(docker_log),
+                    "FAKE_DOCKER_ATTEMPT_FILE": bash_path(attempt_file),
+                    "FAKE_DOCKER_SUCCEED_ON_ATTEMPT": str(succeed_on_attempt),
+                    "FAKE_DOCKER_HANG_SECONDS": str(hang_seconds),
+                    "COMPOSE_IMAGE_PULL_ATTEMPTS": str(attempts),
+                    "COMPOSE_IMAGE_PULL_TIMEOUT_SECONDS": str(timeout_seconds),
+                    "COMPOSE_IMAGE_PULL_BACKOFF_SECONDS": "0",
+                }
+            )
+            result = subprocess.run(
+                [
+                    bash,
+                    "scripts/prepull_compose_images.sh",
+                    "--env-file",
+                    "../.env",
+                    "-f",
+                    "docker-compose.yml",
+                    "-f",
+                    "docker-compose.nginx.yml",
+                    "-f",
+                    "docker-compose.proxy.yml",
+                    "-f",
+                    "docker-compose.monitoring.yml",
+                ],
+                cwd=ROOT / "deploy",
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            calls = (
+                docker_log.read_text(encoding="utf-8").splitlines()
+                if docker_log.exists()
+                else []
+            )
+            return result, calls
+
+    def test_external_image_prepull_retries_transient_registry_failure(self) -> None:
+        result, calls = self._run_compose_image_prepull(succeed_on_attempt=3)
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(3, len(calls))
+        self.assertEqual(
+            {
+                "compose --env-file ../.env -f docker-compose.yml "
+                "-f docker-compose.nginx.yml -f docker-compose.proxy.yml "
+                "-f docker-compose.monitoring.yml "
+                "pull --policy missing --ignore-buildable"
+            },
+            set(calls),
+        )
+        self.assertIn("attempt 3/3 succeeded", result.stdout)
+
+    def test_external_image_prepull_fails_after_bounded_attempts(self) -> None:
+        result, calls = self._run_compose_image_prepull(succeed_on_attempt=4)
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(3, len(calls))
+        self.assertIn("failed after 3 attempts", result.stderr)
+
+    def test_external_image_prepull_terminates_a_hung_registry_call(self) -> None:
+        result, calls = self._run_compose_image_prepull(
+            succeed_on_attempt=1,
+            attempts=1,
+            timeout_seconds=1,
+            hang_seconds=3,
+        )
+
+        self.assertEqual(124, result.returncode)
+        self.assertEqual(1, len(calls))
+        self.assertIn("failed after 1 attempts", result.stderr)
+
+    def test_deploy_prepulls_images_before_database_and_container_changes(self) -> None:
+        deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
+        prepull_script = self.read("deploy/scripts/prepull_compose_images.sh")
+        prepull = deploy.index("prepull_compose_images.sh")
+        first_up = deploy.index('docker compose "\\${COMPOSE_ARGS[@]}" up')
+
+        self.assertLess(deploy.index("trap rollback_on_failure ERR"), prepull)
+        self.assertLess(prepull, first_up)
+        self.assertLess(prepull, deploy.index("prepare_production_credentials.sh"))
+        self.assertLess(prepull, deploy.index("backup_mysql.sh"))
+        self.assertLess(prepull, deploy.index("apply_sql_migrations.sh"))
+        self.assertLess(prepull, deploy.index("Building services in parallel"))
+        self.assertIn(
+            'COMPOSE_PULL_POLICY=never bash "\\$REMOTE_DIR/deploy/scripts/prepare_production_credentials.sh"',
+            deploy,
+        )
+        self.assertIn(
+            'bash "\\$REMOTE_DIR/deploy/scripts/prepull_compose_images.sh" "\\${COMPOSE_ARGS[@]}"',
+            deploy,
+        )
+        self.assertIn(
+            'timeout -k 10s "${PULL_TIMEOUT_SECONDS}s"',
+            prepull_script,
+        )
+        active_up_lines = {
+            line.strip()
+            for line in deploy.splitlines()
+            if 'docker compose "\\${COMPOSE_ARGS[@]}" up ' in line
+        }
+        self.assertEqual(
+            {
+                'docker compose "\\${COMPOSE_ARGS[@]}" up -d --pull never mihomo',
+                'docker compose "\\${COMPOSE_ARGS[@]}" up -d --pull never mysql',
+                'docker compose "\\${COMPOSE_ARGS[@]}" up -d --force-recreate --no-deps --no-build --pull never \\$APP_SERVICES',
+                'docker compose "\\${COMPOSE_ARGS[@]}" up -d --force-recreate --no-build --pull never \\$MONITORING_SERVICES',
+                'docker compose "\\${COMPOSE_ARGS[@]}" up -d --no-build --pull never \\$MONITORING_STACK',
+            },
+            active_up_lines,
+        )
+
+        credentials = self.read("deploy/scripts/prepare_production_credentials.sh")
+        self.assertIn('COMPOSE_PULL_POLICY="${COMPOSE_PULL_POLICY:-missing}"', credentials)
+        self.assertIn('up -d --pull "$COMPOSE_PULL_POLICY" mysql rabbitmq', credentials)
+
+        rollback = self.read("deploy/scripts/rollback_release.sh")
+        rollback_up_lines = [
+            line.strip()
+            for line in rollback.splitlines()
+            if 'docker compose "${compose_args[@]}" up ' in line
+        ]
+        self.assertEqual(4, len(rollback_up_lines))
+        for line in rollback_up_lines:
+            self.assertIn("--no-build", line)
+            self.assertIn("--pull never", line)
+
     def test_actual_remote_diff_adds_services_missed_by_runner_detection(self) -> None:
         resolver = ROOT / "deploy/scripts/resolve_deploy_services.sh"
         bash = shutil.which("bash") or "bash"
@@ -859,13 +1046,16 @@ class DeployContractTests(unittest.TestCase):
             self.read("deploy/scripts/ci_remote_deploy.sh"),
             self.read("deploy/scripts/remote_deploy_production.py"),
         )
-        for deploy in deploys:
+        for index, deploy in enumerate(deploys):
             self.assertIn("MIHOMO_ENABLED=true", deploy)
             self.assertIn("MIHOMO_CONTROLLER_SECRET", deploy)
             self.assertIn("docker-compose.proxy.yml", deploy)
             self.assertIn("--env-file ../.env", deploy)
             self.assertIn("Removing legacy Mihomo container", deploy)
-            self.assertIn("up -d mihomo", deploy)
+            expected_mihomo_start = (
+                "up -d --pull never mihomo" if index == 0 else "up -d mihomo"
+            )
+            self.assertIn(expected_mihomo_start, deploy)
             self.assertIn("docker inspect mihomo", deploy)
             self.assertIn("unmanaged Mihomo container named mihomo", deploy)
             self.assertIn("--force-recreate --no-deps", deploy)
@@ -2070,7 +2260,7 @@ exit 2
         self.assertIn("monitoring_requested", rollback)
         self.assertIn('if [ -z "${DEPLOY_SERVICES//[[:space:]]/}" ]', rollback)
         self.assertIn(
-            'up -d --force-recreate "${available_monitoring_services[@]}"',
+            'up -d --force-recreate --no-build --pull never "${available_monitoring_services[@]}"',
             rollback,
         )
         self.assertIn("Restoring complete old revision monitoring stack", rollback)
@@ -2078,7 +2268,10 @@ exit 2
         self.assertIn('REQUIRE_MONITORING=0 bash "$health_script"', rollback)
         self.assertIn("compatibility mode", rollback)
         self.assertIn("nginx_requested", rollback)
-        self.assertIn('up -d --force-recreate nginx', rollback)
+        self.assertIn(
+            'up -d --force-recreate --no-deps --no-build --pull never nginx',
+            rollback,
+        )
         self.assertIn('for service in "${missing_monitoring_services[@]}"', rollback)
         self.assertIn('prometheus) container="ai-supermarket-prometheus"', rollback)
         self.assertIn('alloy) container="ai-supermarket-alloy"', rollback)

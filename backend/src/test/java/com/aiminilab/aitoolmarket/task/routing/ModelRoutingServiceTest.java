@@ -35,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
@@ -296,6 +297,38 @@ class ModelRoutingServiceTest {
         service.completeTask(1L, TaskStatus.SUCCESS.name());
 
         verify(stateMapper).releaseSuccess(101L);
+    }
+
+    @Test
+    void timeoutWithoutWorkerFailurePersistsTheTaskSafeFailureContract() {
+        AiTask task = processingTask();
+        task.setStatus(TaskStatus.TIMEOUT.name());
+        task.setErrorCode("STALE_TASK_TIMEOUT");
+        task.setErrorMessage("RAW upstream response body=secret");
+        task.setUserMessage("Task timed out, please retry later");
+        task.setDeveloperMessage("Task exceeded the configured stale timeout");
+        task.setFailureTraceId("trace-timeout-1");
+        TaskModelRouteAttempt attempt = activeAttempt(7L, 1L, 10L);
+        AccountModelRouteState state = state(101L, 1L, 10L);
+        when(taskMapper.selectByIdForUpdate(1L)).thenReturn(task);
+        when(attemptMapper.findByIdForUpdate(7L)).thenReturn(attempt);
+        when(attemptMapper.closeWithFailureContract(
+                eq(7L), eq(TaskStatus.TIMEOUT.name()), any(), any(), any(), any())).thenReturn(1);
+        when(stateMapper.findByModelConfigIdsForUpdate(List.of(1L))).thenReturn(List.of(state));
+
+        service.completeTask(1L, TaskStatus.TIMEOUT.name());
+
+        verify(attemptMapper).closeWithFailureContract(
+                eq(7L),
+                eq(TaskStatus.TIMEOUT.name()),
+                argThat(request -> "STALE_TASK_TIMEOUT".equals(request.errorCode())
+                        && "Task exceeded the configured stale timeout".equals(request.errorMessage())),
+                eq("Task timed out, please retry later"),
+                eq("Task exceeded the configured stale timeout"),
+                eq("trace-timeout-1")
+        );
+        verify(attemptMapper, never()).close(anyLong(), any());
+        verify(stateMapper).releaseNeutral(101L);
     }
 
     @Test

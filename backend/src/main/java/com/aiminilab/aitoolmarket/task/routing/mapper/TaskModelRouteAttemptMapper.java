@@ -70,6 +70,11 @@ public interface TaskModelRouteAttemptMapper extends BaseMapper<TaskModelRouteAt
     @Update("""
             UPDATE task_model_route_attempts
             SET status = #{status},
+                error_code = NULL,
+                error_message = NULL,
+                user_message = NULL,
+                developer_message = NULL,
+                failure_trace_id = NULL,
                 finished_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = #{id}
@@ -80,6 +85,11 @@ public interface TaskModelRouteAttemptMapper extends BaseMapper<TaskModelRouteAt
     @Update("""
             UPDATE task_model_route_attempts
             SET status = #{status},
+                error_code = NULL,
+                error_message = NULL,
+                user_message = NULL,
+                developer_message = NULL,
+                failure_trace_id = NULL,
                 delivery_state = CASE
                     WHEN COALESCE(#{providerCalled}, 0) = 1 OR #{providerRequestId} IS NOT NULL THEN 'ACCEPTED'
                     ELSE delivery_state
@@ -113,13 +123,70 @@ public interface TaskModelRouteAttemptMapper extends BaseMapper<TaskModelRouteAt
                              @Param("providerRequestId") String providerRequestId);
 
     @Update("""
-            UPDATE task_model_route_attempts attempt
-            JOIN ai_tasks task ON task.id = attempt.task_id
-            SET attempt.status = task.status,
-                attempt.finished_at = COALESCE(task.finished_at, CURRENT_TIMESTAMP),
-                attempt.updated_at = CURRENT_TIMESTAMP
-            WHERE attempt.status = 'ACTIVE'
-              AND task.status IN ('SUCCESS', 'FAILED', 'TIMEOUT', 'CANCELLED')
+            UPDATE task_model_route_attempts
+            SET status = (
+                    SELECT task.status
+                    FROM ai_tasks task
+                    WHERE task.id = task_model_route_attempts.task_id
+                ),
+                error_code = (
+                    SELECT CASE WHEN task.status = 'SUCCESS' THEN NULL ELSE task.error_code END
+                    FROM ai_tasks task
+                    WHERE task.id = task_model_route_attempts.task_id
+                ),
+                error_message = (
+                    SELECT CASE
+                        WHEN task.status = 'SUCCESS' THEN NULL
+                        ELSE COALESCE(task.developer_message, CONCAT('Task route attempt closed with status=', task.status))
+                    END
+                    FROM ai_tasks task
+                    WHERE task.id = task_model_route_attempts.task_id
+                ),
+                user_message = (
+                    SELECT CASE
+                        WHEN task.status = 'SUCCESS' THEN NULL
+                        WHEN task.status = 'CANCELLED' THEN COALESCE(task.user_message, '任务已取消')
+                        ELSE COALESCE(task.user_message, '任务执行失败，请稍后重试')
+                    END
+                    FROM ai_tasks task
+                    WHERE task.id = task_model_route_attempts.task_id
+                ),
+                developer_message = (
+                    SELECT CASE
+                        WHEN task.status = 'SUCCESS' THEN NULL
+                        ELSE COALESCE(task.developer_message, CONCAT('Task route attempt closed with status=', task.status))
+                    END
+                    FROM ai_tasks task
+                    WHERE task.id = task_model_route_attempts.task_id
+                ),
+                failure_trace_id = (
+                    SELECT CASE WHEN task.status = 'SUCCESS' THEN NULL ELSE task.failure_trace_id END
+                    FROM ai_tasks task
+                    WHERE task.id = task_model_route_attempts.task_id
+                ),
+                provider_error_code = (
+                    SELECT CASE WHEN task.status = 'SUCCESS' THEN NULL ELSE task.provider_error_code END
+                    FROM ai_tasks task
+                    WHERE task.id = task_model_route_attempts.task_id
+                ),
+                provider_request_id = COALESCE((
+                    SELECT task.provider_request_id
+                    FROM ai_tasks task
+                    WHERE task.id = task_model_route_attempts.task_id
+                ), provider_request_id),
+                finished_at = COALESCE((
+                    SELECT task.finished_at
+                    FROM ai_tasks task
+                    WHERE task.id = task_model_route_attempts.task_id
+                ), CURRENT_TIMESTAMP),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE status = 'ACTIVE'
+              AND EXISTS (
+                SELECT 1
+                FROM ai_tasks task
+                WHERE task.id = task_model_route_attempts.task_id
+                  AND task.status IN ('SUCCESS', 'FAILED', 'TIMEOUT', 'CANCELLED')
+              )
             """)
     int closeAttemptsForTerminalTasks();
 }
