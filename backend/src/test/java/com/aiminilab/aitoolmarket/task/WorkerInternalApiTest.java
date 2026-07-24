@@ -643,6 +643,7 @@ class WorkerInternalApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.errorCode").value("MODEL_RISK_CONTROL_REJECTED"))
                 .andExpect(jsonPath("$.data.errorMessage").value("您的提示词包含违禁词"))
+                .andExpect(jsonPath("$.data.developerMessage").doesNotExist())
                 .andExpect(jsonPath("$.data.failureTraceId").value("worker-risk-trace"))
                 .andExpect(jsonPath("$.data.progressMessage").value("您的提示词包含违禁词"));
 
@@ -650,6 +651,7 @@ class WorkerInternalApiTest {
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.errorMessage").value("provider apiKey=[REDACTED] request failed"))
+                .andExpect(jsonPath("$.data.developerMessage").value("provider apiKey=[REDACTED] request failed"))
                 .andExpect(jsonPath("$.data.failureTraceId").value("worker-risk-trace"));
 
         assertThat(jdbcTemplate.queryForObject(
@@ -707,6 +709,16 @@ class WorkerInternalApiTest {
                 .andExpect(jsonPath("$.data.status").value("TIMEOUT"))
                 .andExpect(jsonPath("$.data.progress").value(100))
                 .andExpect(jsonPath("$.data.progressMessage").value("模型响应超时，请稍后重试"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT error_code FROM ai_tasks WHERE id = ?", String.class, taskId
+        )).isEqualTo("MODEL_004");
+
+        mockMvc.perform(get("/api/admin/v1/tasks/{taskId}", taskId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.errorCode").value("MODEL_004"))
+                .andExpect(jsonPath("$.data.developerMessage").value("model request timed out"));
     }
 
     @Test

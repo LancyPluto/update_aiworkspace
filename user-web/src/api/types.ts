@@ -43,6 +43,7 @@ export type KnownApiErrorCode =
   | "MODEL_002"
   | "MODEL_003"
   | "MODEL_004"
+  | "MODEL_005"
   | "PAY_001"
   | "PAY_002"
   | "PAY_003"

@@ -9,6 +9,7 @@ from config import resolve_infinitetalk_api_key, resolve_siliconflow_api_key, se
 from handlers.digital_human_postprocessor import DigitalHumanPostprocessError, DigitalHumanPostprocessor
 from handlers.error_classifier import classify_model_error
 from providers import registry as provider_registry
+from utils.video_timeout import resolve_video_timeout_seconds
 
 
 LOGGER = logging.getLogger(__name__)
@@ -198,7 +199,10 @@ class DigitalHumanVideoHandler:
         configured_provider = str(model_config.get("provider") or "").strip().lower()
         if configured_provider in LEGACY_SILICONFLOW_PROVIDERS or not configured_provider:
             return SeedanceVideoClient()
-        return SeedanceVideoClient.from_model_config(model_config)
+        return SeedanceVideoClient.from_model_config(
+            model_config,
+            timeout_seconds=resolve_video_timeout_seconds(model_config),
+        )
 
     @staticmethod
     def _resolve_video_provider(context: dict[str, Any], model_config: dict[str, Any]) -> str:
@@ -225,7 +229,10 @@ class DigitalHumanVideoHandler:
         return InfiniteTalkVideoClient(
             base_url=self._optional_string(model_config.get("baseUrl")) or None,
             api_key=resolve_infinitetalk_api_key(model_config),
-            timeout_seconds=model_config.get("timeoutSeconds"),
+            timeout_seconds=max(
+                settings.infinitetalk_timeout_seconds,
+                resolve_video_timeout_seconds(model_config),
+            ),
         )
 
     def _generate_video(

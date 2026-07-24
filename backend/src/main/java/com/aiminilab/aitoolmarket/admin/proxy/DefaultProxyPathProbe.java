@@ -94,11 +94,11 @@ public class DefaultProxyPathProbe implements ProxyPathProbe {
     }
 
     static boolean isSuccessfulHttpStatus(int statusCode) {
-        return statusCode >= 100 && statusCode < 300 || statusCode >= 400 && statusCode < 500;
+        return statusCode >= 100 && statusCode < 500;
     }
 
     static String errorForHttpStatus(int statusCode) {
-        return statusCode >= 300 && statusCode < 400 ? "redirect_rejected" : "upstream_http_error";
+        return "upstream_http_error";
     }
 
     private ProxyPathProbeResult failed(

@@ -16,6 +16,7 @@ from client.provider_error import (
 from config import settings
 from utils.input_image import InputImageError, resolve_reference_image_data_url
 from utils.model_contract import parse_response_mapping, read_response_value, response_mapping_has
+from utils.video_timeout import resolve_video_timeout_seconds
 from volcengine_model import normalize_volcengine_openai_base_url
 
 
@@ -31,6 +32,11 @@ SEEDANCE_GENERATION_MODES = {
     FIRST_LAST_FRAME_TO_VIDEO,
     MULTIMODAL_REFERENCE,
 }
+SEEDANCE_PRIVACY_ERROR_CODE = "MODEL_005"
+SEEDANCE_PRIVACY_USER_MESSAGE = "部分参考图片可能包含真人或隐私内容，未通过模型安全检查，请更换后重试"
+SEEDANCE_PRIVACY_PROVIDER_ERROR_CODES = {
+    "inputimagesensitivecontentdetected.privacyinformation",
+}
 
 
 class SeedanceVideoError(ProviderCallError):
@@ -39,6 +45,11 @@ class SeedanceVideoError(ProviderCallError):
 
 class SeedanceVideoTimeoutError(SeedanceVideoError):
     pass
+
+
+class SeedancePrivacyContentError(SeedanceVideoError):
+    error_code = SEEDANCE_PRIVACY_ERROR_CODE
+    user_message = SEEDANCE_PRIVACY_USER_MESSAGE
 
 
 class SeedanceVideoClient:
@@ -81,17 +92,29 @@ class SeedanceVideoClient:
         return normalized_base, normalized_path
 
     @classmethod
-    def from_model_config(cls, model_config: dict[str, Any] | None) -> "SeedanceVideoClient":
+    def from_model_config(
+        cls,
+        model_config: dict[str, Any] | None,
+        *,
+        timeout_seconds: int | None = None,
+    ) -> "SeedanceVideoClient":
         config = model_config or {}
         api_key = str(config.get("apiKey") or config.get("api_key") or "").strip()
         base_url = str(config.get("baseUrl") or config.get("base_url") or settings.seedance_base_url).strip()
         model_name = str(config.get("modelName") or config.get("model_name") or settings.seedance_video_model).strip()
         if not api_key:
             raise SeedanceVideoError("Seedance model snapshot missing apiKey")
+        resolved_timeout = resolve_video_timeout_seconds(config)
+        if timeout_seconds is not None:
+            try:
+                resolved_timeout = max(resolved_timeout, int(timeout_seconds))
+            except (TypeError, ValueError):
+                pass
         return cls(
             base_url=base_url,
             api_key=api_key,
             default_model=model_name,
+            timeout_seconds=resolved_timeout,
             model_config=config,
         )
 
@@ -524,13 +547,23 @@ class SeedanceVideoClient:
                 **transport_failure_metadata(exc),
             ) from exc
 
-        try:
-            response.raise_for_status()
-        except requests.HTTPError as exc:
-            raise SeedanceVideoError(
-                f"seedance video request failed: status={response.status_code}, body={response.text}",
-                **rejected_response_metadata(response),
-            ) from exc
+        if response.status_code >= 400:
+            provider_error_code, provider_message, provider_request_id = _provider_error_details(response)
+            metadata = rejected_response_metadata(response)
+            if provider_error_code:
+                metadata["provider_error_code"] = provider_error_code
+            if provider_request_id:
+                metadata["provider_request_id"] = provider_request_id
+            diagnostic = _provider_error_diagnostic(
+                response.status_code,
+                provider_error_code,
+                provider_message,
+                provider_request_id,
+            )
+            if _is_seedance_privacy_error(provider_error_code):
+                metadata["retry_scope"] = "NONE"
+                raise SeedancePrivacyContentError(diagnostic, **metadata)
+            raise SeedanceVideoError(diagnostic, **metadata)
         try:
             data = response.json()
         except ValueError as exc:
@@ -639,3 +672,63 @@ def _dedupe_texts(values: list[Any]) -> list[str]:
             seen.add(text)
             result.append(text)
     return result
+
+
+def _provider_error_details(response: requests.Response) -> tuple[str | None, str | None, str | None]:
+    try:
+        payload = response.json()
+    except (TypeError, ValueError):
+        payload = None
+    root = payload if isinstance(payload, dict) else {}
+    error = root.get("error") if isinstance(root.get("error"), dict) else {}
+    provider_error_code = _first_safe_text(error, root, keys=("code", "error_code", "errorCode", "type"), limit=128)
+    provider_message = _first_safe_text(error, root, keys=("message", "error_message", "errorMessage"), limit=512)
+    provider_request_id = _first_safe_text(
+        error,
+        root,
+        keys=("request_id", "requestId", "requestID"),
+        limit=128,
+    )
+    headers = getattr(response, "headers", None)
+    if not provider_request_id and hasattr(headers, "get"):
+        for name in ("x-request-id", "x-tt-logid", "request-id"):
+            provider_request_id = _safe_provider_text(headers.get(name), 128)
+            if provider_request_id:
+                break
+    return provider_error_code, provider_message, provider_request_id
+
+
+def _first_safe_text(*containers: dict[str, Any], keys: tuple[str, ...], limit: int) -> str | None:
+    for container in containers:
+        for key in keys:
+            value = _safe_provider_text(container.get(key), limit)
+            if value:
+                return value
+    return None
+
+
+def _safe_provider_text(value: Any, limit: int) -> str | None:
+    if not isinstance(value, (str, int, float)):
+        return None
+    text = re.sub(r"[\x00-\x1f\x7f]+", " ", str(value)).strip()
+    return text[:limit] if text else None
+
+
+def _provider_error_diagnostic(
+    status_code: int,
+    provider_error_code: str | None,
+    provider_message: str | None,
+    provider_request_id: str | None,
+) -> str:
+    fields = [f"status={status_code}"]
+    if provider_error_code:
+        fields.append(f"providerErrorCode={provider_error_code}")
+    if provider_message:
+        fields.append(f"providerMessage={provider_message}")
+    if provider_request_id:
+        fields.append(f"providerRequestId={provider_request_id}")
+    return "seedance video request rejected: " + ", ".join(fields)
+
+
+def _is_seedance_privacy_error(provider_error_code: str | None) -> bool:
+    return str(provider_error_code or "").strip().lower() in SEEDANCE_PRIVACY_PROVIDER_ERROR_CODES

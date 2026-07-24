@@ -22,6 +22,12 @@ public record WorkerFailedRequest(
         String developerMessage,
         String failureTraceId
 ) {
+    public WorkerFailedRequest {
+        if (errorCode != null && "MODEL_TIMEOUT".equalsIgnoreCase(errorCode.trim())) {
+            errorCode = "MODEL_004";
+        }
+    }
+
     public WorkerFailedRequest(String errorCode,
                                String errorMessage,
                                String failureStage,

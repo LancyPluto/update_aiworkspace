@@ -27,6 +27,13 @@ function model(fields) {
   }
 }
 
+function imageModel(fields) {
+  return {
+    ...model(fields),
+    capabilities: ["IMAGE_GENERATION"],
+  }
+}
+
 test("model schema owns values and constraints while tool fields own UI metadata", () => {
   const fields = schemaTools.buildEffectiveToolFields([
     {
@@ -111,6 +118,55 @@ test("keeps tool-only business inputs while schema fields own upstream constrain
   assert.equal(fields[1].options.maxLength, 200)
   assert.equal(fields[2].required, true)
   assert.equal(fields[2].options.uiGroup, "business")
+})
+
+test("image output count is owned by the model schema and fixed single-image counts stay hidden", () => {
+  const schemaLessImage = schemaTools.buildEffectiveToolFields([
+    { fieldKey: "prompt", fieldName: "Prompt", fieldType: "textarea", required: true, sortOrder: 1 },
+    { fieldKey: "count", fieldName: "Count", fieldType: "number", required: false, sortOrder: 2 },
+  ], {
+    modelConfigId: 8,
+    displayName: "Schema-less image model",
+    capabilities: ["IMAGE_GENERATION"],
+  })
+  assert.deepEqual(schemaLessImage.map((field) => field.fieldKey), ["prompt"])
+
+  const legacyOnly = schemaTools.buildEffectiveToolFields([
+    { fieldKey: "prompt", fieldName: "Prompt", fieldType: "textarea", required: true, sortOrder: 1 },
+    { fieldKey: "image_count", fieldName: "Count", fieldType: "number", required: false, sortOrder: 2 },
+  ], imageModel([
+    { key: "prompt", type: "string", required: true },
+  ]))
+  assert.deepEqual(legacyOnly.map((field) => field.fieldKey), ["prompt"])
+
+  const fixedSingle = schemaTools.buildEffectiveToolFields([], imageModel([
+    { key: "n", type: "integer", min: 1, max: 1 },
+  ]))[0]
+  assert.equal(fixedSingle.options.uiHidden, true)
+  assert.equal(fixedSingle.options.defaultValue, 1)
+
+  const multiple = schemaTools.buildEffectiveToolFields([], imageModel([
+    { key: "batch_size", type: "integer", default: 1, min: 1, max: 4 },
+  ]))[0]
+  assert.equal(multiple.options.uiHidden, undefined)
+  assert.equal(multiple.options.maxValue, 4)
+
+  const videoBatch = schemaTools.buildEffectiveToolFields([
+    { fieldKey: "batch_size", fieldName: "Batch", fieldType: "number", required: false, sortOrder: 2 },
+  ], {
+    ...model([{ key: "prompt", type: "string" }]),
+    capabilities: ["VIDEO_GENERATION"],
+  })
+  assert.deepEqual(videoBatch.map((field) => field.fieldKey), ["prompt", "batch_size"])
+
+  const schemaLessVideoFields = [
+    { fieldKey: "batch_size", fieldName: "Batch", fieldType: "number", required: false, sortOrder: 1 },
+  ]
+  assert.equal(schemaTools.buildEffectiveToolFields(schemaLessVideoFields, {
+    modelConfigId: 9,
+    displayName: "Schema-less video model",
+    capabilities: ["VIDEO_GENERATION"],
+  }), schemaLessVideoFields)
 })
 
 test("generation mode uses hidden, segmented and select controls from enum count", () => {

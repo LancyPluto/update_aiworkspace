@@ -30,6 +30,7 @@ import {
 } from "@/lib/api/users"
 import { ApiError } from "@/lib/api/http"
 import { compareCreditLogsByCreatedAtDesc } from "@/lib/credit-log-sort"
+import { adminUserDisplayName } from "@/lib/user-display-name"
 import type { AdminMember, CreditLogItem } from "@/lib/api/types"
 
 const CREDIT_RECORD_PAGE_SIZE = 20
@@ -56,26 +57,11 @@ interface CreditRecordRow {
   time: string
 }
 
-function isPhoneLike(value: string) {
-  const normalized = value.trim().replace(/[\s-]/g, "").replace(/^(?:\+86|86)/, "")
-  return /^1\d{10}$/.test(normalized)
-}
-
-function memberDisplayName(user: AdminMember) {
-  const fallback = user.publicCode ? `用户${user.publicCode}` : "用户"
-  const nickname = user.nickname?.trim()
-  if (nickname && !isPhoneLike(nickname) && nickname !== `用户${user.id}`) return nickname
-
-  const username = user.username?.trim()
-  if (username && !isPhoneLike(username)) return username
-  return fallback
-}
-
 function mapUser(user: AdminMember): CreditUserRow {
   return {
     id: `U${String(user.id).padStart(3, "0")}`,
     rawId: user.id,
-    name: memberDisplayName(user),
+    name: adminUserDisplayName(user),
     phone: user.phone || "",
     credits: memberAccountBalance(user),
     userType: user.userType,

@@ -19,6 +19,7 @@ export type KnownApiErrorCode =
   | 'MODEL_002'
   | 'MODEL_003'
   | 'MODEL_004'
+  | 'MODEL_005'
   | 'SYSTEM_001'
   | 'SYSTEM_ERROR'
 

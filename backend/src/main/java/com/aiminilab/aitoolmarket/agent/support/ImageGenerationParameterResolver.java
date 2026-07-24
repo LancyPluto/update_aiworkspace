@@ -45,7 +45,16 @@ public class ImageGenerationParameterResolver {
     private static final List<String> GENERIC_IMAGE_SIZES = List.of(
             "1024x1024", "1280x720", "720x1280", "1024x768", "768x1024", "1152x768", "768x1152"
     );
-    private static final List<Integer> DEFAULT_COUNTS = List.of(1, 2, 3, 4);
+    private static final Set<String> IMAGE_COUNT_FIELD_KEYS = Set.of(
+            "count",
+            "n",
+            "batchsize",
+            "imagecount",
+            "imagescount",
+            "numimages",
+            "numberofimages",
+            "outputcount"
+    );
 
     private final ObjectMapper objectMapper;
 
@@ -67,14 +76,9 @@ public class ImageGenerationParameterResolver {
         if (requestedDefaultSize == null || sizes.stream().noneMatch(option -> option.value().equals(requestedDefaultSize))) {
             defaultSize = sizes.isEmpty() ? null : sizes.get(0).value();
         }
-        List<Integer> counts = configuredCounts(extra);
-        if (counts.isEmpty()) {
-            counts = defaultCounts(config);
-        }
-        Integer defaultCount = configuredInt(extra, "defaultCount", "defaultN", "defaultImages");
-        if (defaultCount == null || !counts.contains(defaultCount)) {
-            defaultCount = counts.isEmpty() ? null : counts.get(0);
-        }
+        CountConfiguration countConfiguration = configuredCounts(config.getRequestSchemaJson());
+        List<Integer> counts = countConfiguration.counts();
+        Integer defaultCount = countConfiguration.defaultCount();
         List<ImageSizeOptionResponse> qualities = configuredOptions(
                 extra,
                 "qualities",
@@ -155,35 +159,75 @@ public class ImageGenerationParameterResolver {
         return GENERIC_IMAGE_SIZES;
     }
 
-    private static List<Integer> defaultCounts(AgentModelConfig config) {
-        String provider = normalized(config.getProvider());
-        if ("volcengine_images".equals(provider)) {
-            return List.of(1);
+    private CountConfiguration configuredCounts(String requestSchemaJson) {
+        JsonNode fields = parseJsonObject(requestSchemaJson).get("fields");
+        if (fields == null || !fields.isArray()) {
+            return CountConfiguration.singleImage();
         }
-        return DEFAULT_COUNTS;
-    }
-
-    private List<Integer> configuredCounts(JsonNode extra) {
-        JsonNode countsNode = first(extra, "counts", "allowedCounts", "imageCounts");
-        Set<Integer> counts = new LinkedHashSet<>();
-        if (countsNode != null && countsNode.isArray()) {
-            for (JsonNode item : countsNode) {
-                Integer count = item.isNumber() ? item.asInt() : parsePositiveInt(item.asText(""));
-                if (count != null && count > 0 && count <= 10) {
+        for (JsonNode field : fields) {
+            if (!field.isObject() || !isImageCountField(field)) {
+                continue;
+            }
+            Set<Integer> counts = new LinkedHashSet<>();
+            JsonNode options = field.get("enum");
+            if (options != null && options.isArray()) {
+                for (JsonNode option : options) {
+                    JsonNode value = option.isObject() ? option.get("value") : option;
+                    Integer count = positiveInt(value);
+                    if (count != null && count <= 100) {
+                        counts.add(count);
+                    }
+                }
+            }
+            Integer min = positiveInt(field.get("min"));
+            Integer max = positiveInt(field.get("max"));
+            if (counts.isEmpty() && max != null) {
+                int lowerBound = min == null ? 1 : min;
+                for (int count = lowerBound; count <= Math.min(max, 100); count++) {
                     counts.add(count);
                 }
             }
-        }
-        Integer max = configuredInt(extra, "maxImagesPerRequest", "maxBatchSize", "maxCount");
-        if (counts.isEmpty() && max != null && max > 0) {
-            for (int i = 1; i <= Math.min(max, 10); i++) {
-                counts.add(i);
+            Integer configuredDefault = positiveInt(field.get("default"));
+            if (counts.isEmpty() && configuredDefault != null) {
+                counts.add(configuredDefault);
             }
+            if (counts.isEmpty()) {
+                counts.add(1);
+            }
+            List<Integer> resolved = new ArrayList<>(counts);
+            Integer defaultCount = configuredDefault != null && counts.contains(configuredDefault)
+                    ? configuredDefault
+                    : resolved.get(0);
+            return new CountConfiguration(resolved, defaultCount);
         }
-        return new ArrayList<>(counts);
+        return CountConfiguration.singleImage();
+    }
+
+    private static boolean isImageCountField(JsonNode field) {
+        String type = normalized(textValue(field.get("type")));
+        if (!"integer".equals(type) && !"number".equals(type)) {
+            return false;
+        }
+        String key = normalized(textValue(field.get("key"))).replaceAll("[^a-z0-9]", "");
+        return IMAGE_COUNT_FIELD_KEYS.contains(key);
+    }
+
+    private static Integer positiveInt(JsonNode value) {
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (value.isIntegralNumber()) {
+            int parsed = value.asInt();
+            return parsed > 0 ? parsed : null;
+        }
+        return parsePositiveInt(value.asText(""));
     }
 
     private JsonNode parseExtraAuthJson(String value) {
+        return parseJsonObject(value);
+    }
+
+    private JsonNode parseJsonObject(String value) {
         if (value == null || value.isBlank()) {
             return objectMapper.createObjectNode();
         }
@@ -270,5 +314,11 @@ public class ImageGenerationParameterResolver {
 
     private static String normalized(String value) {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private record CountConfiguration(List<Integer> counts, Integer defaultCount) {
+        private static CountConfiguration singleImage() {
+            return new CountConfiguration(List.of(1), 1);
+        }
     }
 }

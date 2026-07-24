@@ -60,11 +60,11 @@ public class PublicUserIdentityService {
         if (user == null) {
             return "用户";
         }
-        String nickname = safePublicName(user.getNickname(), user.getId());
+        String nickname = safePublicName(user.getNickname(), user.getId(), user.getPublicCode());
         if (nickname != null) {
             return nickname;
         }
-        String username = safePublicName(user.getUsername(), user.getId());
+        String username = safePublicName(user.getUsername(), user.getId(), user.getPublicCode());
         if (username != null) {
             return username;
         }
@@ -101,12 +101,18 @@ public class PublicUserIdentityService {
         return new BizException(ApiErrors.RESOURCE_NOT_FOUND, "用户不存在", developerMessage);
     }
 
-    private String safePublicName(String value, Long internalUserId) {
+    private String safePublicName(String value, Long internalUserId, String publicCode) {
         if (value == null || value.isBlank()) {
             return null;
         }
         String trimmed = value.trim();
         if (internalUserId != null && trimmed.equals("用户" + internalUserId)) {
+            return null;
+        }
+        if (trimmed.matches("^用户\\d+$")
+                && publicCode != null
+                && publicCode.matches("[1-9]\\d{4}")
+                && !trimmed.equals("用户" + publicCode)) {
             return null;
         }
         String normalized = trimmed.replaceAll("[\\s-]", "");

@@ -96,9 +96,11 @@ class AgnesVideoClient:
             poll_interval_seconds if poll_interval_seconds is not None else self.extra_auth.get("pollIntervalSeconds"),
             5.0,
         )
+        configured_timeout = _as_int(timeout_seconds, 900)
         self.timeout_seconds = max(
             1,
-            _as_int(self.extra_auth.get("timeoutSeconds") or timeout_seconds, 900),
+            configured_timeout,
+            _as_int(self.extra_auth.get("timeoutSeconds"), configured_timeout),
         )
         self.request_timeout = (
             max(1.0, _as_float(self.extra_auth.get("connectTimeoutSeconds"), 10.0)),

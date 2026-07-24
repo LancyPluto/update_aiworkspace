@@ -1,14 +1,22 @@
 import pytest
 import requests
 
-from client.seedance_video_client import SeedanceVideoClient, SeedanceVideoError, SeedanceVideoTimeoutError
+from client.seedance_video_client import (
+    SEEDANCE_PRIVACY_ERROR_CODE,
+    SEEDANCE_PRIVACY_USER_MESSAGE,
+    SeedancePrivacyContentError,
+    SeedanceVideoClient,
+    SeedanceVideoError,
+    SeedanceVideoTimeoutError,
+)
 
 
 class FakeResponse:
-    def __init__(self, payload, status_code=200):
+    def __init__(self, payload, status_code=200, headers=None):
         self._payload = payload
         self.status_code = status_code
         self.text = str(payload)
+        self.headers = headers or {}
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -47,6 +55,54 @@ def test_normalize_endpoint_upgrades_host_only_base_url() -> None:
     )
     assert base == "https://ark.cn-beijing.volces.com/api/v3"
     assert path == "/contents/generations/tasks"
+
+
+def test_seedance_model_config_uses_async_video_timeout_floor() -> None:
+    client = SeedanceVideoClient.from_model_config(
+        {
+            "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+            "apiKey": "test-key",
+            "modelName": "doubao-seedance-1-5-pro-251215",
+            "timeoutSeconds": 60,
+        }
+    )
+
+    assert client.timeout_seconds == 900
+
+
+def test_seedance_privacy_rejection_uses_structured_safe_error_fields() -> None:
+    provider_code = "InputImageSensitiveContentDetected.PrivacyInformation"
+    session = RecordingSession(
+        [
+            FakeResponse(
+                {
+                    "error": {
+                        "code": provider_code,
+                        "message": "The input image may contain real person",
+                    },
+                    "request_id": "seedance-request-privacy",
+                    "raw_input": "must-not-appear-in-diagnostic",
+                },
+                status_code=400,
+            )
+        ]
+    )
+    client = SeedanceVideoClient(api_key="test-key")
+    client.session = session
+
+    with pytest.raises(SeedancePrivacyContentError) as captured:
+        client._request("POST", client.create_path, {"model": "seedance-test"})
+
+    error = captured.value
+    assert error.error_code == SEEDANCE_PRIVACY_ERROR_CODE
+    assert error.user_message == SEEDANCE_PRIVACY_USER_MESSAGE
+    assert error.provider_error_code == provider_code
+    assert error.provider_request_id == "seedance-request-privacy"
+    assert error.retry_scope == "NONE"
+    assert error.delivery_state == "REJECTED"
+    assert "raw_input" not in str(error)
+    assert "must-not-appear-in-diagnostic" not in str(error)
+    assert [call["method"] for call in session.calls] == ["POST"]
 
 
 def test_seedance_inlines_internal_generated_image(monkeypatch) -> None:

@@ -50,7 +50,7 @@ import {
   regenerateTask,
   streamTaskStatus,
 } from "@/api/taskApi"
-import { unpublishCommunityPost } from "@/api/communityApi"
+import { resolvePublishedCommunityPostId, unpublishCommunityPost } from "@/api/communityApi"
 import { emitCommunityPostUnpublished } from "@/utils/communitySync"
 import { publishAssetToCommunity, type CommunityPublishPayload } from "@/utils/publishCommunityAsset"
 import { fetchAIToolById, fetchTools } from "@/api/toolApi"
@@ -133,13 +133,18 @@ const composerMediaSlots = ref<ComposerMediaSlot[]>([])
 const composerMediaUploadInputRef = ref<HTMLInputElement | null>(null)
 const composerMediaUploadTargetFieldKey = ref<string | undefined>(undefined)
 const composerMediaUploading = ref(false)
+const composerMediaMentionPickerOpen = ref(false)
+const composerMediaMentionPickerRef = ref<HTMLElement | null>(null)
+let composerMentionSelectionStart = 0
+let composerMentionSelectionEnd = 0
 type ComposerMediaPreview = {
-  kind: "image" | "video"
+  kind: "image" | "video" | "audio"
   url: string
   label: string
 }
 const composerMediaPreview = ref<ComposerMediaPreview | null>(null)
 const composerMediaPreviewDialogRef = ref<HTMLElement | null>(null)
+const composerMediaPreviewStyle = ref<Record<string, string>>({})
 let composerMediaPreviewTrigger: HTMLElement | null = null
 const composerRootRef = ref<HTMLElement | null>(null)
 const promptTextareaRef = ref<HTMLTextAreaElement | null>(null)
@@ -334,15 +339,13 @@ const composerMediaUploadAccept = computed(() => {
     .join(",")
 })
 
-const canUploadComposerMedia = computed(() => Boolean(composerMediaUploadAccept.value) && !composerMediaUploading.value)
-
 const composerMediaNames = computed(() => {
   const counters = new Map<ComposerMediaSlot["kind"], number>()
   const names = new Map<string, string>()
   const prefixes: Record<ComposerMediaSlot["kind"], string> = {
     image: "图片",
     video: "视频",
-    audio: "音频",
+    audio: "音乐",
     file: "文件",
   }
 
@@ -357,6 +360,48 @@ const composerMediaNames = computed(() => {
 
   return names
 })
+
+type ComposerMediaReference = {
+  key: string
+  kind: "image" | "video" | "audio"
+  label: string
+  url: string
+}
+
+const composerMediaReferences = computed<ComposerMediaReference[]>(() => {
+  const references: ComposerMediaReference[] = []
+  for (const slot of composerMediaSlots.value) {
+    if (slot.kind !== "image" && slot.kind !== "video" && slot.kind !== "audio") continue
+    slot.previewUrls.forEach((url, index) => {
+      if (!url) return
+      references.push({
+        key: composerMediaItemKey(slot.fieldKey, index),
+        kind: slot.kind,
+        label: composerMediaLabel(slot, index),
+        url,
+      })
+    })
+  }
+
+  if (references.length === 0 && primaryReferenceInfo.value.available) {
+    const kind = primaryReferenceInfo.value.kind
+    if (kind === "image" || kind === "video" || kind === "audio") {
+      const referenceKind: ComposerMediaReference["kind"] = kind
+      primaryReferenceInfo.value.previewUrls.forEach((url, index) => {
+        if (!url) return
+        references.push({
+          key: `primary:${index}`,
+          kind: referenceKind,
+          label: primaryReferenceMediaLabel(index),
+          url,
+        })
+      })
+    }
+  }
+  return references
+})
+
+const canReferenceComposerMedia = computed(() => composerMediaReferences.value.length > 0)
 
 const estimateInput = computed<UseTaskEstimateInput | null>(() => {
   const tool = selectedTool.value
@@ -792,12 +837,78 @@ function composerMediaLabel(slot: ComposerMediaSlot, index = 0) {
 }
 
 function primaryReferenceMediaLabel(index: number) {
-  const prefix = primaryReferenceInfo.value.kind === "video" ? "视频" : "图片"
+  const prefix = primaryReferenceInfo.value.kind === "video"
+    ? "视频"
+    : primaryReferenceInfo.value.kind === "audio"
+      ? "音乐"
+      : "图片"
   return `${prefix}${index + 1}`
 }
 
-function isPreviewableComposerMediaKind(kind: ComposerMediaSlot["kind"]): kind is "image" | "video" {
-  return kind === "image" || kind === "video"
+function isPreviewableComposerMediaKind(kind: ComposerMediaSlot["kind"]): kind is "image" | "video" | "audio" {
+  return kind === "image" || kind === "video" || kind === "audio"
+}
+
+function rememberComposerMentionSelection() {
+  const textarea = promptTextareaRef.value
+  if (!textarea) return
+  composerMentionSelectionStart = textarea.selectionStart ?? promptText.value.length
+  composerMentionSelectionEnd = textarea.selectionEnd ?? composerMentionSelectionStart
+}
+
+function toggleComposerMediaMentionPicker() {
+  if (!canReferenceComposerMedia.value) return
+  if (!composerMediaMentionPickerOpen.value) {
+    rememberComposerMentionSelection()
+    modelPickerOpen.value = false
+    modelConfigPickerOpen.value = false
+    closeComposerMediaPreview(false)
+  }
+  composerMediaMentionPickerOpen.value = !composerMediaMentionPickerOpen.value
+}
+
+function insertComposerMediaReference(reference: ComposerMediaReference) {
+  const value = promptText.value
+  const start = Math.max(0, Math.min(composerMentionSelectionStart, value.length))
+  const end = Math.max(start, Math.min(composerMentionSelectionEnd, value.length))
+  const before = value.slice(0, start)
+  const after = value.slice(end)
+  const leadingSpace = before && !/\s$/.test(before) ? " " : ""
+  const trailingSpace = !after || !/^\s/.test(after) ? " " : ""
+  const token = `@${reference.label}`
+  const insertion = `${leadingSpace}${token}${trailingSpace}`
+  promptText.value = `${before}${insertion}${after}`
+  const caret = before.length + insertion.length
+  composerMentionSelectionStart = caret
+  composerMentionSelectionEnd = caret
+  composerMediaMentionPickerOpen.value = false
+  void nextTick(() => {
+    const textarea = promptTextareaRef.value
+    textarea?.focus({ preventScroll: true })
+    textarea?.setSelectionRange(caret, caret)
+    resizePromptTextarea()
+  })
+}
+
+function updateComposerMediaPreviewPosition() {
+  const trigger = composerMediaPreviewTrigger
+  if (!trigger?.isConnected || !composerMediaPreview.value) return
+  const rect = trigger.getBoundingClientRect()
+  const viewportPadding = 12
+  const gap = 10
+  const width = Math.min(420, Math.max(240, window.innerWidth - viewportPadding * 2))
+  const left = Math.min(
+    window.innerWidth - viewportPadding - width,
+    Math.max(viewportPadding, rect.left + rect.width / 2 - width / 2),
+  )
+  const availableHeight = Math.max(112, rect.top - gap - viewportPadding)
+  const maxHeight = Math.min(composerMediaPreview.value.kind === "audio" ? 150 : 360, availableHeight)
+  composerMediaPreviewStyle.value = {
+    left: `${Math.round(left)}px`,
+    bottom: `${Math.round(window.innerHeight - rect.top + gap)}px`,
+    width: `${Math.round(width)}px`,
+    "--dashboard-media-preview-max-height": `${Math.round(maxHeight)}px`,
+  }
 }
 
 function openComposerMediaPreview(
@@ -807,16 +918,21 @@ function openComposerMediaPreview(
   event?: MouseEvent,
 ) {
   if (!url || !isPreviewableComposerMediaKind(kind)) return
+  composerMediaMentionPickerOpen.value = false
   composerMediaPreviewTrigger = event?.currentTarget instanceof HTMLElement ? event.currentTarget : null
   composerMediaPreview.value = { kind, url, label }
-  void nextTick(() => composerMediaPreviewDialogRef.value?.focus({ preventScroll: true }))
+  updateComposerMediaPreviewPosition()
+  void nextTick(() => {
+    updateComposerMediaPreviewPosition()
+    composerMediaPreviewDialogRef.value?.focus({ preventScroll: true })
+  })
 }
 
-function closeComposerMediaPreview() {
+function closeComposerMediaPreview(restoreFocus = true) {
   composerMediaPreview.value = null
   const focusTarget = composerMediaPreviewTrigger
   composerMediaPreviewTrigger = null
-  if (focusTarget?.isConnected) void nextTick(() => focusTarget.focus({ preventScroll: true }))
+  if (restoreFocus && focusTarget?.isConnected) void nextTick(() => focusTarget.focus({ preventScroll: true }))
 }
 
 function capabilityBucketKey(modelConfigId: number | null, generationMode: string) {
@@ -899,6 +1015,7 @@ function onCapabilityParamsChange(params: Record<string, unknown>) {
 }
 
 function openComposerMediaUpload(fieldKey?: string) {
+  if (composerMediaUploading.value) return
   const input = composerMediaUploadInputRef.value
   if (!input || !capabilityRef.value) return
   const accept = capabilityRef.value.getComposerMediaUploadAccept(fieldKey)
@@ -907,6 +1024,8 @@ function openComposerMediaUpload(fieldKey?: string) {
     return
   }
   submitError.value = ""
+  composerMediaMentionPickerOpen.value = false
+  closeComposerMediaPreview(false)
   composerMediaUploadTargetFieldKey.value = fieldKey
   input.accept = accept
   input.value = ""
@@ -952,6 +1071,10 @@ async function handleComposerMediaUpload(event: Event) {
 }
 
 function removeComposerSlot(fieldKey: string, index = 0) {
+  const slot = composerMediaSlots.value.find((item) => item.fieldKey === fieldKey)
+  if (slot?.previewUrls[index] && composerMediaPreview.value?.url === slot.previewUrls[index]) {
+    closeComposerMediaPreview(false)
+  }
   capabilityRef.value?.removeComposerSlotAt(fieldKey, index)
 }
 
@@ -976,6 +1099,8 @@ function collapseComposerForPreview(manual = true) {
   composerOpen.value = false
   modelPickerOpen.value = false
   modelConfigPickerOpen.value = false
+  composerMediaMentionPickerOpen.value = false
+  closeComposerMediaPreview(false)
   capabilityRef.value?.closeComposerPopovers?.()
 }
 
@@ -985,14 +1110,46 @@ function autoExpandComposerAtFeedBottom() {
 }
 
 function handleDashboardPointerDown(event: PointerEvent) {
+  const target = event.target
+  if (!(target instanceof Node)) return
+  if (
+    composerMediaMentionPickerOpen.value
+    && !composerMediaMentionPickerRef.value?.contains(target)
+  ) {
+    composerMediaMentionPickerOpen.value = false
+  }
+  if (composerMediaPreview.value) {
+    const clickedPreview = composerMediaPreviewDialogRef.value?.contains(target)
+    const clickedTrigger = composerMediaPreviewTrigger?.contains(target)
+    if (!clickedPreview && !clickedTrigger) closeComposerMediaPreview(false)
+    if (clickedPreview) return
+  }
   if (!composerOpen.value || submitting.value) return
   if (modelPickerOpen.value) return
   if (capabilityRef.value?.hasOpenOverlay?.()) return
   const root = composerRootRef.value
-  const target = event.target
-  if (!root || !(target instanceof Node) || root.contains(target)) return
+  if (!root || root.contains(target)) return
   if (target instanceof Element && target.closest("[data-capability-overlay], [data-capability-composer-popover]")) return
   collapseComposerForPreview()
+}
+
+function handleDashboardKeydown(event: KeyboardEvent) {
+  if (event.key !== "Escape") return
+  if (composerMediaPreview.value) {
+    event.preventDefault()
+    closeComposerMediaPreview()
+    return
+  }
+  if (composerMediaMentionPickerOpen.value) {
+    event.preventDefault()
+    composerMediaMentionPickerOpen.value = false
+    promptTextareaRef.value?.focus({ preventScroll: true })
+  }
+}
+
+function handleDashboardResize() {
+  resizePromptTextarea()
+  updateComposerMediaPreviewPosition()
 }
 
 async function createWithSelectedTool() {
@@ -1634,6 +1791,7 @@ function handleHistoryFeedMediaLoaded() {
 }
 
 function handleDashboardScroll() {
+  updateComposerMediaPreviewPosition()
   if (!isHistoryFeedView.value) {
     showHistoryScrollBottom.value = false
     return
@@ -1817,11 +1975,14 @@ function assetFromTask(item: { task: TaskDetail; blocks: ResultBlock[]; modality
       kind: "image",
       url: urls[0],
       urls,
+      downloadUrl: block.images[0]?.downloadUrl,
       title: block.title || base.title,
       subtitle: urls.length > 1 ? `${base.subtitle} · 共 ${urls.length} 张` : base.subtitle,
     }
   }
-  if (block.type === "video") return { ...base, kind: "video", url: block.url, title: block.title || base.title }
+  if (block.type === "video") {
+    return { ...base, kind: "video", url: block.url, downloadUrl: block.downloadUrl, title: block.title || base.title }
+  }
   if (block.type === "audio") {
     const tracks = resolveAudioTracks(block)
     const first = tracks[0]
@@ -1830,6 +1991,7 @@ function assetFromTask(item: { task: TaskDetail; blocks: ResultBlock[]; modality
       kind: "audio",
       url: first?.url || block.url,
       urls: tracks.map((track) => track.url),
+      downloadUrl: first?.downloadUrl,
       coverUrl: tracks.find((track) => track.coverUrl)?.coverUrl,
       title: first?.title || block.title || base.title,
     }
@@ -1942,6 +2104,12 @@ function openPreviewTask(asset: AssetPreviewItem) {
   void router.push(userRoutes.taskResult(String(asset.taskId)))
 }
 
+function patchDashboardTaskCommunityPost(taskId: number, communityPostId?: number | null) {
+  tasks.value = tasks.value.map((task) =>
+    task.taskId === taskId ? { ...task, communityPostId: communityPostId ?? null } : task,
+  )
+}
+
 async function publishPreviewAsset(asset: AssetPreviewItem, payload?: CommunityPublishPayload) {
   if (!auth.token || !asset.taskId) return
   try {
@@ -1950,6 +2118,7 @@ async function publishPreviewAsset(asset: AssetPreviewItem, payload?: CommunityP
       payload,
       defaultPromptVisible: auth.user?.promptPublicByDefault ?? false,
     })
+    patchDashboardTaskCommunityPost(asset.taskId, post.id)
     previewAsset.value = { ...asset, communityPostId: post.id, promptVisible: post.promptVisible, title: post.title }
   } catch (err) {
     const message = err instanceof Error ? err.message : "发布失败"
@@ -1958,10 +2127,17 @@ async function publishPreviewAsset(asset: AssetPreviewItem, payload?: CommunityP
 }
 
 async function unpublishPreviewAsset(asset: AssetPreviewItem) {
-  if (!auth.token || !asset.communityPostId) return
+  if (!auth.token || !asset.taskId) return
   try {
-    await unpublishCommunityPost(asset.communityPostId, { token: auth.token })
-    emitCommunityPostUnpublished({ postId: asset.communityPostId, taskId: asset.taskId })
+    const postId = await resolvePublishedCommunityPostId(asset.taskId, {
+      token: auth.token,
+      publicCode: auth.user?.publicCode,
+      hint: asset.communityPostId,
+    })
+    if (!postId) throw new Error("未找到这个任务对应的公开作品，请刷新后重试")
+    await unpublishCommunityPost(postId, { token: auth.token })
+    emitCommunityPostUnpublished({ postId, taskId: asset.taskId })
+    patchDashboardTaskCommunityPost(asset.taskId, null)
     previewAsset.value = { ...asset, communityPostId: undefined }
   } catch (err) {
     const message = err instanceof Error ? err.message : "撤回失败"
@@ -2039,6 +2215,8 @@ function resetSelectedToolPresentation() {
   selectedModelConfigId.value = null
   activeGenerationMode.value = ""
   modelConfigPickerOpen.value = false
+  composerMediaMentionPickerOpen.value = false
+  closeComposerMediaPreview(false)
   capabilityRenderVersion.value += 1
   composerMediaSlots.value = []
   capabilityParams.value = {}
@@ -2130,7 +2308,8 @@ watch(
 onMounted(async () => {
   window.addEventListener("scroll", handleDashboardScroll, true)
   window.addEventListener("pointerdown", handleDashboardPointerDown, true)
-  window.addEventListener("resize", resizePromptTextarea)
+  window.addEventListener("keydown", handleDashboardKeydown)
+  window.addEventListener("resize", handleDashboardResize)
   const savedHistoryView = localStorage.getItem(HISTORY_VIEW_KEY)
   if (savedHistoryView === "cards" || savedHistoryView === "feed") historyView.value = savedHistoryView
   await loadDashboard()
@@ -2144,7 +2323,8 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener("scroll", handleDashboardScroll, true)
   window.removeEventListener("pointerdown", handleDashboardPointerDown, true)
-  window.removeEventListener("resize", resizePromptTextarea)
+  window.removeEventListener("keydown", handleDashboardKeydown)
+  window.removeEventListener("resize", handleDashboardResize)
   teardownComposerResizeObserver()
   historyObserver?.disconnect()
   composerResizeObserver?.disconnect()
@@ -2492,7 +2672,7 @@ onUnmounted(() => {
                             class="inline-flex h-8 w-8 items-center justify-center rounded-full text-white/60 transition hover:bg-white/10 hover:text-white"
                             title="下载音频"
                             aria-label="下载音频"
-                            @click.stop="forceDownload(track.downloadUrl || normalizeMediaUrl(track.url), track.downloadName || `audio-${track.version}`)"
+                            @click.stop="forceDownload(track.downloadUrl || normalizeMediaUrl(track.url), track.downloadName || `audio-${track.version}`, auth.token)"
                           >
                             <Download class="h-4 w-4" />
                           </button>
@@ -2881,7 +3061,7 @@ onUnmounted(() => {
                         v-if="firstDownloadUrl(item.blocks)"
                         type="button"
                         class="dashboard-feed-action"
-                        @click.stop="forceDownload(firstDownloadUrl(item.blocks), firstDownloadFilename(item))"
+                        @click.stop="forceDownload(firstDownloadUrl(item.blocks), firstDownloadFilename(item), auth.token)"
                       >
                         <Download class="h-3.5 w-3.5" />
                         下载
@@ -3209,7 +3389,7 @@ onUnmounted(() => {
                 type="button"
                 class="absolute right-3 top-3 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full text-white/45 transition hover:bg-white/8 hover:text-white"
                 aria-label="收起创作窗"
-                @click="collapseComposerForPreview"
+                @click="collapseComposerForPreview()"
               >
                 <X class="h-4 w-4" />
               </button>
@@ -3285,6 +3465,12 @@ onUnmounted(() => {
                               playsinline
                               preload="metadata"
                             />
+                            <span
+                              v-else-if="slot.kind === 'audio'"
+                              class="dashboard-pollo-media-slot__audio"
+                            >
+                              <Music class="h-5 w-5" />
+                            </span>
                             <img
                               v-else
                               :src="url"
@@ -3315,8 +3501,6 @@ onUnmounted(() => {
                         @click="openComposerSlotPicker(slot.fieldKey)"
                       >
                         <Loader2 v-if="slot.uploading" class="h-5 w-5 animate-spin text-primary" />
-                        <Video v-else-if="slot.kind === 'video'" class="h-5 w-5" />
-                        <Music v-else-if="slot.kind === 'audio'" class="h-5 w-5" />
                         <Plus v-else class="h-5 w-5" />
                       </button>
                     </template>
@@ -3600,17 +3784,47 @@ onUnmounted(() => {
                   multiple
                   @change="handleComposerMediaUpload"
                 />
-                <button
-                  type="button"
-                  class="dashboard-pollo-at-button shrink-0"
-                  :disabled="!canUploadComposerMedia"
-                  :aria-label="canUploadComposerMedia ? '上传图片或视频' : '当前模型没有可用的图片或视频输入位'"
-                  :title="canUploadComposerMedia ? '上传图片或视频' : '当前模型没有可用的图片或视频输入位'"
-                  @click.stop="openComposerMediaUpload()"
-                >
-                  <Loader2 v-if="composerMediaUploading" class="h-4 w-4 animate-spin" />
-                  <AtSign v-else class="h-4 w-4" />
-                </button>
+                <div ref="composerMediaMentionPickerRef" class="relative shrink-0">
+                  <button
+                    type="button"
+                    class="dashboard-pollo-at-button"
+                    :disabled="!canReferenceComposerMedia"
+                    aria-haspopup="listbox"
+                    :aria-expanded="composerMediaMentionPickerOpen"
+                    :aria-label="canReferenceComposerMedia ? '引用已上传媒体' : '请先通过加号上传媒体'"
+                    :title="canReferenceComposerMedia ? '引用已上传媒体' : '请先通过加号上传媒体'"
+                    @click.stop="toggleComposerMediaMentionPicker"
+                  >
+                    <AtSign class="h-4 w-4" />
+                  </button>
+                  <div
+                    v-if="composerMediaMentionPickerOpen"
+                    class="dashboard-pollo-mention-picker"
+                    role="listbox"
+                    aria-label="引用已上传媒体"
+                  >
+                    <p class="dashboard-pollo-mention-picker__title">引用素材</p>
+                    <button
+                      v-for="reference in composerMediaReferences"
+                      :key="reference.key"
+                      type="button"
+                      role="option"
+                      class="dashboard-pollo-mention-option"
+                      @click.stop="insertComposerMediaReference(reference)"
+                    >
+                      <span class="dashboard-pollo-mention-option__preview">
+                        <img
+                          v-if="reference.kind === 'image'"
+                          :src="reference.url"
+                          :alt="reference.label"
+                        />
+                        <Video v-else-if="reference.kind === 'video'" class="h-4 w-4" />
+                        <Music v-else class="h-4 w-4" />
+                      </span>
+                      <span class="min-w-0 flex-1 truncate text-left">@{{ reference.label }}</span>
+                    </button>
+                  </div>
+                </div>
 
                 <button
                   type="button"
@@ -3654,18 +3868,18 @@ onUnmounted(() => {
           v-if="composerMediaPreview"
           ref="composerMediaPreviewDialogRef"
           class="dashboard-composer-media-preview"
+          :style="composerMediaPreviewStyle"
           role="dialog"
-          aria-modal="true"
+          aria-modal="false"
           :aria-label="`预览${composerMediaPreview.label}`"
           tabindex="-1"
-          @click.self="closeComposerMediaPreview"
-          @keydown.esc.stop.prevent="closeComposerMediaPreview"
+          @keydown.esc.stop.prevent="closeComposerMediaPreview()"
         >
           <button
             type="button"
             class="dashboard-composer-media-preview__close"
             aria-label="关闭媒体预览"
-            @click="closeComposerMediaPreview"
+            @click="closeComposerMediaPreview()"
           >
             <X class="h-5 w-5" />
           </button>
@@ -3677,13 +3891,24 @@ onUnmounted(() => {
               class="dashboard-composer-media-preview__asset"
             />
             <video
-              v-else
+              v-else-if="composerMediaPreview.kind === 'video'"
               :src="composerMediaPreview.url"
               controls
               playsinline
               preload="metadata"
               class="dashboard-composer-media-preview__asset dashboard-composer-media-preview__asset--video"
             />
+            <div v-else class="dashboard-composer-media-preview__audio">
+              <span class="dashboard-composer-media-preview__audio-icon">
+                <Music class="h-7 w-7" />
+              </span>
+              <audio
+                :src="composerMediaPreview.url"
+                controls
+                preload="metadata"
+                class="w-full"
+              />
+            </div>
             <figcaption class="dashboard-composer-media-preview__caption">{{ composerMediaPreview.label }}</figcaption>
           </figure>
         </div>
@@ -4617,27 +4842,49 @@ onUnmounted(() => {
   object-fit: cover;
 }
 
+.dashboard-pollo-media-slot__audio {
+  display: grid;
+  height: 100%;
+  width: 100%;
+  place-items: center;
+  background: rgb(var(--brand-primary-rgb) / 0.12);
+  color: rgb(255 255 255 / 0.78);
+}
+
 .dashboard-composer-media-preview {
   position: fixed;
-  inset: 0;
   z-index: 140;
-  display: grid;
-  place-items: center;
-  overflow: auto;
-  background: rgb(0 0 0 / 0.88);
-  padding: 28px;
+  overflow: visible;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 12px;
+  background: rgb(17 18 23 / 0.98);
+  padding: 8px;
   color: white;
-  backdrop-filter: blur(8px);
+  box-shadow: 0 20px 58px rgb(0 0 0 / 0.56), inset 0 1px 0 rgb(255 255 255 / 0.05);
+  outline: none;
+}
+
+.dashboard-composer-media-preview::after {
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  height: 12px;
+  width: 12px;
+  border-right: 1px solid rgb(255 255 255 / 0.16);
+  border-bottom: 1px solid rgb(255 255 255 / 0.16);
+  background: rgb(17 18 23 / 0.98);
+  content: "";
+  transform: translateX(-50%) rotate(45deg);
 }
 
 .dashboard-composer-media-preview__close {
-  position: fixed;
-  right: max(18px, env(safe-area-inset-right));
-  top: max(18px, env(safe-area-inset-top));
+  position: absolute;
+  right: 14px;
+  top: 14px;
   z-index: 2;
   display: grid;
-  height: 44px;
-  width: 44px;
+  height: 32px;
+  width: 32px;
   place-items: center;
   border: 1px solid rgb(255 255 255 / 0.16);
   border-radius: 999px;
@@ -4654,22 +4901,24 @@ onUnmounted(() => {
 .dashboard-composer-media-preview__stage {
   position: relative;
   display: flex;
-  max-height: calc(100dvh - 56px);
-  max-width: min(1120px, calc(100vw - 56px));
+  width: 100%;
+  max-height: var(--dashboard-media-preview-max-height, 360px);
   align-items: center;
   justify-content: center;
+  flex-direction: column;
+  gap: 8px;
   margin: 0;
 }
 
 .dashboard-composer-media-preview__asset {
   display: block;
   height: auto;
-  width: auto;
-  max-height: calc(100dvh - 56px);
+  width: 100%;
+  max-height: calc(var(--dashboard-media-preview-max-height, 360px) - 30px);
   max-width: 100%;
-  border-radius: 8px;
+  border-radius: 7px;
   object-fit: contain;
-  box-shadow: 0 24px 80px rgb(0 0 0 / 0.58);
+  background: #050507;
 }
 
 .dashboard-composer-media-preview__asset--video {
@@ -4677,18 +4926,34 @@ onUnmounted(() => {
 }
 
 .dashboard-composer-media-preview__caption {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  max-width: calc(100% - 20px);
+  width: 100%;
+  max-width: 100%;
   overflow: hidden;
-  border-radius: 5px;
-  background: rgb(0 0 0 / 0.68);
-  padding: 5px 8px;
+  padding: 0 4px 1px;
+  color: rgb(255 255 255 / 0.7);
   font-size: 12px;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.dashboard-composer-media-preview__audio {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 14px 42px 8px 8px;
+}
+
+.dashboard-composer-media-preview__audio-icon {
+  display: grid;
+  height: 48px;
+  width: 48px;
+  place-items: center;
+  border-radius: 8px;
+  background: rgb(var(--brand-primary-rgb) / 0.16);
+  color: var(--brand-active-text);
 }
 
 .dashboard-pollo-textarea {
@@ -4772,6 +5037,66 @@ onUnmounted(() => {
   opacity: 0.72;
 }
 
+.dashboard-pollo-mention-picker {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  z-index: 45;
+  width: min(280px, calc(100vw - 32px));
+  max-height: min(280px, 42dvh);
+  overflow-y: auto;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 12px;
+  background: rgb(10 11 15 / 0.98);
+  padding: 6px;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.52), inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
+.dashboard-pollo-mention-picker__title {
+  padding: 7px 8px 5px;
+  color: rgb(255 255 255 / 0.42);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.dashboard-pollo-mention-option {
+  display: flex;
+  min-height: 44px;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 5px 8px;
+  color: rgb(255 255 255 / 0.76);
+  font-size: 13px;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.dashboard-pollo-mention-option:hover,
+.dashboard-pollo-mention-option:focus-visible {
+  background: rgb(255 255 255 / 0.08);
+  color: white;
+}
+
+.dashboard-pollo-mention-option__preview {
+  display: grid;
+  height: 32px;
+  width: 32px;
+  flex-shrink: 0;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 6px;
+  background: rgb(255 255 255 / 0.06);
+  color: rgb(255 255 255 / 0.66);
+}
+
+.dashboard-pollo-mention-option__preview img {
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+}
+
 .dashboard-pollo-generate {
   display: inline-flex;
   height: 40px;
@@ -4835,17 +5160,20 @@ onUnmounted(() => {
     height: 56px;
   }
 
-  .dashboard-composer-media-preview {
-    padding: 16px;
+  .dashboard-composer-media-preview__audio {
+    grid-template-columns: 40px minmax(0, 1fr);
+    gap: 8px;
+    padding-left: 4px;
   }
 
-  .dashboard-composer-media-preview__stage {
-    max-height: calc(100dvh - 32px);
-    max-width: calc(100vw - 32px);
+  .dashboard-composer-media-preview__audio-icon {
+    height: 40px;
+    width: 40px;
   }
 
-  .dashboard-composer-media-preview__asset {
-    max-height: calc(100dvh - 32px);
+  .dashboard-pollo-mention-picker {
+    right: auto;
+    left: 0;
   }
 
   .dashboard-pollo-composer__toolbar {

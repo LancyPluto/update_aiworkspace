@@ -64,6 +64,17 @@ def test_agnes_read_timeout_keeps_delivery_unknown():
     assert raised.value.retry_scope == "NONE"
 
 
+def test_agnes_explicit_runtime_timeout_overrides_short_account_timeout():
+    client = AgnesVideoClient(
+        base_url="https://apihub.agnes-ai.com",
+        api_key="test-key",
+        timeout_seconds=900,
+        extra_auth_json='{"timeoutSeconds":60}',
+    )
+
+    assert client.timeout_seconds == 900
+
+
 def test_agnes_video_client_creates_task_and_retrieves_result_by_video_id():
     session = RecordingSession(
         [
