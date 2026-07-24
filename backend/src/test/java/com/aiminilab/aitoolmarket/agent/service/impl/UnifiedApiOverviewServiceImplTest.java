@@ -8,6 +8,7 @@ import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
+import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorMapper;
 import com.aiminilab.aitoolmarket.agent.service.ModelCapabilityService;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountMigrationService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
@@ -42,6 +43,52 @@ class UnifiedApiOverviewServiceImplTest {
         assertFalse(UnifiedApiOverviewServiceImpl.isNegativeBalance(positive));
         assertFalse(UnifiedApiOverviewServiceImpl.isNegativeBalance(zero));
         assertTrue(UnifiedApiOverviewServiceImpl.isNegativeBalance(negative));
+    }
+
+    @Test
+    void explicitGoogleAccountStaysInGoogleGroupWithOfoxBaseUrl() {
+        ModelVendorAccountMigrationService migrationService = mock(ModelVendorAccountMigrationService.class);
+        ModelVendorAccountMapper accountMapper = mock(ModelVendorAccountMapper.class);
+        AgentModelConfigMapper modelConfigMapper = mock(AgentModelConfigMapper.class);
+        ModelProviderRegistry providerRegistry = new ModelProviderRegistry();
+        VendorCodeResolver vendorCodeResolver = new VendorCodeResolver(
+                providerRegistry, mock(ModelVendorMapper.class));
+        ModelCapabilitiesCodec capabilitiesCodec = mock(ModelCapabilitiesCodec.class);
+        ModelCapabilityService capabilityService = mock(ModelCapabilityService.class);
+        AccountModelRouteStateMapper routeStateMapper = mock(AccountModelRouteStateMapper.class);
+        UnifiedApiOverviewServiceImpl service = new UnifiedApiOverviewServiceImpl(
+                migrationService,
+                accountMapper,
+                modelConfigMapper,
+                vendorCodeResolver,
+                providerRegistry,
+                capabilitiesCodec,
+                capabilityService,
+                routeStateMapper,
+                new ObjectMapper()
+        );
+        ModelVendorAccount account = new ModelVendorAccount();
+        account.setId(36L);
+        account.setVendorCode("google");
+        account.setAccountName("google-ofox");
+        account.setBaseUrl("https://api.ofox.ai/v1");
+        account.setEnabled(true);
+        when(accountMapper.findAllActive()).thenReturn(List.of(account));
+        when(modelConfigMapper.findAllActive()).thenReturn(List.of());
+
+        UnifiedApiOverviewResponse response = service.overview();
+
+        assertThat(response.vendors())
+                .filteredOn(vendor -> "google".equals(vendor.vendorCode()))
+                .singleElement()
+                .satisfies(vendor -> assertThat(vendor.accounts())
+                        .singleElement()
+                        .satisfies(item -> assertThat(item.id()).isEqualTo(36L)));
+        assertThat(response.vendors())
+                .filteredOn(vendor -> "openai".equals(vendor.vendorCode()))
+                .allSatisfy(vendor -> assertThat(vendor.accounts())
+                        .extracting(item -> item.id())
+                        .doesNotContain(36L));
     }
 
     @Test
