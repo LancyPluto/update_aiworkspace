@@ -18,7 +18,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.datasource.username=sa",
         "spring.datasource.password=",
         "spring.sql.init.mode=always",
-        "spring.sql.init.schema-locations=classpath:schema-test.sql"
+        "spring.sql.init.schema-locations=classpath:schema-test.sql",
+        "management.endpoint.health.probes.enabled=true"
 })
 class ActuatorEndpointTest {
 
@@ -28,6 +29,9 @@ class ActuatorEndpointTest {
     @Test
     void actuatorHealthAndMetricsEndpointsAreReachable() throws Exception {
         mockMvc.perform(get("/actuator/health"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/actuator/health/readiness"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(get("/actuator/metrics"))

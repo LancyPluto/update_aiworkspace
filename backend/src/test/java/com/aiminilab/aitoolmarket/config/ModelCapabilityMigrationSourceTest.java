@@ -161,6 +161,27 @@ class ModelCapabilityMigrationSourceTest {
     }
 
     @Test
+    void runtimeProviderMetadataJoinPinsTheIdentifierCollation() throws Exception {
+        String initializer = Files.readString(Path.of(
+                "src/main/java/com/aiminilab/aitoolmarket/config/DataInitializer.java"
+        ));
+
+        assertThat(initializer).containsPattern(
+                "ON metadata\\.provider_code COLLATE utf8mb4_unicode_ci\\s*"
+                        + "= model\\.provider COLLATE utf8mb4_unicode_ci\\s*"
+                        + "AND metadata\\.enabled = 1"
+        );
+
+        int metadataTable = initializer.indexOf("ensureTable(\"model_provider_metadata\"");
+        int nextTable = initializer.indexOf("ensureTable(\"gift_card_packages\"", metadataTable);
+        assertThat(metadataTable).isGreaterThanOrEqualTo(0);
+        assertThat(nextTable).isGreaterThan(metadataTable);
+        assertThat(initializer.substring(metadataTable, nextTable)).contains(
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+    }
+
+    @Test
     void providerManifestDoesNotExposeDigitalHumanAsAModelCapability() throws Exception {
         String manifest = Files.readString(Path.of("src/main/resources/model-providers.yml"));
 

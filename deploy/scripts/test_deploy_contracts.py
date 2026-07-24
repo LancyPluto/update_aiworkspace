@@ -88,6 +88,47 @@ class DeployContractTests(unittest.TestCase):
         )
         self.assertIn("IF applied_count <> matched_count THEN", migration)
 
+    def test_model_identifier_collations_are_migrated_and_verified(self) -> None:
+        migration = self.read("sql/121_unify_model_identifier_collations.sql")
+        preflight = self.read("deploy/scripts/production_readonly_preflight.sh")
+        target_columns = {
+            "agent_model_configs": "config_code,provider,model_name",
+            "model_provider_metadata": "provider_code",
+            "model_vendor_accounts": "vendor_code",
+            "model_vendors": "vendor_code",
+            "model_account_routing_pools": "vendor_code",
+            "agent_context_snapshots": "model_provider_code,model_name",
+            "agent_model_request_snapshots": "model_provider_code,model_name",
+            "agent_runs": "model_provider_code,model_name",
+            "billing_usage_logs": "provider,model_name",
+            "workflow_step_attempts": "provider_code",
+            "provider_callback_registrations": "provider_code",
+            "provider_callback_inbox": "provider_code",
+            "user_generation_subjects": "provider_code",
+        }
+
+        self.assertIn("assert_model_identifier_unique_keys", migration)
+        self.assertIn("GROUP BY CONVERT(config_code USING utf8mb4)", migration)
+        self.assertIn("GROUP BY CONVERT(vendor_code USING utf8mb4)", migration)
+        self.assertIn("GROUP BY CONVERT(provider_code USING utf8mb4)", migration)
+        self.assertIn("column_type", migration)
+        self.assertIn("QUOTE(column_comment)", migration)
+        self.assertIn(
+            "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+            migration,
+        )
+        self.assertIn("model identifier collation verification failed", migration)
+        self.assertNotIn("CONVERT TO CHARACTER SET", migration.upper())
+        for table, columns in target_columns.items():
+            self.assertIn(f"'{table}', '{columns}'", migration)
+
+        self.assertIn('check_zero "model_identifier_collation_mismatch"', preflight)
+        self.assertIn("SELECT 19 - COUNT(*)", preflight)
+        self.assertIn("collation_name = 'utf8mb4_unicode_ci'", preflight)
+        for table, columns in target_columns.items():
+            for column in columns.split(","):
+                self.assertIn(f"'{table}.{column}'", preflight)
+
     def test_user_code_migrations_normalize_existing_column_comparisons(self) -> None:
         public_code_migration = self.read("sql/117_public_user_codes.sql")
         referral_code_migration = self.read("sql/119_user_referral_codes.sql")
@@ -538,6 +579,23 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn('if [ -n "\\$BACKUP_ENCRYPTION_PASSWORD" ]', deploy)
         self.assertIn('--resolve "$PUBLIC_HOST:443:127.0.0.1"', health)
         self.assertIn("http://127.0.0.1:8080/api/health", health)
+        self.assertIn("http://127.0.0.1:8080/actuator/health/readiness", health)
+        self.assertIn(
+            'REQUIRED_CONSECUTIVE_SUCCESSES="${REQUIRED_CONSECUTIVE_SUCCESSES:-3}"',
+            health,
+        )
+        self.assertIn("assert_backend_runtime_unchanged", health)
+        self.assertIn("BACKEND_EXPECTED_CONTAINER_ID", health)
+        self.assertIn("BACKEND_RESTART_BASELINE", health)
+        self.assertIn(
+            "consecutive_successes=$((consecutive_successes + 1))",
+            health,
+        )
+        self.assertIn("BACKEND_RESTART_BASELINE=0", deploy)
+        self.assertLess(
+            deploy.index("BACKEND_RESTART_BASELINE=0"),
+            deploy.index("verify_release_health.sh"),
+        )
         self.assertIn("http://127.0.0.1:5174/admin", health)
         self.assertIn("http://127.0.0.1:8090/health", health)
         self.assertIn("docker logs --tail 80", health)

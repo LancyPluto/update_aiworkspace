@@ -50,6 +50,15 @@ public class DataInitializer implements CommandLineRunner {
     private final ModelProviderRegistry modelProviderRegistry;
     private final AppProperties appProperties;
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final String MYSQL_PROVIDER_METADATA_JOIN = """
+            ON metadata.provider_code COLLATE utf8mb4_unicode_ci
+             = model.provider COLLATE utf8mb4_unicode_ci
+           AND metadata.enabled = 1
+            """;
+    private static final String PORTABLE_PROVIDER_METADATA_JOIN = """
+            ON metadata.provider_code = model.provider
+           AND metadata.enabled = 1
+            """;
 
     public DataInitializer(UserMapper userMapper, PublicUserIdentityService publicUserIdentityService,
                            ReferralCodeService referralCodeService,
@@ -1101,7 +1110,7 @@ public class DataInitializer implements CommandLineRunner {
                   enabled TINYINT NOT NULL DEFAULT 1,
                   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """);
         ensureTable("gift_card_packages", """
                 CREATE TABLE gift_card_packages (
@@ -1967,6 +1976,9 @@ public class DataInitializer implements CommandLineRunner {
     }
 
     private void clearIncompatibleDigitalHumanBindings() {
+        String providerMetadataJoin = usesMySqlDialect()
+                ? MYSQL_PROVIDER_METADATA_JOIN
+                : PORTABLE_PROVIDER_METADATA_JOIN;
         List<Long> invalidToolIds = jdbcTemplate.query("""
                 SELECT tool.id,
                        model.provider AS model_provider,
@@ -1976,10 +1988,10 @@ public class DataInitializer implements CommandLineRunner {
                 LEFT JOIN agent_model_configs model
                   ON model.id = tool.model_config_id AND model.is_deleted = 0
                 LEFT JOIN model_provider_metadata metadata
-                  ON metadata.provider_code = model.provider AND metadata.enabled = 1
+                %s
                 WHERE UPPER(COALESCE(tool.execution_handler, '')) = 'DIGITAL_HUMAN'
                   AND tool.model_config_id IS NOT NULL
-                """, (result, rowNumber) -> {
+                """.formatted(providerMetadataJoin), (result, rowNumber) -> {
             boolean supportedProvider = isDigitalHumanVideoProvider(result.getString("model_provider"));
             List<String> capabilities = normalizeLegacyCapabilities(
                     result.getString("model_capabilities"), false);
@@ -1999,6 +2011,15 @@ public class DataInitializer implements CommandLineRunner {
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
                 """, toolId));
+    }
+
+    private boolean usesMySqlDialect() {
+        try (Connection connection = dataSource.getConnection()) {
+            String productName = connection.getMetaData().getDatabaseProductName();
+            return productName != null && productName.toLowerCase(Locale.ROOT).contains("mysql");
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to detect database dialect", exception);
+        }
     }
 
     static boolean isDigitalHumanVideoProvider(String provider) {
