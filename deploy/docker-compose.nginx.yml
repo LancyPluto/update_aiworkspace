@@ -1,6 +1,6 @@
 services:
   nginx:
-    image: ${DOCKER_REGISTRY:-docker.1ms.run/}nginx:1.30.4-alpine
+    image: ${NGINX_IMAGE:-docker.io/library/nginx:1.30.4-alpine}
     container_name: ai-supermarket-nginx
     restart: unless-stopped
     depends_on:
