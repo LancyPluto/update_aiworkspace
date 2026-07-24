@@ -166,6 +166,58 @@ class ModelRoutingMapperIntegrationTest {
         assertThat(persisted.getFailureTraceId()).isEqualTo("trace-route-1");
     }
 
+    @Test
+    void reconciliationCopiesOnlySafeTaskFailureFieldsToTerminalAttempts() {
+        jdbcTemplate.update("""
+                INSERT INTO ai_tasks(
+                    task_no, user_id, tool_id, model_config_id, status, params_json,
+                    error_code, error_message, user_message, developer_message, failure_trace_id
+                ) VALUES (
+                    'routing-reconcile-timeout', 1, 1, 90001, 'TIMEOUT', '{}',
+                    'STALE_TASK_TIMEOUT', 'RAW legacy provider response body=secret',
+                    'Task timed out, please retry later',
+                    'Task exceeded the configured stale timeout', 'trace-reconcile-1'
+                )
+                """);
+        Long timedOutTaskId = jdbcTemplate.queryForObject(
+                "SELECT id FROM ai_tasks WHERE task_no = 'routing-reconcile-timeout'", Long.class);
+        TaskModelRouteAttempt timedOutAttempt = attempt(timedOutTaskId, 1, 90001L, 80001L);
+        assertThat(attemptMapper.insertAttempt(timedOutAttempt)).isEqualTo(1);
+
+        jdbcTemplate.update("""
+                INSERT INTO ai_tasks(task_no, user_id, tool_id, model_config_id, status, params_json)
+                VALUES ('routing-reconcile-success', 1, 1, 90001, 'SUCCESS', '{}')
+                """);
+        Long successfulTaskId = jdbcTemplate.queryForObject(
+                "SELECT id FROM ai_tasks WHERE task_no = 'routing-reconcile-success'", Long.class);
+        TaskModelRouteAttempt successfulAttempt = attempt(successfulTaskId, 1, 90001L, 80001L);
+        successfulAttempt.setErrorCode("STALE_ERROR");
+        successfulAttempt.setErrorMessage("stale raw error");
+        successfulAttempt.setUserMessage("stale user message");
+        successfulAttempt.setDeveloperMessage("stale developer message");
+        successfulAttempt.setFailureTraceId("stale-trace");
+        attemptMapper.insert(successfulAttempt);
+
+        assertThat(attemptMapper.closeAttemptsForTerminalTasks()).isEqualTo(2);
+
+        TaskModelRouteAttempt persistedTimeout = attemptMapper.selectById(timedOutAttempt.getId());
+        assertThat(persistedTimeout.getStatus()).isEqualTo("TIMEOUT");
+        assertThat(persistedTimeout.getErrorCode()).isEqualTo("STALE_TASK_TIMEOUT");
+        assertThat(persistedTimeout.getErrorMessage()).isEqualTo("Task exceeded the configured stale timeout");
+        assertThat(persistedTimeout.getUserMessage()).isEqualTo("Task timed out, please retry later");
+        assertThat(persistedTimeout.getDeveloperMessage()).isEqualTo("Task exceeded the configured stale timeout");
+        assertThat(persistedTimeout.getFailureTraceId()).isEqualTo("trace-reconcile-1");
+        assertThat(persistedTimeout.getDeveloperMessage()).doesNotContain("RAW", "secret");
+
+        TaskModelRouteAttempt persistedSuccess = attemptMapper.selectById(successfulAttempt.getId());
+        assertThat(persistedSuccess.getStatus()).isEqualTo("SUCCESS");
+        assertThat(persistedSuccess.getErrorCode()).isNull();
+        assertThat(persistedSuccess.getErrorMessage()).isNull();
+        assertThat(persistedSuccess.getUserMessage()).isNull();
+        assertThat(persistedSuccess.getDeveloperMessage()).isNull();
+        assertThat(persistedSuccess.getFailureTraceId()).isNull();
+    }
+
     private static TaskModelRouteAttempt attempt(Long taskId,
                                                  int attemptNo,
                                                  Long modelConfigId,

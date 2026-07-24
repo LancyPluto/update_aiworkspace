@@ -412,6 +412,86 @@ class CreditRechargeApiTest {
     }
 
     @Test
+    void alipayDependencyFailureMarksCustomOrderFailedAndHidesDiagnostics() throws Exception {
+        when(alipayPagePayClient.createPagePayOrder(any(AlipayPagePayRequest.class)))
+                .thenThrow(new com.aiminilab.aitoolmarket.common.exception.DependencyException(
+                        com.aiminilab.aitoolmarket.common.error.PayErrors.PROVIDER_CALL_FAILED,
+                        "operation=page-pay; upstreamStatus=502; upstreamCode=SYSTEM_ERROR; "
+                                + "exceptionType=java.io.IOException"));
+        RegisteredUser user = registerUser("custom_alipay_dependency_failure");
+
+        mockMvc.perform(post("/api/v1/credits/recharge-orders/custom")
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "amount": 10.00,
+                                  "paymentChannel": "ALIPAY_PAGE",
+                                  "clientRequestId": "custom-alipay-dependency-failure"
+                                }
+                                """))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("SYSTEM_ERROR"))
+                .andExpect(jsonPath("$.message").value("支付服务暂不可用，请稍后重试"))
+                .andExpect(jsonPath("$.developerMessage").doesNotExist());
+
+        Map<String, Object> persisted = jdbcTemplate.queryForMap(
+                "SELECT id, status, status_reason FROM credit_recharge_orders WHERE user_id = ? AND idempotency_key = ?",
+                user.userId(),
+                "custom-alipay-dependency-failure"
+        );
+        org.assertj.core.api.Assertions.assertThat(persisted.get("status")).isEqualTo("FAILED");
+        org.assertj.core.api.Assertions.assertThat(persisted.get("status_reason"))
+                .isEqualTo("支付服务暂不可用，请稍后重试");
+
+        mockMvc.perform(get("/api/v1/credits/recharge-orders/{orderId}", persisted.get("id"))
+                        .header("Authorization", "Bearer " + user.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("FAILED"))
+                .andExpect(jsonPath("$.data.statusReason").value("支付服务暂不可用，请稍后重试"));
+    }
+
+    @Test
+    void wechatDependencyFailureMarksCustomOrderFailedAndHidesDiagnostics() throws Exception {
+        when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
+                .thenThrow(new com.aiminilab.aitoolmarket.common.exception.DependencyException(
+                        com.aiminilab.aitoolmarket.common.error.PayErrors.PROVIDER_CALL_FAILED,
+                        "operation=native-prepay; upstreamStatus=502; upstreamCode=SYSTEM_ERROR; "
+                                + "exceptionType=java.io.IOException"));
+        RegisteredUser user = registerUser("custom_wechat_dependency_failure");
+
+        mockMvc.perform(post("/api/v1/credits/recharge-orders/custom")
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "amount": 10.00,
+                                  "paymentChannel": "WECHAT_NATIVE",
+                                  "clientRequestId": "custom-wechat-dependency-failure"
+                                }
+                                """))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("SYSTEM_ERROR"))
+                .andExpect(jsonPath("$.message").value("支付服务暂不可用，请稍后重试"))
+                .andExpect(jsonPath("$.developerMessage").doesNotExist());
+
+        Map<String, Object> persisted = jdbcTemplate.queryForMap(
+                "SELECT id, status, status_reason FROM credit_recharge_orders WHERE user_id = ? AND idempotency_key = ?",
+                user.userId(),
+                "custom-wechat-dependency-failure"
+        );
+        org.assertj.core.api.Assertions.assertThat(persisted.get("status")).isEqualTo("FAILED");
+        org.assertj.core.api.Assertions.assertThat(persisted.get("status_reason"))
+                .isEqualTo("支付服务暂不可用，请稍后重试");
+
+        mockMvc.perform(get("/api/v1/credits/recharge-orders/{orderId}", persisted.get("id"))
+                        .header("Authorization", "Bearer " + user.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("FAILED"))
+                .andExpect(jsonPath("$.data.statusReason").value("支付服务暂不可用，请稍后重试"));
+    }
+
+    @Test
     void failedWechatPrepayReleasesMembershipOnlyAfterConfirmedChannelClose() throws Exception {
         when(wechatNativePayClient.createNativeOrder(any(NativePrepayRequest.class)))
                 .thenThrow(new com.aiminilab.aitoolmarket.common.exception.BusinessException(

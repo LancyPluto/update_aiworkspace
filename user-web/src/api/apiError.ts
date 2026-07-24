@@ -98,6 +98,8 @@ function safeLegacyUserMessage(errorCode?: string): string | undefined {
       return "任务处理失败，请稍后重试"
     case "MODEL":
       return "模型服务暂不可用，请稍后重试"
+    case "PAY":
+      return "支付服务暂不可用，请稍后重试"
     case "AGENT":
       return "Agent 请求失败，请稍后重试"
     case "WORKFLOW":

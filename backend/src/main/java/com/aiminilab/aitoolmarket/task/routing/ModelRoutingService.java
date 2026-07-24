@@ -304,18 +304,21 @@ public class ModelRoutingService {
             return;
         }
         int closed;
-        RouteFailoverRequest failureDetails = failure == null ? null : toRouteFailure(failure);
-        if (failureDetails == null && TaskStatus.SUCCESS.name().equalsIgnoreCase(outcome)
+        String normalizedOutcome = normalizedOutcome(outcome);
+        RouteFailoverRequest failureDetails = failure == null
+                ? toRouteFailure(task)
+                : toRouteFailure(failure);
+        if (TaskStatus.SUCCESS.name().equalsIgnoreCase(normalizedOutcome)
                 && (providerRequestId != null || providerCalled != null)) {
             closed = attemptMapper.closeSuccess(
-                    attempt.getId(), normalizedOutcome(outcome), providerRequestId, providerCalled);
-        } else if (failureDetails == null) {
-            closed = attemptMapper.close(attempt.getId(), normalizedOutcome(outcome));
+                    attempt.getId(), normalizedOutcome, providerRequestId, providerCalled);
+        } else if (TaskStatus.SUCCESS.name().equalsIgnoreCase(normalizedOutcome)) {
+            closed = attemptMapper.close(attempt.getId(), normalizedOutcome);
         } else {
             FailureContract failureContract = failureContract(task, failure, failureDetails);
             closed = attemptMapper.closeWithFailureContract(
                     attempt.getId(),
-                    normalizedOutcome(outcome),
+                    normalizedOutcome,
                     failureDetails,
                     failureContract.userMessage(),
                     failureContract.developerMessage(),
@@ -577,6 +580,25 @@ public class ModelRoutingService {
                 request.providerRequestId(),
                 request.providerCharged(),
                 request.retryAfterSeconds()
+        ));
+    }
+
+    private RouteFailoverRequest toRouteFailure(AiTask task) {
+        String developerSource = isBlank(task.getDeveloperMessage())
+                ? task.getErrorMessage()
+                : task.getDeveloperMessage();
+        return sanitize(new RouteFailoverRequest(
+                task.getClaimToken(),
+                task.getCurrentRouteAttemptId(),
+                null,
+                null,
+                null,
+                task.getErrorCode(),
+                developerSource,
+                task.getProviderErrorCode(),
+                task.getProviderRequestId(),
+                null,
+                null
         ));
     }
 

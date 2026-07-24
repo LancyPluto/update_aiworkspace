@@ -1,6 +1,5 @@
 package com.aiminilab.aitoolmarket.common.error;
 
-import java.util.Locale;
 import java.util.regex.Pattern;
 
 public final class ErrorMessageSanitizer {
@@ -29,6 +28,9 @@ public final class ErrorMessageSanitizer {
     private static final Pattern RAW_PAYLOAD = Pattern.compile(
             "(?is)\\b(response\\s*body|responseBody|response_body|rawBody|raw_body|body|payload)\\s*[:=]\\s*.+$"
     );
+    private static final Pattern JSON_LIKE_PAYLOAD = Pattern.compile(
+            "(?s)(\\{\\s*\\\"[^}]*\\}|\\[\\s*(?:\\{|\\\"|[-\\d]|true\\b|false\\b|null\\b).*?\\])"
+    );
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
     private ErrorMessageSanitizer() {
@@ -37,6 +39,9 @@ public final class ErrorMessageSanitizer {
     public static String sanitizeUserMessage(String candidate, String fallback) {
         String safeFallback = normalizeFallback(fallback, "请求处理失败，请稍后重试");
         String normalized = normalize(candidate, safeFallback);
+        if (containsRawDiagnostic(normalized)) {
+            return truncate(safeFallback, MAX_USER_MESSAGE_LENGTH);
+        }
         normalized = redactSecrets(normalized);
         normalized = PUBLIC_URL.matcher(normalized).replaceAll("[链接已隐藏]");
         normalized = PHONE_NUMBER.matcher(normalized).replaceAll("[手机号已隐藏]");
@@ -52,12 +57,21 @@ public final class ErrorMessageSanitizer {
             normalized = safeFallback + " [stack trace redacted]";
         } else {
             normalized = RAW_PAYLOAD.matcher(normalized).replaceFirst("$1=[REDACTED]");
+            normalized = JSON_LIKE_PAYLOAD.matcher(normalized).replaceAll("[raw payload redacted]");
             normalized = redactSecrets(normalized);
             normalized = JDBC_URL.matcher(normalized).replaceAll("jdbc:[REDACTED]");
             normalized = URL_CREDENTIALS.matcher(normalized).replaceAll("$1[REDACTED]@");
             normalized = PHONE_NUMBER.matcher(normalized).replaceAll("[REDACTED_PHONE]");
         }
         return truncate(normalized, MAX_DEVELOPER_MESSAGE_LENGTH);
+    }
+
+    private static boolean containsRawDiagnostic(String value) {
+        return SQL_STATEMENT.matcher(value).find()
+                || STACK_TRACE.matcher(value).find()
+                || RAW_PAYLOAD.matcher(value).find()
+                || JSON_LIKE_PAYLOAD.matcher(value).find()
+                || JDBC_URL.matcher(value).find();
     }
 
     private static String redactSecrets(String value) {

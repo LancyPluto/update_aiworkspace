@@ -2070,36 +2070,74 @@ components:
             $ref: "#/components/schemas/ErrorApiResponse"
 
   schemas:
-    ErrorCode:
+    LegacyErrorCode:
       type: string
       enum:
-        - SUCCESS
         - PARAM_ERROR
+        - NOT_FOUND
         - UNAUTHORIZED
         - FORBIDDEN
         - ADMIN_UNAUTHORIZED
         - ADMIN_FORBIDDEN
         - TOOL_NOT_FOUND
         - TOOL_OFFLINE
+        - WORKFLOW_RUNTIME_BLOCKED
         - CREDIT_NOT_ENOUGH
+        - IDEMPOTENCY_CONFLICT
+        - MEMBERSHIP_ACTIVE
+        - MEMBERSHIP_ORDER_PENDING
         - TASK_NOT_FOUND
         - TASK_STATUS_INVALID
+        - AGENT_SESSION_NOT_FOUND
+        - AGENT_RUN_NOT_FOUND
+        - AGENT_RUN_NOT_CANCELLABLE
+        - AGENT_RATE_LIMITED
+        - AGENT_ACTIVE_RUN_LIMIT
+        - AGENT_TOOL_NOT_AVAILABLE
+        - AGENT_CREDIT_NOT_ENOUGH
+        - AGENT_RUN_BUDGET_EXCEEDED
+        - AGENT_TOOL_CALL_LIMIT
+        - AGENT_MODEL_CALL_LIMIT
+        - AGENT_SECURITY_REJECTED
+        - AGENT_RUN_NOT_REGENERATABLE
+        - AGENT_MESSAGE_NOT_EDITABLE
+        - AGENT_MESSAGE_NOT_FOUND
+        - AGENT_ACTIVE_RUN_EXISTS
+        - AGENT_USE_REGENERATE_PATH
         - MODEL_CALL_FAILED
+        - SESSION_NOT_FOUND
+        - FILE_TYPE_NOT_ALLOWED
+        - FILE_SIZE_EXCEEDED
+        - PPT_PROJECT_NOT_FOUND
+        - PPT_STEP_DISABLED
+        - PPT_ENGINE_ERROR
+        - PPT_TASK_FAILED
+        - PPT_EXPORT_FAILED
         - SYSTEM_ERROR
+
+    BusinessErrorCode:
+      type: string
+      pattern: "^[A-Z][A-Z0-9]*_[0-9]{3}$"
+      example: MODEL_004
+      description: Stable business error code. HTTP status is defined independently.
 
     ApiResponse:
       type: object
-      required: [code, message]
+      required: [code]
       properties:
         code:
-          $ref: "#/components/schemas/ErrorCode"
+          type: string
+          enum: [SUCCESS]
         message:
           type: string
           example: ok
+          deprecated: true
+          description: Legacy success compatibility only; omitted when APP_ERROR_CONTRACT_MODE=V2.
         traceId:
           type: string
           nullable: true
-          description: 当前实现使用 traceId；旧规划中的 requestId 视为同类追踪字段?
+          maxLength: 64
+          description: Cross-service trace identifier.
 
     PageBase:
       type: object
@@ -2115,14 +2153,68 @@ components:
           type: boolean
 
     ErrorApiResponse:
-      allOf:
-        - $ref: "#/components/schemas/ApiResponse"
-        - type: object
-          properties:
-            data:
-              type: object
-              nullable: true
-              example: null
+      description: |
+        Phase 1 rolling contract. Production defaults to LEGACY until V2 is explicitly enabled.
+        V2 public/user responses contain only errorCode, userMessage and traceId.
+        V2 authenticated admin and signature-verified internal responses contain only
+        errorCode, developerMessage and traceId. Admin login always uses the user shape.
+      oneOf:
+        - $ref: "#/components/schemas/LegacyErrorApiResponse"
+        - $ref: "#/components/schemas/UserErrorApiResponse"
+        - $ref: "#/components/schemas/AdminErrorApiResponse"
+
+    LegacyErrorApiResponse:
+      type: object
+      required: [code, message, data]
+      properties:
+        code:
+          $ref: "#/components/schemas/LegacyErrorCode"
+        message:
+          type: string
+          maxLength: 200
+        data:
+          type: object
+          nullable: true
+          additionalProperties: true
+        traceId:
+          type: string
+          nullable: true
+          maxLength: 64
+      description: Legacy compatibility shape used while APP_ERROR_CONTRACT_MODE=LEGACY.
+
+    UserErrorApiResponse:
+      type: object
+      additionalProperties: false
+      required: [errorCode, userMessage]
+      properties:
+        errorCode:
+          $ref: "#/components/schemas/BusinessErrorCode"
+        userMessage:
+          type: string
+          maxLength: 200
+          description: Short, non-sensitive text safe to display to end users.
+        traceId:
+          type: string
+          nullable: true
+          maxLength: 64
+      description: V2 user error shape. message, developerMessage, data and details are forbidden.
+
+    AdminErrorApiResponse:
+      type: object
+      additionalProperties: false
+      required: [errorCode, developerMessage]
+      properties:
+        errorCode:
+          $ref: "#/components/schemas/BusinessErrorCode"
+        developerMessage:
+          type: string
+          maxLength: 2000
+          description: Sanitized diagnostic text for authenticated admins or verified internal callers.
+        traceId:
+          type: string
+          nullable: true
+          maxLength: 64
+      description: V2 diagnostic shape. message, userMessage, data and details are forbidden.
 
     EmptyApiResponse:
       allOf:

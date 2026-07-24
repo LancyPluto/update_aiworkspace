@@ -223,6 +223,30 @@ class GlobalExceptionHandlerContractTest {
     }
 
     @Test
+    void rawJsonDiagnosticsNeverReachLegacyUsersOrV2Admins() {
+        MDC.put("traceId", "trace-raw-json");
+        String rawPayload = "gateway rejected: {\"merchant\":\"private-order\",\"reason\":\"upstream detail\"}";
+
+        ResponseEntity<Object> legacyResponse = legacyHandler().handleAppException(
+                new BusinessException(ErrorCode.PARAM_ERROR, rawPayload),
+                request("/api/v1/credit/recharge-orders")
+        );
+        ApiResponse<?> legacyBody = (ApiResponse<?>) legacyResponse.getBody();
+        assertThat(legacyBody.message()).isEqualTo(ApiErrors.INVALID_ARGUMENT.defaultUserMessage());
+        assertThat(legacyBody.toString()).doesNotContain("private-order", "upstream detail", "merchant");
+
+        AuthContext.set(new AuthUser(1L, "admin", UserType.ADMIN.name()));
+        ResponseEntity<Object> adminResponse = v2Handler().handleAppException(
+                new DependencyException(ModelErrors.PROVIDER_CALL_FAILED, rawPayload),
+                request("/api/admin/v1/tasks")
+        );
+        AdminErrorResponse adminBody = (AdminErrorResponse) adminResponse.getBody();
+        assertThat(adminBody.developerMessage())
+                .contains("gateway rejected", "raw payload redacted")
+                .doesNotContain("private-order", "upstream detail", "merchant");
+    }
+
+    @Test
     void errorDefinitionControlsHttpStatusIndependentlyFromCode() {
         GlobalExceptionHandler handler = v2Handler();
 
