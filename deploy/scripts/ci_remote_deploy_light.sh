@@ -622,6 +622,17 @@ for svc in \$DEPLOY_SERVICES; do
   esac
 done
 
+BACKEND_CONTAINER_ID_BEFORE="\$(docker inspect --format '{{.Id}}' ai-supermarket-backend 2>/dev/null || true)"
+BACKEND_RESTART_COUNT_BEFORE="\$(docker inspect --format '{{.RestartCount}}' ai-supermarket-backend 2>/dev/null || true)"
+BACKEND_WILL_RECREATE=false
+if echo "\$APP_SERVICES" | grep -qw backend; then
+  BACKEND_WILL_RECREATE=true
+elif [ -z "\$BACKEND_CONTAINER_ID_BEFORE" ] \
+    || ! [[ "\$BACKEND_RESTART_COUNT_BEFORE" =~ ^[0-9]+$ ]]; then
+  echo "::error::Unable to capture the existing backend stability baseline." >&2
+  exit 1
+fi
+
 if [ -n "\$APP_SERVICES" ]; then
   echo "Force-recreating application containers:\$APP_SERVICES"
   docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate --no-deps --no-build --pull never \$APP_SERVICES
@@ -646,8 +657,24 @@ docker compose "\${COMPOSE_ARGS[@]}" up -d --no-build --pull never \$MONITORING_
 # nginx 反代静态资源；任意前端/配置变更后都 reload，避免 user_web_dist 已更新但 nginx 仍握旧连接。
 docker compose "\${COMPOSE_ARGS[@]}" restart nginx
 
+if [ "\$BACKEND_WILL_RECREATE" = true ]; then
+  BACKEND_EXPECTED_CONTAINER_ID="\$(docker inspect --format '{{.Id}}' ai-supermarket-backend 2>/dev/null || true)"
+  BACKEND_RESTART_BASELINE=0
+  if [ -z "\$BACKEND_EXPECTED_CONTAINER_ID" ] \
+      || { [ -n "\$BACKEND_CONTAINER_ID_BEFORE" ] \
+        && [ "\$BACKEND_EXPECTED_CONTAINER_ID" = "\$BACKEND_CONTAINER_ID_BEFORE" ]; }; then
+    echo "::error::Backend force-recreate did not produce a new inspectable container." >&2
+    exit 1
+  fi
+else
+  BACKEND_EXPECTED_CONTAINER_ID="\$BACKEND_CONTAINER_ID_BEFORE"
+  BACKEND_RESTART_BASELINE="\$BACKEND_RESTART_COUNT_BEFORE"
+fi
+
 echo "Verifying release health..."
-bash "\$REMOTE_DIR/deploy/scripts/verify_release_health.sh"
+BACKEND_EXPECTED_CONTAINER_ID="\$BACKEND_EXPECTED_CONTAINER_ID" \
+BACKEND_RESTART_BASELINE="\$BACKEND_RESTART_BASELINE" \
+  bash "\$REMOTE_DIR/deploy/scripts/verify_release_health.sh"
 if echo "\$DEPLOY_SERVICES" | grep -qw agent-service; then
   echo "Checking agent-service outbound model connectivity ..."
   python3 "\$REMOTE_DIR/deploy/scripts/check_outbound_proxy.py"

@@ -3,17 +3,37 @@ set -euo pipefail
 
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-18}"
 RETRY_SECONDS="${RETRY_SECONDS:-5}"
+REQUIRED_CONSECUTIVE_SUCCESSES="${REQUIRED_CONSECUTIVE_SUCCESSES:-3}"
 PUBLIC_HOST="${PUBLIC_HOST:-wlcloudai.com}"
 REQUIRE_MONITORING="${REQUIRE_MONITORING:-1}"
 METRIC_MAX_AGE_SECONDS="${METRIC_MAX_AGE_SECONDS:-180}"
+BACKEND_EXPECTED_CONTAINER_ID="${BACKEND_EXPECTED_CONTAINER_ID:-}"
+BACKEND_RESTART_BASELINE="${BACKEND_RESTART_BASELINE:-}"
 
 if [[ "$REQUIRE_MONITORING" != "0" && "$REQUIRE_MONITORING" != "1" ]]; then
   echo "ERROR: REQUIRE_MONITORING must be 0 or 1" >&2
   exit 2
 fi
+if ! [[ "$MAX_ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "ERROR: MAX_ATTEMPTS must be a positive integer" >&2
+  exit 2
+fi
+if ! [[ "$REQUIRED_CONSECUTIVE_SUCCESSES" =~ ^[1-9][0-9]*$ ]] \
+    || (( REQUIRED_CONSECUTIVE_SUCCESSES > MAX_ATTEMPTS )); then
+  echo "ERROR: REQUIRED_CONSECUTIVE_SUCCESSES must be a positive integer no greater than MAX_ATTEMPTS" >&2
+  exit 2
+fi
 
 container_status() {
   docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$1" 2>/dev/null || echo missing
+}
+
+container_id() {
+  docker inspect --format '{{.Id}}' "$1" 2>/dev/null || echo missing
+}
+
+container_restart_count() {
+  docker inspect --format '{{.RestartCount}}' "$1" 2>/dev/null || echo missing
 }
 
 is_valid_port() {
@@ -153,7 +173,36 @@ dump_failure_diagnostics() {
   done
 }
 
+if [ -z "$BACKEND_EXPECTED_CONTAINER_ID" ]; then
+  BACKEND_EXPECTED_CONTAINER_ID="$(container_id ai-supermarket-backend)"
+fi
+if [ -z "$BACKEND_RESTART_BASELINE" ]; then
+  BACKEND_RESTART_BASELINE="$(container_restart_count ai-supermarket-backend)"
+fi
+if [ "$BACKEND_EXPECTED_CONTAINER_ID" = missing ] \
+    || ! [[ "$BACKEND_RESTART_BASELINE" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: unable to establish backend container stability baseline" >&2
+  dump_failure_diagnostics
+  exit 1
+fi
+
+assert_backend_runtime_unchanged() {
+  local current_container_id
+  local current_restart_count
+  current_container_id="$(container_id ai-supermarket-backend)"
+  current_restart_count="$(container_restart_count ai-supermarket-backend)"
+  if [ "$current_container_id" != "$BACKEND_EXPECTED_CONTAINER_ID" ] \
+      || [ "$current_restart_count" != "$BACKEND_RESTART_BASELINE" ]; then
+    echo "ERROR: backend container changed during release health verification: expected id=$BACKEND_EXPECTED_CONTAINER_ID restarts=$BACKEND_RESTART_BASELINE; observed id=$current_container_id restarts=$current_restart_count" >&2
+    dump_failure_diagnostics
+    exit 1
+  fi
+}
+
+echo "Backend stability baseline: container=$BACKEND_EXPECTED_CONTAINER_ID restart-count=$BACKEND_RESTART_BASELINE"
+consecutive_successes=0
 for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
+  assert_backend_runtime_unchanged
   nginx="$(container_status ai-supermarket-nginx)"
   user_web="$(container_status ai-supermarket-user-web)"
   backend="$(container_status ai-supermarket-backend)"
@@ -161,6 +210,7 @@ for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
   agent="$(container_status ai-supermarket-agent-service)"
   public_code="$(http_status "https://$PUBLIC_HOST/" --resolve "$PUBLIC_HOST:443:127.0.0.1")"
   api_code="$(http_status http://127.0.0.1:8080/api/health)"
+  backend_readiness_code="$(http_status http://127.0.0.1:8080/actuator/health/readiness)"
   admin_code="$(http_status http://127.0.0.1:5174/admin)"
   agent_code="$(http_status http://127.0.0.1:8090/health)"
 
@@ -231,9 +281,9 @@ for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
     fi
   fi
 
-  printf 'Release health attempt %s/%s: app nginx=%s user-web=%s backend=%s worker=%s agent=%s; http public=%s api=%s admin=%s agent=%s\n' \
+  printf 'Release health attempt %s/%s: app nginx=%s user-web=%s backend=%s worker=%s agent=%s; http public=%s api=%s backend-readiness=%s admin=%s agent=%s\n' \
     "$attempt" "$MAX_ATTEMPTS" "$nginx" "$user_web" "$backend" "$worker" "$agent" \
-    "$public_code" "$api_code" "$admin_code" "$agent_code"
+    "$public_code" "$api_code" "$backend_readiness_code" "$admin_code" "$agent_code"
   printf '  monitoring required=%s containers grafana=%s prometheus=%s loki=%s alloy=%s node-exporter=%s cadvisor=%s blackbox=%s; http grafana=%s prometheus=%s loki=%s alloy=%s; metrics alloy=%s cadvisor=%s container-cpu=%s container-memory=%s loki-logs=%s\n' \
     "$REQUIRE_MONITORING" "$grafana" "$prometheus" "$loki" "$alloy" "$node_exporter" "$cadvisor" "$blackbox" \
     "$grafana_code" "$prometheus_code" "$loki_code" "$alloy_code" "$alloy_metric" "$cadvisor_metric" \
@@ -246,15 +296,27 @@ for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
       && is_container_ready "$agent" \
       && is_http_ready "$public_code" \
       && is_http_ready "$api_code" \
+      && [ "$backend_readiness_code" = "200" ] \
       && is_http_ready "$admin_code" \
       && is_http_ready "$agent_code" \
       && [ "$monitoring_ready" = true ] \
       && worker_media_runtime_ready; then
+    assert_backend_runtime_unchanged
+    consecutive_successes=$((consecutive_successes + 1))
+  else
+    consecutive_successes=0
+  fi
+  printf '  stability consecutive-successes=%s/%s backend-restarts=%s\n' \
+    "$consecutive_successes" "$REQUIRED_CONSECUTIVE_SUCCESSES" "$BACKEND_RESTART_BASELINE"
+  if (( consecutive_successes >= REQUIRED_CONSECUTIVE_SUCCESSES )); then
     verify_optional_media_delivery
-    echo "Release health verification passed"
+    assert_backend_runtime_unchanged
+    echo "Release health verification passed after $consecutive_successes consecutive successful attempts"
     exit 0
   fi
-  sleep "$RETRY_SECONDS"
+  if (( attempt < MAX_ATTEMPTS )); then
+    sleep "$RETRY_SECONDS"
+  fi
 done
 
 echo "ERROR: release health verification failed" >&2

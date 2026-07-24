@@ -176,6 +176,34 @@ if [ "$PHASE" = "post-migration" ]; then
     check_zero "provider_charged_workflow_usage_binding_missing" \
       "SELECT COUNT(*) FROM workflow_step_charges charge_row LEFT JOIN billing_usage_logs usage_row ON usage_row.id = charge_row.billing_usage_id WHERE (charge_row.status = 'CAPTURED' OR (charge_row.status = 'RELEASED' AND charge_row.provider_cost IS NOT NULL)) AND (charge_row.billing_usage_id IS NULL OR usage_row.id IS NULL)"
   fi
+
+  check_zero "model_identifier_collation_mismatch" \
+    "SELECT 19 - COUNT(*)
+     FROM information_schema.columns
+     WHERE table_schema = DATABASE()
+       AND CONCAT(table_name, '.', column_name) IN (
+         'agent_model_configs.config_code',
+         'agent_model_configs.provider',
+         'agent_model_configs.model_name',
+         'model_provider_metadata.provider_code',
+         'model_vendor_accounts.vendor_code',
+         'model_vendors.vendor_code',
+         'model_account_routing_pools.vendor_code',
+         'agent_context_snapshots.model_provider_code',
+         'agent_context_snapshots.model_name',
+         'agent_model_request_snapshots.model_provider_code',
+         'agent_model_request_snapshots.model_name',
+         'agent_runs.model_provider_code',
+         'agent_runs.model_name',
+         'billing_usage_logs.provider',
+         'billing_usage_logs.model_name',
+         'workflow_step_attempts.provider_code',
+         'provider_callback_registrations.provider_code',
+         'provider_callback_inbox.provider_code',
+         'user_generation_subjects.provider_code'
+       )
+       AND character_set_name = 'utf8mb4'
+       AND collation_name = 'utf8mb4_unicode_ci'"
 fi
 
 if [ "$blocking_issues" -ne 0 ]; then
