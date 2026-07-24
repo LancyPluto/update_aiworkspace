@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 
 public record AdminUserResponse(
         Long id,
+        String publicCode,
         String username,
         String phone,
         String email,
@@ -21,6 +22,7 @@ public record AdminUserResponse(
     public static AdminUserResponse of(User user, CreditAccountResponse creditAccount) {
         return new AdminUserResponse(
                 user.getId(),
+                user.getPublicCode(),
                 user.getUsername(),
                 user.getPhone(),
                 user.getEmail(),

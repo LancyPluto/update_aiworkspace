@@ -973,35 +973,13 @@ public class CommunityServiceImpl implements CommunityService {
         Map<Long, AiTask> tasksByIdForPrompt = batchLoadTasksForPrompt(posts, taskIds);
 
         if (posts.get(0) instanceof CommunityPostDiscoverRow) {
-            List<Long> missingUserIds = posts.stream()
-                    .filter(p -> p instanceof CommunityPostDiscoverRow row
-                            && (row.getAuthorNickname() == null || row.getAuthorNickname().isBlank())
-                            && p.getUserId() != null)
-                    .map(CommunityPost::getUserId)
-                    .distinct()
-                    .toList();
-            Map<Long, User> fallbackUsers = missingUserIds.isEmpty()
-                    ? Map.of()
-                    : userMapper.findByIds(missingUserIds).stream()
-                    .collect(Collectors.toMap(User::getId, Function.identity(), (l, r) -> l));
             return posts.stream()
                     .map(post -> {
                         CommunityPostDiscoverRow row = (CommunityPostDiscoverRow) post;
-                        String authorNickname = row.getAuthorNickname();
-                        String authorAvatarUrl = row.getAuthorAvatarUrl();
-                        if (authorNickname == null || authorNickname.isBlank()) {
-                            User user = fallbackUsers.get(row.getUserId());
-                            authorNickname = resolveAuthorNickname(user);
-                            if (authorAvatarUrl == null && user != null) {
-                                authorAvatarUrl = user.getAvatarUrl();
-                            }
-                        } else {
-                            authorNickname = normalizeAuthorNickname(
-                                    authorNickname, row.getUserId(), row.getAuthorPublicCode());
-                        }
+                        CommunityAuthorIdentity author = resolveCommunityAuthor(row);
                         return buildResponseBatch(row, likedIds, favoritedIds, tagsByPost,
-                                firstResultByTaskId, tasksByIdForPrompt, authorNickname, authorAvatarUrl,
-                                row.getAuthorPublicCode(), viewerId);
+                                firstResultByTaskId, tasksByIdForPrompt, author.nickname(), author.avatarUrl(),
+                                author.publicCode(), viewerId);
                     })
                     .toList();
         }
@@ -1013,28 +991,27 @@ public class CommunityServiceImpl implements CommunityService {
                 .toList();
         Map<Long, User> usersById = userIds.isEmpty()
                 ? Map.of()
-                : userMapper.findByIds(userIds).stream()
+                : userMapper.findAnyByIds(userIds).stream()
                 .collect(Collectors.toMap(User::getId, Function.identity(), (l, r) -> l));
         return posts.stream()
                 .map(post -> {
-                    User author = usersById.get(post.getUserId());
+                    CommunityAuthorIdentity author = resolveCommunityAuthor(usersById.get(post.getUserId()));
                     return buildResponseBatch(post, likedIds, favoritedIds, tagsByPost,
                             firstResultByTaskId, tasksByIdForPrompt,
-                            resolveAuthorNickname(author),
-                            author == null ? null : author.getAvatarUrl(),
-                            author == null ? null : author.getPublicCode(),
+                            author.nickname(), author.avatarUrl(), author.publicCode(),
                             viewerId);
                 })
                 .toList();
     }
 
     private CommunityPostResponse buildResponse(CommunityPost post, Long viewerId, User author) {
+        CommunityAuthorIdentity identity = resolveCommunityAuthor(author);
         return buildResponse(
                 post,
                 viewerId,
-                resolveAuthorNickname(author),
-                author == null ? null : author.getAvatarUrl(),
-                author == null ? null : author.getPublicCode()
+                identity.nickname(),
+                identity.avatarUrl(),
+                identity.publicCode()
         );
     }
 
@@ -1243,7 +1220,7 @@ public class CommunityServiceImpl implements CommunityService {
     }
 
     private CommunityPostResponse response(CommunityPost post, Long viewerId) {
-        User user = post.getUserId() == null ? null : userMapper.findById(post.getUserId()).orElse(null);
+        User user = post.getUserId() == null ? null : userMapper.findAnyById(post.getUserId()).orElse(null);
         return buildResponse(post, viewerId, user);
     }
 
@@ -1252,13 +1229,13 @@ public class CommunityServiceImpl implements CommunityService {
     }
 
     private CommunityPostResponse adminResponse(CommunityPost post) {
-        User user = post.getUserId() == null ? null : userMapper.findById(post.getUserId()).orElse(null);
+        User user = post.getUserId() == null ? null : userMapper.findAnyById(post.getUserId()).orElse(null);
         CommunityPostResponse resp = CommunityPostResponse.adminFrom(
                 post,
                 postMapper.findTags(post.getId()),
                 user == null ? null : user.getPublicCode(),
-                resolveAuthorNickname(user),
-                user == null ? null : user.getAvatarUrl(),
+                resolveAdminAuthorNickname(user),
+                isDeletedUser(user) ? null : user == null ? null : user.getAvatarUrl(),
                 resolvePromptSnapshot(post)
         );
         return rewriteResponseUrls(resp, true);
@@ -1277,7 +1254,7 @@ public class CommunityServiceImpl implements CommunityService {
                 .toList();
         Map<Long, User> usersById = userIds.isEmpty()
                 ? Map.of()
-                : userMapper.findByIds(userIds).stream()
+                : userMapper.findAnyByIds(userIds).stream()
                 .collect(Collectors.toMap(User::getId, Function.identity(), (l, r) -> l));
 
         List<Long> taskIds = posts.stream()
@@ -1293,8 +1270,8 @@ public class CommunityServiceImpl implements CommunityService {
                     post,
                     tagsByPost.getOrDefault(post.getId(), List.of()),
                     user == null ? null : user.getPublicCode(),
-                    resolveAuthorNickname(user),
-                    user == null ? null : user.getAvatarUrl(),
+                    resolveAdminAuthorNickname(user),
+                    isDeletedUser(user) ? null : user == null ? null : user.getAvatarUrl(),
                     resolvePromptSnapshotBatch(post, tasksByIdForPrompt)
             );
             return rewriteResponseUrls(resp, true);
@@ -1316,6 +1293,45 @@ public class CommunityServiceImpl implements CommunityService {
 
     private String resolveAuthorNickname(User user) {
         return publicUserIdentityService.resolveDisplayName(user);
+    }
+
+    private CommunityAuthorIdentity resolveCommunityAuthor(User user) {
+        if (isDeletedUser(user)) {
+            return new CommunityAuthorIdentity(cancelledAuthorNickname(user.getPublicCode()), null, null);
+        }
+        return new CommunityAuthorIdentity(
+                resolveAuthorNickname(user),
+                user == null ? null : user.getAvatarUrl(),
+                user == null ? null : user.getPublicCode()
+        );
+    }
+
+    private CommunityAuthorIdentity resolveCommunityAuthor(CommunityPostDiscoverRow row) {
+        if (Boolean.TRUE.equals(row.getAuthorDeleted())) {
+            return new CommunityAuthorIdentity(cancelledAuthorNickname(row.getAuthorPublicCode()), null, null);
+        }
+        return new CommunityAuthorIdentity(
+                normalizeAuthorNickname(row.getAuthorNickname(), row.getUserId(), row.getAuthorPublicCode()),
+                row.getAuthorAvatarUrl(),
+                row.getAuthorPublicCode()
+        );
+    }
+
+    private String resolveAdminAuthorNickname(User user) {
+        return isDeletedUser(user) ? cancelledAuthorNickname(user.getPublicCode()) : resolveAuthorNickname(user);
+    }
+
+    private String cancelledAuthorNickname(String publicCode) {
+        return publicCode != null && publicCode.matches("[1-9]\\d{4}")
+                ? "注销用户" + publicCode
+                : "注销用户";
+    }
+
+    private boolean isDeletedUser(User user) {
+        return user != null && Boolean.TRUE.equals(user.getDeleted());
+    }
+
+    private record CommunityAuthorIdentity(String nickname, String avatarUrl, String publicCode) {
     }
 
     private String normalizeAuthorNickname(String nickname, Long userId, String publicCode) {

@@ -418,6 +418,7 @@ export interface CreditAccount {
 /** 与后端 AdminUserResponse 一致 */
 export interface AdminMember {
   id: number
+  publicCode: string
   username: string
   phone?: string | null
   email?: string | null
