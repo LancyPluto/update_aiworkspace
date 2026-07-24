@@ -130,5 +130,37 @@ CALL ensure_error_contract_index('workflow_run_steps', 'idx_workflow_run_steps_f
 CALL ensure_error_contract_index('workflow_step_attempts', 'idx_workflow_step_attempts_failure_trace',
   'ALTER TABLE workflow_step_attempts ADD KEY idx_workflow_step_attempts_failure_trace(failure_trace_id)');
 
+UPDATE ai_tasks
+SET developer_message = LEFT(error_message, 2000)
+WHERE developer_message IS NULL AND error_message IS NOT NULL;
+
+UPDATE ai_task_logs
+SET developer_message = LEFT(error_message, 2000)
+WHERE developer_message IS NULL AND error_message IS NOT NULL;
+
+UPDATE task_model_route_attempts
+SET developer_message = LEFT(error_message, 2000)
+WHERE developer_message IS NULL AND error_message IS NOT NULL;
+
+UPDATE agent_runs
+SET developer_message = LEFT(error_message, 2000)
+WHERE developer_message IS NULL AND error_message IS NOT NULL;
+
+UPDATE agent_tool_calls
+SET developer_message = LEFT(error_message, 2000)
+WHERE developer_message IS NULL AND error_message IS NOT NULL;
+
+UPDATE workflow_runs
+SET developer_message = LEFT(error_message, 2000)
+WHERE developer_message IS NULL AND error_message IS NOT NULL;
+
+UPDATE workflow_run_steps
+SET developer_message = LEFT(error_message, 2000)
+WHERE developer_message IS NULL AND error_message IS NOT NULL;
+
+UPDATE workflow_step_attempts
+SET developer_message = LEFT(error_message, 2000)
+WHERE developer_message IS NULL AND error_message IS NOT NULL;
+
 DROP PROCEDURE IF EXISTS ensure_error_contract_column;
 DROP PROCEDURE IF EXISTS ensure_error_contract_index;
