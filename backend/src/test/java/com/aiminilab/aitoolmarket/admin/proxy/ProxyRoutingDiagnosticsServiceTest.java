@@ -94,9 +94,8 @@ class ProxyRoutingDiagnosticsServiceTest {
     }
 
     @Test
-    void redirectStatusIsRejectedByProbePolicy() {
-        assertThat(DefaultProxyPathProbe.isSuccessfulHttpStatus(302)).isFalse();
-        assertThat(DefaultProxyPathProbe.errorForHttpStatus(302)).isEqualTo("redirect_rejected");
+    void redirectStatusConfirmsHttpConnectivityWithoutFollowingRedirect() {
+        assertThat(DefaultProxyPathProbe.isSuccessfulHttpStatus(302)).isTrue();
     }
 
     private ProxyPathProbeResult result(ProxyEgressPath path, boolean success, long totalMs, String error) {

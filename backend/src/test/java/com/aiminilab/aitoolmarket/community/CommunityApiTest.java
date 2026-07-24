@@ -327,6 +327,35 @@ class CommunityApiTest {
     }
 
     @Test
+    void publishedPostsFromDeletedAuthorsRemainPublicWithAnonymizedIdentity() throws Exception {
+        String publicCode = "54322";
+        long userId = insertDeletedUser(publicCode);
+        String title = "注销用户保留的公开作品";
+        long postId = insertPostForUser(userId, "PUBLISHED", "APPROVED", title, true);
+        String cancelledName = "注销用户" + publicCode;
+
+        mockMvc.perform(get("/api/v1/community/posts/{postId}", postId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.userId").doesNotExist())
+                .andExpect(jsonPath("$.data.authorPublicCode").value(nullValue()))
+                .andExpect(jsonPath("$.data.authorNickname").value(cancelledName))
+                .andExpect(jsonPath("$.data.authorAvatarUrl").value(nullValue()));
+
+        mockMvc.perform(get("/api/v1/community/search")
+                        .param("keyword", title)
+                        .param("pageSize", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].id").value((int) postId))
+                .andExpect(jsonPath("$.data.list[0].userId").doesNotExist())
+                .andExpect(jsonPath("$.data.list[0].authorPublicCode").value(nullValue()))
+                .andExpect(jsonPath("$.data.list[0].authorNickname").value(cancelledName))
+                .andExpect(jsonPath("$.data.list[0].authorAvatarUrl").value(nullValue()));
+
+        mockMvc.perform(get("/api/v1/community/users/{publicCode}", publicCode))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     void userCanReportPostAndAdminCanListAndResolveIt() throws Exception {
         long postId = insertPostForUser(1L, "PUBLISHED", "APPROVED", "被举报作品", true);
         String userToken = loginUser();
@@ -506,6 +535,17 @@ class CommunityApiTest {
                 )
                 VALUES (?, ?, 'legacy-password-hash', ?, NULL, 'USER', 'ACTIVE', 0)
                 """, publicCode, phone, phone);
+        return jdbcTemplate.queryForObject("SELECT MAX(id) FROM users", Long.class);
+    }
+
+    private long insertDeletedUser(String publicCode) {
+        jdbcTemplate.update("""
+                INSERT INTO users (
+                  public_code, username, password_hash, nickname, avatar_url, user_type, status, is_deleted
+                )
+                VALUES (?, ?, 'cancelled-password-hash', 'Cancelled User', '/generated/legacy-avatar.png',
+                        'USER', 'DISABLED', 1)
+                """, publicCode, "cancelled_test_" + publicCode);
         return jdbcTemplate.queryForObject("SELECT MAX(id) FROM users", Long.class);
     }
 

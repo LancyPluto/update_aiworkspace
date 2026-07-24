@@ -3,6 +3,7 @@ package com.aiminilab.aitoolmarket.task.dto;
 import com.aiminilab.aitoolmarket.task.entity.AiTask;
 import com.aiminilab.aitoolmarket.common.error.ErrorMessageSanitizer;
 import com.aiminilab.aitoolmarket.task.support.TaskFailureMessage;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.time.LocalDateTime;
@@ -24,6 +25,8 @@ public record TaskDetailResponse(
         String progressMessage,
         String errorCode,
         String errorMessage,
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        String developerMessage,
         String failureTraceId,
         JsonNode params,
         TaskResultResponse result,
@@ -68,8 +71,9 @@ public record TaskDetailResponse(
                 task.getStatus(),
                 task.getProgress(),
                 TaskFailureMessage.userFacingProgressMessage(task.getErrorCode(), task.getProgressMessage()),
-                task.getErrorCode(),
+                responseErrorCode(task.getErrorCode()),
                 responseErrorMessage(task, forAdmin),
+                responseDeveloperMessage(task, forAdmin),
                 task.getFailureTraceId(),
                 params,
                 result,
@@ -102,6 +106,24 @@ public record TaskDetailResponse(
                 ? TaskFailureMessage.userFacingProgressMessage(task.getErrorCode(), task.getProgressMessage())
                 : task.getUserMessage();
         return ErrorMessageSanitizer.sanitizeUserMessage(candidate, "任务执行失败，请稍后重试");
+    }
+
+    private static String responseDeveloperMessage(AiTask task, boolean forAdmin) {
+        if (!forAdmin) {
+            return null;
+        }
+        String candidate = task.getDeveloperMessage() == null || task.getDeveloperMessage().isBlank()
+                ? task.getErrorMessage()
+                : task.getDeveloperMessage();
+        return candidate == null
+                ? null
+                : ErrorMessageSanitizer.sanitizeDeveloperMessage(candidate, "Task execution failed");
+    }
+
+    private static String responseErrorCode(String errorCode) {
+        return errorCode != null && "MODEL_TIMEOUT".equalsIgnoreCase(errorCode.trim())
+                ? "MODEL_004"
+                : errorCode;
     }
 
     private static String defaultValue(String value, String fallback) {

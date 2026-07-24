@@ -24,6 +24,7 @@ from handlers.generated_audio_persister import GeneratedAudioPersister
 from handlers.generated_video_persister import GeneratedVideoPersister
 from storage.asset_storage import asset_storage
 from utils.tts_config import merge_tts_params, speech_billable_units
+from utils.video_timeout import resolve_video_timeout_seconds
 
 
 LOGGER = logging.getLogger(__name__)
@@ -3068,7 +3069,7 @@ def _resolve_video_generator(model_config: dict[str, Any]):
             base_url=model_config.get("baseUrl"),
             api_key=model_config.get("apiKey"),
             extra_auth_json=model_config.get("extraAuthJson"),
-            timeout_seconds=model_config.get("timeoutSeconds"),
+            timeout_seconds=resolve_video_timeout_seconds(model_config),
         )
 
         def _gen(
@@ -3092,7 +3093,10 @@ def _resolve_video_generator(model_config: dict[str, Any]):
 
         return _gen
 
-    seedance = SeedanceVideoClient.from_model_config(model_config)
+    seedance = SeedanceVideoClient.from_model_config(
+        model_config,
+        timeout_seconds=resolve_video_timeout_seconds(model_config),
+    )
 
     def _gen(
         *,

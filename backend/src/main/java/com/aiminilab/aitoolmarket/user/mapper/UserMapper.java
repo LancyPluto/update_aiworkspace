@@ -15,7 +15,7 @@ public interface UserMapper extends BaseMapper<User> {
         return Optional.ofNullable(selectById(id));
     }
 
-    @Select("SELECT * FROM users WHERE id = #{id} LIMIT 1")
+    @Select("SELECT *, is_deleted AS deleted FROM users WHERE id = #{id} LIMIT 1")
     User selectAnyById(@Param("id") Long id);
 
     default Optional<User> findAnyById(Long id) {
@@ -80,6 +80,25 @@ public interface UserMapper extends BaseMapper<User> {
             return List.of();
         }
         return selectUsersByIdList(ids);
+    }
+
+    @Select("""
+            <script>
+            SELECT *, is_deleted AS deleted
+            FROM users
+            WHERE id IN
+              <foreach collection="ids" item="id" open="(" separator="," close=")">
+                #{id}
+              </foreach>
+            </script>
+            """)
+    List<User> selectAnyUsersByIdList(@Param("ids") List<Long> ids);
+
+    default List<User> findAnyByIds(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return selectAnyUsersByIdList(ids);
     }
 
     @Select("""
@@ -226,7 +245,7 @@ public interface UserMapper extends BaseMapper<User> {
                 password_hash = #{cancelledPasswordHash},
                 phone = NULL,
                 email = NULL,
-                nickname = 'Cancelled User',
+                nickname = CONCAT('注销用户', public_code),
                 avatar_url = NULL,
                 bio = NULL,
                 auto_publish_assets = 0,

@@ -30,6 +30,7 @@ import {
 } from "@/lib/api/users"
 import { ApiError } from "@/lib/api/http"
 import { compareCreditLogsByCreatedAtDesc } from "@/lib/credit-log-sort"
+import { adminUserDisplayName } from "@/lib/user-display-name"
 import type { AdminMember, CreditLogItem } from "@/lib/api/types"
 
 const CREDIT_RECORD_PAGE_SIZE = 20
@@ -60,7 +61,7 @@ function mapUser(user: AdminMember): CreditUserRow {
   return {
     id: `U${String(user.id).padStart(3, "0")}`,
     rawId: user.id,
-    name: user.nickname || user.username,
+    name: adminUserDisplayName(user),
     phone: user.phone || "",
     credits: memberAccountBalance(user),
     userType: user.userType,

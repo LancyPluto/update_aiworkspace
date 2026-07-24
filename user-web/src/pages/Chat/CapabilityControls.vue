@@ -196,7 +196,7 @@ const generatedMaterialList = useGeneratedMaterialList<MaterialAsset>({
 useInfiniteScroll({
   sentinelRef: referenceUploadSentinelRef,
   scrollRootRef: referenceUploadScrollRootRef,
-  enabled: () => referencePickerOpen.value && referencePickerTab.value === "upload",
+  enabled: () => props.retainUploadHistory !== false && referencePickerOpen.value && referencePickerTab.value === "upload",
   hasMore: () => uploadHistoryList.hasMore.value,
   loading: () => uploadHistoryList.loading.value,
   loadingMore: () => uploadHistoryList.loadingMore.value,
@@ -1148,7 +1148,7 @@ function openUploadHistoryPicker(field: ToolField) {
   uploadHistoryField.value = field
   pickerSelectedUrls.value = isMultiImageField(field) ? multiImageValues(field) : []
   uploadHistoryOpen.value = true
-  void loadUploadHistory()
+  if (props.retainUploadHistory !== false) void loadUploadHistory()
 }
 
 function openReferenceMaterialPicker(tab: "upload" | "material" = "upload", fieldKey?: string) {
@@ -1163,7 +1163,7 @@ function openReferenceMaterialPicker(tab: "upload" | "material" = "upload", fiel
   uploadHistoryField.value = field
   materialPickerField.value = field
   pickerSelectedUrls.value = isMultiImageField(field) ? multiImageValues(field) : []
-  void loadUploadHistory()
+  if (props.retainUploadHistory !== false) void loadUploadHistory()
   if (tab === "material") void loadGeneratedMaterialAssets()
 }
 
@@ -2493,7 +2493,7 @@ defineExpose({
               />
             </label>
 
-            <section class="mt-7">
+            <section v-if="props.retainUploadHistory !== false" class="mt-7">
               <div class="mb-4 flex items-center gap-2 text-sm font-semibold text-white/70">
                 <Clock class="h-4 w-4" />
                 最近上传

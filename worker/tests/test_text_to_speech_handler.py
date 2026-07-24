@@ -336,6 +336,7 @@ class TextToSpeechHandlerTest(unittest.TestCase):
 
         self.assertEqual(backend.requests[0]["json"]["claimToken"], "claim-token-104")
         self.assertEqual(backend.requests[1]["json"]["claimToken"], "claim-token-104")
+        self.assertEqual(backend.requests[1]["json"]["errorCode"], "MODEL_004")
         self.assertEqual(backend.requests[1]["json"]["failureStage"], "PROVIDER_POLLING")
 
 

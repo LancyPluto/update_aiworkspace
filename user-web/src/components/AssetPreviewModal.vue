@@ -22,6 +22,7 @@ import CommunityPublishModal from "@/components/CommunityPublishModal.vue"
 import CommunityReportModal from "@/components/CommunityReportModal.vue"
 import { useAuthStore } from "@/store/authStore"
 import type { AssetPreviewItem, AssetPreviewRecommendation } from "@/types/assetPreview"
+import { forceDownload } from "@/utils/download"
 import type { CommunityPublishPayload } from "@/utils/publishCommunityAsset"
 import { cleanToolDisplayText } from "@/utils/toolDisplayText"
 
@@ -69,6 +70,7 @@ const mediaUrl = computed(() => selectedUrl.value || normalizeMediaUrl(props.ass
 const activeAsset = computed<AssetPreviewItem | null>(() => (props.asset ? { ...props.asset, url: mediaUrl.value } : null))
 
 const downloadUrl = computed(() => {
+  if (selectedUrl.value && selectedUrl.value !== mediaUrls.value[0]) return mediaUrl.value
   // 优先使用后端返回的downloadUrl（OSS签名URL或CDN签名URL）
   if (props.asset?.downloadUrl) return props.asset.downloadUrl
   return mediaUrl.value
@@ -314,12 +316,11 @@ function downloadBlob(blob: Blob, filename: string) {
 
 function fetchDownload() {
   if (!downloadUrl.value) return
-  const a = document.createElement("a")
-  a.href = downloadUrl.value
-  a.download = sanitizeDownloadName(activeAsset.value?.title || "download")
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
+  void forceDownload(
+    downloadUrl.value,
+    sanitizeDownloadName(activeAsset.value?.title || "download"),
+    auth.token,
+  )
 }
 
 function sanitizeDownloadName(value: string) {

@@ -26,6 +26,40 @@ const TOOL_UI_META_KEYS = [
   "libraryKind",
 ] as const
 
+const IMAGE_OUTPUT_COUNT_KEYS = new Set([
+  "count",
+  "n",
+  "batchsize",
+  "imagecount",
+  "imagescount",
+  "numimages",
+  "numberofimages",
+  "outputcount",
+])
+
+function normalizedFieldKey(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]/g, "")
+}
+
+function isImageOutputCountKey(value: string): boolean {
+  return IMAGE_OUTPUT_COUNT_KEYS.has(normalizedFieldKey(value))
+}
+
+function hasImageGenerationCapability(model?: ToolSupportedModel | null): boolean {
+  return (model?.capabilities || []).some((capability) =>
+    String(capability).trim().toUpperCase() === "IMAGE_GENERATION",
+  )
+}
+
+function isSingleImageOutputField(field: ModelRequestSchemaField): boolean {
+  if (!isImageOutputCountKey(field.key)) return false
+  const options = normalizeOptions(field.enum)
+  if (options.length > 0) {
+    return options.every((option) => Number(option.value) === 1)
+  }
+  return typeof field.max === "number" && field.max <= 1
+}
+
 function recordValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -228,8 +262,13 @@ export function buildEffectiveToolFields(
   toolFields: ToolField[],
   model?: ToolSupportedModel | null,
 ): ToolField[] {
+  const imageGenerationModel = hasImageGenerationCapability(model)
   const schema = parseModelRequestSchema(model?.requestSchemaJson)
-  if (!schema) return toolFields
+  if (!schema) {
+    return imageGenerationModel
+      ? toolFields.filter((field) => !isImageOutputCountKey(field.fieldKey))
+      : toolFields
+  }
   const toolFieldsByKey = new Map(toolFields.map((field) => [field.fieldKey, field]))
   const schemaFieldKeys = new Set<string>()
   const schemaFields = schema.fields.map((schemaField, index) => {
@@ -244,6 +283,10 @@ export function buildEffectiveToolFields(
       ...pickToolUiMeta(toolField),
     }
     if (key === "prompt" && meta.core === undefined && meta.isCore === undefined) meta.core = true
+    if (imageGenerationModel && isSingleImageOutputField(schemaField)) {
+      meta.uiHidden = true
+      if (meta.defaultValue === undefined) meta.defaultValue = 1
+    }
     return {
       fieldKey: key,
       fieldName: toolField?.fieldName?.trim() || schemaField.label?.trim() || key,
@@ -259,7 +302,10 @@ export function buildEffectiveToolFields(
   })
   const merged = [
     ...schemaFields,
-    ...toolFields.filter((field) => !schemaFieldKeys.has(field.fieldKey)),
+    ...toolFields.filter((field) =>
+      !schemaFieldKeys.has(field.fieldKey)
+      && (!imageGenerationModel || !isImageOutputCountKey(field.fieldKey)),
+    ),
   ]
   return merged
     .map((field, index) => ({ field, index }))

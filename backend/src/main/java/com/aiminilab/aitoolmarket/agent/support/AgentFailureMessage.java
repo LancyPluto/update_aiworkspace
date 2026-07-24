@@ -23,7 +23,7 @@ public final class AgentFailureMessage {
 
     private static String legacyUserMessage(String errorCode) {
         return switch (errorCode) {
-            case "AGENT_RUN_STALE", "AGENT_SERVICE_NOTIFY_TIMEOUT", "MODEL_TIMEOUT", "WORKFLOW_TIMEOUT" ->
+            case "AGENT_RUN_STALE", "AGENT_SERVICE_NOTIFY_TIMEOUT", "MODEL_TIMEOUT", "MODEL_004", "WORKFLOW_TIMEOUT" ->
                     "执行超时，请稍后重试";
             case "AGENT_SERVICE_NOTIFY_FAILED", "MODEL_CALL_FAILED", "MODEL_AUTH_FAILED",
                     "MODEL_CREDIT_INSUFFICIENT", "MODEL_CAPABILITY_DISABLED" ->

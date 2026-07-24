@@ -51,7 +51,7 @@ public record WorkflowFailureContract(
                 .map(definition -> definition.defaultUserMessage())
                 .orElseGet(() -> switch (errorCode) {
                     case "MODEL_RISK_CONTROL_REJECTED", "AGENT_SECURITY_REJECTED" -> "请求未通过安全检查";
-                    case "MODEL_TIMEOUT", "WORKFLOW_TIMEOUT", "ATTEMPT_LEASE_EXPIRED" ->
+                    case "MODEL_TIMEOUT", "MODEL_004", "WORKFLOW_TIMEOUT", "ATTEMPT_LEASE_EXPIRED" ->
                             "工作流执行超时，请稍后重试";
                     case "MODEL_RATE_LIMITED", "AGENT_RATE_LIMITED" -> "请求过于频繁，请稍后重试";
                     case "INVALID_TASK_PARAMS", "PROMPT_VARIABLE_MISSING" -> "任务参数有误，请检查后重试";

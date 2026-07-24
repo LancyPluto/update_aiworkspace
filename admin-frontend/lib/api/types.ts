@@ -19,6 +19,7 @@ export type KnownApiErrorCode =
   | 'MODEL_002'
   | 'MODEL_003'
   | 'MODEL_004'
+  | 'MODEL_005'
   | 'SYSTEM_001'
   | 'SYSTEM_ERROR'
 
@@ -418,6 +419,7 @@ export interface CreditAccount {
 /** 与后端 AdminUserResponse 一致 */
 export interface AdminMember {
   id: number
+  publicCode: string
   username: string
   phone?: string | null
   email?: string | null

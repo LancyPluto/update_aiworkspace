@@ -211,7 +211,7 @@ test("infers image size and count options for public image model responses", () 
     "1536x1024",
     "1024x1536",
   ])
-  assert.deepEqual(groups[0].models[0].imageParameters.counts, [1, 2, 3, 4])
+  assert.deepEqual(groups[0].models[0].imageParameters.counts, [1])
   assert.ok(groups[1].models[0].imageParameters.sizes.some((option) => option.value === "3840x2160"))
 })
 
@@ -355,10 +355,10 @@ test("builds homepage composer format options from selected tool field schema", 
   assert.deepEqual(options.duration.map((option) => option.label), ["5 秒", "10 秒"])
   assert.deepEqual(options.quality.map((option) => option.value), ["720p"])
   assert.deepEqual(options.ratio.map((option) => option.value), ["9:16", "16:9"])
-  assert.deepEqual(options.count.map((option) => option.value), [1, 2, 3, 4])
+  assert.deepEqual(options.count.map((option) => option.value), [])
   assert.equal(options.defaults.duration, 10)
   assert.equal(options.defaults.ratio, "9:16")
-  assert.equal(options.defaults.count, 1)
+  assert.equal(options.defaults.count, undefined)
 })
 
 test("uses selected image model parameters as homepage image size and count options", () => {
@@ -386,7 +386,7 @@ test("uses selected image model parameters as homepage image size and count opti
   assert.equal(options.defaults.quality, "high")
 })
 
-test("submits selected image size and count even when the default image tool has no format fields", () => {
+test("does not submit image count when the model has no count field", () => {
   const result = adapter.resolveCreatorTask(
     {
       mode: "image",
@@ -407,7 +407,7 @@ test("submits selected image size and count even when the default image tool has
 
   assert.equal(result.params.imageSize, "1536x1024")
   assert.equal(result.params.quality, "high")
-  assert.equal(result.params.count, 2)
+  assert.equal(result.params.count, undefined)
   assert.deepEqual(result.missingRequiredFields, [])
 })
 

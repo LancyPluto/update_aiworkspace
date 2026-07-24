@@ -13,7 +13,12 @@ from client.backend_client import BackendClient, BackendClientError
 from client.dashscope_video_client import DashScopeVideoClient, DashScopeVideoError, DashScopeVideoTimeoutError
 from client.kling_video_client import KlingVideoClient, KlingVideoError, KlingVideoTimeoutError
 from client.provider_error import RETRY_NONE, structured_failure_payload
-from client.seedance_video_client import SeedanceVideoClient, SeedanceVideoError, SeedanceVideoTimeoutError
+from client.seedance_video_client import (
+    SeedancePrivacyContentError,
+    SeedanceVideoClient,
+    SeedanceVideoError,
+    SeedanceVideoTimeoutError,
+)
 from config import resolve_kling_api_key, resolve_kling_credentials, resolve_kling_credentials_source
 from handlers.error_classifier import classify_model_error
 from handlers.generated_video_persister import GeneratedVideoPersistError, GeneratedVideoPersister
@@ -21,6 +26,7 @@ from providers import registry as provider_registry
 from utils.input_image import InputImageError, resolve_reference_image_data_url, validate_min_resolution
 from utils.kling_config import resolve_kling_api_task, resolve_kling_model_name, resolve_kling_video_paths
 from utils.model_contract import ModelContractParamsError, ModelContractResponseError, apply_request_mapping
+from utils.video_timeout import resolve_video_timeout_seconds
 from utils.volcengine_config import resolve_volcengine_task_model
 
 
@@ -260,7 +266,7 @@ class VideoGenerationHandler:
         except (KlingVideoTimeoutError, SeedanceVideoTimeoutError, AgnesVideoTimeoutError, DashScopeVideoTimeoutError) as exc:
             return self._mark_failed(
                 task_id,
-                "MODEL_TIMEOUT",
+                "MODEL_004",
                 str(exc),
                 trace_id,
                 structured_failure_payload(exc),
@@ -274,6 +280,16 @@ class VideoGenerationHandler:
             return self._mark_failed(task_id, "INVALID_TASK_PARAMS", str(exc), trace_id)
         except ModelContractResponseError as exc:
             return self._mark_failed(task_id, "MODEL_CALL_FAILED", str(exc), trace_id)
+        except SeedancePrivacyContentError as exc:
+            return self._mark_failed(
+                task_id,
+                exc.error_code,
+                str(exc),
+                trace_id,
+                structured_failure_payload(exc),
+                provider_checkpoint,
+                user_message=exc.user_message,
+            )
         except (KlingVideoError, SeedanceVideoError, AgnesVideoError, DashScopeVideoError, provider_registry.ProviderRegistryError) as exc:
             return self._mark_failed(
                 task_id,
@@ -293,6 +309,7 @@ class VideoGenerationHandler:
 
     def _client(self, provider: str, model_config: dict[str, Any]) -> Any:
         provider_protocol = provider_registry.provider_protocol(provider)
+        timeout_seconds = resolve_video_timeout_seconds(model_config)
         if provider_protocol == "kling_video":
             if self.kling_client is not None:
                 return self.kling_client
@@ -325,24 +342,27 @@ class VideoGenerationHandler:
                 image_path=model_config.get("imagePath") or create_path,
                 text_result_path=model_config.get("textResultPath") or result_path,
                 image_result_path=model_config.get("imageResultPath") or result_path,
-                timeout_seconds=model_config.get("timeoutSeconds"),
+                timeout_seconds=timeout_seconds,
                 model_config=model_config,
             )
         if provider_protocol == "agnes_video":
             return self.agnes_client or AgnesVideoClient(
                 base_url=model_config.get("baseUrl"),
                 api_key=model_config.get("apiKey"),
-                timeout_seconds=model_config.get("timeoutSeconds"),
+                timeout_seconds=timeout_seconds,
                 extra_auth_json=model_config.get("extraAuthJson"),
                 model_config=model_config,
             )
         if provider_protocol == "seedance":
-            return self.seedance_client or SeedanceVideoClient.from_model_config(model_config)
+            return self.seedance_client or SeedanceVideoClient.from_model_config(
+                model_config,
+                timeout_seconds=timeout_seconds,
+            )
         if provider == "bailian_happyhorse":
             return self.dashscope_client or DashScopeVideoClient(
                 base_url=model_config.get("baseUrl"),
                 api_key=model_config.get("apiKey"),
-                timeout_seconds=model_config.get("timeoutSeconds"),
+                timeout_seconds=timeout_seconds,
                 model_config=model_config,
             )
         raise KlingVideoError(f"unsupported video provider: {provider or 'empty'}")
@@ -355,6 +375,7 @@ class VideoGenerationHandler:
         trace_id: str | None,
         failure_metadata: dict[str, Any] | None = None,
         provider_checkpoint: dict[str, Any] | None = None,
+        user_message: str | None = None,
     ) -> dict[str, Any]:
         LOGGER.exception("video generation task %s failed traceId=%s errorCode=%s: %s", task_id, trace_id or "-", error_code, error_message)
         self._mark_processing_safe(task_id, progress=99, progress_message="Video generation failed", trace_id=trace_id)
@@ -369,13 +390,16 @@ class VideoGenerationHandler:
                     "providerRequestId": checkpoint_request_id,
                 }
             )
+        payload = {
+            "errorCode": error_code,
+            "errorMessage": error_message,
+            **metadata,
+        }
+        if user_message:
+            payload["userMessage"] = user_message
         self.backend_client.mark_failed(
             task_id,
-            {
-                "errorCode": error_code,
-                "errorMessage": error_message,
-                **metadata,
-            },
+            payload,
             trace_id=trace_id,
         )
         return {"status": "FAILED", "taskId": task_id, "errorCode": error_code, "traceId": trace_id}

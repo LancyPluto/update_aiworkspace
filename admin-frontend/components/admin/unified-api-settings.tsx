@@ -424,12 +424,6 @@ function routeTaskLabel(provider: string | undefined, task: string | null | unde
   return executionTaskOptions[(provider || "").trim()]?.find((item) => item.value === normalized)?.label || normalized || "未配置"
 }
 
-function routePreviewForForm(form: AgentModelConfigPayload & { id?: number }) {
-  const task = routeTasksForModel(form.provider, form.capabilities).find((item) => item.value === form.executionTask)
-  if (task) return { createPath: task.createPath, resultPath: task.resultPath, source: "executionTask" }
-  return null
-}
-
 function renderModelCost(model: UnifiedApiModelItem) {
   const billingUnit = (model.billingUnit || "").toString().trim().toUpperCase()
   if (!billingUnit) {
@@ -2623,54 +2617,18 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                 能力决定工具页可绑定范围和 Worker 执行路由；音乐模型请选择“文生音乐”。
               </p>
             </div>
-            <div className="space-y-3 rounded-md border p-3">
-              <div className="flex items-center justify-between gap-3">
-                <Label>执行任务类型</Label>
-                <span className="text-xs text-muted-foreground">模型级路由，不填写 Key</span>
-              </div>
-              {routeTasksForModel(modelForm.provider, modelForm.capabilities).length > 0 ? (
-                <Select
-                  value={modelForm.executionTask || undefined}
-                  onValueChange={(value) => setModelForm((f) => ({ ...f, executionTask: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="选择 API 任务类型" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {routeTasksForModel(modelForm.provider, modelForm.capabilities).map((task) => (
-                      <SelectItem key={task.value} value={task.value}>
-                        {task.label} · {task.value}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <div className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
-                  当前供应商暂未定义结构化路由任务，将使用 Worker 默认路由。
-                </div>
-              )}
-              {(() => {
-                const preview = routePreviewForForm(modelForm)
-                return preview ? (
-                  <div className="space-y-1 rounded-md bg-muted/30 p-3 text-xs text-muted-foreground">
-                    <div>POST <span className="font-mono text-foreground">{preview.createPath}</span></div>
-                    <div>GET <span className="font-mono text-foreground">{preview.resultPath}</span></div>
-                  </div>
-                ) : null
-              })()}
-              <details className="rounded-md border border-dashed p-3">
-                <summary className="cursor-pointer text-sm text-muted-foreground">高级执行选项 JSON</summary>
-                <Textarea
-                  className="mt-3 min-h-24 font-mono text-xs"
-                  value={modelForm.executionOptionsJson || ""}
-                  placeholder={'{"createPath":"/v1/custom","resultPath":"/v1/custom/{task_id}"}'}
-                  onChange={(e) => setModelForm((f) => ({ ...f, executionOptionsJson: e.target.value }))}
-                />
-                <p className="mt-2 text-xs text-muted-foreground">
-                  仅用于 endpoint 覆盖或执行参数扩展，不要填写 API Key、AK/SK、Token。
-                </p>
-              </details>
-            </div>
+            <details className="rounded-md border border-dashed p-3">
+              <summary className="cursor-pointer text-sm text-muted-foreground">高级执行选项 JSON</summary>
+              <Textarea
+                className="mt-3 min-h-24 font-mono text-xs"
+                value={modelForm.executionOptionsJson || ""}
+                placeholder={'{"createPath":"/v1/custom","resultPath":"/v1/custom/{task_id}"}'}
+                onChange={(e) => setModelForm((f) => ({ ...f, executionOptionsJson: e.target.value }))}
+              />
+              <p className="mt-2 text-xs text-muted-foreground">
+                仅用于 endpoint 覆盖或执行参数扩展，不要填写 API Key、AK/SK、Token。
+              </p>
+            </details>
             <div className="space-y-2">
               <Label>API 文档页</Label>
               <div className="flex gap-2">

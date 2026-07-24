@@ -741,7 +741,7 @@ def test_seedance_video_generator_does_not_replay_ambiguous_create_timeout(monke
 
     class FailingSeedanceClient:
         @classmethod
-        def from_model_config(cls, _model_config):
+        def from_model_config(cls, _model_config, **_kwargs):
             return cls()
 
         def generate_video(self, **_kwargs):

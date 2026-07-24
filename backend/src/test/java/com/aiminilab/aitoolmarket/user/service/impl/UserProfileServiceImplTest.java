@@ -21,6 +21,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -103,14 +104,14 @@ class UserProfileServiceImplTest {
     }
 
     @Test
-    void unpublishesCommunityPostsBeforeCancellingAccount() {
+    void keepsCommunityPostsPublishedWhenCancellingAccount() {
         UserProfileServiceImpl service = buildService("https://cdn.wlcloudai.com", null);
 
         service.cancelAccount(USER_ID, new CancelAccountRequest("123456"));
 
-        InOrder inOrder = inOrder(smsCodeService, communityPostMapper, userMapper);
+        InOrder inOrder = inOrder(smsCodeService, userMapper);
         inOrder.verify(smsCodeService).verifyCode("13800138000", "CANCEL_ACCOUNT", "123456");
-        inOrder.verify(communityPostMapper).unpublishByUserId(USER_ID);
         inOrder.verify(userMapper).cancelAccount(eq(USER_ID), anyString(), anyString());
+        verify(communityPostMapper, never()).unpublishByUserId(USER_ID);
     }
 }

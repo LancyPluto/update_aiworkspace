@@ -215,6 +215,7 @@ class BackendClient:
         claim_token: str | None = None,
     ) -> dict[str, Any]:
         payload = dict(payload or {})
+        payload["errorCode"] = _normalize_failure_error_code(str(payload.get("errorCode") or ""))
         self._attach_claim_token(payload, claim_token)
         route_attempt_id = _CURRENT_ROUTE_ATTEMPT_ID.get()
         if route_attempt_id is not None and "routeAttemptId" not in payload:
@@ -427,11 +428,18 @@ def _infer_failure_stage(error_code: str) -> str:
         return "MEDIA_PERSIST"
     if normalized in {"WORKER_INTERNAL_ERROR"}:
         return "WORKER_INTERNAL"
-    if normalized in {"MODEL_TIMEOUT"}:
+    if normalized in {"MODEL_TIMEOUT", "MODEL_004"}:
         return "PROVIDER_POLLING"
     if normalized.startswith("MODEL_"):
         return "PROVIDER_SUBMITTED"
     return "UNKNOWN"
+
+
+def _normalize_failure_error_code(error_code: str) -> str:
+    normalized = (error_code or "").strip()
+    if normalized.upper() == "MODEL_TIMEOUT":
+        return "MODEL_004"
+    return normalized or "MODEL_001"
 
 
 def _should_attempt_route_failover(payload: dict[str, Any]) -> bool:

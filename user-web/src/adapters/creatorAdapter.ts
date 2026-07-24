@@ -239,7 +239,7 @@ const GPT_IMAGE_2_4K_IMAGE_SIZES = [
   "1280x3840",
 ]
 const GENERIC_IMAGE_SIZES = ["1024x1024", "1280x720", "720x1280", "1024x768", "768x1024", "1152x768", "768x1152"]
-const DEFAULT_IMAGE_COUNTS = [1, 2, 3, 4]
+const DEFAULT_IMAGE_COUNTS = [1]
 
 function imageSizeDisplayLabel(size: string): string {
   const [width, height] = size.split("x").map((value) => Number(value))
@@ -504,10 +504,11 @@ function imageSizeOptionsFromParameters(params?: ImageGenerationParameters | nul
 }
 
 function imageCountOptionsFromParameters(params?: ImageGenerationParameters | null): ComposerFormatValueOption<number>[] {
-  return (params?.counts || [])
+  const options = (params?.counts || [])
     .map((value) => Number(value))
     .filter((value) => Number.isInteger(value) && value > 0)
     .map((value) => ({ label: String(value), value }))
+  return options.some((option) => option.value > 1) ? options : []
 }
 
 function imageQualityOptionsFromParameters(params?: ImageGenerationParameters | null): ComposerFormatValueOption<string>[] {
@@ -570,9 +571,6 @@ export function buildComposerFormatOptions(
       return numeric === null ? null : { label: optionLabel(option), value: numeric }
     })
     .filter((option): option is ComposerFormatValueOption<number> => Boolean(option))
-  if (count.length === 0 && countField && (countField.fieldType === "number" || countField.fieldType === "slider")) {
-    count.push(...[1, 2, 3, 4].map((value) => ({ label: String(value), value })))
-  }
   const modelImageSizes = imageSizeOptionsFromParameters(imageParameters)
   const modelImageCounts = imageCountOptionsFromParameters(imageParameters)
   const modelImageQualities = imageQualityOptionsFromParameters(imageParameters)
@@ -581,6 +579,9 @@ export function buildComposerFormatOptions(
   }
   if (count.length === 0 && modelImageCounts.length > 0) {
     count = modelImageCounts
+  }
+  if (!count.some((option) => option.value > 1)) {
+    count = []
   }
   if (quality.length === 0 && modelImageQualities.length > 0) {
     quality = modelImageQualities
@@ -636,9 +637,6 @@ export function resolveCreatorTask(
   if (state.mode === "image") {
     if (!ratioField && hasFieldValue(state.ratio)) {
       params.imageSize = state.ratio
-    }
-    if (!countField && hasFieldValue(state.outputCount)) {
-      params.count = state.outputCount
     }
     if (!qualityField && hasFieldValue(state.quality)) {
       params.quality = state.quality

@@ -532,7 +532,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         String errorCode = request.errorCode() == null || request.errorCode().isBlank()
                 ? ErrorCode.MODEL_CALL_FAILED.name()
                 : request.errorCode();
-        String targetStatus = "MODEL_TIMEOUT".equals(errorCode)
+        String targetStatus = "MODEL_004".equals(errorCode) || "MODEL_TIMEOUT".equals(errorCode)
                 ? TaskStatus.TIMEOUT.name()
                 : TaskStatus.FAILED.name();
         String userMessage = ErrorMessageSanitizer.sanitizeUserMessage(

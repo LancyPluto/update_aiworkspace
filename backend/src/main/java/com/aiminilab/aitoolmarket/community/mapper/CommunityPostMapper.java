@@ -77,9 +77,10 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             SELECT p.*,
                    u.public_code AS author_public_code,
                    COALESCE(NULLIF(TRIM(u.nickname), ''), NULLIF(TRIM(u.username), '')) AS author_nickname,
-                   u.avatar_url AS author_avatar_url
+                   u.avatar_url AS author_avatar_url,
+                   u.is_deleted AS author_deleted
             FROM community_posts p
-            LEFT JOIN users u ON u.id = p.user_id AND u.is_deleted = 0
+            LEFT JOIN users u ON u.id = p.user_id
             WHERE p.user_id = #{userId}
               AND p.status = 'PUBLISHED'
               AND (p.audit_status IS NULL OR p.audit_status = 'APPROVED')
@@ -119,9 +120,10 @@ public interface CommunityPostMapper extends BaseMapper<CommunityPost> {
             SELECT p.*,
                    u.public_code AS author_public_code,
                    COALESCE(NULLIF(TRIM(u.nickname), ''), NULLIF(TRIM(u.username), '')) AS author_nickname,
-                   u.avatar_url AS author_avatar_url
+                   u.avatar_url AS author_avatar_url,
+                   u.is_deleted AS author_deleted
             FROM community_posts p
-            LEFT JOIN users u ON u.id = p.user_id AND u.is_deleted = 0
+            LEFT JOIN users u ON u.id = p.user_id
             <if test="tag != null and tag.trim() != ''">
             INNER JOIN community_post_tags t ON t.post_id = p.id AND t.tag = #{tag}
             </if>

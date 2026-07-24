@@ -6,6 +6,7 @@ public class CommunityPostDiscoverRow extends CommunityPost {
     private String authorPublicCode;
     private String authorNickname;
     private String authorAvatarUrl;
+    private Boolean authorDeleted;
 
     public String getAuthorPublicCode() {
         return authorPublicCode;
@@ -29,5 +30,13 @@ public class CommunityPostDiscoverRow extends CommunityPost {
 
     public void setAuthorAvatarUrl(String authorAvatarUrl) {
         this.authorAvatarUrl = authorAvatarUrl;
+    }
+
+    public Boolean getAuthorDeleted() {
+        return authorDeleted;
+    }
+
+    public void setAuthorDeleted(Boolean authorDeleted) {
+        this.authorDeleted = authorDeleted;
     }
 }
