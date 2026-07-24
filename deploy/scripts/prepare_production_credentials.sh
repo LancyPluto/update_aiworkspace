@@ -6,6 +6,15 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ROOT_ENV_FILE="${ROOT_ENV_FILE:-$ROOT_DIR/.env}"
 DEPLOY_ENV_FILE="${DEPLOY_ENV_FILE:-$ROOT_DIR/deploy/.env}"
 BACKUP_OSS_URI_DEFAULT="${BACKUP_OSS_URI_DEFAULT:-oss://wlcloudai-db-backup-prod/mysql/full}"
+COMPOSE_PULL_POLICY="${COMPOSE_PULL_POLICY:-missing}"
+
+case "$COMPOSE_PULL_POLICY" in
+  always|missing|never) ;;
+  *)
+    echo "ERROR: COMPOSE_PULL_POLICY must be always, missing, or never" >&2
+    exit 2
+    ;;
+esac
 
 python3 - "$ROOT_ENV_FILE" "$DEPLOY_ENV_FILE" "$BACKUP_OSS_URI_DEFAULT" <<'PY'
 import re
@@ -148,7 +157,7 @@ read_env_value() {
 }
 
 cd "$ROOT_DIR/deploy"
-docker compose --env-file "$ROOT_ENV_FILE" -f docker-compose.yml up -d mysql rabbitmq
+docker compose --env-file "$ROOT_ENV_FILE" -f docker-compose.yml up -d --pull "$COMPOSE_PULL_POLICY" mysql rabbitmq
 
 rabbitmq_ready=false
 for _ in $(seq 1 60); do

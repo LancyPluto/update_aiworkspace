@@ -284,15 +284,15 @@ if [ "$nginx_requested" = true ]; then
     echo "ERROR: nginx was requested but is unavailable in the old revision compose" >&2
     exit 1
   fi
-  docker compose "${compose_args[@]}" up -d --force-recreate nginx
+  docker compose "${compose_args[@]}" up -d --force-recreate --no-deps --no-build --pull never nginx
 fi
 
 if [ "$require_monitoring" -eq 1 ]; then
   echo "Restoring complete old revision monitoring stack: ${available_monitoring_services[*]}"
-  docker compose "${compose_args[@]}" up -d --force-recreate "${available_monitoring_services[@]}"
+  docker compose "${compose_args[@]}" up -d --force-recreate --no-build --pull never "${available_monitoring_services[@]}"
 elif [ "$monitoring_requested" = true ] && [ "${#available_monitoring_services[@]}" -gt 0 ]; then
   echo "Restoring old revision monitoring stack: ${available_monitoring_services[*]}"
-  docker compose "${compose_args[@]}" up -d --force-recreate "${available_monitoring_services[@]}"
+  docker compose "${compose_args[@]}" up -d --force-recreate --no-build --pull never "${available_monitoring_services[@]}"
 fi
 
 if [ "$require_monitoring" -eq 1 ] && ! monitoring_health_contract_supported; then

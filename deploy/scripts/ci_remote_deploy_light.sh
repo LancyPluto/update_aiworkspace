@@ -503,6 +503,9 @@ cleanup_preflight_user() {
 }
 trap cleanup_preflight_user EXIT
 
+echo "Pre-pulling missing external images before database or container changes ..."
+bash "\$REMOTE_DIR/deploy/scripts/prepull_compose_images.sh" "\${COMPOSE_ARGS[@]}"
+
 if docker inspect mihomo >/dev/null 2>&1; then
   echo "::error::Found unmanaged Mihomo container named mihomo; run the one-time managed-overlay migration before deployment." >&2
   exit 1
@@ -514,7 +517,7 @@ if docker inspect ai-supermarket-mihomo >/dev/null 2>&1; then
     docker rm -f ai-supermarket-mihomo
   fi
 fi
-docker compose "\${COMPOSE_ARGS[@]}" up -d mihomo
+docker compose "\${COMPOSE_ARGS[@]}" up -d --pull never mihomo
 
 echo "DEPLOY_SERVICES=\$DEPLOY_SERVICES" | tee -a "\$REMOTE_DIR/deploy/logs/deploy-history.log"
 
@@ -523,7 +526,7 @@ export APP_ENV="\$(read_env_value APP_ENV)"
 export PRODUCTION_PREFLIGHT_MYSQL_USER
 export PRODUCTION_PREFLIGHT_MYSQL_PASSWORD
 echo "Preparing persistent production credentials ..."
-bash "\$REMOTE_DIR/deploy/scripts/prepare_production_credentials.sh"
+COMPOSE_PULL_POLICY=never bash "\$REMOTE_DIR/deploy/scripts/prepare_production_credentials.sh"
 CURRENT_SECRET_SNAPSHOT="\$(read_secret_snapshot)"
 if [ "\$CURRENT_SECRET_SNAPSHOT" != "\$SECRET_SNAPSHOT_AFTER" ]; then
   DEPLOY_SERVICES="\$(bash "\$REMOTE_DIR/deploy/scripts/merge_deploy_services.sh" "\$DEPLOY_SERVICES" backend worker agent-service)"
@@ -538,7 +541,7 @@ bash "\$REMOTE_DIR/deploy/scripts/verify_production_environment.sh"
 # first. A real migration failure aborts the deploy (set -e) instead of shipping a
 # backend that crashes on a missing table.
 echo "Applying pending SQL migrations ..."
-docker compose "\${COMPOSE_ARGS[@]}" up -d mysql
+docker compose "\${COMPOSE_ARGS[@]}" up -d --pull never mysql
 export MYSQL_PASS="\$(read_env_value MYSQL_ROOT_PASSWORD)"
 export MYSQL_DB="\$(read_env_value MYSQL_DATABASE)"
 export BACKUP_ENCRYPTION_PASSWORD="\$(read_env_value BACKUP_ENCRYPTION_PASSWORD)"
@@ -621,7 +624,7 @@ done
 
 if [ -n "\$APP_SERVICES" ]; then
   echo "Force-recreating application containers:\$APP_SERVICES"
-  docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate --no-deps \$APP_SERVICES
+  docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate --no-deps --no-build --pull never \$APP_SERVICES
 fi
 if [ -n "\$EXPECTED_USER_WEB_IMAGE_ID" ]; then
   RUNNING_USER_WEB_IMAGE_ID="\$(docker inspect --format '{{.Image}}' ai-supermarket-user-web)"
@@ -634,11 +637,11 @@ fi
 
 if [ -n "\$MONITORING_SERVICES" ]; then
   echo "Starting/updating monitoring containers:\$MONITORING_SERVICES"
-  docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate \$MONITORING_SERVICES
+  docker compose "\${COMPOSE_ARGS[@]}" up -d --force-recreate --no-build --pull never \$MONITORING_SERVICES
 fi
 
 echo "Ensuring complete monitoring stack: \$MONITORING_STACK"
-docker compose "\${COMPOSE_ARGS[@]}" up -d \$MONITORING_STACK
+docker compose "\${COMPOSE_ARGS[@]}" up -d --no-build --pull never \$MONITORING_STACK
 
 # nginx 反代静态资源；任意前端/配置变更后都 reload，避免 user_web_dist 已更新但 nginx 仍握旧连接。
 docker compose "\${COMPOSE_ARGS[@]}" restart nginx
