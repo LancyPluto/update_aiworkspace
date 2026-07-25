@@ -30,20 +30,17 @@ public class PptAdminWorkflowService {
 
     private final ToolMapper toolMapper;
     private final PptWorkflowService pptWorkflowService;
-    private final PptEngineSettingsSyncService pptEngineSettingsSyncService;
     private final AgentModelConfigMapper agentModelConfigMapper;
     private final EngineApiSettingsService engineApiSettingsService;
     private final ObjectMapper objectMapper;
 
     public PptAdminWorkflowService(ToolMapper toolMapper,
                                    PptWorkflowService pptWorkflowService,
-                                   PptEngineSettingsSyncService pptEngineSettingsSyncService,
                                    AgentModelConfigMapper agentModelConfigMapper,
                                    EngineApiSettingsService engineApiSettingsService,
                                    ObjectMapper objectMapper) {
         this.toolMapper = toolMapper;
         this.pptWorkflowService = pptWorkflowService;
-        this.pptEngineSettingsSyncService = pptEngineSettingsSyncService;
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.engineApiSettingsService = engineApiSettingsService;
         this.objectMapper = objectMapper;
@@ -77,14 +74,9 @@ public class PptAdminWorkflowService {
     }
 
     private PptAdminWorkflowDetailResponse syncAndDetail(PptWorkflow workflow) {
-        try {
-            pptEngineSettingsSyncService.syncFromWorkflow(workflow);
-            return toDetailResponse(workflow, true, "已同步到 PPT 引擎");
-        } catch (BusinessException exception) {
-            return toDetailResponse(workflow, false, exception.getMessage());
-        } catch (RuntimeException exception) {
-            return toDetailResponse(workflow, false, "引擎同步失败: " + exception.getMessage());
-        }
+        // Production generation uses task-scoped KCD_PLATFORM tokens. Never copy
+        // model credentials into Banana's process-global settings.
+        return toDetailResponse(workflow, true, "平台模型由任务级路由托管，无需同步到 PPT 引擎");
     }
 
     private PptAdminWorkflowDetailResponse toDetailResponse(PptWorkflow workflow,

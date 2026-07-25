@@ -412,9 +412,14 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         PricingUsage usage = new PricingUsage(request.promptTokens(), request.completionTokens(), request.billableUnits());
         PricingQuote quote = pricingService.computeQuote(billingTool, modelConfig,
                 parseParams(task.getParamsJson()), usage, estimated);
-        int actualCredits = quote.chargeCredits();
-        int chargedCredits = settleTaskCredits(task.getUserId(), taskId, estimated, actualCredits);
-        if (chargedCredits < actualCredits) {
+        boolean parentBilledPptInvocation = "PPT_JOB".equals(
+                parseParams(task.getParamsJson()).path("_billingOwner").asText());
+        int intendedCredits = quote.chargeCredits();
+        int actualCredits = parentBilledPptInvocation ? 0 : intendedCredits;
+        int chargedCredits = parentBilledPptInvocation
+                ? 0
+                : settleTaskCredits(task.getUserId(), taskId, estimated, actualCredits);
+        if (!parentBilledPptInvocation && chargedCredits < actualCredits) {
             LOGGER.warn(
                     "task settled below intended charge (credit shortfall) taskId={} userId={} intendedCredits={} chargedCredits={} shortfall={}",
                     taskId, task.getUserId(), actualCredits, chargedCredits, actualCredits - chargedCredits

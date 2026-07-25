@@ -275,10 +275,21 @@ class ModelClient:
                 ),
             ) from exc
 
-        for raw_line in response.iter_lines(decode_unicode=True):
-            if not raw_line or not raw_line.startswith("data:"):
+        # Some OpenAI-compatible providers omit charset=UTF-8 from their SSE
+        # Content-Type. requests then guesses ISO-8859-1 when decode_unicode is
+        # enabled, permanently turning Chinese text into mojibake. SSE JSON is
+        # UTF-8 by contract, so decode the buffered line bytes explicitly.
+        for raw_line in response.iter_lines(decode_unicode=False):
+            if isinstance(raw_line, bytes):
+                try:
+                    line = raw_line.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    raise ModelClientError("model stream returned non-UTF-8 data") from exc
+            else:
+                line = raw_line
+            if not line or not line.startswith("data:"):
                 continue
-            data = raw_line[5:].strip()
+            data = line[5:].strip()
             if not data or data == "[DONE]":
                 continue
             try:

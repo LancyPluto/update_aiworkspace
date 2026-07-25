@@ -141,7 +141,7 @@ def resolve_outbound_proxy_policy(model_config: dict[str, Any] | None = None, *,
     # no routing authority; only the project container environment enables Mihomo.
     del model_config, extra_auth_json
     configured_url = os.getenv("PROJECT_MIHOMO_PROXY_URL", "").strip()
-    proxy_url = configured_url if _is_project_mihomo_url(configured_url) else ""
+    proxy_url = configured_url if _is_allowed_project_proxy_url(configured_url) else ""
     return OutboundProxyPolicy(
         enabled=bool(proxy_url),
         proxy_url=proxy_url,
@@ -209,6 +209,28 @@ def _is_project_mihomo_url(value: str) -> bool:
             parsed.scheme == "http"
             and parsed.hostname == "mihomo"
             and parsed.port == 7890
+            and parsed.username is None
+            and parsed.password is None
+            and parsed.path in {"", "/"}
+            and not parsed.query
+            and not parsed.fragment
+        )
+    except ValueError:
+        return False
+
+
+def _is_allowed_project_proxy_url(value: str) -> bool:
+    if _is_project_mihomo_url(value):
+        return True
+    if os.getenv("ALLOW_LOCAL_HOST_PROXY", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        return False
+    try:
+        parsed = urlparse(value)
+        return (
+            parsed.scheme == "http"
+            and parsed.hostname == "host.docker.internal"
+            and parsed.port is not None
+            and 1 <= parsed.port <= 65535
             and parsed.username is None
             and parsed.password is None
             and parsed.path in {"", "/"}

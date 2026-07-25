@@ -1,0 +1,172 @@
+openapi: 3.0.3
+info:
+  title: Banana Slides Adapter Contract
+  version: banana-project-api-v3
+  description: >
+    Platform-owned snapshot of the Banana endpoints used by 科创点AI.
+    This contract is intentionally narrower than the upstream API.
+servers:
+  - url: http://banana-slides:5000
+paths:
+  /health:
+    get:
+      operationId: health
+      responses:
+        "200":
+          description: Engine is ready to accept requests.
+  /api/projects:
+    post:
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/ProjectResponse"
+        "201":
+          $ref: "#/components/responses/ProjectResponse"
+  /api/projects/{projectId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: getProject
+      responses:
+        "200":
+          $ref: "#/components/responses/ProjectResponse"
+    put:
+      operationId: updateProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - type: object
+                  required: [platform_execution]
+                  properties:
+                    platform_execution:
+                      $ref: "#/components/schemas/PlatformExecution"
+                - type: object
+                  additionalProperties: true
+      responses:
+        "200":
+          $ref: "#/components/responses/ProjectResponse"
+    delete:
+      operationId: deleteProject
+      responses:
+        "204":
+          description: Project deleted.
+  /api/projects/{projectId}/{action}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - name: action
+        in: path
+        required: true
+        schema:
+          type: string
+        description: >
+          Reviewed action path such as generate-outline, generate-descriptions,
+          generate-images, task/{taskId}, export/pptx, or export/pdf.
+    get:
+      operationId: getProjectAction
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionResponse"
+    post:
+      operationId: postProjectAction
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          $ref: "#/components/responses/ActionResponse"
+        "202":
+          $ref: "#/components/responses/ActionResponse"
+components:
+  parameters:
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    PlatformExecution:
+      type: object
+      required:
+        - provider
+        - project_id
+        - job_id
+        - idempotency_key
+        - gateway_base_url
+        - execution_token
+      properties:
+        provider:
+          type: string
+          enum: [KCD_PLATFORM]
+        project_id:
+          type: integer
+          format: int64
+        job_id:
+          type: integer
+          format: int64
+        idempotency_key:
+          type: string
+        gateway_base_url:
+          type: string
+          format: uri
+        execution_token:
+          type: string
+          writeOnly: true
+      additionalProperties: false
+    CreateProjectRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        language:
+          type: string
+        page_count:
+          type: integer
+          minimum: 1
+          maximum: 100
+      additionalProperties: true
+    EngineEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+      additionalProperties: true
+  responses:
+    ProjectResponse:
+      description: Banana project envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/EngineEnvelope"
+    ActionResponse:
+      description: Immediate result or asynchronous task envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/EngineEnvelope"

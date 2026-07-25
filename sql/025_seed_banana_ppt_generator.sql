@@ -18,6 +18,7 @@ SELECT
     CHAR(10), CHAR(10),
     '<!-- ppt-workflow:',
     '{"integrationMode":"PPT_WORKSPACE","customUiRoute":"/tools/banana_ppt_generator/workspace",',
+    '"modelBindingStrategy":"PLATFORM_AUTO","preferredImageFamily":"gpt-image-2",',
     '"creationTypes":["idea","outline","descriptions"],',
     '"steps":[',
     '{"code":"CREATE","name":"创建项目","credits":5,"enabled":true},',

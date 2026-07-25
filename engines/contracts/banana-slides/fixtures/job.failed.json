@@ -1,0 +1,7 @@
+{
+  "success": false,
+  "error": {
+    "code": "GENERATION_FAILED",
+    "message": "fixture generation failure"
+  }
+}

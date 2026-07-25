@@ -1,0 +1,37 @@
+services:
+  worker:
+    environment:
+      # Docker Desktop exposes its configured host proxy on this internal
+      # endpoint. The worker accepts it only when this local-only guard is set.
+      PROJECT_MIHOMO_PROXY_URL: ${LOCAL_CONTAINER_PROXY_URL:-http://host.docker.internal:3128}
+      ALLOW_LOCAL_HOST_PROXY: "true"
+
+  banana-slides-migrate:
+    image: ${BANANA_SLIDES_LOCAL_IMAGE:-banana-slides:kcd-local}
+    build:
+      context: ${BANANA_SLIDES_LOCAL_SOURCE_DIR:-../../banana-slides-product}
+      dockerfile: Dockerfile.allinone
+      args:
+        DOCKER_REGISTRY: ${DOCKER_BUILD_REGISTRY:-docker.1ms.run/}
+        GHCR_REGISTRY: ${GHCR_BUILD_REGISTRY:-ghcr.1ms.run/}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+        PYPI_INDEX_URL: ${PYPI_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
+
+  banana-slides:
+    image: ${BANANA_SLIDES_LOCAL_IMAGE:-banana-slides:kcd-local}
+    build:
+      context: ${BANANA_SLIDES_LOCAL_SOURCE_DIR:-../../banana-slides-product}
+      dockerfile: Dockerfile.allinone
+      args:
+        DOCKER_REGISTRY: ${DOCKER_BUILD_REGISTRY:-docker.1ms.run/}
+        GHCR_REGISTRY: ${GHCR_BUILD_REGISTRY:-ghcr.1ms.run/}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+        PYPI_INDEX_URL: ${PYPI_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
+    ports:
+      - "127.0.0.1:${BANANA_SLIDES_LOCAL_PORT:-5000}:5000"
+    volumes:
+      # Generated page images and exports remain directly inspectable on the host.
+      - "${BANANA_SLIDES_LOCAL_DATA_DIR:-../.local/banana-slides}/instance:/app/backend/instance"
+      - "${BANANA_SLIDES_LOCAL_DATA_DIR:-../.local/banana-slides}/uploads:/app/uploads"

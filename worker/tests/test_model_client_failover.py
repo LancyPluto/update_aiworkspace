@@ -186,12 +186,12 @@ def test_text_model_stream_uses_declared_delta_path(monkeypatch) -> None:
             return None
 
         def iter_lines(self, decode_unicode: bool = False):
-            assert decode_unicode is True
+            assert decode_unicode is False
             return iter(
                 [
-                    'data: {"event":{"delta":"mapped "}}',
-                    'data: {"event":{"delta":"stream"}}',
-                    "data: [DONE]",
+                    b'data: {"event":{"delta":"mapped "}}',
+                    b'data: {"event":{"delta":"stream"}}',
+                    b"data: [DONE]",
                 ]
             )
 
@@ -209,3 +209,38 @@ def test_text_model_stream_uses_declared_delta_path(monkeypatch) -> None:
     )
 
     assert chunks == ["mapped ", "stream"]
+
+
+def test_text_model_stream_decodes_utf8_when_provider_omits_charset(monkeypatch) -> None:
+    class StreamResponse:
+        status_code = 200
+        text = ""
+        headers = {"Content-Type": "text/event-stream"}
+        encoding = "ISO-8859-1"
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def iter_lines(self, decode_unicode: bool = False):
+            assert decode_unicode is False
+            return iter(
+                [
+                    'data: {"choices":[{"delta":{"content":"为什么"}}]}'.encode("utf-8"),
+                    'data: {"choices":[{"delta":{"content":"报考大学"}}]}'.encode("utf-8"),
+                    b"data: [DONE]",
+                ]
+            )
+
+    monkeypatch.setattr(requests, "post", lambda *_args, **_kwargs: StreamResponse())
+
+    chunks = list(
+        ModelClient().generate_stream_with_usage(
+            "ping",
+            provider="openai_compatible",
+            model_name="doubao-seed-2-0-lite-260215",
+            base_url="https://ark.cn-beijing.volces.com/api/v3",
+            api_key="test-key",
+        )
+    )
+
+    assert chunks == ["为什么", "报考大学"]

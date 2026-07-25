@@ -93,6 +93,34 @@ fi
 
 require_boolean WORKFLOW_RUNTIME_ENABLED
 require_boolean WORKFLOW_RUNTIME_EXECUTION_ENABLED
+require_boolean PPT_WORKBENCH_ENABLED
+
+banana_image="$(read_env_value BANANA_SLIDES_IMAGE)"
+approved_banana_repository="crpi-e8y8tegbhx1vbpxm.cn-guangzhou.personal.cr.aliyuncs.com/aitools_wl/banana"
+if [[ ! "$banana_image" =~ ^${approved_banana_repository}@sha256:[0-9a-f]{64}$ ]]; then
+  fail "BANANA_SLIDES_IMAGE must use the approved ACR repository and an immutable sha256 digest"
+fi
+
+if ! python3 - "$ROOT_DIR/engines/versions.lock.json" "$banana_image" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+deployed = sys.argv[2]
+try:
+    engine = json.loads(path.read_text(encoding="utf-8"))["engines"]["banana-slides"]
+    assert engine["productForkRepository"] == "https://github.com/AI-miniLab/banana-slides"
+    assert engine["productForkCommit"]
+    assert engine["image"]["reference"] == deployed
+    assert engine["contractVersion"] == "banana-project-api-v3"
+    assert engine["releaseStatus"] == "READY"
+except (AssertionError, KeyError, TypeError, json.JSONDecodeError, OSError):
+    raise SystemExit(1)
+PY
+then
+  fail "engines/versions.lock.json is not a READY release matching BANANA_SLIDES_IMAGE"
+fi
 
 if [ "$(read_env_value WORKFLOW_RUNTIME_EXECUTION_ENABLED)" = "true" ]; then
   if [ "$(read_env_value WORKFLOW_RUNTIME_ENABLED)" != "true" ]; then

@@ -201,6 +201,29 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     @Transactional
+    public TaskStatusResponse createForPptInvocation(Long userId, CreateTaskRequest request) {
+        String idempotencyKey = normalizeIdempotencyKey(request.clientRequestId());
+        AiTask existing = findIdempotentTask(userId, idempotencyKey, request.toolCode());
+        if (existing != null) {
+            return TaskStatusResponse.from(existing);
+        }
+        if (request.params() == null
+                || !"PPT_JOB".equals(request.params().path("_billingOwner").asText())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "PPT 子任务缺少父级计费归属");
+        }
+        return createNewTask(
+                userId,
+                request.toolCode(),
+                request.params(),
+                idempotencyKey,
+                null,
+                request.modelConfigId(),
+                false
+        );
+    }
+
+    @Override
+    @Transactional
     public TaskStatusResponse createWorkflowRoot(Long userId,
                                                  String toolCode,
                                                  JsonNode params,

@@ -1,0 +1,5 @@
+LICENSE SNAPSHOT REQUIRED BEFORE RELEASE.
+
+Copy the unmodified LICENSE file from the exact Banana Slides commit recorded in
+`engines/versions.lock.json`. Production release validation must reject this
+placeholder.

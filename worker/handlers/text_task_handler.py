@@ -233,6 +233,28 @@ class TextTaskHandler:
         generation_mode = str(context.get("generationMode") or "").upper()
         has_rewrite_context = bool(context.get("rewriteContext"))
 
+        if tool_code == "ppt_platform_text_invocation":
+            params = context.get("params") or {}
+            messages = params.get("messages") or []
+            system_parts: list[str] = []
+            user_parts: list[str] = []
+            if isinstance(messages, list):
+                for message in messages:
+                    if not isinstance(message, dict):
+                        continue
+                    content = str(message.get("content") or "").strip()
+                    if not content:
+                        continue
+                    role = str(message.get("role") or "user").lower()
+                    if role == "system":
+                        system_parts.append(content)
+                    else:
+                        user_parts.append(f"{role}: {content}")
+            prompt = str(params.get("prompt") or "").strip()
+            if prompt:
+                user_parts.append(prompt)
+            return "\n\n".join(system_parts), "\n\n".join(user_parts)
+
         if tool_code == "xiaohongshu_copywriting":
             prompt_payload = build_xiaohongshu_prompt_payload(context)
             return prompt_payload["system_prompt"], prompt_payload["user_prompt"]
@@ -465,6 +487,8 @@ class TextTaskHandler:
     def _build_default_prompt(params: dict[str, Any]) -> str:
         lines = ["Generate a result from the following user input:"]
         for key, value in params.items():
+            if str(key).startswith("_"):
+                continue
             lines.append(f"- {key}: {value}")
         return "\n".join(lines)
 
@@ -488,6 +512,11 @@ def _select_model_request_params(
     params: dict[str, Any],
     model_config: dict[str, Any],
 ) -> dict[str, Any]:
+    contract_status = model_config.get("contractStatus")
+    if contract_status is None:
+        contract_status = model_config.get("contract_status")
+    if str(contract_status or "").upper() != "READY":
+        return {}
     raw_schema = model_config.get("requestSchemaJson")
     if raw_schema is None:
         raw_schema = model_config.get("request_schema_json")

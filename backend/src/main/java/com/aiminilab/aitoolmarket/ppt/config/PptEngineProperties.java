@@ -7,6 +7,9 @@ public class PptEngineProperties {
 
     private Engine engine = new Engine();
     private Billing billing = new Billing();
+    private boolean workbenchEnabled = true;
+    private String modelGatewayBaseUrl = "http://backend:8080";
+    private long executionTokenTtlSeconds = 3600;
 
     public Engine getEngine() {
         return engine;
@@ -18,6 +21,17 @@ public class PptEngineProperties {
 
     public Billing getBilling() {
         return billing;
+    }
+
+    public boolean isWorkbenchEnabled() { return workbenchEnabled; }
+    public void setWorkbenchEnabled(boolean workbenchEnabled) { this.workbenchEnabled = workbenchEnabled; }
+    public String getModelGatewayBaseUrl() { return modelGatewayBaseUrl; }
+    public void setModelGatewayBaseUrl(String modelGatewayBaseUrl) {
+        this.modelGatewayBaseUrl = modelGatewayBaseUrl;
+    }
+    public long getExecutionTokenTtlSeconds() { return executionTokenTtlSeconds; }
+    public void setExecutionTokenTtlSeconds(long executionTokenTtlSeconds) {
+        this.executionTokenTtlSeconds = executionTokenTtlSeconds;
     }
 
     public void setBilling(Billing billing) {

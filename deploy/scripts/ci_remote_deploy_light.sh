@@ -8,6 +8,7 @@ set -euo pipefail
 : "${DEPLOY_PASSWORD:?DEPLOY_PASSWORD is required}"
 : "${PRODUCTION_PREFLIGHT_MYSQL_USER:?Runner-generated preflight MySQL user is required}"
 : "${PRODUCTION_PREFLIGHT_MYSQL_PASSWORD:?Runner-generated preflight MySQL password is required}"
+: "${PPT_SMOKE_AUTH_TOKEN:?PPT_SMOKE_AUTH_TOKEN is required}"
 
 DEPLOY_SYNC_MODE="${DEPLOY_SYNC_MODE:-git}"
 if [ "$DEPLOY_SYNC_MODE" != "git" ]; then
@@ -32,6 +33,7 @@ GIT_BRANCH="${DEPLOY_GIT_BRANCH:-dev}"
 DEPLOY_GIT_REF="${DEPLOY_GIT_REF:-${GITHUB_SHA:-dev}}"
 DEPLOY_EVENT="${DEPLOY_EVENT:-${GITHUB_EVENT_NAME:-push}}"
 DEPLOY_PR_NUMBER="${DEPLOY_PR_NUMBER:-}"
+PPT_SMOKE_AUTH_TOKEN_B64="$(printf '%s' "$PPT_SMOKE_AUTH_TOKEN" | base64 -w0)"
 
 ssh_cmd() {
   SSHPASS="$DEPLOY_PASSWORD" sshpass -e ssh "${SSH_OPTS[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" "$@"
@@ -100,6 +102,7 @@ DEPLOY_PR_NUMBER="$DEPLOY_PR_NUMBER"
 GITHUB_SHA="${GITHUB_SHA:-unknown}"
 PRODUCTION_PREFLIGHT_MYSQL_USER="$PRODUCTION_PREFLIGHT_MYSQL_USER"
 PRODUCTION_PREFLIGHT_MYSQL_PASSWORD="$PRODUCTION_PREFLIGHT_MYSQL_PASSWORD"
+PPT_SMOKE_AUTH_TOKEN_B64="$PPT_SMOKE_AUTH_TOKEN_B64"
 
 if [ "\$DEPLOY_SYNC_MODE" = "git" ]; then
   diff_status_file="\$REMOTE_DIR/deploy/logs/deploy-diff-base.status"
@@ -183,6 +186,7 @@ PY
 SECRET_SNAPSHOT_BEFORE="\$(read_secret_snapshot)"
 
 python3 - <<'PY'
+import json
 from pathlib import Path
 
 patch_lines = """
@@ -202,6 +206,9 @@ ASSET_PRIVATE_CACHE_CONTROL=private,max-age=3600
 ASSET_LEGACY_CACHE_CONTROL=public,max-age=300,must-revalidate
 MEDIA_VIDEO_PREVIEW_ENABLED=true
 VITE_MEDIA_DELIVERY_OPTIMIZATION=true
+PPT_WORKBENCH_ENABLED=true
+PPT_MODEL_GATEWAY_BASE_URL=http://backend:8080
+PPT_EXECUTION_TOKEN_TTL_SECONDS=3600
 MIHOMO_ENABLED=true
 NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,.klingai.com,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat
 CONTAINER_NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,.klingai.com,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat
@@ -226,6 +233,10 @@ for line in patch_lines:
         continue
     key, value = line.split("=", 1)
     patch[key] = value
+
+engine_lock_path = Path("/root/ai_tool_market/engines/versions.lock.json")
+engine_lock = json.loads(engine_lock_path.read_text(encoding="utf-8"))
+patch["BANANA_SLIDES_IMAGE"] = engine_lock["engines"]["banana-slides"]["image"]["reference"]
 
 LEGACY_APPLICATION_PROXY_KEYS = {
     "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
@@ -464,16 +475,13 @@ if [ -f "\$REMOTE_DIR/deploy/logs/last-deploy.files.txt" ]; then
 fi
 
 cd "\$REMOTE_DIR/deploy"
-COMPOSE_ARGS=(--env-file ../.env -f docker-compose.yml -f docker-compose.nginx.yml)
+COMPOSE_ARGS=(--env-file ../.env -f docker-compose.yml -f docker-compose.ppt.yml -f docker-compose.nginx.yml)
 if grep -Eqi '^MIHOMO_ENABLED=true$' "\$REMOTE_DIR/.env"; then
   COMPOSE_ARGS+=(-f docker-compose.proxy.yml)
   echo "Mihomo overlay enabled"
 fi
 if [ -f docker-compose.monitoring.yml ]; then
   COMPOSE_ARGS+=(-f docker-compose.monitoring.yml)
-fi
-if echo "\$DEPLOY_SERVICES" | grep -qw banana-slides; then
-  COMPOSE_ARGS+=(--profile banana-slides)
 fi
 
 rollback_on_failure() {
@@ -570,6 +578,8 @@ else
   echo "::warning::Pre-migration backup skipped: BACKUP_ENCRYPTION_PASSWORD is not configured. This is allowed for development/internal testing only." >&2
 fi
 bash "\$REMOTE_DIR/deploy/scripts/apply_sql_migrations.sh"
+echo "Verifying PPT platform model pool ..."
+bash "\$REMOTE_DIR/deploy/scripts/verify_ppt_model_pool.sh"
 if [ "\$APP_PRODUCTION_MODE" = "true" ] || [ "\$APP_ENV" = "production" ]; then
   echo "Running post-migration read-only preflight ..."
 bash "\$REMOTE_DIR/deploy/scripts/production_readonly_preflight.sh" post-migration
@@ -580,10 +590,14 @@ chmod 600 "\$REMOTE_DIR/deploy/logs/last-deploy.services.txt"
 
 # Parallel build: launch all builds concurrently, then wait.
 echo "Building services in parallel: \$DEPLOY_SERVICES"
+if echo "\$DEPLOY_SERVICES" | grep -qw banana-slides; then
+  echo "Pulling public immutable Banana Slides image anonymously"
+  docker compose "\${COMPOSE_ARGS[@]}" pull banana-slides
+fi
 pids=()
 for svc in \$DEPLOY_SERVICES; do
   case "\$svc" in
-    backend|worker|agent-service|admin-frontend|user-web|banana-slides) ;;
+    backend|worker|agent-service|admin-frontend|user-web) ;;
     *)
       echo "  Skipping build for image-only service: \$svc"
       continue
@@ -675,6 +689,9 @@ echo "Verifying release health..."
 BACKEND_EXPECTED_CONTAINER_ID="\$BACKEND_EXPECTED_CONTAINER_ID" \
 BACKEND_RESTART_BASELINE="\$BACKEND_RESTART_BASELINE" \
   bash "\$REMOTE_DIR/deploy/scripts/verify_release_health.sh"
+echo "Running authenticated PPT production smoke..."
+PPT_SMOKE_AUTH_TOKEN="\$(printf '%s' "\$PPT_SMOKE_AUTH_TOKEN_B64" | base64 -d)" \
+  python3 "\$REMOTE_DIR/deploy/scripts/smoke_ppt_workbench.py"
 if echo "\$DEPLOY_SERVICES" | grep -qw agent-service; then
   echo "Checking agent-service outbound model connectivity ..."
   python3 "\$REMOTE_DIR/deploy/scripts/check_outbound_proxy.py"

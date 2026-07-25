@@ -140,7 +140,7 @@ services:
       - ../WXcert:/app/WXcert:ro
       - ../docs:/docs:ro
       - ../data/geoip:/data/geoip:ro
-      - ../data/generated-media:/data/generated-media
+      - ${GENERATED_MEDIA_DIR:-../data/generated-media}:/data/generated-media
     dns:
       # Keep backend model connectivity tests away from poisoned/default container DNS.
       - 223.5.5.5
@@ -302,7 +302,7 @@ services:
       NO_PROXY: ${CONTAINER_NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal}
     volumes:
       - ../worker:/app
-      - ../data/generated-media:/data/generated-media
+      - ${GENERATED_MEDIA_DIR:-../data/generated-media}:/data/generated-media
     expose:
       - "9101"
     dns:

@@ -21,6 +21,9 @@ _ENV_PATCH_LINES = [
     "ADMIN_NEXT_PUBLIC_API_BASE_URL=",
     "ADMIN_NEXT_PUBLIC_API_PROXY_TARGET=http://backend:8080",
     "CORS_ALLOWED_ORIGINS=http://wlcloudai.com,http://www.wlcloudai.com,http://8.134.93.203,https://wlcloudai.com,https://www.wlcloudai.com,https://8.134.93.203",
+    "PPT_WORKBENCH_ENABLED=true",
+    "PPT_MODEL_GATEWAY_BASE_URL=http://backend:8080",
+    "PPT_EXECUTION_TOKEN_TTL_SECONDS=3600",
     "MIHOMO_ENABLED=true",
     "NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,.klingai.com,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat",
     "CONTAINER_NO_PROXY=localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,host.docker.internal,wlcloudai.com,8.134.93.203,.aliyuncs.com,.aliyun.com,.cn,.klingai.com,api.deepseek.com,.deepseek.com,ark.cn-beijing.volces.com,.volces.com,api.minimaxi.com,.minimaxi.com,api.minimax.chat,.minimax.chat",
@@ -270,16 +273,13 @@ REMOTE_DIR="$REMOTE_DIR" \
 {ENV_PATCH_SCRIPT}
 
 cd "$REMOTE_DIR/deploy"
-COMPOSE_ARGS=(--env-file ../.env -f docker-compose.yml -f docker-compose.nginx.yml)
+COMPOSE_ARGS=(--env-file ../.env -f docker-compose.yml -f docker-compose.ppt.yml -f docker-compose.nginx.yml)
 if grep -Eqi '^MIHOMO_ENABLED=true$' "$REMOTE_DIR/.env"; then
   COMPOSE_ARGS+=(-f docker-compose.proxy.yml)
   echo "Mihomo overlay enabled"
 fi
 if [ -f docker-compose.monitoring.yml ]; then
   COMPOSE_ARGS+=(-f docker-compose.monitoring.yml)
-fi
-if echo "$SERVICES" | grep -qw banana-slides; then
-  COMPOSE_ARGS+=(--profile banana-slides)
 fi
 
 if docker inspect mihomo >/dev/null 2>&1; then
@@ -353,13 +353,17 @@ bash "$REMOTE_DIR/deploy/scripts/production_readonly_preflight.sh" historical
 echo "Creating encrypted pre-migration backup ..."
 bash "$REMOTE_DIR/deploy/scripts/backup_mysql.sh"
 bash "$REMOTE_DIR/deploy/scripts/apply_sql_migrations.sh"
+bash "$REMOTE_DIR/deploy/scripts/verify_ppt_model_pool.sh"
 echo "Running post-migration read-only preflight ..."
 bash "$REMOTE_DIR/deploy/scripts/production_readonly_preflight.sh" post-migration
 cleanup_preflight_user
 
+if echo "$SERVICES" | grep -qw banana-slides; then
+  docker compose "${{COMPOSE_ARGS[@]}}" pull banana-slides
+fi
 for svc in $SERVICES; do
   case "$svc" in
-    backend|worker|agent-service|admin-frontend|user-web|banana-slides) ;;
+    backend|worker|agent-service|admin-frontend|user-web) ;;
     *)
       echo "Skipping build for image-only service: $svc"
       continue

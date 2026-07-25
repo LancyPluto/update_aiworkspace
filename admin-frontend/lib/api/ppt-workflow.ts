@@ -17,6 +17,8 @@ export interface PptWorkflow {
   features?: Record<string, boolean>
   textModelConfigId?: number | null
   imageModelConfigId?: number | null
+  modelBindingStrategy?: "PLATFORM_AUTO" | "EXPLICIT" | string
+  preferredImageFamily?: string
   engineSecrets?: Record<string, string>
   /** 值为 system 表示使用系统配置中的全局引擎 API */
   engineSecretSources?: Record<string, string>

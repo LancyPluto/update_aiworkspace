@@ -93,7 +93,8 @@ public class ToolIntegrationResolver {
             ToolIntegrationConfig config = new ToolIntegrationConfig();
             config.setIntegrationMode(IntegrationMode.PPT_WORKSPACE);
             config.setPluginId(DEFAULT_PPT_PLUGIN_ID);
-            config.setApiPrefix(DEFAULT_PPT_API_PREFIX);
+            config.setApiPrefix(textOrDefault(pptNode, "apiPrefix", DEFAULT_PPT_API_PREFIX));
+            config.setCustomUiRoute(textOrNull(pptNode, "customUiRoute"));
             config.putExtra(DEFAULT_PPT_PLUGIN_ID, pptNode);
             normalize(config, toolCode);
             return Optional.of(config);
@@ -124,5 +125,18 @@ public class ToolIntegrationResolver {
         ToolIntegrationConfig config = new ToolIntegrationConfig();
         config.setIntegrationMode(IntegrationMode.STANDARD_TASK);
         return config;
+    }
+
+    private String textOrNull(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.get(field);
+        if (value == null || value.isNull() || !value.isTextual() || value.asText().isBlank()) {
+            return null;
+        }
+        return value.asText().trim();
+    }
+
+    private String textOrDefault(JsonNode node, String field, String fallback) {
+        String value = textOrNull(node, field);
+        return value == null ? fallback : value;
     }
 }

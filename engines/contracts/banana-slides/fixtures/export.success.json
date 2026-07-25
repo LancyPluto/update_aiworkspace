@@ -1,0 +1,7 @@
+{
+  "success": true,
+  "data": {
+    "type": "pptx",
+    "download_url": "/api/projects/banana-project-fixture-001/export/pptx/download"
+  }
+}

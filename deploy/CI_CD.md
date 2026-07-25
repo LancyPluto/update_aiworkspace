@@ -1,5 +1,7 @@
 # CI/CD 说明
 
+PPT 工作台的双仓发布顺序、模型/代理/乱码排查、生产冒烟和一键 PR 入口见 [PPT 工作台部署与排障](../docs/PPT工作台部署与排障.md)。
+
 主仓库通过 GitHub Actions 编排、由当前 Windows 主机内两个隔离的 WSL2 环境中的四个 self-hosted Runner 实例执行 **dev 分支持续集成 + 轻量持续交付**：
 
 - CI WSL 中运行 3 个带 `ci-isolated` 标签的 Runner 实例，仅运行 CI，无生产凭据，并阻断生产地址与本地 LAN。

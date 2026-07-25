@@ -40,6 +40,12 @@ public class PptEngineSettingsSyncService {
         }
         AgentModelConfig text = textId == null ? null : requireEnabledConfig(textId, "文本");
         AgentModelConfig image = imageId == null ? null : requireEnabledConfig(imageId, "生图");
+        syncModels(text, image, workflow);
+    }
+
+    public void syncModels(AgentModelConfig text, AgentModelConfig image, PptWorkflow workflow) {
+        Map<String, String> resolvedSecrets = engineApiSettingsService.resolveForWorkflow(
+                workflow.getEngineSecrets(), workflow.getEngineSecretSources());
         Map<String, Object> payload = PptBananaSettingsMapper.toBananaSettings(text, image);
         PptEngineSecretSupport.mergeEngineSecretsIntoPayload(payload, resolvedSecrets);
         pptEngineClient.updateSettings(payload);

@@ -1169,6 +1169,165 @@ CREATE TABLE ppt_step_billing_logs (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE ppt_projects (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  tool_id BIGINT,
+  title VARCHAR(255) NOT NULL,
+  topic CLOB,
+  creation_type VARCHAR(32) NOT NULL DEFAULT 'idea',
+  language VARCHAR(16) NOT NULL DEFAULT 'zh-CN',
+  aspect_ratio VARCHAR(16) NOT NULL DEFAULT '16:9',
+  page_count INT,
+  status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+  engine_strategy VARCHAR(32) NOT NULL DEFAULT 'VISUAL',
+  text_model_config_id BIGINT,
+  image_model_config_id BIGINT,
+  current_deck_version_id BIGINT,
+  legacy_binding_id BIGINT,
+  is_deleted TINYINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TIMESTAMP,
+  CONSTRAINT uk_ppt_project_legacy_binding UNIQUE (legacy_binding_id)
+);
+CREATE INDEX idx_ppt_project_user_updated ON ppt_projects(user_id, is_deleted, updated_at);
+CREATE INDEX idx_ppt_project_user_status ON ppt_projects(user_id, status, is_deleted);
+CREATE INDEX idx_ppt_project_text_model ON ppt_projects(text_model_config_id);
+CREATE INDEX idx_ppt_project_image_model ON ppt_projects(image_model_config_id);
+
+CREATE TABLE ppt_engine_bindings (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  project_id BIGINT NOT NULL,
+  engine_code VARCHAR(64) NOT NULL,
+  external_project_id VARCHAR(128) NOT NULL,
+  engine_metadata_json CLOB,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_ppt_engine_binding_project UNIQUE (project_id, engine_code),
+  CONSTRAINT uk_ppt_engine_binding_external UNIQUE (engine_code, external_project_id)
+);
+CREATE INDEX idx_ppt_engine_binding_project ON ppt_engine_bindings(project_id);
+
+CREATE TABLE ppt_deck_versions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  project_id BIGINT NOT NULL,
+  version_no INT NOT NULL,
+  source_job_id BIGINT,
+  status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+  title VARCHAR(255),
+  content_spec_json CLOB,
+  design_spec_json CLOB,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_ppt_deck_version UNIQUE (project_id, version_no)
+);
+CREATE INDEX idx_ppt_deck_project_created ON ppt_deck_versions(project_id, created_at);
+
+CREATE TABLE ppt_slides (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  project_id BIGINT NOT NULL,
+  deck_version_id BIGINT NOT NULL,
+  slide_no INT NOT NULL,
+  title VARCHAR(255),
+  engine_page_id VARCHAR(128),
+  content_json CLOB,
+  preview_url VARCHAR(1024),
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_ppt_slide_position UNIQUE (deck_version_id, slide_no)
+);
+CREATE INDEX idx_ppt_slide_project ON ppt_slides(project_id, deck_version_id);
+CREATE INDEX idx_ppt_slide_engine_page ON ppt_slides(project_id, engine_page_id);
+
+CREATE TABLE ppt_slide_versions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  slide_id BIGINT NOT NULL,
+  version_no INT NOT NULL,
+  source_job_id BIGINT,
+  content_json CLOB,
+  preview_url VARCHAR(1024),
+  conversion_mode VARCHAR(32) NOT NULL DEFAULT 'RASTERIZED',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_ppt_slide_version UNIQUE (slide_id, version_no)
+);
+CREATE INDEX idx_ppt_slide_version_created ON ppt_slide_versions(slide_id, created_at);
+
+CREATE TABLE ppt_jobs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  root_job_id BIGINT,
+  job_type VARCHAR(64) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'CREATED',
+  engine_code VARCHAR(64) NOT NULL,
+  external_job_id VARCHAR(128),
+  idempotency_key VARCHAR(128) NOT NULL,
+  attempt_no INT NOT NULL DEFAULT 1,
+  progress INT NOT NULL DEFAULT 0,
+  progress_message VARCHAR(512),
+  request_json CLOB,
+  result_json CLOB,
+  error_code VARCHAR(64),
+  error_message VARCHAR(1000),
+  retryable TINYINT NOT NULL DEFAULT 0,
+  reserved_credits INT NOT NULL DEFAULT 0,
+  actual_credits INT NOT NULL DEFAULT 0,
+  credit_state VARCHAR(32) NOT NULL DEFAULT 'NOT_REQUIRED',
+  next_poll_at TIMESTAMP,
+  lease_owner VARCHAR(128),
+  lease_expires_at TIMESTAMP,
+  submission_started_at TIMESTAMP,
+  reconcile_started_at TIMESTAMP,
+  last_engine_heartbeat_at TIMESTAMP,
+  deadline_at TIMESTAMP,
+  started_at TIMESTAMP,
+  finished_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_ppt_job_user_idempotency UNIQUE (user_id, idempotency_key)
+);
+CREATE INDEX idx_ppt_job_project_created ON ppt_jobs(project_id, created_at);
+CREATE INDEX idx_ppt_job_recovery ON ppt_jobs(status, next_poll_at, lease_expires_at);
+CREATE INDEX idx_ppt_job_deadline ON ppt_jobs(status, deadline_at);
+CREATE INDEX idx_ppt_job_external ON ppt_jobs(engine_code, external_job_id);
+CREATE INDEX idx_ppt_job_root_attempt ON ppt_jobs(root_job_id, attempt_no);
+
+CREATE TABLE ppt_exports (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  deck_version_id BIGINT,
+  job_id BIGINT NOT NULL,
+  export_type VARCHAR(32) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+  file_name VARCHAR(255),
+  content_type VARCHAR(128),
+  file_size BIGINT,
+  storage_url VARCHAR(1024),
+  checksum_sha256 CHAR(64),
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_ppt_export_job_type UNIQUE (job_id, export_type)
+);
+CREATE INDEX idx_ppt_export_project_created ON ppt_exports(project_id, created_at);
+CREATE INDEX idx_ppt_export_user_project ON ppt_exports(user_id, project_id);
+
+CREATE TABLE ppt_model_invocations (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  ppt_job_id BIGINT NOT NULL,
+  ai_task_id BIGINT NOT NULL,
+  capability VARCHAR(64) NOT NULL,
+  idempotency_key VARCHAR(191) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_ppt_model_invocation_job_key UNIQUE (ppt_job_id, idempotency_key),
+  CONSTRAINT uk_ppt_model_invocation_task UNIQUE (ai_task_id)
+);
+CREATE INDEX idx_ppt_model_invocation_project ON ppt_model_invocations(project_id, id);
+CREATE INDEX idx_ppt_model_invocation_user ON ppt_model_invocations(user_id, id);
+
 CREATE TABLE tool_workflows (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   tool_id BIGINT NOT NULL,

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "engines": {
+    "banana-slides": {
+      "engineCode": "BANANA_VISUAL",
+      "upstreamRepository": "https://github.com/Anionex/banana-slides",
+      "upstreamRef": "main",
+      "reviewedUpstreamCommit": "25e90d6c57b6",
+      "productForkRepository": "https://github.com/AI-miniLab/banana-slides",
+      "productForkCommit": "fb095b0eafec2052503a15806222fcebf8ec8095",
+      "image": {
+        "registry": "ALIYUN_ACR",
+        "environmentVariable": "BANANA_SLIDES_IMAGE",
+        "immutableReferenceRequired": true,
+        "reference": "crpi-e8y8tegbhx1vbpxm.cn-guangzhou.personal.cr.aliyuncs.com/aitools_wl/banana@sha256:cfeb45a8ec23d5f3a3e6a54c2303ab05d562e78ba4d060f5f1b6edaa3b140d72"
+      },
+      "contractVersion": "banana-project-api-v3",
+      "contractPath": "engines/contracts/banana-slides/openapi.yaml",
+      "licensePath": "engines/third-party/banana-slides/LICENSE",
+      "noticePath": "engines/third-party/banana-slides/NOTICE.md",
+      "releaseStatus": "READY"
+    }
+  }
+}

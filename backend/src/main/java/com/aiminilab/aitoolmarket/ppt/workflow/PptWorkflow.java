@@ -17,6 +17,9 @@ public class PptWorkflow {
     /** 绑定超市 agent_model_configs，保存工作流时同步到 banana */
     private Long textModelConfigId;
     private Long imageModelConfigId;
+    /** PLATFORM_AUTO resolves missing bindings from the shared model catalog. */
+    private String modelBindingStrategy;
+    private String preferredImageFamily;
     /**
      * 引擎侧第三方 API 凭证（MinerU、百度 OCR 等），key 与 {@code ToolIntegrationApiCatalog} 中
      * {@link com.aiminilab.aitoolmarket.tool.integration.api.ToolEngineApiFieldDefinition#key()} 一致。
@@ -42,6 +45,22 @@ public class PptWorkflow {
 
     public void setImageModelConfigId(Long imageModelConfigId) {
         this.imageModelConfigId = imageModelConfigId;
+    }
+
+    public String getModelBindingStrategy() {
+        return modelBindingStrategy;
+    }
+
+    public void setModelBindingStrategy(String modelBindingStrategy) {
+        this.modelBindingStrategy = modelBindingStrategy;
+    }
+
+    public String getPreferredImageFamily() {
+        return preferredImageFamily;
+    }
+
+    public void setPreferredImageFamily(String preferredImageFamily) {
+        this.preferredImageFamily = preferredImageFamily;
     }
 
     public Map<String, String> getEngineSecrets() {
