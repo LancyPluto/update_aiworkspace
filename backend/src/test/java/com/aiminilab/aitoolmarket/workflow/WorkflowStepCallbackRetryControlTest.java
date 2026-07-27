@@ -107,6 +107,20 @@ class WorkflowStepCallbackRetryControlTest {
     }
 
     @Test
+    void billingReconciliationFailedRunRejectsLateCallbackWithoutAdvancing() {
+        CallbackFixture fixture = callbackFixture();
+        fixture.run().setStatus("FAILED");
+        fixture.run().setBillingStatus("RECONCILIATION_FAILED");
+        WorkerFailedRequest failure = failure();
+
+        assertThat(fixture.service().failed(31L, failure)).isFalse();
+
+        verify(fixture.metrics()).recordLateCallback(WorkflowMetrics.LateCallbackResult.REJECTED_TERMINAL_RUN);
+        verify(fixture.billingService()).releaseLateFailure(11L, 31L, failure);
+        verifyProviderRequestIdWasNotAttached(fixture);
+    }
+
+    @Test
     void staleGenerationCallbackRecordsBoundedRejectionReason() {
         CallbackFixture fixture = callbackFixture();
         fixture.run().setCancellationGeneration(2L);

@@ -41,12 +41,31 @@ const IMAGE_OUTPUT_COUNT_KEYS = new Set([
   "outputcount",
 ])
 
+const MODEL_OWNED_MEDIA_FIELD_TYPES = new Set<ToolField["fieldType"]>([
+  "image",
+  "image_upload",
+  "video_upload",
+  "audio_upload",
+  "multi_image",
+  "multi_video",
+  "multi_audio",
+  "omni_video_list",
+])
+
 function normalizedFieldKey(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]/g, "")
 }
 
 function isImageOutputCountKey(value: string): boolean {
   return IMAGE_OUTPUT_COUNT_KEYS.has(normalizedFieldKey(value))
+}
+
+function isModelOwnedMediaField(field: ToolField): boolean {
+  if (MODEL_OWNED_MEDIA_FIELD_TYPES.has(field.fieldType)) return true
+  if (field.fieldType !== "file") return false
+  const meta = recordValue(field.options)
+  const accept = String(meta?.accept || "").toLowerCase()
+  return /(?:image|video|audio)\//.test(accept)
 }
 
 function hasImageGenerationCapability(model?: ToolSupportedModel | null): boolean {
@@ -318,6 +337,7 @@ export function buildEffectiveToolFields(
     ...schemaFields,
     ...toolFields.filter((field) =>
       !schemaFieldKeys.has(field.fieldKey)
+      && !isModelOwnedMediaField(field)
       && (!imageGenerationModel || !isImageOutputCountKey(field.fieldKey)),
     ),
   ]

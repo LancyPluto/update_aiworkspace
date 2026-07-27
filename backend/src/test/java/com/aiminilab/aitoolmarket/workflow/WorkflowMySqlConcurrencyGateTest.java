@@ -4,7 +4,6 @@ import com.aiminilab.aitoolmarket.agent.dto.DelegatedWorkflowToolCallResponse;
 import com.aiminilab.aitoolmarket.agent.balance.VendorBalanceRefreshScheduler;
 import com.aiminilab.aitoolmarket.agent.service.AgentRunStaleRecoveryScheduler;
 import com.aiminilab.aitoolmarket.agent.service.AgentWorkflowDelegationService;
-import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.config.DataInitializer;
 import com.aiminilab.aitoolmarket.community.service.CommunityService;
@@ -15,7 +14,6 @@ import com.aiminilab.aitoolmarket.task.dto.WorkerSuccessRequest;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
 import com.aiminilab.aitoolmarket.task.TaskOutboxDispatcher;
 import com.aiminilab.aitoolmarket.workflow.config.WorkflowRuntimeGate;
-import com.aiminilab.aitoolmarket.workflow.config.WorkflowRuntimeProperties;
 import com.aiminilab.aitoolmarket.workflow.dto.CreateWorkflowRunCommand;
 import com.aiminilab.aitoolmarket.workflow.dto.WorkflowRunCreated;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowAttemptRecoveryService;
@@ -70,10 +68,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "workflow.runtime.enabled=true",
         "workflow.runtime.execution-enabled=true",
         "workflow.runtime.real-billing-enabled=true",
-        "workflow.runtime.confirmation-enabled=false",
-        "workflow.runtime.canary-percentage=100",
-        "workflow.runtime.max-run-cost-credits=100",
-        "workflow.runtime.max-user-daily-cost-credits=60"
+        "workflow.runtime.confirmation-enabled=false"
 })
 class WorkflowMySqlConcurrencyGateTest {
 
@@ -102,9 +97,6 @@ class WorkflowMySqlConcurrencyGateTest {
 
     @Autowired
     private WorkflowRuntimeGate runtimeGate;
-
-    @Autowired
-    private WorkflowRuntimeProperties runtimeProperties;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -216,7 +208,7 @@ class WorkflowMySqlConcurrencyGateTest {
     }
 
     @Test
-    void concurrentDifferentKeysLetOnlyOneRunConsumeTheDailyLimit() throws Exception {
+    void concurrentDifferentKeysProceedWhenBalanceCoversBothReservations() throws Exception {
         PublishedWorkflow published = insertWorkerWorkflow(TOOL_PREFIX + "daily_limit", 40, 5);
         insertCreditAccount(1_000);
 
@@ -231,24 +223,23 @@ class WorkflowMySqlConcurrencyGateTest {
             }
         });
 
-        assertThat(results.stream().filter(WorkflowRunCreated.class::isInstance).count()).isOne();
-        assertThat(results.stream().filter(this::isDailyLimitRejection).count()).isOne();
+        assertThat(results.stream().filter(WorkflowRunCreated.class::isInstance).count()).isEqualTo(2);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM workflow_runs WHERE user_id = ?",
                 Integer.class,
                 USER_ID
-        )).isOne();
+        )).isEqualTo(2);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM workflow_step_charges WHERE user_id = ? AND status = 'RESERVED'",
                 Integer.class,
                 USER_ID
-        )).isOne();
+        )).isEqualTo(2);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COALESCE(SUM(reserved_credits), 0) FROM workflow_step_charges "
                         + "WHERE user_id = ? AND status = 'RESERVED'",
                 Integer.class,
                 USER_ID
-        )).isEqualTo(40);
+        )).isEqualTo(80);
     }
 
     @RepeatedTest(5)
@@ -540,15 +531,6 @@ class WorkflowMySqlConcurrencyGateTest {
                 Integer.class,
                 agent.agentRunId()
         )).isOne();
-    }
-
-    private boolean isDailyLimitRejection(Object result) {
-        if (!(result instanceof BusinessException exception)
-                || exception.getErrorCode() != ErrorCode.WORKFLOW_RUNTIME_BLOCKED
-                || !(exception.getData() instanceof Map<?, ?> data)) {
-            return false;
-        }
-        return "user_daily_cost_limit_exceeded".equals(data.get("reason"));
     }
 
     private PublishedWorkflow insertWorkerWorkflow(String toolCode,

@@ -55,6 +55,11 @@ public class WorkflowExecutionService {
     private static final String RUN_FAILED = "FAILED";
     private static final String RUN_TIMEOUT = "TIMEOUT";
     private static final String RUN_CANCELLED = "CANCELLED";
+    private static final String BILLING_RECONCILIATION_FAILED = "RECONCILIATION_FAILED";
+    private static final String BILLING_RECONCILIATION_ERROR_CODE =
+            "WORKFLOW_BILLING_RECONCILIATION_FAILED";
+    private static final String BILLING_RECONCILIATION_ERROR_MESSAGE =
+            "Workflow billing reconciliation failed";
     private static final Set<String> TERMINAL_RUN_STATUSES = Set.of(
             RUN_SUCCESS,
             RUN_FAILED,
@@ -240,6 +245,7 @@ public class WorkflowExecutionService {
             WorkflowRunStep step = new WorkflowRunStep();
             step.setRunId(run.getId());
             step.setNodeId(node.id());
+            step.setNodeTitle(node.title());
             step.setNodeDefType(node.type().name());
             step.setStatus(STEP_PENDING);
             step.setAttempt(0);
@@ -280,6 +286,27 @@ public class WorkflowExecutionService {
                 request.errorMessage(),
                 request.developerMessage()
         ));
+    }
+
+    @Transactional
+    public void finishBillingReconciliationFailure(Long runId) {
+        WorkflowRun run = workflowRunMapper.selectByIdForUpdate(runId);
+        if (run == null) {
+            throw new IllegalStateException("Workflow run not found during billing reconciliation: " + runId);
+        }
+        if (TERMINAL_RUN_STATUSES.contains(run.getStatus())) {
+            return;
+        }
+        if (!RUN_CANCELLING.equals(run.getStatus())
+                || !BILLING_RECONCILIATION_FAILED.equals(run.getBillingStatus())) {
+            throw new IllegalStateException(
+                    "Workflow run is not isolated for billing reconciliation: " + runId
+            );
+        }
+        failRun(run, WorkflowFailureContract.from(
+                BILLING_RECONCILIATION_ERROR_CODE,
+                BILLING_RECONCILIATION_ERROR_MESSAGE
+        ), true);
     }
 
     public boolean isWorkflowStepTask(JsonNode params) {
@@ -458,11 +485,18 @@ public class WorkflowExecutionService {
     }
 
     private void failRun(Long runId, WorkflowFailureContract failure) {
-        WorkflowRun run = requireRun(runId);
-        if (TERMINAL_RUN_STATUSES.contains(run.getStatus()) || RUN_CANCELLING.equals(run.getStatus())) {
+        failRun(requireRun(runId), failure, false);
+    }
+
+    private void failRun(WorkflowRun run,
+                         WorkflowFailureContract failure,
+                         boolean allowCancelling) {
+        if (TERMINAL_RUN_STATUSES.contains(run.getStatus())
+                || (RUN_CANCELLING.equals(run.getStatus()) && !allowCancelling)) {
             return;
         }
-        if (!FAILABLE_RUN_STATUSES.contains(run.getStatus())) {
+        if (!FAILABLE_RUN_STATUSES.contains(run.getStatus())
+                && !(allowCancelling && RUN_CANCELLING.equals(run.getStatus()))) {
             throw new IllegalStateException("Workflow run cannot fail from status: " + run.getStatus());
         }
         String expectedStatus = run.getStatus();

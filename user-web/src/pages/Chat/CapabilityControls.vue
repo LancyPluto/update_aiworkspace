@@ -11,6 +11,10 @@ import { buildAspectRatioOptions, buildAspectRatioTaskParams } from "@/utils/too
 import { useGeneratedMaterialList, useUploadHistoryList } from "@/composables/useMaterialPickerLists"
 import { useInfiniteScroll } from "@/composables/useInfiniteScroll"
 import {
+  availableComposerMediaSlots,
+  type ComposerUploadMediaKind,
+} from "@/utils/composerMediaRouting"
+import {
   defaultFieldValue as resolveDefaultFieldValue,
   fieldOptionsFromMeta,
   groupVisibleFields,
@@ -120,6 +124,7 @@ export interface ComposerMediaSlot {
   previewUrls: string[]
   count: number
   maxCount: number
+  uploadPriority: number
 }
 
 export interface ComposerMediaUploadResult {
@@ -417,6 +422,14 @@ function composerSlotLabel(field: ToolField, kind: MaterialKind, presentation: C
   return ""
 }
 
+function composerSlotUploadPriority(field: ToolField, presentation: ComposerMediaSlotPresentation): number {
+  const required = isFieldRequired(field, state.value.fields) || field.executionRequired === true
+  const requiredPriority = required ? 0 : 10_000
+  const presentationPriority = presentation === "frame_card" ? 0 : 1_000
+  const framePriority = isComposerLastFrameField(field) ? 100 : 0
+  return requiredPriority + presentationPriority + framePriority + (field.sortOrder ?? 999)
+}
+
 function buildComposerMediaSlot(field: ToolField): ComposerMediaSlot {
   const kind = materialKindForField(field)
   const presentation = resolveComposerSlotPresentation(field, kind)!
@@ -447,6 +460,7 @@ function buildComposerMediaSlot(field: ToolField): ComposerMediaSlot {
     previewUrls,
     count,
     maxCount,
+    uploadPriority: composerSlotUploadPriority(field, presentation),
   }
 }
 
@@ -1477,19 +1491,21 @@ async function uploadFieldFile(
   }
 }
 
-function composerMediaFileKind(file: File): "image" | "video" | null {
+function composerMediaFileKind(file: File): ComposerUploadMediaKind | null {
   const byType = materialKindFromValue(file.type)
-  if (byType === "image" || byType === "video") return byType
+  if (byType === "image" || byType === "video" || byType === "audio") return byType
   const byName = materialKindFromValue(file.name)
-  return byName === "image" || byName === "video" ? byName : null
+  return byName === "image" || byName === "video" || byName === "audio" ? byName : null
 }
 
-function composerUploadSlots(kind?: "image" | "video", availableOnly = false): ComposerMediaSlot[] {
-  return composerMediaSlots.value.filter((slot) => {
-    if (slot.kind !== "image" && slot.kind !== "video") return false
+function composerUploadSlots(kind?: ComposerUploadMediaKind, availableOnly = false): ComposerMediaSlot[] {
+  const matching = composerMediaSlots.value.filter((slot) => {
+    if (slot.kind !== "image" && slot.kind !== "video" && slot.kind !== "audio") return false
     if (kind && slot.kind !== kind) return false
-    return !availableOnly || (slot.canAdd && !slot.uploading)
+    return true
   })
+  if (availableOnly) return availableComposerMediaSlots(matching, kind)
+  return [...matching].sort((left, right) => left.uploadPriority - right.uploadPriority)
 }
 
 function getComposerMediaUploadAccept(preferredFieldKey?: string): string {
@@ -1518,7 +1534,7 @@ async function uploadComposerMediaFiles(
   for (const file of Array.from(files || [])) {
     const kind = composerMediaFileKind(file)
     if (!kind) {
-      result.rejected.push({ name: file.name, reason: "当前仅支持上传图片或视频" })
+      result.rejected.push({ name: file.name, reason: "当前仅支持上传图片、视频或音频" })
       continue
     }
 
@@ -1539,12 +1555,12 @@ async function uploadComposerMediaFiles(
       result.rejected.push({
         name: file.name,
         reason: preferredTarget && preferredTarget.kind !== kind
-          ? `该输入位仅支持${preferredTarget.kind === "image" ? "图片" : "视频"}`
+          ? `该输入位仅支持${materialKindLabel(preferredTarget.kind)}`
           : formatRejected
           ? "文件格式不符合当前模型字段要求"
           : supported
-          ? `${kind === "image" ? "图片" : "视频"}输入数量已满`
-          : `当前模型不支持${kind === "image" ? "图片" : "视频"}输入`,
+          ? `${materialKindLabel(kind)}输入数量已满`
+          : `当前模型不支持${materialKindLabel(kind)}输入`,
       })
       continue
     }

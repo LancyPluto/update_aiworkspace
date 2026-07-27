@@ -20,6 +20,40 @@ public interface WorkflowRunMapper extends BaseMapper<WorkflowRun> {
     @Select("SELECT * FROM workflow_runs WHERE id = #{runId} FOR UPDATE")
     WorkflowRun selectByIdForUpdate(@Param("runId") Long runId);
 
+    @Update("""
+            UPDATE workflow_runs
+            SET billing_status = 'RECONCILIATION_FAILED',
+                revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{runId}
+              AND revision = #{expectedRevision}
+              AND billing_status <> 'RECONCILIATION_FAILED'
+            """)
+    int markBillingReconciliationFailed(@Param("runId") Long runId,
+                                        @Param("expectedRevision") Long expectedRevision);
+
+    @Update("""
+            UPDATE workflow_runs
+            SET status = 'CANCELLING',
+                billing_status = 'RECONCILIATION_FAILED',
+                cancellation_generation = cancellation_generation + 1,
+                error_code = 'WORKFLOW_BILLING_RECONCILIATION_FAILED',
+                error_message = #{developerMessage},
+                user_message = #{userMessage},
+                developer_message = #{developerMessage},
+                failure_trace_id = #{failureTraceId},
+                revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{runId}
+              AND revision = #{expectedRevision}
+              AND status IN ('RUNNING', 'AWAITING_USER', 'AWAITING_FUNDS')
+            """)
+    int beginBillingReconciliationIsolation(@Param("runId") Long runId,
+                                            @Param("expectedRevision") Long expectedRevision,
+                                            @Param("userMessage") String userMessage,
+                                            @Param("developerMessage") String developerMessage,
+                                            @Param("failureTraceId") String failureTraceId);
+
     default Optional<WorkflowRun> findByRootTaskId(Long rootTaskId) {
         return Optional.ofNullable(selectByRootTaskId(rootTaskId));
     }
@@ -160,7 +194,12 @@ public interface WorkflowRunMapper extends BaseMapper<WorkflowRun> {
 
     @Update("""
             UPDATE workflow_runs
-            SET status = 'CANCELLED', billing_status = 'CLEAR', finished_at = CURRENT_TIMESTAMP,
+            SET status = 'CANCELLED',
+                billing_status = CASE
+                    WHEN billing_status = 'RECONCILIATION_FAILED' THEN billing_status
+                    ELSE 'CLEAR'
+                END,
+                finished_at = CURRENT_TIMESTAMP,
                 revision = revision + 1, updated_at = CURRENT_TIMESTAMP
             WHERE id = #{runId} AND revision = #{expectedRevision} AND status = 'CANCELLING'
             """)

@@ -1,9 +1,7 @@
 package com.aiminilab.aitoolmarket.workflow;
 
-import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.workflow.config.WorkflowRuntimeGate;
-import com.aiminilab.aitoolmarket.workflow.config.WorkflowRuntimeProperties;
 import com.aiminilab.aitoolmarket.workflow.dto.CreateWorkflowRunCommand;
 import com.aiminilab.aitoolmarket.workflow.dto.WorkflowRunCreated;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowRecoveryScheduler;
@@ -20,7 +18,6 @@ import org.springframework.test.context.TestPropertySource;
 import java.util.ArrayList;
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -41,9 +38,6 @@ import static org.assertj.core.api.Assertions.assertThat;
         "workflow.runtime.execution-enabled=true",
         "workflow.runtime.real-billing-enabled=true",
         "workflow.runtime.confirmation-enabled=false",
-        "workflow.runtime.canary-percentage=100",
-        "workflow.runtime.max-run-cost-credits=100",
-        "workflow.runtime.max-user-daily-cost-credits=60",
         "spring.task.scheduling.enabled=false"
 })
 class WorkflowDailyAdmissionConcurrencyTest {
@@ -60,9 +54,6 @@ class WorkflowDailyAdmissionConcurrencyTest {
 
     @Autowired
     private WorkflowRuntimeGate runtimeGate;
-
-    @Autowired
-    private WorkflowRuntimeProperties runtimeProperties;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -114,7 +105,7 @@ class WorkflowDailyAdmissionConcurrencyTest {
     }
 
     @Test
-    void concurrentRunsCountReservedExposureAndCannotBothCrossDailyLimit() throws Exception {
+    void concurrentRunsProceedWhenTheAccountCanCoverBothReservations() throws Exception {
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
         ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -142,8 +133,7 @@ class WorkflowDailyAdmissionConcurrencyTest {
                 results.add(future.get(30, TimeUnit.SECONDS));
             }
 
-            assertThat(results.stream().filter(WorkflowRunCreated.class::isInstance).count()).isOne();
-            assertThat(results.stream().filter(this::isDailyLimitRejection).count()).isOne();
+            assertThat(results.stream().filter(WorkflowRunCreated.class::isInstance).count()).isEqualTo(2);
         } finally {
             start.countDown();
             executor.shutdownNow();
@@ -153,18 +143,18 @@ class WorkflowDailyAdmissionConcurrencyTest {
                 "SELECT COUNT(*) FROM workflow_runs WHERE user_id = ?",
                 Integer.class,
                 USER_ID
-        )).isOne();
+        )).isEqualTo(2);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COALESCE(SUM(reserved_credits), 0) FROM workflow_step_charges "
                         + "WHERE user_id = ? AND status = 'RESERVED'",
                 Integer.class,
                 USER_ID
-        )).isEqualTo(40);
+        )).isEqualTo(80);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT frozen FROM credit_accounts WHERE user_id = ?",
                 Integer.class,
                 USER_ID
-        )).isEqualTo(40);
+        )).isEqualTo(80);
     }
 
     @Test
@@ -217,15 +207,6 @@ class WorkflowDailyAdmissionConcurrencyTest {
                 USER_ID,
                 OTHER_USER_ID
         )).isEqualByComparingTo("0.000000");
-    }
-
-    private boolean isDailyLimitRejection(Object result) {
-        if (!(result instanceof BusinessException exception)
-                || exception.getErrorCode() != ErrorCode.WORKFLOW_RUNTIME_BLOCKED
-                || !(exception.getData() instanceof Map<?, ?> data)) {
-            return false;
-        }
-        return "user_daily_cost_limit_exceeded".equals(data.get("reason"));
     }
 
     private CreateWorkflowRunCommand command(String requestId) {

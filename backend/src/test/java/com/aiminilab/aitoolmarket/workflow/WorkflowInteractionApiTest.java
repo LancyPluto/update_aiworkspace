@@ -35,6 +35,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import java.math.BigDecimal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -422,6 +423,112 @@ class WorkflowInteractionApiTest {
                 Integer.class,
                 attempt.getClaimToken() + ":usage"
         )).isZero();
+    }
+
+    @Test
+    void billingReconciliationIsolationReleasesSafeReservationBeforeFailingRun() {
+        UserFixture owner = insertUser("workflow_reconciliation_safe_release_owner");
+        RunFixture fixture = startPaidWorkerWorkflow(owner.userId(), 20, 100);
+        Long attemptId = jdbcTemplate.queryForObject(
+                "SELECT current_attempt_id FROM workflow_run_steps WHERE id = ?",
+                Long.class,
+                fixture.focalStepId()
+        );
+
+        assertThat(cancellationService.isolateBillingReconciliationFailure(fixture.runId())).isTrue();
+        assertThat(cancellationService.settlePersisted(fixture.runId())).isTrue();
+
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, billing_status, error_code FROM workflow_runs WHERE id = ?",
+                fixture.runId()
+        )).containsEntry("status", "FAILED")
+                .containsEntry("billing_status", "RECONCILIATION_FAILED")
+                .containsEntry("error_code", "WORKFLOW_BILLING_RECONCILIATION_FAILED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM workflow_step_charges WHERE attempt_id = ?",
+                String.class,
+                attemptId
+        )).isEqualTo("RELEASED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT frozen FROM credit_accounts WHERE user_id = ?",
+                Integer.class,
+                owner.userId()
+        )).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM ai_tasks WHERE id = ?",
+                String.class,
+                fixture.rootTaskId()
+        )).isEqualTo("FAILED");
+    }
+
+    @Test
+    void billingReconciliationIsolationKeepsLostReservationFrozenAndRecoverable() {
+        UserFixture owner = insertUser("workflow_reconciliation_lost_owner");
+        RunFixture fixture = startPaidWorkerWorkflow(owner.userId(), 20, 100);
+        Long attemptId = jdbcTemplate.queryForObject(
+                "SELECT current_attempt_id FROM workflow_run_steps WHERE id = ?",
+                Long.class,
+                fixture.focalStepId()
+        );
+        jdbcTemplate.update("UPDATE workflow_step_attempts SET status = 'LOST' WHERE id = ?", attemptId);
+
+        assertThat(cancellationService.isolateBillingReconciliationFailure(fixture.runId())).isTrue();
+        assertThat(cancellationService.settlePersisted(fixture.runId())).isFalse();
+
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, billing_status, error_code FROM workflow_runs WHERE id = ?",
+                fixture.runId()
+        )).containsEntry("status", "CANCELLING")
+                .containsEntry("billing_status", "RECONCILIATION_FAILED")
+                .containsEntry("error_code", "WORKFLOW_BILLING_RECONCILIATION_FAILED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM workflow_step_charges WHERE attempt_id = ?",
+                String.class,
+                attemptId
+        )).isEqualTo("RESERVED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT frozen FROM credit_accounts WHERE user_id = ?",
+                Integer.class,
+                owner.userId()
+        )).isEqualTo(20);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM ai_tasks WHERE id = ?",
+                String.class,
+                fixture.rootTaskId()
+        )).isEqualTo("PROCESSING");
+    }
+
+    @Test
+    void billingReconciliationIsolationRemainsCommittedWhenSettlementFails() {
+        UserFixture owner = insertUser("workflow_reconciliation_settlement_failure_owner");
+        RunFixture fixture = startPaidWorkerWorkflow(owner.userId(), 20, 100);
+        Long attemptId = jdbcTemplate.queryForObject(
+                "SELECT current_attempt_id FROM workflow_run_steps WHERE id = ?",
+                Long.class,
+                fixture.focalStepId()
+        );
+
+        assertThat(cancellationService.isolateBillingReconciliationFailure(fixture.runId())).isTrue();
+        jdbcTemplate.update("UPDATE workflow_step_attempts SET status = 'SUCCESS' WHERE id = ?", attemptId);
+        jdbcTemplate.update(
+                "UPDATE workflow_step_charges SET status = 'AWAITING_FUNDS', settlement_payload_json = NULL WHERE attempt_id = ?",
+                attemptId
+        );
+
+        assertThatThrownBy(() -> cancellationService.settlePersisted(fixture.runId()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Deferred workflow settlement has no persisted payload");
+
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, billing_status FROM workflow_runs WHERE id = ?",
+                fixture.runId()
+        )).containsEntry("status", "CANCELLING")
+                .containsEntry("billing_status", "RECONCILIATION_FAILED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT frozen FROM credit_accounts WHERE user_id = ?",
+                Integer.class,
+                owner.userId()
+        )).isEqualTo(20);
     }
 
     @Test

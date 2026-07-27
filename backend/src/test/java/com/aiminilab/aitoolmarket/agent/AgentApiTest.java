@@ -68,7 +68,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.agent.max-messages-per-minute=100",
         "workflow.runtime.enabled=true",
         "workflow.runtime.execution-enabled=true",
-        "workflow.runtime.canary-percentage=100",
         "spring.task.scheduling.enabled=false"
 })
 class AgentApiTest {

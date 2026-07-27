@@ -120,6 +120,25 @@ test("keeps tool-only business inputs while schema fields own upstream constrain
   assert.equal(fields[2].options.uiGroup, "business")
 })
 
+test("schema-backed models discard legacy tool media fields that are not in the model contract", () => {
+  const fields = schemaTools.buildEffectiveToolFields([
+    { fieldKey: "imageUrl", fieldName: "旧首帧", fieldType: "image", required: true, sortOrder: 1 },
+    { fieldKey: "imageTail", fieldName: "旧尾帧", fieldType: "image_upload", required: false, sortOrder: 2 },
+    { fieldKey: "businessBrief", fieldName: "业务说明", fieldType: "textarea", required: false, sortOrder: 3 },
+  ], model([
+    { key: "generationMode", type: "string", default: "first_frame_to_video", enum: ["first_frame_to_video", "first_last_frame_to_video"] },
+    { key: "firstFrameImage", type: "string", control: "upload", itemType: "image", required: true },
+    { key: "lastFrameImage", type: "string", control: "upload", itemType: "image", required: true },
+  ]))
+
+  assert.deepEqual(fields.map((field) => field.fieldKey), [
+    "generationMode",
+    "firstFrameImage",
+    "lastFrameImage",
+    "businessBrief",
+  ])
+})
+
 test("image output count is owned by the model schema and fixed single-image counts stay hidden", () => {
   const schemaLessImage = schemaTools.buildEffectiveToolFields([
     { fieldKey: "prompt", fieldName: "Prompt", fieldType: "textarea", required: true, sortOrder: 1 },

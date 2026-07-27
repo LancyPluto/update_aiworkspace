@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ApiError } from "@/lib/api/http"
 import { fetchBillingOverview, fetchBillingUsageLogs, type BillingQuery } from "@/lib/api/billing"
 import type { BillingModelCostPoint, BillingOverview, BillingUsageLog } from "@/lib/api/types"
+import { billingUsageSearchText, billingUsageSourceLabel, isWorkflowStepUsage } from "@/lib/billing-log-presentation"
 import { Check, ChevronDown, ChevronRight, DollarSign, Gauge, Search, Sigma, WalletCards } from "lucide-react"
 import { CreditPowerIcon } from "@/components/admin/credit-power-icon"
 
@@ -74,13 +75,6 @@ function billingUnit(log: BillingUsageLog) {
   const inputPrice = log.inputTokenPricePer1m ?? Number(log.inputTokenPricePer1k || 0) * 1000
   const outputPrice = log.outputTokenPricePer1m ?? Number(log.outputTokenPricePer1k || 0) * 1000
   return `输入 ${money(inputPrice)}/1M，输出 ${money(outputPrice)}/1M`
-}
-
-function taskDisplayId(log: BillingUsageLog) {
-  if (log.taskNo) return log.taskNo
-  if (log.sourceType === "TASK") return `#${log.sourceId}`
-  if (log.sourceType === "AGENT_RUN") return `Agent运行 #${log.sourceId}`
-  return log.sourceId ? `${log.sourceType} #${log.sourceId}` : "-"
 }
 
 function sortModelCosts(items: BillingModelCostPoint[], mode: ModelSortMode) {
@@ -194,7 +188,7 @@ function logMatchesClientFilters(
   const taskKeyword = filters.taskQuery.trim().toLowerCase()
   const taskMatched =
     !taskKeyword ||
-    `${taskDisplayId(log)} ${log.sourceType || ""} ${log.sourceId || ""}`.toLowerCase().includes(taskKeyword)
+    billingUsageSearchText(log).includes(taskKeyword)
   const userMatched =
     filters.userIds.length <= 1 || filters.userIds.includes(String(log.userId))
   const modelMatched =
@@ -858,14 +852,14 @@ export default function BillingPage() {
                 <WalletCards className="h-5 w-5" />
                 最近计费日志
               </CardTitle>
-              <CardDescription>任务和 Agent 完成或失败时上报 token 后会写入这里，默认每页 20 条</CardDescription>
+              <CardDescription>任务、Agent 和工作流步骤上报模型用量后会写入这里，默认每页 20 条</CardDescription>
             </div>
             <div className="relative mx-auto w-full max-w-sm lg:w-80">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={logFilters.taskQuery}
                 onChange={(event) => patchLogFilters({ taskQuery: event.target.value }, false)}
-                placeholder="搜索任务 ID"
+                placeholder="搜索任务、工作流或步骤"
                 className="h-9 pl-8 text-sm"
               />
             </div>
@@ -875,7 +869,7 @@ export default function BillingPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className={headClass}>任务ID</TableHead>
+                  <TableHead className={headClass}>来源</TableHead>
                   <TableHead className={headClass}>
                     <MultiSelectFilter
                       label="用户"
@@ -938,7 +932,9 @@ export default function BillingPage() {
                 {filteredLogs.map((log) => (
                   <TableRow key={log.id}>
                     <TableCell className={cellClass}>
-                      <span className="font-mono text-sm">{taskDisplayId(log)}</span>
+                      <span className={isWorkflowStepUsage(log) ? "text-sm" : "font-mono text-sm"}>
+                        {billingUsageSourceLabel(log)}
+                      </span>
                     </TableCell>
                     <TableCell className={cellClass}>U{log.userId}</TableCell>
                     <TableCell className={cellClass}>

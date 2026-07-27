@@ -1138,6 +1138,11 @@ export interface BillingUsageLog {
   id: number
   sourceType: string
   sourceId: number
+  workflowRunId: number | null
+  workflowId: number | null
+  workflowName: string | null
+  workflowNodeId: string | null
+  workflowStepName: string | null
   taskNo?: string | null
   inputModality?: string | null
   outputModality?: string | null

@@ -89,6 +89,10 @@ import {
   prepareModelParams,
   resolveDefaultModelConfigId,
 } from "@/utils/modelRequestSchema"
+import {
+  lastComposerMediaPreviewKey,
+  remainingComposerMediaCapacity,
+} from "@/utils/composerMediaRouting"
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -331,13 +335,37 @@ const hasComposerMediaSlots = computed(() => composerMediaSlots.value.length > 0
 const composerMediaUploadAccept = computed(() => {
   const kinds = new Set(
     composerMediaSlots.value
-      .filter((slot) => slot.canAdd && !slot.uploading && (slot.kind === "image" || slot.kind === "video"))
+      .filter((slot) => slot.canAdd && !slot.uploading && (slot.kind === "image" || slot.kind === "video" || slot.kind === "audio"))
       .map((slot) => slot.kind),
   )
-  return [kinds.has("image") ? "image/*" : "", kinds.has("video") ? "video/*" : ""]
+  return [
+    kinds.has("image") ? "image/*" : "",
+    kinds.has("video") ? "video/*" : "",
+    kinds.has("audio") ? "audio/*" : "",
+  ]
     .filter(Boolean)
     .join(",")
 })
+
+const composerMediaPreviewCount = computed(() =>
+  composerMediaSlots.value.reduce((total, slot) => total + slot.previewUrls.length, 0),
+)
+const composerMediaRemainingCount = computed(() => remainingComposerMediaCapacity(composerMediaSlots.value))
+const composerMediaAddAnchorKey = computed(() => lastComposerMediaPreviewKey(composerMediaSlots.value))
+const composerMediaCanUpload = computed(() =>
+  composerMediaSlots.value.some((slot) => slot.canAdd && !slot.uploading && slot.kind !== "file"),
+)
+const composerMediaAnyUploading = computed(() =>
+  composerMediaUploading.value || composerMediaSlots.value.some((slot) => slot.uploading),
+)
+
+function isComposerMediaAddAnchor(slot: ComposerMediaSlot, index: number): boolean {
+  return composerMediaAddAnchorKey.value === composerMediaItemKey(slot.fieldKey, index)
+}
+
+function isPrimaryReferenceAddAnchor(index: number): boolean {
+  return index === primaryReferenceInfo.value.previewUrls.length - 1
+}
 
 const composerMediaNames = computed(() => {
   const counters = new Map<ComposerMediaSlot["kind"], number>()
@@ -1020,7 +1048,7 @@ function openComposerMediaUpload(fieldKey?: string) {
   if (!input || !capabilityRef.value) return
   const accept = capabilityRef.value.getComposerMediaUploadAccept(fieldKey)
   if (!accept) {
-    submitError.value = fieldKey ? "该输入位已满或不支持图片、视频" : "当前模型没有可用的图片或视频输入位"
+    submitError.value = fieldKey ? "该输入位已满或不支持此类媒体" : "当前模型没有可用的媒体输入位"
     return
   }
   submitError.value = ""
@@ -1031,16 +1059,6 @@ function openComposerMediaUpload(fieldKey?: string) {
   input.value = ""
   input.click()
   expandComposer()
-}
-
-function openComposerSlotPicker(fieldKey: string) {
-  const slot = composerMediaSlots.value.find((item) => item.fieldKey === fieldKey)
-  if (slot && slot.kind !== "image" && slot.kind !== "video") {
-    capabilityRef.value?.openComposerSlotPicker(fieldKey)
-    expandComposer()
-    return
-  }
-  openComposerMediaUpload(fieldKey)
 }
 
 async function handleComposerMediaUpload(event: Event) {
@@ -3429,17 +3447,19 @@ onUnmounted(() => {
                         >
                           <X class="h-3 w-3" />
                         </button>
+                        <button
+                          v-if="isComposerMediaAddAnchor(slot, index) && composerMediaRemainingCount > 0"
+                          type="button"
+                          class="dashboard-pollo-upload-slot__add"
+                          :disabled="!composerMediaCanUpload || composerMediaAnyUploading"
+                          aria-label="继续上传媒体"
+                          title="继续上传"
+                          @click.stop="openComposerMediaUpload()"
+                        >
+                          <Loader2 v-if="composerMediaAnyUploading" class="h-3 w-3 animate-spin" />
+                          <Plus v-else class="h-3 w-3" />
+                        </button>
                       </div>
-                      <button
-                        v-if="slot.canAdd"
-                        type="button"
-                        class="dashboard-pollo-upload-slot dashboard-pollo-upload-slot--empty"
-                        :title="slot.fieldName || '上传图片'"
-                        @click="openComposerSlotPicker(slot.fieldKey)"
-                      >
-                        <Loader2 v-if="slot.uploading" class="h-5 w-5 animate-spin text-primary" />
-                        <Plus v-else class="h-5 w-5" />
-                      </button>
                     </template>
 
                     <template v-else>
@@ -3491,20 +3511,34 @@ onUnmounted(() => {
                           >
                             <X class="h-3 w-3" />
                           </button>
+                          <button
+                            v-if="isComposerMediaAddAnchor(slot, index) && composerMediaRemainingCount > 0"
+                            type="button"
+                            class="dashboard-pollo-upload-slot__add"
+                            :disabled="!composerMediaCanUpload || composerMediaAnyUploading"
+                            aria-label="继续上传媒体"
+                            title="继续上传"
+                            @click.stop="openComposerMediaUpload()"
+                          >
+                            <Loader2 v-if="composerMediaAnyUploading" class="h-3 w-3 animate-spin" />
+                            <Plus v-else class="h-3 w-3" />
+                          </button>
                         </div>
                       </div>
-                      <button
-                        v-if="slot.canAdd"
-                        type="button"
-                        class="dashboard-pollo-media-slot__box"
-                        :title="slot.fieldName"
-                        @click="openComposerSlotPicker(slot.fieldKey)"
-                      >
-                        <Loader2 v-if="slot.uploading" class="h-5 w-5 animate-spin text-primary" />
-                        <Plus v-else class="h-5 w-5" />
-                      </button>
                     </template>
                   </template>
+                  <button
+                    v-if="composerMediaPreviewCount === 0 && composerMediaRemainingCount > 0"
+                    type="button"
+                    class="dashboard-pollo-upload-slot dashboard-pollo-upload-slot--empty"
+                    :disabled="!composerMediaCanUpload || composerMediaAnyUploading"
+                    title="上传媒体"
+                    aria-label="上传媒体"
+                    @click="openComposerMediaUpload()"
+                  >
+                    <Loader2 v-if="composerMediaAnyUploading" class="h-5 w-5 animate-spin text-primary" />
+                    <Plus v-else class="h-5 w-5" />
+                  </button>
                 </div>
 
                 <div
@@ -3550,9 +3584,21 @@ onUnmounted(() => {
                     >
                       <X class="h-3 w-3" />
                     </button>
+                    <button
+                      v-if="canAddPrimaryReference && isPrimaryReferenceAddAnchor(index)"
+                      type="button"
+                      class="dashboard-pollo-upload-slot__add"
+                      :disabled="primaryReferenceInfo.uploading"
+                      aria-label="继续上传媒体"
+                      title="继续上传"
+                      @click.stop="openPrimaryReferencePicker"
+                    >
+                      <Loader2 v-if="primaryReferenceInfo.uploading" class="h-3 w-3 animate-spin" />
+                      <Plus v-else class="h-3 w-3" />
+                    </button>
                   </div>
                   <button
-                    v-if="canAddPrimaryReference"
+                    v-if="canAddPrimaryReference && primaryReferenceInfo.previewUrls.length === 0"
                     type="button"
                     class="dashboard-pollo-upload-slot dashboard-pollo-upload-slot--empty"
                     :title="primaryReferenceInfo.fieldName || '上传图片'"
@@ -4714,6 +4760,11 @@ onUnmounted(() => {
   color: white;
 }
 
+.dashboard-pollo-upload-slot--empty:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
 .dashboard-pollo-upload-slot--filled {
   background: transparent;
 }
@@ -4802,6 +4853,35 @@ onUnmounted(() => {
 
 .dashboard-pollo-upload-slot__remove:hover {
   background: rgb(220 38 38 / 0.92);
+}
+
+.dashboard-pollo-upload-slot__add {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  z-index: 4;
+  display: flex;
+  height: 20px;
+  width: 20px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(255 255 255 / 0.34);
+  border-radius: 999px;
+  background: var(--brand-primary);
+  color: white;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.42);
+  touch-action: manipulation;
+  transition: filter 160ms ease, transform 160ms ease, opacity 160ms ease;
+}
+
+.dashboard-pollo-upload-slot__add:hover:not(:disabled) {
+  filter: brightness(1.12);
+  transform: scale(1.06);
+}
+
+.dashboard-pollo-upload-slot__add:disabled {
+  cursor: wait;
+  opacity: 0.78;
 }
 
 .dashboard-pollo-media-slot {

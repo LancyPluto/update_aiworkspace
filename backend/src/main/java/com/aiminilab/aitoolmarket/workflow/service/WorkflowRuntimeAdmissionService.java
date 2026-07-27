@@ -108,7 +108,7 @@ public class WorkflowRuntimeAdmissionService {
             throw blocked("canonical_workflow_not_published");
         }
 
-        requireAllowed(gate.evaluateBaseNewRun(userId));
+        requireAllowed(gate.evaluateBaseNewRun());
 
         ToolWorkflowVersion version = versionMapper.selectById(workflow.getPublishedVersionId());
         if (version == null || !workflow.getId().equals(version.getWorkflowId())) {
@@ -133,7 +133,6 @@ public class WorkflowRuntimeAdmissionService {
 
         long estimatedRunCredits = estimatedRunCredits(version, dsl, operationNodeIds);
         boolean paidRun = estimatedRunCredits > 0;
-        long committedToday = paidRun ? committedToday(userId) : 0L;
         if (paidRun && unknownProviderCostsToday() > 0) {
             if (metrics != null) {
                 metrics.recordProviderCostAnomaly(WorkflowMetrics.ProviderCostAnomaly.ACTUAL_COST_UNKNOWN);
@@ -144,12 +143,7 @@ public class WorkflowRuntimeAdmissionService {
                 metrics.recordProviderCostAnomaly(WorkflowMetrics.ProviderCostAnomaly.CURRENCY_UNSUPPORTED);
             }
         }
-        WorkflowRuntimeGate.Decision decision = gate.evaluateNewRun(
-                userId,
-                paidRun,
-                estimatedRunCredits,
-                committedToday
-        );
+        WorkflowRuntimeGate.Decision decision = gate.evaluateNewRun(paidRun, estimatedRunCredits);
         requireAllowed(decision);
         return new WorkflowRuntimeAdmission(
                 workflow,
@@ -369,16 +363,6 @@ public class WorkflowRuntimeAdmissionService {
         Set<String> names = new HashSet<>();
         object.fieldNames().forEachRemaining(names::add);
         return names;
-    }
-
-    private long committedToday(Long userId) {
-        lockCreditAccount(userId);
-        LocalDateTime dayStart = dayStart();
-        return chargeMapper.sumCommittedCreditsForUserBetween(
-                userId,
-                dayStart,
-                dayStart.plusDays(1)
-        );
     }
 
     private int unsupportedProviderCostCurrenciesToday() {

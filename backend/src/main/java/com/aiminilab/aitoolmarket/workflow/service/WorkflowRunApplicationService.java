@@ -311,6 +311,7 @@ public class WorkflowRunApplicationService {
             WorkflowRunStep step = new WorkflowRunStep();
             step.setRunId(runId);
             step.setNodeId(node.id());
+            step.setNodeTitle(node.title());
             step.setSequenceNo(++sequence);
             step.setNodeDefType(node.type().name());
             step.setStatus(WorkflowStepStatus.PENDING.name());

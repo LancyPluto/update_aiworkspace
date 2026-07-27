@@ -33,10 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.sql.init.schema-locations=classpath:schema-test.sql",
         "workflow.runtime.enabled=true",
         "workflow.runtime.execution-enabled=true",
-        "workflow.runtime.canary-percentage=100",
         "workflow.runtime.real-billing-enabled=true",
-        "workflow.runtime.max-run-cost-credits=100",
-        "workflow.runtime.max-user-daily-cost-credits=1000",
         "spring.task.scheduling.enabled=false"
 })
 class WorkflowLegacyFlagLaunchApiTest {

@@ -205,7 +205,7 @@ class DeployContractTests(unittest.TestCase):
             workflow,
         )
         self.assertIn("fork-pr-policy:", workflow)
-        self.assertIn("Reject Fork PR On Self-Hosted CI", workflow)
+        self.assertIn("拒绝外部 Fork PR 使用自托管 CI", workflow)
         self.assertIn(
             "(github.event_name == 'push' || github.event_name == 'workflow_dispatch') "
             "&& github.ref == 'refs/heads/dev'",
@@ -516,6 +516,13 @@ class DeployContractTests(unittest.TestCase):
         self.assertIn("temporary.chmod(0o600)", script)
         self.assertIn("WORKFLOW_RUNTIME_ENABLED\": \"true", script)
         self.assertIn("WORKFLOW_RUNTIME_EXECUTION_ENABLED\": \"true", script)
+        for obsolete_setting in (
+            "WORKFLOW_RUNTIME_ALLOWED_USER_IDS",
+            "WORKFLOW_RUNTIME_CANARY_PERCENTAGE",
+            "WORKFLOW_RUNTIME_MAX_RUN_COST_CREDITS",
+            "WORKFLOW_RUNTIME_MAX_USER_DAILY_COST_CREDITS",
+        ):
+            self.assertIn(obsolete_setting, script)
 
     def test_provider_accounting_columns_are_migrated_before_backend_start(self) -> None:
         migration = self.read("sql/096_workflow_provider_accounting.sql")

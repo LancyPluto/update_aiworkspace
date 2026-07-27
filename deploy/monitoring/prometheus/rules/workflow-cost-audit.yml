@@ -21,3 +21,13 @@ groups:
         annotations:
           summary: Workflow provider cost audit currency is unexpected
           description: Paid workflow admission observed optional provider cost data outside the current CNY audit convention.
+
+      - alert: WorkflowBillingReconciliationInconsistent
+        expr: increase(workflow_reconciliation_total{result="inconsistent"}[15m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: backend
+        annotations:
+          summary: Workflow billing reconciliation is inconsistent
+          description: A workflow run has mismatched step charges, usage records, wallet deductions, or unresolved billing state. The affected run is isolated while other runs remain available.

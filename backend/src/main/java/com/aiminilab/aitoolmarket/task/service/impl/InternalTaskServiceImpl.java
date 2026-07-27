@@ -422,7 +422,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         }
         billingService.recordUsage("TASK", taskId, task.getUserId(), modelConfig,
                 request.promptTokens(), request.completionTokens(), request.billableUnits(),
-                actualCredits, quote.vendorCost(), quote.markupRatio());
+                chargedCredits, quote.vendorCost(), quote.markupRatio());
         taskMapper.insertResult(taskId, task.getUserId(), request.resourceType(), request.contentText());
         try {
             communityService.autoPublishTask(findTask(taskId), request.resourceType(), request.contentText());

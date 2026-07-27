@@ -135,6 +135,12 @@ class VendorCodeResolverTest {
     }
 
     @Test
+    void accountVendorCanonicalizationPreservesGatewayAndGroupsSuno() {
+        assertThat(resolver.canonicalVendorCode("openai_gateway")).isEqualTo("openai_gateway");
+        assertThat(resolver.canonicalVendorCode("suno_music")).isEqualTo("suno");
+    }
+
+    @Test
     void agnesProvidersAreGroupedAsAgnesVendor() {
         assertThat(resolver.resolveVendorCode("agnes_chat", "https://apihub.agnes-ai.com/v1", "Agnes 2.0", "agnes-2.0-flash"))
                 .isEqualTo("agnes");

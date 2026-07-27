@@ -668,6 +668,8 @@ export interface CreditLog {
   userId: number
   taskId?: number | null
   agentRunId?: number | null
+  sourceType?: string | null
+  sourceRef?: number | null
   logType: "FREEZE" | "DEDUCT" | "RELEASE" | "RECHARGE" | "MANUAL_ADD" | "MANUAL_DEDUCT"
   amount: number
   frozenAmount: number
@@ -681,10 +683,37 @@ export interface CreditLog {
   createdAt: string
 }
 
+export interface CreditStatementLog {
+  id: number
+  userId: number
+  sourceType?: string | null
+  sourceRef?: number | null
+  logType: "DEDUCT" | "RECHARGE" | "REFERRAL_BONUS" | "MANUAL_ADD" | "MANUAL_DEDUCT"
+  amount: number
+  reason?: string | null
+  createdAt: string
+  taskNo?: string | null
+  toolName?: string | null
+  agentRunId?: number | null
+  agentIntent?: string | null
+  workflowRunId?: number | null
+  workflowId?: number | null
+  workflowName?: string | null
+  workflowNodeId?: string | null
+  workflowStepName?: string | null
+  modelName?: string | null
+  provider?: string | null
+}
+
 export interface BillingUsageLog {
   id: number
   sourceType: string
   sourceId: number
+  workflowRunId: number | null
+  workflowId: number | null
+  workflowName: string | null
+  workflowNodeId: string | null
+  workflowStepName: string | null
   taskNo?: string | null
   inputModality?: string | null
   outputModality?: string | null

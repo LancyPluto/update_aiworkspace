@@ -187,15 +187,11 @@ workflow:
     shadow-billing-enabled: ${WORKFLOW_RUNTIME_SHADOW_BILLING_ENABLED:false}
     auto-retry-enabled: ${WORKFLOW_RUNTIME_AUTO_RETRY_ENABLED:false}
     confirmation-enabled: ${WORKFLOW_RUNTIME_CONFIRMATION_ENABLED:false}
-    allowed-user-ids: ${WORKFLOW_RUNTIME_ALLOWED_USER_IDS:}
-    canary-percentage: ${WORKFLOW_RUNTIME_CANARY_PERCENTAGE:0}
     attempt-timeout: ${WORKFLOW_RUNTIME_ATTEMPT_TIMEOUT:PT15M}
     recovery-interval: ${WORKFLOW_RUNTIME_RECOVERY_INTERVAL:PT1M}
     recovery-batch-size: ${WORKFLOW_RUNTIME_RECOVERY_BATCH_SIZE:100}
     reconciliation-interval: ${WORKFLOW_RUNTIME_RECONCILIATION_INTERVAL:PT15M}
     reconciliation-batch-size: ${WORKFLOW_RUNTIME_RECONCILIATION_BATCH_SIZE:100}
-    max-run-cost-credits: ${WORKFLOW_RUNTIME_MAX_RUN_COST_CREDITS:0}
-    max-user-daily-cost-credits: ${WORKFLOW_RUNTIME_MAX_USER_DAILY_COST_CREDITS:0}
 
 ppt:
   engine:

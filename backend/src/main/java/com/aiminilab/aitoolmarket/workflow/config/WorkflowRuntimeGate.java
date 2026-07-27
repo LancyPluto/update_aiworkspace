@@ -13,11 +13,8 @@ public class WorkflowRuntimeGate {
         this.properties = properties;
     }
 
-    public Decision evaluateNewRun(Long userId,
-                                   boolean paidRun,
-                                   long estimatedRunCredits,
-                                   long userDailyCredits) {
-        Decision baseDecision = evaluateBaseNewRun(userId);
+    public Decision evaluateNewRun(boolean paidRun, long estimatedRunCredits) {
+        Decision baseDecision = evaluateBaseNewRun();
         if (!baseDecision.allowed()) {
             return baseDecision;
         }
@@ -33,30 +30,15 @@ public class WorkflowRuntimeGate {
         if (estimatedRunCredits <= 0) {
             return Decision.denied("paid_run_cost_unknown");
         }
-        if (properties.getMaxRunCostCredits() <= 0
-                || estimatedRunCredits > properties.getMaxRunCostCredits()) {
-            return Decision.denied("run_cost_limit_exceeded");
-        }
-        if (userDailyCredits < 0
-                || properties.getMaxUserDailyCostCredits() <= 0
-                || userDailyCredits > (long) properties.getMaxUserDailyCostCredits() - estimatedRunCredits) {
-            return Decision.denied("user_daily_cost_limit_exceeded");
-        }
         return Decision.allowedDecision();
     }
 
-    public Decision evaluateBaseNewRun(Long userId) {
+    public Decision evaluateBaseNewRun() {
         if (!properties.isEnabled()) {
             return Decision.denied("runtime_disabled");
         }
         if (!properties.isExecutionEnabled()) {
             return Decision.denied("execution_disabled");
-        }
-        if (!reconciliationHealthy) {
-            return Decision.denied("reconciliation_not_healthy");
-        }
-        if (!isCanaryUser(userId)) {
-            return Decision.denied("user_not_in_canary");
         }
         return Decision.allowedDecision();
     }
@@ -88,20 +70,6 @@ public class WorkflowRuntimeGate {
     public synchronized void markReconciliationUnhealthy() {
         reconciliationHealthy = false;
         reconciliationFailureGeneration++;
-    }
-
-    private boolean isCanaryUser(Long userId) {
-        if (userId == null) {
-            return false;
-        }
-        if (properties.getAllowedUserIds().contains(userId)) {
-            return true;
-        }
-        int percentage = properties.getCanaryPercentage();
-        if (percentage < 0 || percentage > 100) {
-            return false;
-        }
-        return percentage > 0 && Math.floorMod(userId, 100L) < percentage;
     }
 
     public record Decision(boolean allowed, String reason) {

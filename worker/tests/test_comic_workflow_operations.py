@@ -699,7 +699,7 @@ def test_seedance_resolver_orders_base_frame_before_reference_images(monkeypatch
 
     class FakeSeedance:
         @classmethod
-        def from_model_config(cls, _config):
+        def from_model_config(cls, _config, **_kwargs):
             return cls()
 
         def generate_video(self, **kwargs):

@@ -797,6 +797,8 @@ public class CreditServiceImpl implements CreditService {
                 log.getUserId(),
                 log.getTaskId(),
                 log.getAgentRunId(),
+                log.getSourceType(),
+                log.getSourceRef(),
                 log.getLogType(),
                 log.getAmount(),
                 log.getFrozenAmount(),

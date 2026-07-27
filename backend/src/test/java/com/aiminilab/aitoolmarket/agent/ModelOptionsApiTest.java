@@ -51,19 +51,30 @@ class ModelOptionsApiTest {
                     {"label": "?? 1536", "value": "1536x1024"}
                   ],
                   "defaultImageSize": "1536x1024",
-                  "counts": [1, 2],
-                  "defaultCount": 2,
                   "qualities": [
                     {"label": "Low", "value": "low"},
                     {"label": "High", "value": "high"}
                   ],
                   "defaultQuality": "high"
                 }
+                """,
+                """
+                {
+                  "version": "1",
+                  "fields": [
+                    {
+                      "key": "count",
+                      "type": "integer",
+                      "enum": [1, 2],
+                      "default": 2
+                    }
+                  ]
+                }
                 """);
         long unnamedModelId = createModelConfig(adminToken, "public_image_unnamed", "", "siliconflow_images",
-                "private-internal-model-route", true, true, "");
+                "private-internal-model-route", true, true, "", "");
         createModelConfig(adminToken, "public_image_agent_disabled", "Public Image Agent Disabled", "siliconflow_images",
-                "agent-disabled-image-model", true, false, "");
+                "agent-disabled-image-model", true, false, "", "");
 
         String response = mockMvc.perform(get("/api/v1/model-options")
                         .param("mode", "image"))
@@ -131,7 +142,8 @@ class ModelOptionsApiTest {
     }
 
     private long createModelConfig(String adminToken, String configCode, String displayName, String provider,
-                                   String modelName, boolean enabled, boolean agentEnabled, String extraAuthJson) throws Exception {
+                                   String modelName, boolean enabled, boolean agentEnabled, String extraAuthJson,
+                                   String requestSchemaJson) throws Exception {
         String response = mockMvc.perform(post("/api/admin/v1/agent/model-config")
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -145,6 +157,7 @@ class ModelOptionsApiTest {
                                   "apiKey": "public-option-secret",
                                   "timeoutSeconds": 60,
                                   "extraAuthJson": %s,
+                                  "requestSchemaJson": %s,
                                   "billingUnit": "PER_CALL",
                                   "unitPrice": 0.03,
                                   "capabilities": ["IMAGE_GENERATION"],
@@ -156,6 +169,9 @@ class ModelOptionsApiTest {
                                 extraAuthJson == null || extraAuthJson.isBlank()
                                         ? "\"\""
                                         : "\"" + extraAuthJson.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"",
+                                requestSchemaJson == null || requestSchemaJson.isBlank()
+                                        ? "\"\""
+                                        : "\"" + requestSchemaJson.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"",
                                 enabled, agentEnabled)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.modelName").value(modelName))

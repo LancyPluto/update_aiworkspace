@@ -43,6 +43,7 @@ import {
 } from "@/lib/api/tasks"
 import { AgentRunsContent } from "@/app/agent-runs/page"
 import { ApiError } from "@/lib/api/http"
+import { formatShanghaiDateTime } from "@/lib/date-time"
 import type { AdminTaskApiPayload } from "@/lib/api/types"
 
 type TaskStatus = "active" | "pending" | "error" | "timeout"
@@ -91,13 +92,6 @@ function mapStatus(status: string): { status: TaskStatus; label: string } {
     default:
       return { status: "pending", label: status || "未知" }
   }
-}
-
-function formatDateTime(iso?: string | null): string {
-  if (!iso) return "-"
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toISOString().replace("T", " ").slice(0, 19)
 }
 
 function computeDuration(startIso?: string | null, endIso?: string | null): string {
@@ -201,10 +195,10 @@ function rowToTask(row: AdminTaskApiPayload): Task {
     errorMessage: row.errorMessage?.trim() || "",
     progressMessage: row.progressMessage?.trim() || "",
     agentSource: row.agentSource ?? null,
-    createdAt: formatDateTime(row.createdAt),
-    queuedAt: formatDateTime(row.queuedAt),
-    startedAt: formatDateTime(row.startedAt),
-    completedAt: formatDateTime(row.finishedAt),
+    createdAt: formatShanghaiDateTime(row.createdAt),
+    queuedAt: formatShanghaiDateTime(row.queuedAt),
+    startedAt: formatShanghaiDateTime(row.startedAt),
+    completedAt: formatShanghaiDateTime(row.finishedAt),
     duration: computeDuration(row.startedAt ?? row.queuedAt ?? row.createdAt, row.finishedAt),
   }
 }

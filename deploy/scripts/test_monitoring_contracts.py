@@ -82,10 +82,13 @@ class MonitoringContractTests(unittest.TestCase):
             "backend/src/main/java/com/aiminilab/aitoolmarket/workflow/metrics/WorkflowMetrics.java"
         )
         self.assertIn("workflow_provider_cost_anomaly_total", metrics)
+        self.assertIn("workflow_reconciliation_total", metrics)
         self.assertIn("WorkflowProviderActualCostUnknown", rules)
         self.assertIn("WorkflowProviderCostCurrencyUnexpected", rules)
+        self.assertIn("WorkflowBillingReconciliationInconsistent", rules)
         self.assertIn("actual_cost_unknown", rules)
         self.assertIn("currency_unsupported", rules)
+        self.assertIn('result="inconsistent"', rules)
 
     def test_cadvisor_and_health_ports_are_declared(self) -> None:
         compose = self.read("deploy/docker-compose.monitoring.yml")
