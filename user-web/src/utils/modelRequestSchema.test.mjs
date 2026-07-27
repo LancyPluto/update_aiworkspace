@@ -169,6 +169,23 @@ test("image output count is owned by the model schema and fixed single-image cou
   }), schemaLessVideoFields)
 })
 
+test("video tools keep count fields when a model also advertises image generation", () => {
+  const fields = [
+    { fieldKey: "prompt", fieldName: "Prompt", fieldType: "textarea", required: true, sortOrder: 1 },
+    { fieldKey: "count", fieldName: "Count", fieldType: "number", required: false, sortOrder: 2 },
+  ]
+  const effective = schemaTools.buildEffectiveToolFields(fields, {
+    modelConfigId: 10,
+    displayName: "Multimodal video model",
+    capabilities: ["IMAGE_GENERATION", "VIDEO_GENERATION"],
+  }, {
+    outputModality: "VIDEO",
+    toolType: "VIDEO_GENERATION",
+  })
+
+  assert.deepEqual(effective, fields)
+})
+
 test("generation mode uses hidden, segmented and select controls from enum count", () => {
   const one = schemaTools.buildEffectiveToolFields([], model([
     { key: "generationMode", type: "string", enum: ["only"] },

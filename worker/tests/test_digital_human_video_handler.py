@@ -2,6 +2,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from client.seedance_video_client import (
+    SEEDANCE_PRIVACY_ERROR_CODE,
+    SEEDANCE_PRIVACY_USER_MESSAGE,
+    SeedancePrivacyContentError,
+)
 from config import settings
 from handlers import digital_human_video_handler as handler_module
 from handlers.digital_human_video_handler import DigitalHumanVideoHandler
@@ -216,6 +221,69 @@ def test_digital_human_handler_executes_with_video_generation_capability(monkeyp
     assert result == {"status": "SUCCESS", "taskId": 901, "traceId": None}
     assert capability_checks == [("seedance", "VIDEO_GENERATION")]
     assert backend.successes[0][1]["resourceType"] == "MARKDOWN"
+
+
+def test_digital_human_preserves_seedance_privacy_failure_contract(monkeypatch):
+    class Backend:
+        def __init__(self):
+            self.failed_payload = None
+
+        def mark_processing(self, *_args, **_kwargs):
+            return None
+
+        def mark_failed(self, _task_id, payload, **_kwargs):
+            self.failed_payload = payload
+
+    class SiliconFlowClient:
+        def generate_speech_data_url(self, **_kwargs):
+            return "data:audio/mpeg;base64,YXVkaW8="
+
+        def generate_image(self, **_kwargs):
+            return "https://example.test/avatar.png"
+
+    class PrivacyRejectedSeedanceClient:
+        def generate_video(self, **_kwargs):
+            raise SeedancePrivacyContentError(
+                "seedance request rejected",
+                delivery_state="REJECTED",
+                retry_scope="NONE",
+                failure_stage="BEFORE_PROVIDER",
+                http_status=400,
+                provider_error_code="InputImageSensitiveContentDetected.PrivacyInformation",
+                provider_request_id="seedance-digital-human-privacy",
+            )
+
+    monkeypatch.setattr(handler_module.provider_registry, "require_capability", lambda *_args: None)
+    monkeypatch.setattr(handler_module.provider_registry, "require_worker_ready", lambda *_args: None)
+    backend = Backend()
+    handler = DigitalHumanVideoHandler(
+        backend_client=backend,
+        video_client=SiliconFlowClient(),
+        seedance_video_client=PrivacyRejectedSeedanceClient(),
+        postprocessor=object(),
+    )
+
+    result = handler.handle(
+        {
+            "taskId": 903,
+            "__executionContext": {
+                "modelConfig": {
+                    "provider": "seedance",
+                    "modelName": "doubao-seedance-2-0-260128",
+                },
+                "params": {"script": "privacy rejection"},
+            },
+        }
+    )
+
+    assert result["errorCode"] == SEEDANCE_PRIVACY_ERROR_CODE
+    assert backend.failed_payload["errorCode"] == SEEDANCE_PRIVACY_ERROR_CODE
+    assert backend.failed_payload["userMessage"] == SEEDANCE_PRIVACY_USER_MESSAGE
+    assert backend.failed_payload["providerErrorCode"] == (
+        "InputImageSensitiveContentDetected.PrivacyInformation"
+    )
+    assert backend.failed_payload["providerRequestId"] == "seedance-digital-human-privacy"
+    assert backend.failed_payload["retryScope"] == "NONE"
 
 
 def test_router_keeps_digital_human_on_dedicated_handler():

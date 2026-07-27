@@ -6,6 +6,7 @@ import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.connectivity.AccountProbeContext;
 import com.aiminilab.aitoolmarket.agent.connectivity.ConnectivityProbeRegistry;
 import com.aiminilab.aitoolmarket.agent.connectivity.ConnectivityProbeResult;
+import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountRequest;
 import com.aiminilab.aitoolmarket.agent.dto.ModelVendorAccountTestResponse;
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
@@ -121,6 +122,38 @@ class ModelVendorAccountServiceImplTest {
         verify(vendorAccountMapper).updateAccount(account);
         verify(routeStateMapper, never()).recoverByVendorAccountId(any());
         verify(agentServiceClient, never()).testModelConfig(any());
+    }
+
+    @Test
+    void createCanonicalizesAliyunVendorAliasBeforeInsert() {
+        when(vendorCodeResolver.canonicalVendorCode("bailian_happyhorse")).thenReturn("qwen");
+        when(vendorCodeResolver.vendorLabel("qwen")).thenReturn("阿里云百炼");
+        ModelVendorAccountRequest request = new ModelVendorAccountRequest(
+                "bailian_happyhorse",
+                "HappyHorse account",
+                "https://dashscope.aliyuncs.com",
+                "test-key",
+                false,
+                null,
+                false,
+                null,
+                null,
+                null,
+                false,
+                "MANUAL",
+                null,
+                "CNY",
+                null,
+                true,
+                null,
+                null
+        );
+
+        service.adminCreate(request);
+
+        ArgumentCaptor<ModelVendorAccount> account = ArgumentCaptor.forClass(ModelVendorAccount.class);
+        verify(vendorAccountMapper).insertAccount(account.capture());
+        assertThat(account.getValue().getVendorCode()).isEqualTo("qwen");
     }
 
     private ModelVendorAccount agnesAccount() {

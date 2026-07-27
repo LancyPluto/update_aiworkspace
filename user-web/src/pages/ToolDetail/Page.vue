@@ -98,7 +98,7 @@ const selectedSupportedModel = computed(() =>
   supportedModels.value.find((model) => model.modelConfigId === selectedModelConfigId.value) || null,
 )
 const effectiveFields = computed(() =>
-  buildEffectiveToolFields(tool.value?.fields || [], selectedSupportedModel.value),
+  buildEffectiveToolFields(tool.value?.fields || [], selectedSupportedModel.value, tool.value),
 )
 const modelBoundTool = computed<ToolDetail | null>(() =>
   tool.value ? { ...tool.value, fields: effectiveFields.value } : null,

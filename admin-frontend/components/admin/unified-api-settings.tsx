@@ -419,11 +419,6 @@ function routeTasksForModel(provider: string | undefined, capabilities: string[]
   return tasks.filter((task) => task.capabilities.some((capability) => caps.has(capability)))
 }
 
-function routeTaskLabel(provider: string | undefined, task: string | null | undefined) {
-  const normalized = (task || "").trim()
-  return executionTaskOptions[(provider || "").trim()]?.find((item) => item.value === normalized)?.label || normalized || "未配置"
-}
-
 function renderModelCost(model: UnifiedApiModelItem) {
   const billingUnit = (model.billingUnit || "").toString().trim().toUpperCase()
   if (!billingUnit) {
@@ -1913,34 +1908,26 @@ export function UnifiedApiSettings({ refreshKey = 0 }: UnifiedApiSettingsProps) 
                       <TableCell className="align-middle text-center">
                         {model.routingPoolId ? (() => {
                           const pool = vendorRoutingPools.find((candidate) => candidate.id === model.routingPoolId)
-                          const anchor = model.vendorAccountId
-                            ? accountById.get(model.vendorAccountId)
-                              || vendor.accounts.find((account) => account.id === model.vendorAccountId)
-                            : undefined
-                          const accountIndex = anchor
-                            ? vendor.accounts.findIndex((account) => account.id === anchor.id)
-                            : -1
+                          const poolName = pool?.name?.trim() || `负载池 #${model.routingPoolId}`
                           return (
-                            <div className="mx-auto grid max-w-[180px] gap-1 text-left">
-                              <span className="truncate text-[11px] text-muted-foreground">
-                                {pool ? `${pool.eligibleAccounts.length} 个可路由账户` : "池成员详情未加载"}
-                                {anchor ? ` · 锚点 #${anchor.id} ${displayAccountName(anchor, accountIndex)}` : ""}
+                            <div className="mx-auto max-w-[180px] text-left">
+                              <span className="block truncate text-sm font-medium" title={poolName}>
+                                {poolName}
                               </span>
                             </div>
                           )
                         })() : model.vendorAccountId ? (() => {
                           const boundAccount = accountById.get(model.vendorAccountId) || vendor.accounts.find((account) => account.id === model.vendorAccountId)
-                          const fallbackAccount = {
-                            id: model.vendorAccountId,
-                            accountName: model.vendorAccountName || "",
-                            apiKeyMasked: null,
-                            extraAuthJsonMasked: null,
-                          } as ModelVendorAccount
-                          const account = boundAccount || fallbackAccount
+                          const accountIndex = boundAccount
+                            ? vendor.accounts.findIndex((account) => account.id === boundAccount.id)
+                            : -1
+                          const accountName = boundAccount
+                            ? displayAccountName(boundAccount, accountIndex)
+                            : model.vendorAccountName?.trim() || `账户 #${model.vendorAccountId}`
                           return (
                             <div className="mx-auto grid max-w-[170px] gap-1 text-left">
-                              <span className={`truncate text-[11px] ${hasAccountCredential(account) ? "text-muted-foreground" : "text-amber-700"}`}>
-                                {boundAccount ? accountCredentialLabel(boundAccount) : "账号详情未加载"}
+                              <span className="truncate text-sm font-medium" title={accountName}>
+                                {accountName}
                               </span>
                               {boundAccount && boundAccount.vendorCode !== vendor.vendorCode ? (
                                 <span className="truncate text-[11px] text-amber-700">

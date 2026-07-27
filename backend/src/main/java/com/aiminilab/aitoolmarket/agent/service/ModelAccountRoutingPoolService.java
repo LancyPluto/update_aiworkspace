@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.agent.service;
 
 import com.aiminilab.aitoolmarket.agent.entity.ModelAccountRoutingPool;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelAccountRoutingPoolMapper;
+import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
 import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
 import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import org.springframework.stereotype.Service;
@@ -13,9 +14,12 @@ public class ModelAccountRoutingPoolService {
     private static final int MAX_POOL_NAME_LENGTH = 128;
 
     private final ModelAccountRoutingPoolMapper poolMapper;
+    private final VendorCodeResolver vendorCodeResolver;
 
-    public ModelAccountRoutingPoolService(ModelAccountRoutingPoolMapper poolMapper) {
+    public ModelAccountRoutingPoolService(ModelAccountRoutingPoolMapper poolMapper,
+                                          VendorCodeResolver vendorCodeResolver) {
         this.poolMapper = poolMapper;
+        this.vendorCodeResolver = vendorCodeResolver;
     }
 
     public ModelAccountRoutingPool resolveOrCreate(String vendorCode, String requestedPoolName) {
@@ -26,7 +30,7 @@ public class ModelAccountRoutingPoolService {
         if (vendorCode == null || vendorCode.isBlank()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor code is required for routing pool");
         }
-        String normalizedVendorCode = vendorCode.trim();
+        String normalizedVendorCode = vendorCodeResolver.canonicalVendorCode(vendorCode);
         String poolKey = poolName.toLowerCase(Locale.ROOT);
         poolMapper.upsert(normalizedVendorCode, poolName, poolKey);
         ModelAccountRoutingPool pool = poolMapper.findByVendorCodeAndPoolKey(normalizedVendorCode, poolKey);
@@ -42,7 +46,7 @@ public class ModelAccountRoutingPoolService {
             return null;
         }
         return poolMapper.findByVendorCodeAndPoolKey(
-                vendorCode.trim(),
+                vendorCodeResolver.canonicalVendorCode(vendorCode),
                 poolName.toLowerCase(Locale.ROOT)
         );
     }

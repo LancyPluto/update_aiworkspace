@@ -53,3 +53,18 @@ test("model editor can target either an account or a same-vendor routing pool", 
   assert.match(source, /resolveModelRoutingTarget\(value, form\.vendorAccountId, modelAccountOptions\)/)
   assert.match(source, /<TableHead className="w-\[170px\] text-center">路由目标<\/TableHead>/)
 })
+
+test("model rows show route names without credential summaries", () => {
+  const modelRows = source.match(/<TableHead className="w-\[170px\] text-center">路由目标<\/TableHead>[\s\S]*?<\/TableBody>/)?.[0] || ""
+
+  assert.match(modelRows, /displayAccountName\(boundAccount, accountIndex\)/)
+  assert.match(modelRows, /pool\?\.name\?\.trim\(\)/)
+  assert.doesNotMatch(modelRows, /accountCredentialLabel\(/)
+  assert.doesNotMatch(modelRows, /apiKeyMasked|extraAuthJsonMasked/)
+})
+
+test("model editor hides execution task controls while preserving runtime routing fields", () => {
+  assert.doesNotMatch(source, /<Label>执行任务类型<\/Label>/)
+  assert.match(source, /executionTask:\s*model\.executionTask \|\| ""/)
+  assert.match(source, /const modelPayload = \{ \.\.\.modelForm \}/)
+})

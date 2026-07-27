@@ -3,6 +3,7 @@ from typing import Any
 
 from client.backend_client import BackendClient, BackendClientError
 from client.infinitetalk_video_client import InfiniteTalkVideoClient, InfiniteTalkVideoError, InfiniteTalkVideoTimeoutError
+from client.provider_error import structured_failure_payload
 from client.seedance_video_client import SeedanceVideoClient, SeedanceVideoError, SeedanceVideoTimeoutError
 from client.siliconflow_video_client import SiliconFlowVideoClient, SiliconFlowVideoError, SiliconFlowVideoTimeoutError
 from config import resolve_infinitetalk_api_key, resolve_siliconflow_api_key, settings
@@ -139,7 +140,16 @@ class DigitalHumanVideoHandler:
         except SeedanceVideoTimeoutError as exc:
             return self._mark_failed(task_id, error_code="MODEL_TIMEOUT", error_message=str(exc), trace_id=trace_id)
         except SeedanceVideoError as exc:
-            return self._mark_failed(task_id, error_code=classify_model_error(str(exc)), error_message=str(exc), trace_id=trace_id)
+            structured_error_code = str(getattr(exc, "error_code", "") or "").strip()
+            structured_user_message = str(getattr(exc, "user_message", "") or "").strip()
+            return self._mark_failed(
+                task_id,
+                error_code=structured_error_code or classify_model_error(str(exc)),
+                error_message=str(exc),
+                trace_id=trace_id,
+                user_message=structured_user_message or None,
+                failure_metadata=structured_failure_payload(exc),
+            )
         except InfiniteTalkVideoTimeoutError as exc:
             return self._mark_failed(task_id, error_code="MODEL_TIMEOUT", error_message=str(exc), trace_id=trace_id)
         except InfiniteTalkVideoError as exc:
@@ -158,6 +168,8 @@ class DigitalHumanVideoHandler:
         error_code: str,
         error_message: str,
         trace_id: str | None,
+        user_message: str | None = None,
+        failure_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         LOGGER.exception(
             "digital human video task %s failed traceId=%s errorCode=%s: %s",
@@ -166,12 +178,16 @@ class DigitalHumanVideoHandler:
             error_code,
             error_message,
         )
+        payload = {
+            "errorCode": error_code,
+            "errorMessage": error_message,
+            **(failure_metadata or {}),
+        }
+        if user_message:
+            payload["userMessage"] = user_message
         self.backend_client.mark_failed(
             task_id,
-            {
-                "errorCode": error_code,
-                "errorMessage": error_message,
-            },
+            payload,
             trace_id=trace_id,
         )
         return {"status": "FAILED", "taskId": task_id, "errorCode": error_code, "traceId": trace_id}
