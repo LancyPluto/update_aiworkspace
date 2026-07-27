@@ -85,3 +85,12 @@ test("creates digital human template field defaults", () => {
   assert.equal(defaults[3].fieldType, "radio")
   assert.equal(defaults[4].defaultValue, "10")
 })
+
+test("converts numeric select options into an equivalent slider range", () => {
+  assert.deepEqual(fields.sliderMetaFromNumericOptions([
+    { label: "1", value: "1" },
+    { label: "2", value: "2" },
+    { label: "3", value: "3" },
+    { label: "4", value: "4" },
+  ]), { min: 1, max: 4, step: 1 })
+})

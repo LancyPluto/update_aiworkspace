@@ -2,6 +2,7 @@ package com.aiminilab.aitoolmarket.agent.service;
 
 import com.aiminilab.aitoolmarket.agent.dto.ModelOptionGroupResponse;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
+import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorAccountMapper;
 import com.aiminilab.aitoolmarket.agent.support.ImageGenerationParameterResolver;
@@ -107,6 +108,44 @@ class PublicModelOptionServiceTest {
         );
 
         assertThat(service.list("video")).isEmpty();
+    }
+
+    @Test
+    void list_groupsGatewayModelByDeclaredUpstreamVendor() {
+        AgentModelConfigMapper modelMapper = mock(AgentModelConfigMapper.class);
+        ModelVendorAccountMapper accountMapper = mock(ModelVendorAccountMapper.class);
+        VendorCodeResolver vendorCodeResolver = mock(VendorCodeResolver.class);
+        ModelCapabilityService capabilityService = mock(ModelCapabilityService.class);
+        AgentModelConfig gatewayModel = config(
+                8L,
+                "ofox-image",
+                "ofox_openai_images",
+                "[\"IMAGE_GENERATION\"]"
+        );
+        gatewayModel.setVendorAccountId(18L);
+        ModelVendorAccount ofoxAccount = new ModelVendorAccount();
+        ofoxAccount.setId(18L);
+        ofoxAccount.setVendorCode("ofox");
+        when(accountMapper.findAllActive()).thenReturn(List.of(ofoxAccount));
+        when(modelMapper.findAgentEnabled()).thenReturn(List.of(gatewayModel));
+        when(capabilityService.resolveCapabilities(gatewayModel)).thenReturn(List.of("IMAGE_GENERATION"));
+        when(vendorCodeResolver.resolvePublicVendorCode(gatewayModel)).thenReturn("openai");
+        when(vendorCodeResolver.vendorLabel("openai")).thenReturn("OpenAI");
+        when(vendorCodeResolver.vendorIconAsset("openai")).thenReturn("openai");
+        PublicModelOptionService service = new PublicModelOptionService(
+                modelMapper,
+                accountMapper,
+                vendorCodeResolver,
+                mock(ImageGenerationParameterResolver.class),
+                capabilityService
+        );
+
+        assertThat(service.list("image"))
+                .singleElement()
+                .satisfies(group -> {
+                    assertThat(group.vendorCode()).isEqualTo("openai");
+                    assertThat(group.models()).singleElement();
+                });
     }
 
     private static AgentModelConfig config(Long id, String code, String provider, String capabilities) {

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -16,6 +17,31 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ModelVendorAccountMigrationServiceImplTest {
+
+    @Test
+    void unboundGenericGatewayWithUnknownHostFailsClosed() {
+        AgentModelConfigMapper configMapper = mock(AgentModelConfigMapper.class);
+        ModelVendorAccountMapper accountMapper = mock(ModelVendorAccountMapper.class);
+        VendorCodeResolver vendorCodeResolver = mock(VendorCodeResolver.class);
+        ModelVendorAccountMigrationServiceImpl service = new ModelVendorAccountMigrationServiceImpl(
+                configMapper,
+                accountMapper,
+                vendorCodeResolver
+        );
+        AgentModelConfig gateway = new AgentModelConfig();
+        gateway.setId(81L);
+        gateway.setProvider("openai_images_gateway");
+        gateway.setBaseUrl("https://unknown-gateway.example/v1");
+        when(configMapper.findAllActive()).thenReturn(List.of(gateway));
+        when(vendorCodeResolver.resolveVendorCode(gateway)).thenReturn("other");
+        when(vendorCodeResolver.usesBoundAccountVendor("openai_images_gateway")).thenReturn(true);
+
+        assertThatThrownBy(service::migrateIfNeeded)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("actual credential issuer");
+        verify(accountMapper, never()).insertAccount(any());
+        verify(configMapper, never()).updateVendorAccountId(any(), any(), any());
+    }
 
     @Test
     void preservesExplicitAccountsWithCompatibleCredentials() {

@@ -343,8 +343,15 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         AiTask task = findTask(taskId);
         String claimToken = cleanClaimPart(request.claimToken(), 128);
         ensureClaimToken(task, claimToken);
+        boolean workflowStepTask = isWorkflowStepTask(task);
         lockWorkflowRunBeforeCoupledMutation(task);
-        if (isWorkflowStepTask(task)) {
+        if (workflowStepTask) {
+            AiTask current = requireTaskForUpdate(taskId);
+            current.setToolCode(task.getToolCode());
+            task = current;
+            ensureClaimToken(task, claimToken);
+        }
+        if (workflowStepTask) {
             if (TaskStateMachine.isTerminal(task.getStatus())) {
                 workflowStepCallbackService.succeeded(taskId, request);
                 completeRoute(taskId, task.getStatus(), null);
@@ -528,7 +535,14 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         AiTask task = findTask(taskId);
         String claimToken = cleanClaimPart(request.claimToken(), 128);
         ensureClaimToken(task, claimToken);
+        boolean workflowStepTask = isWorkflowStepTask(task);
         lockWorkflowRunBeforeCoupledMutation(task);
+        if (workflowStepTask) {
+            AiTask current = requireTaskForUpdate(taskId);
+            current.setToolCode(task.getToolCode());
+            task = current;
+            ensureClaimToken(task, claimToken);
+        }
         String errorCode = request.errorCode() == null || request.errorCode().isBlank()
                 ? ErrorCode.MODEL_CALL_FAILED.name()
                 : request.errorCode();
@@ -552,7 +566,7 @@ public class InternalTaskServiceImpl implements InternalTaskService {
         }
         String providerErrorCode = cleanClaimPart(request.providerErrorCode(), 128);
         String providerRequestId = cleanClaimPart(request.providerRequestId(), 128);
-        if (isWorkflowStepTask(task)) {
+        if (workflowStepTask) {
             if (TaskStateMachine.isTerminal(task.getStatus())) {
                 workflowStepCallbackService.failed(taskId, request);
                 completeRoute(taskId, task.getStatus(), terminalFailure(task.getStatus(), request));
@@ -774,6 +788,14 @@ public class InternalTaskServiceImpl implements InternalTaskService {
     private AiTask findTask(Long taskId) {
         return taskMapper.findById(taskId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.TASK_NOT_FOUND, "任务不存在"));
+    }
+
+    private AiTask requireTaskForUpdate(Long taskId) {
+        AiTask task = taskMapper.selectByIdForUpdate(taskId);
+        if (task == null) {
+            throw new BusinessException(ErrorCode.TASK_NOT_FOUND, "任务不存在");
+        }
+        return task;
     }
 
     private String limitText(String value, int maxLength) {

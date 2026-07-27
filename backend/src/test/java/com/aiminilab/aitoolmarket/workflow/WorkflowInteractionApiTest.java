@@ -6,6 +6,7 @@ import com.aiminilab.aitoolmarket.auth.security.TokenDenylistService;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowExecutionService;
 import com.aiminilab.aitoolmarket.task.dto.ClaimTaskRequest;
 import com.aiminilab.aitoolmarket.task.dto.WorkerFailedRequest;
+import com.aiminilab.aitoolmarket.task.dto.WorkerSuccessRequest;
 import com.aiminilab.aitoolmarket.task.service.InternalTaskService;
 import com.aiminilab.aitoolmarket.workflow.entity.WorkflowStepAttempt;
 import com.aiminilab.aitoolmarket.workflow.entity.WorkflowConfirmation;
@@ -426,6 +427,67 @@ class WorkflowInteractionApiTest {
     }
 
     @Test
+    void userCancellationRemainsCancelledWhenReconcilerAddsAuditMarker() {
+        UserFixture owner = insertUser("workflow_cancel_reconciliation_marker_owner");
+        RunFixture fixture = startPaidWorkerWorkflow(owner.userId(), 20, 100);
+        WorkflowStepAttempt attempt = attemptMapper.selectById(
+                jdbcTemplate.queryForObject(
+                        "SELECT current_attempt_id FROM workflow_run_steps WHERE id = ?",
+                        Long.class,
+                        fixture.focalStepId()
+                )
+        );
+        assertThat(internalTaskService.claim(
+                attempt.getChildTaskId(),
+                new ClaimTaskRequest("cancel-marker-worker", "cancel-marker-claim")
+        ).claimed()).isTrue();
+
+        cancellationService.begin(fixture.rootTaskId(), owner.userId(), "USER_CANCELLED");
+        assertThat(cancellationService.isolateBillingReconciliationFailure(fixture.runId())).isTrue();
+        assertThat(cancellationService.settlePersisted(fixture.runId())).isTrue();
+
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, billing_status, error_code FROM workflow_runs WHERE id = ?",
+                fixture.runId()
+        )).containsEntry("status", "CANCELLED")
+                .containsEntry("billing_status", "RECONCILIATION_FAILED")
+                .containsEntry("error_code", "WORKFLOW_CANCELLED");
+
+        WorkerSuccessRequest lateSuccess = new WorkerSuccessRequest(
+                "JSON",
+                "{\"ok\":true}",
+                0,
+                0,
+                1,
+                new BigDecimal("0.10"),
+                "CNY",
+                "cancel-marker-late-success",
+                true,
+                "cancel-marker-claim"
+        );
+        assertThat(internalTaskService.markSuccess(attempt.getChildTaskId(), lateSuccess).status())
+                .isEqualTo("CANCELLED");
+
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, charged_credits FROM workflow_step_charges WHERE attempt_id = ?",
+                attempt.getId()
+        )).containsEntry("status", "RELEASED")
+                .containsEntry("charged_credits", 0);
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT balance, frozen, total_consumed FROM credit_accounts WHERE user_id = ?",
+                owner.userId()
+        )).containsEntry("balance", 100)
+                .containsEntry("frozen", 0)
+                .containsEntry("total_consumed", 0);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT charged_credits FROM billing_usage_logs WHERE source_type = 'WORKFLOW_STEP' AND source_id = ?",
+                Integer.class,
+                fixture.focalStepId()
+        )).isZero();
+        assertThat(runStatus(fixture.runId())).isEqualTo("CANCELLED");
+    }
+
+    @Test
     void billingReconciliationIsolationReleasesSafeReservationBeforeFailingRun() {
         UserFixture owner = insertUser("workflow_reconciliation_safe_release_owner");
         RunFixture fixture = startPaidWorkerWorkflow(owner.userId(), 20, 100);
@@ -459,6 +521,16 @@ class WorkflowInteractionApiTest {
                 String.class,
                 fixture.rootTaskId()
         )).isEqualTo("FAILED");
+
+        WorkflowStepAttempt releasedAttempt = attemptMapper.selectById(attemptId);
+        WorkerSuccessRequest unexpectedSuccess = new WorkerSuccessRequest(
+                "JSON", "{\"ok\":true}", 0, 0, 1,
+                new BigDecimal("0.10"), "CNY", "released-charge-success", true, null
+        );
+        assertThatThrownBy(() -> billingService.recordReconciliationLateSuccess(
+                attemptId, releasedAttempt.getChildTaskId(), unexpectedSuccess
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessage("Workflow charge is not reserved for capture");
     }
 
     @Test
@@ -474,6 +546,7 @@ class WorkflowInteractionApiTest {
 
         assertThat(cancellationService.isolateBillingReconciliationFailure(fixture.runId())).isTrue();
         assertThat(cancellationService.settlePersisted(fixture.runId())).isFalse();
+        assertThat(attemptMapper.selectById(attemptId).getStatus()).isEqualTo("LOST");
 
         assertThat(jdbcTemplate.queryForMap(
                 "SELECT status, billing_status, error_code FROM workflow_runs WHERE id = ?",
@@ -496,6 +569,342 @@ class WorkflowInteractionApiTest {
                 String.class,
                 fixture.rootTaskId()
         )).isEqualTo("PROCESSING");
+    }
+
+    @Test
+    void billingReconciliationIsolationCapturesLateProviderSuccess() {
+        UserFixture owner = insertUser("workflow_reconciliation_late_success_owner");
+        RunFixture fixture = startPaidWorkerWorkflow(owner.userId(), 20, 100);
+        WorkflowStepAttempt attempt = attemptMapper.selectById(
+                jdbcTemplate.queryForObject(
+                        "SELECT current_attempt_id FROM workflow_run_steps WHERE id = ?",
+                        Long.class,
+                        fixture.focalStepId()
+                )
+        );
+        assertThat(internalTaskService.claim(
+                attempt.getChildTaskId(),
+                new ClaimTaskRequest("reconciliation-worker", "reconciliation-claim")
+        ).claimed()).isTrue();
+        jdbcTemplate.update("UPDATE workflow_step_attempts SET status = 'LOST' WHERE id = ?", attempt.getId());
+
+        assertThat(cancellationService.isolateBillingReconciliationFailure(fixture.runId())).isTrue();
+        assertThat(cancellationService.settlePersisted(fixture.runId())).isFalse();
+
+        WorkerSuccessRequest success = new WorkerSuccessRequest(
+                "JSON",
+                "{\"ok\":true}",
+                0,
+                0,
+                1,
+                new BigDecimal("0.10"),
+                "CNY",
+                "reconciliation-late-success",
+                true,
+                "reconciliation-claim"
+        );
+        assertThat(internalTaskService.markSuccess(attempt.getChildTaskId(), success).status())
+                .isEqualTo("CANCELLED");
+        var callbackResponse = internalTaskService.markSuccess(attempt.getChildTaskId(), success);
+        assertThat(callbackResponse.status()).isEqualTo("CANCELLED");
+        assertThat(callbackResponse.toolCode()).startsWith("workflow_interaction_");
+
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, charged_credits FROM workflow_step_charges WHERE attempt_id = ?",
+                attempt.getId()
+        )).containsEntry("status", "CAPTURED")
+                .containsEntry("charged_credits", 20);
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT balance, frozen, total_consumed FROM credit_accounts WHERE user_id = ?",
+                owner.userId()
+        )).containsEntry("balance", 80)
+                .containsEntry("frozen", 0)
+                .containsEntry("total_consumed", 20);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT charged_credits FROM billing_usage_logs WHERE source_type = 'WORKFLOW_STEP' AND source_id = ?",
+                Integer.class,
+                fixture.focalStepId()
+        )).isEqualTo(20);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM billing_usage_logs WHERE source_type = 'WORKFLOW_STEP' AND source_id = ?",
+                Integer.class,
+                fixture.focalStepId()
+        )).isEqualTo(1);
+        assertThat(cancellationService.settlePersisted(fixture.runId())).isTrue();
+        assertThat(runStatus(fixture.runId())).isEqualTo("FAILED");
+    }
+
+    @Test
+    void billingReconciliationIsolationCapturesRunningProviderSuccess() {
+        UserFixture owner = insertUser("workflow_reconciliation_running_success_owner");
+        RunFixture fixture = startPaidWorkerWorkflow(owner.userId(), 20, 100);
+        WorkflowStepAttempt attempt = attemptMapper.selectById(
+                jdbcTemplate.queryForObject(
+                        "SELECT current_attempt_id FROM workflow_run_steps WHERE id = ?",
+                        Long.class,
+                        fixture.focalStepId()
+                )
+        );
+        assertThat(internalTaskService.claim(
+                attempt.getChildTaskId(),
+                new ClaimTaskRequest("reconciliation-running-worker", "reconciliation-running-claim")
+        ).claimed()).isTrue();
+
+        assertThat(cancellationService.isolateBillingReconciliationFailure(fixture.runId())).isTrue();
+        assertThat(cancellationService.settlePersisted(fixture.runId())).isFalse();
+        assertThat(attemptMapper.selectById(attempt.getId()).getStatus()).isEqualTo("RUNNING");
+
+        WorkerSuccessRequest success = new WorkerSuccessRequest(
+                "JSON",
+                "{\"ok\":true}",
+                0,
+                0,
+                1,
+                new BigDecimal("0.10"),
+                "CNY",
+                "reconciliation-running-success",
+                true,
+                "reconciliation-running-claim"
+        );
+        assertThat(internalTaskService.markSuccess(attempt.getChildTaskId(), success).status())
+                .isEqualTo("CANCELLED");
+
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, charged_credits FROM workflow_step_charges WHERE attempt_id = ?",
+                attempt.getId()
+        )).containsEntry("status", "CAPTURED")
+                .containsEntry("charged_credits", 20);
+        assertThat(attemptMapper.selectById(attempt.getId()).getStatus()).isEqualTo("SUCCESS");
+        assertThat(cancellationService.settlePersisted(fixture.runId())).isTrue();
+        assertThat(runStatus(fixture.runId())).isEqualTo("FAILED");
+    }
+
+    @Test
+    void billingReconciliationCapturesLegacyCancelledProviderSuccess() {
+        UserFixture owner = insertUser("workflow_reconciliation_legacy_cancelled_owner");
+        RunFixture fixture = startPaidWorkerWorkflow(owner.userId(), 20, 100);
+        WorkflowStepAttempt attempt = attemptMapper.selectById(
+                jdbcTemplate.queryForObject(
+                        "SELECT current_attempt_id FROM workflow_run_steps WHERE id = ?",
+                        Long.class,
+                        fixture.focalStepId()
+                )
+        );
+        assertThat(internalTaskService.claim(
+                attempt.getChildTaskId(),
+                new ClaimTaskRequest("legacy-cancelled-worker", "legacy-cancelled-claim")
+        ).claimed()).isTrue();
+        assertThat(cancellationService.isolateBillingReconciliationFailure(fixture.runId())).isTrue();
+        assertThat(cancellationService.settlePersisted(fixture.runId())).isFalse();
+        jdbcTemplate.update(
+                "UPDATE workflow_step_attempts SET status = 'CANCELLED' WHERE id = ?",
+                attempt.getId()
+        );
+
+        WorkerSuccessRequest success = new WorkerSuccessRequest(
+                "JSON", "{\"ok\":true}", 0, 0, 1,
+                new BigDecimal("0.10"), "CNY", "legacy-cancelled-success", true,
+                "legacy-cancelled-claim"
+        );
+        assertThat(internalTaskService.markSuccess(attempt.getChildTaskId(), success).status())
+                .isEqualTo("CANCELLED");
+
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, charged_credits FROM workflow_step_charges WHERE attempt_id = ?",
+                attempt.getId()
+        )).containsEntry("status", "CAPTURED")
+                .containsEntry("charged_credits", 20);
+        assertThat(attemptMapper.selectById(attempt.getId()).getStatus()).isEqualTo("SUCCESS");
+        assertThat(cancellationService.settlePersisted(fixture.runId())).isTrue();
+        assertThat(runStatus(fixture.runId())).isEqualTo("FAILED");
+    }
+
+    @Test
+    void billingReconciliationResolvesLegacyCancelledProviderFailure() {
+        UserFixture owner = insertUser("workflow_reconciliation_legacy_cancelled_failure_owner");
+        RunFixture fixture = startPaidWorkerWorkflow(owner.userId(), 20, 100);
+        WorkflowStepAttempt attempt = attemptMapper.selectById(
+                jdbcTemplate.queryForObject(
+                        "SELECT current_attempt_id FROM workflow_run_steps WHERE id = ?",
+                        Long.class,
+                        fixture.focalStepId()
+                )
+        );
+        assertThat(internalTaskService.claim(
+                attempt.getChildTaskId(),
+                new ClaimTaskRequest("legacy-failure-worker", "legacy-failure-claim")
+        ).claimed()).isTrue();
+        assertThat(cancellationService.isolateBillingReconciliationFailure(fixture.runId())).isTrue();
+        assertThat(cancellationService.settlePersisted(fixture.runId())).isFalse();
+        jdbcTemplate.update(
+                "UPDATE workflow_step_attempts SET status = 'CANCELLED' WHERE id = ?",
+                attempt.getId()
+        );
+
+        WorkerFailedRequest failure = new WorkerFailedRequest(
+                "PROVIDER_ERROR", "legacy provider failure", "PROVIDER_CALL", true,
+                new BigDecimal("0.10"), "CNY", "UPSTREAM_500", "legacy-failure-request",
+                0, 0, 1, "legacy-failure-claim"
+        );
+        internalTaskService.markFailed(attempt.getChildTaskId(), failure);
+
+        assertThat(attemptMapper.selectById(attempt.getId()).getStatus()).isEqualTo("FAILED");
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, charged_credits FROM workflow_step_charges WHERE attempt_id = ?",
+                attempt.getId()
+        )).containsEntry("status", "RELEASED")
+                .containsEntry("charged_credits", 0);
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT balance, frozen, total_consumed FROM credit_accounts WHERE user_id = ?",
+                owner.userId()
+        )).containsEntry("balance", 100)
+                .containsEntry("frozen", 0)
+                .containsEntry("total_consumed", 0);
+        assertThat(cancellationService.settlePersisted(fixture.runId())).isTrue();
+        assertThat(runStatus(fixture.runId())).isEqualTo("FAILED");
+    }
+
+    @Test
+    void billingReconciliationIsolationResolvesRunningProviderFailure() {
+        UserFixture owner = insertUser("workflow_reconciliation_running_failure_owner");
+        RunFixture fixture = startPaidWorkerWorkflow(owner.userId(), 20, 100);
+        WorkflowStepAttempt attempt = attemptMapper.selectById(
+                jdbcTemplate.queryForObject(
+                        "SELECT current_attempt_id FROM workflow_run_steps WHERE id = ?",
+                        Long.class,
+                        fixture.focalStepId()
+                )
+        );
+        assertThat(internalTaskService.claim(
+                attempt.getChildTaskId(),
+                new ClaimTaskRequest("reconciliation-failure-worker", "reconciliation-failure-claim")
+        ).claimed()).isTrue();
+        assertThat(cancellationService.isolateBillingReconciliationFailure(fixture.runId())).isTrue();
+        assertThat(cancellationService.settlePersisted(fixture.runId())).isFalse();
+        assertThat(attemptMapper.selectById(attempt.getId()).getStatus()).isEqualTo("RUNNING");
+
+        WorkerFailedRequest failure = new WorkerFailedRequest(
+                "PROVIDER_ERROR",
+                "provider failed after billing isolation",
+                "PROVIDER_CALL",
+                true,
+                new BigDecimal("0.10"),
+                "CNY",
+                "UPSTREAM_500",
+                null,
+                0,
+                0,
+                1,
+                "reconciliation-failure-claim"
+        );
+        internalTaskService.markFailed(attempt.getChildTaskId(), failure);
+        WorkerFailedRequest replayWithProviderRequestId = new WorkerFailedRequest(
+                "PROVIDER_ERROR",
+                "provider failed after billing isolation",
+                "PROVIDER_CALL",
+                true,
+                new BigDecimal("0.10"),
+                "CNY",
+                "UPSTREAM_500",
+                "reconciliation-running-failure",
+                0,
+                0,
+                1,
+                "reconciliation-failure-claim"
+        );
+        internalTaskService.markFailed(attempt.getChildTaskId(), replayWithProviderRequestId);
+
+        assertThat(attemptMapper.selectById(attempt.getId()).getStatus()).isEqualTo("FAILED");
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, charged_credits FROM workflow_step_charges WHERE attempt_id = ?",
+                attempt.getId()
+        )).containsEntry("status", "RELEASED")
+                .containsEntry("charged_credits", 0);
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT balance, frozen, total_consumed FROM credit_accounts WHERE user_id = ?",
+                owner.userId()
+        )).containsEntry("balance", 100)
+                .containsEntry("frozen", 0)
+                .containsEntry("total_consumed", 0);
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT attempt.provider_request_id AS attempt_request_id, "
+                        + "usage.provider_request_id AS usage_request_id "
+                        + "FROM workflow_step_attempts attempt "
+                        + "JOIN workflow_step_charges charge ON charge.attempt_id = attempt.id "
+                        + "JOIN billing_usage_logs usage ON usage.id = charge.billing_usage_id "
+                        + "WHERE attempt.id = ?",
+                attempt.getId()
+        )).containsEntry("attempt_request_id", "reconciliation-running-failure")
+                .containsEntry("usage_request_id", "reconciliation-running-failure");
+        assertThat(cancellationService.settlePersisted(fixture.runId())).isTrue();
+        assertThat(runStatus(fixture.runId())).isEqualTo("FAILED");
+    }
+
+    @Test
+    void billingReconciliationLateSuccessWaitsForShortfallRecharge() {
+        UserFixture owner = insertUser("workflow_reconciliation_late_shortfall_owner");
+        RunFixture fixture = startPaidWorkerWorkflow(owner.userId(), 20, 20, 30);
+        WorkflowStepAttempt attempt = attemptMapper.selectById(
+                jdbcTemplate.queryForObject(
+                        "SELECT current_attempt_id FROM workflow_run_steps WHERE id = ?",
+                        Long.class,
+                        fixture.focalStepId()
+                )
+        );
+        assertThat(internalTaskService.claim(
+                attempt.getChildTaskId(),
+                new ClaimTaskRequest("reconciliation-shortfall-worker", "reconciliation-shortfall-claim")
+        ).claimed()).isTrue();
+        jdbcTemplate.update("UPDATE workflow_step_attempts SET status = 'LOST' WHERE id = ?", attempt.getId());
+        assertThat(cancellationService.isolateBillingReconciliationFailure(fixture.runId())).isTrue();
+        assertThat(cancellationService.settlePersisted(fixture.runId())).isFalse();
+
+        WorkerSuccessRequest success = new WorkerSuccessRequest(
+                "JSON",
+                "{\"ok\":true}",
+                0,
+                0,
+                1,
+                new BigDecimal("0.15"),
+                "CNY",
+                "reconciliation-late-shortfall",
+                true,
+                "reconciliation-shortfall-claim"
+        );
+        assertThat(internalTaskService.markSuccess(attempt.getChildTaskId(), success).status())
+                .isEqualTo("CANCELLED");
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM workflow_step_charges WHERE attempt_id = ?",
+                String.class,
+                attempt.getId()
+        )).isEqualTo("AWAITING_FUNDS");
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT balance, frozen, total_consumed FROM credit_accounts WHERE user_id = ?",
+                owner.userId()
+        )).containsEntry("balance", 20)
+                .containsEntry("frozen", 20)
+                .containsEntry("total_consumed", 0);
+        assertThat(cancellationService.settlePersisted(fixture.runId())).isFalse();
+
+        jdbcTemplate.update(
+                "UPDATE credit_accounts SET balance = 30, membership_balance = 30, total_granted = 30 WHERE user_id = ?",
+                owner.userId()
+        );
+        assertThat(cancellationService.settlePersisted(fixture.runId())).isTrue();
+
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, charged_credits FROM workflow_step_charges WHERE attempt_id = ?",
+                attempt.getId()
+        )).containsEntry("status", "CAPTURED")
+                .containsEntry("charged_credits", 30);
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT balance, frozen, total_consumed FROM credit_accounts WHERE user_id = ?",
+                owner.userId()
+        )).containsEntry("balance", 0)
+                .containsEntry("frozen", 0)
+                .containsEntry("total_consumed", 30);
+        assertThat(runStatus(fixture.runId())).isEqualTo("FAILED");
     }
 
     @Test
@@ -688,17 +1097,25 @@ class WorkflowInteractionApiTest {
     }
 
     private RunFixture startPaidWorkerWorkflow(Long userId, int requiredCredits, int balance) {
+        return startPaidWorkerWorkflow(userId, requiredCredits, balance, requiredCredits);
+    }
+
+    private RunFixture startPaidWorkerWorkflow(Long userId,
+                                               int requiredCredits,
+                                               int balance,
+                                               int fallbackCredits) {
         String nodes = """
                 [{"id":"worker","data":{"nodeDefType":"llm_text","title":"Worker",
                   "parameters":{"maxCreditCost":%d}}}]
                 """.formatted(requiredCredits);
         String policy = """
                 {"mode":"WORKFLOW_STEP","nodePolicies":{"worker":{
-                  "maxCreditCost":%d,"maxProviderCostCny":0.10,"fallbackChargeCredits":%d,"staticParams":{},
+                  "maxCreditCost":%d,"maxProviderCostCny":0.10,"pricingSource":"TOOL_FALLBACK",
+                  "fallbackChargeCredits":%d,"staticParams":{},
                   "modelPricingSnapshot":null,
                   "pricingPolicy":{"markupRatio":1.0,"minCredits":0,
                   "imageEstimateInputTokens":8000,"imageEstimateOutputTokens":8000,"rules":[]}}}}
-                """.formatted(requiredCredits, requiredCredits);
+                """.formatted(requiredCredits, fallbackCredits);
         jdbcTemplate.update(
                 "INSERT INTO credit_accounts(user_id, balance, membership_balance, gift_balance, frozen, total_granted, total_consumed, status) VALUES (?, ?, ?, 0, 0, ?, 0, 'ACTIVE')",
                 userId,

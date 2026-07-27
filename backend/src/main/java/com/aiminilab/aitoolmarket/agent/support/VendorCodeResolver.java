@@ -6,9 +6,12 @@ import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendor;
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorMapper;
+import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
+import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 
+import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -16,6 +19,9 @@ import java.util.Set;
 
 @Component
 public class VendorCodeResolver {
+
+    private static final String DEPRECATED_GATEWAY_VENDOR = "openai_gateway";
+    private static final String ACCOUNT_VENDOR_DRIVEN_PROVIDER = "openai_images_gateway";
 
     private static final Map<String, String> PROVIDER_TO_VENDOR = Map.ofEntries(
             Map.entry("deepseek", "deepseek"),
@@ -35,8 +41,7 @@ public class VendorCodeResolver {
             Map.entry("kling_video", "kling"),
             Map.entry("bailian_happyhorse", "qwen"),
             Map.entry("dashscope_qwen_tts", "qwen"),
-            Map.entry("ofox_openai_images", "openai_gateway"),
-            Map.entry("openai_images_gateway", "openai_gateway"),
+            Map.entry("ofox_openai_images", "ofox"),
             Map.entry("agnes_chat", "agnes"),
             Map.entry("agnes_images", "agnes"),
             Map.entry("agnes_video", "agnes"),
@@ -51,7 +56,7 @@ public class VendorCodeResolver {
     static {
         VENDOR_LABELS.put("deepseek", "DeepSeek");
         VENDOR_LABELS.put("openai", "OpenAI");
-        VENDOR_LABELS.put("openai_gateway", "OpenAI 兼容网关");
+        VENDOR_LABELS.put("ofox", "oFox");
         VENDOR_LABELS.put("agnes", "Agnes AI");
         VENDOR_LABELS.put("google", "Google Gemini");
         VENDOR_LABELS.put("qwen", "阿里云百炼");
@@ -86,23 +91,22 @@ public class VendorCodeResolver {
             return "other";
         }
         String declared = canonicalVendorCode(account.getVendorCode());
-        String inferred = canonicalVendorCode(resolveVendorCode(
-                "openai_compatible",
-                account.getBaseUrl(),
-                account.getAccountName(),
-                null
-        ));
+        String inferred = canonicalVendorCode(inferStrictVendorFromBaseUrl(account.getBaseUrl()));
         if ((declared.isBlank() || "openai".equals(declared))
                 && !inferred.isBlank()
                 && !"openai".equals(inferred)
                 && !"other".equals(inferred)) {
             return inferred;
         }
-        return declared.isBlank() ? inferred : declared;
+        return declared.isBlank() ? (inferred.isBlank() ? "other" : inferred) : declared;
     }
 
     public String resolveVendorCode(String provider, String baseUrl, String displayName, String modelName) {
         String normalizedProvider = provider == null ? "" : provider.trim().toLowerCase(Locale.ROOT);
+        if (ACCOUNT_VENDOR_DRIVEN_PROVIDER.equals(normalizedProvider)) {
+            String inferred = inferGatewayVendorFromBaseUrl(baseUrl);
+            return inferred == null ? "other" : inferred;
+        }
         String mapped = PROVIDER_TO_VENDOR.get(normalizedProvider);
         if ("openai_compatible".equals(normalizedProvider)) {
             return inferFromText(baseUrl, displayName, modelName, "openai");
@@ -112,9 +116,6 @@ public class VendorCodeResolver {
         }
         if (mapped != null && !"openai".equals(mapped)) {
             return mapped;
-        }
-        if ("ofox_openai_images".equals(normalizedProvider) || "openai_images_gateway".equals(normalizedProvider)) {
-            return "openai_gateway";
         }
         String fromUrl = inferFromBaseUrl(baseUrl);
         if (fromUrl != null) {
@@ -134,6 +135,42 @@ public class VendorCodeResolver {
             case "suno_music" -> "suno";
             default -> normalized;
         };
+    }
+
+    public String requireConcreteVendorCode(String vendorCode) {
+        String normalized = canonicalVendorCode(vendorCode);
+        if (normalized.isBlank()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "vendorCode is required");
+        }
+        if (DEPRECATED_GATEWAY_VENDOR.equals(normalized)) {
+            throw new BusinessException(
+                    ErrorCode.PARAM_ERROR,
+                    "openai_gateway is a compatibility channel, not a vendor; select the actual credential issuer"
+            );
+        }
+        return normalized;
+    }
+
+    public boolean usesBoundAccountVendor(String providerCode) {
+        return providerCode != null
+                && ACCOUNT_VENDOR_DRIVEN_PROVIDER.equals(providerCode.trim().toLowerCase(Locale.ROOT));
+    }
+
+    public boolean isDeprecatedVirtualVendorCode(String vendorCode) {
+        return DEPRECATED_GATEWAY_VENDOR.equals(canonicalVendorCode(vendorCode));
+    }
+
+    public String resolvePublicVendorCode(AgentModelConfig config) {
+        if (config == null) {
+            return "other";
+        }
+        String upstreamVendor = providerRegistry.findByCode(config.getProvider())
+                .map(ModelProviderDefinition::upstreamVendor)
+                .orElse(null);
+        if (upstreamVendor != null && !upstreamVendor.isBlank()) {
+            return canonicalVendorCode(upstreamVendor);
+        }
+        return canonicalVendorCode(resolveVendorCode(config));
     }
 
     public String vendorLabel(String vendorCode) {
@@ -163,6 +200,9 @@ public class VendorCodeResolver {
             if (vendor.getVendorCode() == null || vendor.getVendorCode().isBlank()) {
                 continue;
             }
+            if (DEPRECATED_GATEWAY_VENDOR.equals(canonicalVendorCode(vendor.getVendorCode()))) {
+                continue;
+            }
             catalog.putIfAbsent(vendor.getVendorCode(), vendorLabel(vendor.getVendorCode()));
         }
         catalog.putAll(VENDOR_LABELS);
@@ -180,9 +220,6 @@ public class VendorCodeResolver {
         if (vendor != null && Boolean.TRUE.equals(vendor.getEnabled())
                 && vendor.getIconAsset() != null && !vendor.getIconAsset().isBlank()) {
             return vendor.getIconAsset();
-        }
-        if ("openai_gateway".equalsIgnoreCase(vendorCode)) {
-            return "openrouter";
         }
         if ("volcengine".equalsIgnoreCase(vendorCode)) {
             return "doubao";
@@ -229,8 +266,51 @@ public class VendorCodeResolver {
         if (text.contains("mineru.net") || text.contains("mineru")) return "mineru";
         if (text.contains("openai.com")) return "openai";
         if (text.contains("api.openai.com")) return "openai";
-        if (text.contains("ofox.ai")) return "openai_gateway";
+        if (text.contains("ofox.ai")) return "ofox";
         return null;
+    }
+
+    private static String inferGatewayVendorFromBaseUrl(String baseUrl) {
+        String host = host(baseUrl);
+        if ("api.openai.com".equals(host)) return "openai";
+        if (matchesDomain(host, "ofox.ai")) return "ofox";
+        return null;
+    }
+
+    private static String inferStrictVendorFromBaseUrl(String baseUrl) {
+        String host = host(baseUrl);
+        if (host == null) return null;
+        if ("api.openai.com".equals(host)) return "openai";
+        if (matchesDomain(host, "ofox.ai")) return "ofox";
+        if (matchesDomain(host, "moonshot.cn")) return "moonshot";
+        if (matchesDomain(host, "deepseek.com")) return "deepseek";
+        if (matchesDomain(host, "siliconflow.cn")) return "siliconflow";
+        if (matchesDomain(host, "volces.com") || matchesDomain(host, "volcengine.com")) return "volcengine";
+        if (matchesDomain(host, "klingai.com")) return "kling";
+        if (matchesDomain(host, "minimaxi.com")) return "minimax";
+        if (matchesDomain(host, "sunoapi.org") || matchesDomain(host, "suno.com")) return "suno";
+        if (matchesDomain(host, "googleapis.com")) return "google";
+        if (matchesDomain(host, "aliyuncs.com")) return "qwen";
+        if (matchesDomain(host, "bigmodel.cn")) return "zhipu";
+        if (matchesDomain(host, "anthropic.com")) return "anthropic";
+        if (matchesDomain(host, "agnes-ai.com")) return "agnes";
+        if (matchesDomain(host, "mineru.net")) return "mineru";
+        if (matchesDomain(host, "vidu.com")) return "vidu";
+        return null;
+    }
+
+    private static String host(String baseUrl) {
+        if (baseUrl == null || baseUrl.isBlank()) return null;
+        try {
+            String host = URI.create(baseUrl.trim()).getHost();
+            return host == null || host.isBlank() ? null : host.toLowerCase(Locale.ROOT);
+        } catch (IllegalArgumentException exception) {
+            return null;
+        }
+    }
+
+    private static boolean matchesDomain(String host, String domain) {
+        return host != null && (domain.equals(host) || host.endsWith("." + domain));
     }
 
     private static String inferFromText(String baseUrl, String displayName, String modelName, String fallback) {

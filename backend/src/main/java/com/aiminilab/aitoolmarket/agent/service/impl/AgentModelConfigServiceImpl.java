@@ -799,10 +799,11 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     private AgentModelConfigResponse toResponse(AgentModelConfig config, boolean chatSelectable) {
         String vendorAccountName = null;
+        ModelVendorAccount vendorAccount = null;
         if (config.getVendorAccountId() != null) {
-            ModelVendorAccount account = vendorAccountMapper.findActiveById(config.getVendorAccountId());
-            if (account != null) {
-                vendorAccountName = account.getAccountName();
+            vendorAccount = vendorAccountMapper.findActiveById(config.getVendorAccountId());
+            if (vendorAccount != null) {
+                vendorAccountName = vendorAccount.getAccountName();
             }
         }
         config.setRoutingPoolName(null);
@@ -812,7 +813,10 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
                 config.setRoutingPoolName(pool.getPoolName());
             }
         }
-        String channelCode = vendorCodeResolver.resolveVendorCode(config);
+        String channelCode = vendorAccount == null
+                ? vendorCodeResolver.resolveVendorCode(config)
+                : vendorCodeResolver.canonicalVendorCode(
+                        vendorCodeResolver.resolveEffectiveVendorCode(vendorAccount));
         return AgentModelConfigResponse.from(
                 config,
                 capabilitiesCodec,
@@ -827,7 +831,7 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
     }
 
     private AgentSelectableModelResponse toSelectableResponse(AgentModelConfig config, boolean chatSelectable) {
-        String channelCode = vendorCodeResolver.resolveVendorCode(config);
+        String channelCode = vendorCodeResolver.resolvePublicVendorCode(config);
         return AgentSelectableModelResponse.from(
                 config,
                 capabilitiesCodec,
@@ -1125,11 +1129,12 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account does not belong to the selected routing pool");
         }
         String modelVendor = resolveModelVendorCode(request);
-        String effectiveAccountVendor = vendorCodeResolver.canonicalVendorCode(
+        String effectiveAccountVendor = vendorCodeResolver.requireConcreteVendorCode(
                 vendorCodeResolver.resolveEffectiveVendorCode(account));
         String declaredAccountVendor = vendorCodeResolver.canonicalVendorCode(account.getVendorCode());
-        String poolVendor = vendorCodeResolver.canonicalVendorCode(pool.getVendorCode());
-        if (!modelVendor.equals(effectiveAccountVendor)
+        String poolVendor = vendorCodeResolver.requireConcreteVendorCode(pool.getVendorCode());
+        if ((!vendorCodeResolver.usesBoundAccountVendor(request.provider())
+                && !modelVendor.equals(effectiveAccountVendor))
                 || (!poolVendor.equals(effectiveAccountVendor) && !poolVendor.equals(declaredAccountVendor))) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "routing pool does not belong to the model provider vendor");
         }
@@ -1137,9 +1142,10 @@ public class AgentModelConfigServiceImpl implements AgentModelConfigService {
 
     private void validateVendorAccountMatchesModel(AgentModelConfigRequest request, ModelVendorAccount account) {
         String modelVendor = resolveModelVendorCode(request);
-        String accountVendor = vendorCodeResolver.canonicalVendorCode(
+        String accountVendor = vendorCodeResolver.requireConcreteVendorCode(
                 vendorCodeResolver.resolveEffectiveVendorCode(account));
-        if (!modelVendor.equals(accountVendor)) {
+        if (!vendorCodeResolver.usesBoundAccountVendor(request.provider())
+                && !modelVendor.equals(accountVendor)) {
             throw new BusinessException(
                     ErrorCode.PARAM_ERROR,
                     "vendor account does not belong to the model provider vendor"

@@ -18,6 +18,8 @@ import com.aiminilab.aitoolmarket.agent.service.ModelProviderMetadataService;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
 import com.aiminilab.aitoolmarket.agent.support.ModelConfigCredentialResolver;
 import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
+import com.aiminilab.aitoolmarket.common.enums.ErrorCode;
+import com.aiminilab.aitoolmarket.common.exception.BusinessException;
 import com.aiminilab.aitoolmarket.task.routing.mapper.AccountModelRouteStateMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,8 +34,10 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -240,6 +244,56 @@ class ModelVendorAccountServiceImplTest {
         ArgumentCaptor<ModelVendorAccount> account = ArgumentCaptor.forClass(ModelVendorAccount.class);
         verify(vendorAccountMapper).insertAccount(account.capture());
         assertThat(account.getValue().getVendorCode()).isEqualTo("qwen");
+    }
+
+    @Test
+    void createRejectsVirtualGatewayVendorBeforeInsert() {
+        doThrow(new BusinessException(
+                ErrorCode.PARAM_ERROR,
+                "openai_gateway is a compatibility channel, not a vendor; select the actual credential issuer"
+        )).when(vendorCodeResolver).requireConcreteVendorCode("openai_gateway");
+        ModelVendorAccountRequest request = new ModelVendorAccountRequest(
+                "openai_gateway",
+                "Legacy gateway",
+                "https://api.ofox.ai/v1",
+                "test-key",
+                false,
+                null,
+                false,
+                null,
+                null,
+                null,
+                false,
+                "MANUAL",
+                null,
+                "USD",
+                null,
+                true,
+                null,
+                null
+        );
+
+        assertThatThrownBy(() -> service.adminCreate(request))
+                .hasMessageContaining("actual credential issuer");
+        verify(vendorAccountMapper, never()).insertAccount(any());
+    }
+
+    @Test
+    void discoveryRejectsLegacyVirtualGatewayAccountBeforeImport() {
+        ModelVendorAccount legacy = new ModelVendorAccount();
+        legacy.setId(33L);
+        legacy.setVendorCode("openai_gateway");
+        legacy.setBaseUrl("https://api.ofox.ai/v1");
+        legacy.setApiKey("legacy-key");
+        when(vendorAccountMapper.findActiveById(33L)).thenReturn(legacy);
+        doThrow(new BusinessException(
+                ErrorCode.PARAM_ERROR,
+                "openai_gateway is a compatibility channel, not a vendor; select the actual credential issuer"
+        )).when(vendorCodeResolver).requireConcreteVendorCode("openai_gateway");
+
+        assertThatThrownBy(() -> service.adminDiscoverModels(33L))
+                .hasMessageContaining("actual credential issuer");
+        verifyNoInteractions(agentModelConfigMapper);
     }
 
     private ModelVendorAccount agnesAccount() {

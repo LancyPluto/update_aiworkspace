@@ -52,6 +52,14 @@ public interface BillingUsageLogMapper extends BaseMapper<BillingUsageLog> {
                                                  @Param("providerRequestId") String providerRequestId,
                                                  @Param("marginCredits") int marginCredits);
 
+    @Update("""
+            UPDATE billing_usage_logs
+            SET provider_request_id = #{providerRequestId}
+            WHERE id = #{id} AND provider_request_id IS NULL
+            """)
+    int attachProviderRequestIdIfAbsent(@Param("id") Long id,
+                                        @Param("providerRequestId") String providerRequestId);
+
     String FILTER = """
             <if test="startAt != null">AND created_at &gt;= #{startAt}</if>
             <if test="endAt != null">AND created_at &lt; #{endAt}</if>

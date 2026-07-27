@@ -31,6 +31,7 @@ import {
   applyOptionPreset,
   createEmptyField,
   detectPreset,
+  sliderMetaFromNumericOptions,
 } from "@/lib/tool-fields"
 
 type FieldSchemaEditorProps = {
@@ -58,6 +59,10 @@ export function FieldSchemaEditor({ fields, onChange, disabled }: FieldSchemaEdi
     const next = fields.map((field, i) => {
       if (i !== index) return field
       const merged = { ...field, ...patch }
+      if (patch.fieldType === "slider" && !field.uiMeta.slider) {
+        const slider = sliderMetaFromNumericOptions(field.options)
+        if (slider) merged.uiMeta = { ...field.uiMeta, slider }
+      }
       if (patch.fieldType && !supportsOptions(patch.fieldType)) {
         merged.options = []
       }

@@ -12,6 +12,7 @@ import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowStepAttemptMapper;
 import com.aiminilab.aitoolmarket.workflow.metrics.WorkflowMetrics;
 import com.aiminilab.aitoolmarket.workflow.model.WorkflowAttemptStatus;
 import com.aiminilab.aitoolmarket.workflow.model.WorkflowStepStatus;
+import com.aiminilab.aitoolmarket.workflow.support.WorkflowBillingReconciliationState;
 import com.aiminilab.aitoolmarket.workflow.support.WorkflowFailureContract;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,6 +37,12 @@ public class WorkflowStepCallbackService {
     private static final List<String> ACTIVE_STEP_STATUSES = List.of(
             WorkflowStepStatus.QUEUED.name(),
             WorkflowStepStatus.RUNNING.name()
+    );
+    // Older releases cancelled uncertain attempts during isolation; keep those runs recoverable.
+    private static final List<String> RECONCILIATION_LATE_CALLBACK_ATTEMPT_STATUSES = List.of(
+            WorkflowAttemptStatus.RUNNING.name(),
+            WorkflowAttemptStatus.LOST.name(),
+            WorkflowAttemptStatus.CANCELLED.name()
     );
 
     private final WorkflowStepAttemptMapper attemptMapper;
@@ -89,6 +96,12 @@ public class WorkflowStepCallbackService {
         WorkflowMetrics.LateCallbackResult rejection = rejection(run, step, attempt, true);
         if (rejection != null) {
             metrics.recordLateCallback(rejection);
+            if (WorkflowBillingReconciliationState.isIsolation(run)) {
+                String outputJson = outputJson(request);
+                persistReconciliationLateSuccess(attempt, outputJson, providerRequestId);
+                billingService.recordReconciliationLateSuccess(attempt.getId(), childTaskId, request);
+                return true;
+            }
             billingService.releaseLateSuccess(attempt.getId(), childTaskId, request);
             return false;
         }
@@ -232,6 +245,12 @@ public class WorkflowStepCallbackService {
         WorkflowMetrics.LateCallbackResult rejection = rejection(run, step, attempt, true);
         if (rejection != null) {
             metrics.recordLateCallback(rejection);
+            if (WorkflowBillingReconciliationState.isIsolation(run)) {
+                attachProviderRequestId(attempt.getId(), providerRequestId);
+                persistReconciliationLateFailure(attempt, request, providerRequestId);
+                billingService.releaseLateFailure(attempt.getId(), childTaskId, request);
+                return true;
+            }
             billingService.releaseLateFailure(attempt.getId(), childTaskId, request);
             return false;
         }
@@ -320,6 +339,59 @@ public class WorkflowStepCallbackService {
         return isCurrent(step, attempt)
                 && WorkflowAttemptStatus.RUNNING.name().equals(attempt.getStatus())
                 && WorkflowStepStatus.RUNNING.name().equals(step.getStatus());
+    }
+
+    private void persistReconciliationLateSuccess(WorkflowStepAttempt attempt,
+                                                   String outputJson,
+                                                   String providerRequestId) {
+        if (WorkflowAttemptStatus.SUCCESS.name().equals(attempt.getStatus())) {
+            if (!sameOutput(attempt.getOutputJson(), outputJson)) {
+                throw new IllegalStateException("Reconciliation late success output conflicts with persisted output");
+            }
+            return;
+        }
+        if (attemptMapper.markSuccess(
+                attempt.getId(),
+                outputJson,
+                providerRequestId,
+                RECONCILIATION_LATE_CALLBACK_ATTEMPT_STATUSES
+        ) == 1) {
+            return;
+        }
+        WorkflowStepAttempt persisted = attemptMapper.selectByIdForUpdate(attempt.getId());
+        if (persisted == null
+                || !WorkflowAttemptStatus.SUCCESS.name().equals(persisted.getStatus())
+                || !sameOutput(persisted.getOutputJson(), outputJson)) {
+            throw new IllegalStateException("Reconciliation late success could not be persisted");
+        }
+    }
+
+    private void persistReconciliationLateFailure(WorkflowStepAttempt attempt,
+                                                   WorkerFailedRequest request,
+                                                   String providerRequestId) {
+        if (WorkflowAttemptStatus.FAILED.name().equals(attempt.getStatus())) {
+            return;
+        }
+        WorkflowFailureContract failure = WorkflowFailureContract.from(
+                request.errorCode(),
+                request.errorMessage(),
+                request.developerMessage()
+        );
+        if (attemptMapper.markFailedWithContract(
+                attempt.getId(),
+                failure.errorCode(),
+                failure.userMessage(),
+                failure.developerMessage(),
+                failure.failureTraceId(),
+                providerRequestId,
+                RECONCILIATION_LATE_CALLBACK_ATTEMPT_STATUSES
+        ) == 1) {
+            return;
+        }
+        WorkflowStepAttempt persisted = attemptMapper.selectByIdForUpdate(attempt.getId());
+        if (persisted == null || !WorkflowAttemptStatus.FAILED.name().equals(persisted.getStatus())) {
+            throw new IllegalStateException("Reconciliation late failure could not be persisted");
+        }
     }
 
     private WorkflowRun lockRun(WorkflowRunStep step) {

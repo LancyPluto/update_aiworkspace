@@ -322,6 +322,9 @@ public class WorkflowBillingService {
         if (!reserved && !released) {
             throw new IllegalStateException("Workflow charge is not reserved for release");
         }
+        if (released && request != null) {
+            attachRecordedProviderRequestId(charge, request.providerRequestId());
+        }
         boolean hasProviderCost = request != null
                 && !Boolean.FALSE.equals(request.providerCharged())
                 && (Boolean.TRUE.equals(request.providerCharged())
@@ -393,6 +396,26 @@ public class WorkflowBillingService {
     }
 
     @Transactional
+    public void recordReconciliationLateSuccess(Long attemptId,
+                                                Long childTaskId,
+                                                WorkerSuccessRequest request) {
+        capture(attemptId, childTaskId, request);
+    }
+
+    @Transactional
+    public boolean settleReconciliationSuccess(Long attemptId, Long childTaskId) {
+        WorkflowStepCharge charge = chargeMapper.selectByAttemptIdForUpdate(attemptId);
+        if (charge == null || WorkflowChargeStatus.CAPTURED.name().equals(charge.getStatus())) {
+            return true;
+        }
+        if (!WorkflowChargeStatus.AWAITING_FUNDS.name().equals(charge.getStatus())) {
+            return false;
+        }
+        WorkerSuccessRequest request = readSettlementPayload(charge).toWorkerSuccessRequest(null);
+        return capture(attemptId, childTaskId, request) == SettlementResult.SETTLED;
+    }
+
+    @Transactional
     public void releaseDeferredSuccess(Long attemptId, Long childTaskId) {
         WorkflowStepCharge charge = chargeMapper.selectByAttemptIdForUpdate(attemptId);
         if (charge == null || !WorkflowChargeStatus.AWAITING_FUNDS.name().equals(charge.getStatus())) {
@@ -421,6 +444,9 @@ public class WorkflowBillingService {
         boolean released = WorkflowChargeStatus.RELEASED.name().equals(charge.getStatus());
         if (!reserved && !released) {
             return;
+        }
+        if (released) {
+            attachRecordedProviderRequestId(charge, request.providerRequestId());
         }
         if (Boolean.FALSE.equals(request.providerCalled())) {
             if (released) {
@@ -487,11 +513,12 @@ public class WorkflowBillingService {
                                                 Long childTaskId,
                                                 WorkerSuccessRequest request) {
         validateProviderCallDeclaration(request);
-        if (request.providerCostAmount() == null) {
-            return;
-        }
         if (charge.getBillingUsageId() == null) {
             throw new IllegalStateException("Captured workflow charge has no billing usage to attach provider cost");
+        }
+        attachRecordedProviderRequestId(charge, request.providerRequestId());
+        if (request.providerCostAmount() == null) {
+            return;
         }
         taskMapper.findById(childTaskId)
                 .orElseThrow(() -> new IllegalStateException("Workflow child task does not exist"));
@@ -519,6 +546,12 @@ public class WorkflowBillingService {
         }
         if (attached) {
             metrics.recordLateCallback(WorkflowMetrics.LateCallbackResult.RECORDED_PROVIDER_COST);
+        }
+    }
+
+    private void attachRecordedProviderRequestId(WorkflowStepCharge charge, String providerRequestId) {
+        if (charge.getBillingUsageId() != null) {
+            usageService.attachProviderRequestId(charge.getBillingUsageId(), providerRequestId);
         }
     }
 

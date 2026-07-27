@@ -11,6 +11,7 @@ import com.aiminilab.aitoolmarket.agent.dto.UpsertModelVendorRequest;
 import com.aiminilab.aitoolmarket.agent.entity.ModelVendor;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorMapper;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorService;
+import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
 import com.aiminilab.aitoolmarket.tool.mapper.ToolMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,26 +29,29 @@ public class ModelVendorServiceImpl implements ModelVendorService {
     private final ToolMapper toolMapper;
     private final BypassCacheService bypassCacheService;
     private final ObjectMapper objectMapper;
+    private final VendorCodeResolver vendorCodeResolver;
 
     public ModelVendorServiceImpl(ModelVendorMapper modelVendorMapper,
                                   ModelVendorAccountMapper modelVendorAccountMapper,
                                   AgentModelConfigMapper agentModelConfigMapper,
                                   ToolMapper toolMapper,
                                   BypassCacheService bypassCacheService,
-                                  ObjectMapper objectMapper) {
+                                  ObjectMapper objectMapper,
+                                  VendorCodeResolver vendorCodeResolver) {
         this.modelVendorMapper = modelVendorMapper;
         this.modelVendorAccountMapper = modelVendorAccountMapper;
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.toolMapper = toolMapper;
         this.bypassCacheService = bypassCacheService;
         this.objectMapper = objectMapper;
+        this.vendorCodeResolver = vendorCodeResolver;
     }
 
     @Override
     public List<ModelVendorResponse> listEnabled() {
         JavaType type = objectMapper.getTypeFactory()
                 .constructCollectionType(List.class, ModelVendorResponse.class);
-        return bypassCacheService.getOrLoad(
+        List<ModelVendorResponse> cached = bypassCacheService.getOrLoad(
                 CacheNamespaces.MODEL_VENDORS_ENABLED,
                 bypassCacheService.vendorTtl(),
                 type,
@@ -55,11 +59,15 @@ public class ModelVendorServiceImpl implements ModelVendorService {
                         .map(ModelVendorResponse::from)
                         .toList()
         );
+        return cached.stream()
+                .filter(vendor -> !vendorCodeResolver.isDeprecatedVirtualVendorCode(vendor.vendorCode()))
+                .toList();
     }
 
     @Override
     public List<ModelVendorResponse> adminListAll() {
         return modelVendorMapper.selectList(null).stream()
+                .filter(vendor -> !vendorCodeResolver.isDeprecatedVirtualVendorCode(vendor.getVendorCode()))
                 .sorted(Comparator
                         .comparing((ModelVendor vendor) -> Boolean.FALSE.equals(vendor.getEnabled()) ? 1 : 0)
                         .thenComparing(vendor -> vendor.getSortOrder() == null ? 0 : vendor.getSortOrder())
@@ -71,11 +79,12 @@ public class ModelVendorServiceImpl implements ModelVendorService {
     @Override
     @Transactional
     public ModelVendorResponse adminUpsert(UpsertModelVendorRequest request) {
-        ModelVendor existing = modelVendorMapper.findByCode(request.vendorCode());
+        String vendorCode = vendorCodeResolver.requireConcreteVendorCode(request.vendorCode());
+        ModelVendor existing = modelVendorMapper.findByCode(vendorCode);
         LocalDateTime now = LocalDateTime.now();
         if (existing == null) {
             ModelVendor vendor = new ModelVendor();
-            vendor.setVendorCode(request.vendorCode());
+            vendor.setVendorCode(vendorCode);
             vendor.setVendorLabel(request.vendorLabel());
             vendor.setIconAsset(request.iconAsset());
             vendor.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());

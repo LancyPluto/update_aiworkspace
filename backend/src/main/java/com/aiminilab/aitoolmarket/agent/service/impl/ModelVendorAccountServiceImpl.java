@@ -299,6 +299,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     @Transactional
     public ModelVendorAccountDiscoveryResponse adminDiscoverModels(Long id) {
         ModelVendorAccount account = findActiveOrThrow(id);
+        vendorCodeResolver.requireConcreteVendorCode(account.getVendorCode());
         if (account.getBaseUrl() == null || account.getBaseUrl().isBlank()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor account baseUrl is required for model discovery");
         }
@@ -1100,13 +1101,14 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
             return false;
         }
         String vendor = vendorCode.trim().toLowerCase(Locale.ROOT);
-        return "openai".equals(vendor) || "openai_gateway".equals(vendor);
+        return "openai".equals(vendor) || "ofox".equals(vendor);
     }
 
     private void validate(ModelVendorAccountRequest request, ModelVendorAccount existing) {
         if (request.vendorCode() == null || request.vendorCode().isBlank()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "vendorCode is required");
         }
+        vendorCodeResolver.requireConcreteVendorCode(request.vendorCode());
         if (request.accountName() == null || request.accountName().isBlank()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "accountName is required");
         }

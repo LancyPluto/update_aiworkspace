@@ -4,8 +4,10 @@ import com.aiminilab.aitoolmarket.agent.config.ModelProviderRegistry;
 import com.aiminilab.aitoolmarket.agent.mapper.ModelVendorMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 class VendorCodeResolverTest {
@@ -14,7 +16,9 @@ class VendorCodeResolverTest {
 
     @BeforeEach
     void setUp() {
-        resolver = new VendorCodeResolver(new ModelProviderRegistry(), mock(ModelVendorMapper.class));
+        ModelProviderRegistry providerRegistry = new ModelProviderRegistry();
+        ReflectionTestUtils.invokeMethod(providerRegistry, "load");
+        resolver = new VendorCodeResolver(providerRegistry, mock(ModelVendorMapper.class));
     }
 
     @Test
@@ -83,7 +87,57 @@ class VendorCodeResolverTest {
                 "https://api.ofox.ai/v1",
                 "GPT-Image-2",
                 "openai/gpt-image-2"
-        )).isEqualTo("openai_gateway");
+        )).isEqualTo("ofox");
+    }
+
+    @Test
+    void imageGatewayUsesStrictOperatorHostAndPublicUpstreamVendor() {
+        assertThat(resolver.resolveVendorCode(
+                "ofox_openai_images",
+                "https://relay.example/v1",
+                "oFox images",
+                "openai/gpt-image-2"
+        )).isEqualTo("ofox");
+        assertThat(resolver.resolveVendorCode(
+                "openai_images_gateway",
+                "https://api.ofox.ai/v1",
+                "Gateway images",
+                "openai/gpt-image-2"
+        )).isEqualTo("ofox");
+        assertThat(resolver.resolveVendorCode(
+                "openai_images_gateway",
+                "https://api.openai.com/v1",
+                "Official images",
+                "gpt-image-1"
+        )).isEqualTo("openai");
+        assertThat(resolver.resolveVendorCode(
+                "openai_images_gateway",
+                "https://ofox.ai.evil.example/v1",
+                "Unknown gateway",
+                "gpt-image-1"
+        )).isEqualTo("other");
+        assertThat(resolver.resolveVendorCode(
+                "openai_images_gateway",
+                "https://api.openai.com.evil.example/v1",
+                "Unknown gateway",
+                "gpt-image-1"
+        )).isEqualTo("other");
+
+        com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount declaredOpenAi =
+                new com.aiminilab.aitoolmarket.agent.entity.ModelVendorAccount();
+        declaredOpenAi.setVendorCode("openai");
+        declaredOpenAi.setBaseUrl("https://ofox.ai.evil.example/v1");
+        assertThat(resolver.resolveEffectiveVendorCode(declaredOpenAi)).isEqualTo("openai");
+        declaredOpenAi.setBaseUrl("https://api.moonshot.cn/v1");
+        assertThat(resolver.resolveEffectiveVendorCode(declaredOpenAi)).isEqualTo("moonshot");
+
+        com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig config =
+                new com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig();
+        config.setProvider("ofox_openai_images");
+        config.setBaseUrl("https://api.ofox.ai/v1");
+        assertThat(resolver.resolvePublicVendorCode(config)).isEqualTo("openai");
+        assertThat(resolver.usesBoundAccountVendor("openai_images_gateway")).isTrue();
+        assertThat(resolver.usesBoundAccountVendor("ofox_openai_images")).isFalse();
     }
 
     @Test
@@ -135,8 +189,10 @@ class VendorCodeResolverTest {
     }
 
     @Test
-    void accountVendorCanonicalizationPreservesGatewayAndGroupsSuno() {
+    void accountVendorCanonicalizationRejectsVirtualGatewayAndGroupsSuno() {
         assertThat(resolver.canonicalVendorCode("openai_gateway")).isEqualTo("openai_gateway");
+        assertThatThrownBy(() -> resolver.requireConcreteVendorCode("openai_gateway"))
+                .hasMessageContaining("actual credential issuer");
         assertThat(resolver.canonicalVendorCode("suno_music")).isEqualTo("suno");
     }
 

@@ -30,7 +30,7 @@ public class ModelAccountRoutingPoolService {
         if (vendorCode == null || vendorCode.isBlank()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "vendor code is required for routing pool");
         }
-        String normalizedVendorCode = vendorCodeResolver.canonicalVendorCode(vendorCode);
+        String normalizedVendorCode = vendorCodeResolver.requireConcreteVendorCode(vendorCode);
         String poolKey = poolName.toLowerCase(Locale.ROOT);
         poolMapper.upsert(normalizedVendorCode, poolName, poolKey);
         ModelAccountRoutingPool pool = poolMapper.findByVendorCodeAndPoolKey(normalizedVendorCode, poolKey);

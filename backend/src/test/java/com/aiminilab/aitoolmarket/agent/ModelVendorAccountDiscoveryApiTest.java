@@ -56,7 +56,7 @@ class ModelVendorAccountDiscoveryApiTest {
     private AgentServiceClient agentServiceClient;
 
     @Test
-    void openAiGatewayAccountUsesEnabledLinkedMediaModel() throws Exception {
+    void ofoxAccountUsesEnabledLinkedGenericMediaModel() throws Exception {
         HttpServer server = modelsServer("""
                 {
                   "object": "list",
@@ -68,10 +68,10 @@ class ModelVendorAccountDiscoveryApiTest {
         try {
             String adminToken = loginAdmin();
             String baseUrl = "http://127.0.0.1:%d/v1".formatted(server.getAddress().getPort());
-            Long accountId = createVendorAccount(adminToken, "openai_gateway", "OpenAI Gateway", baseUrl);
+            Long accountId = createVendorAccount(adminToken, "ofox", "oFox Gateway", baseUrl);
             bindEnabledModel(
                     accountId,
-                    "openai-gateway-account-probe",
+                    "ofox-generic-gateway-account-probe",
                     "openai_images_gateway",
                     "openai/gpt-image-2",
                     baseUrl,
@@ -201,15 +201,15 @@ class ModelVendorAccountDiscoveryApiTest {
     }
 
     @Test
-    void accountProbeReportsCredentialFailureForUnauthorizedGateway() throws Exception {
+    void accountProbeReportsCredentialFailureForUnauthorizedOfoxGateway() throws Exception {
         HttpServer server = statusServer(401, "{\"error\":\"unauthorized\"}");
         try {
             String adminToken = loginAdmin();
             String baseUrl = "http://127.0.0.1:%d/v1".formatted(server.getAddress().getPort());
-            Long accountId = createVendorAccount(adminToken, "openai_gateway", "Unauthorized Gateway", baseUrl);
+            Long accountId = createVendorAccount(adminToken, "ofox", "Unauthorized oFox Gateway", baseUrl);
             bindEnabledModel(
                     accountId,
-                    "unauthorized-openai-gateway-probe",
+                    "unauthorized-ofox-gateway-probe",
                     "openai_images_gateway",
                     "openai/gpt-image-2",
                     baseUrl,
@@ -501,15 +501,20 @@ class ModelVendorAccountDiscoveryApiTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {
-                                      "vendorCode": "openai_gateway",
-                                      "vendorLabel": "OpenAI Gateway",
-                                      "iconAsset": "openrouter",
+                                      "vendorCode": "cascade_test_vendor",
+                                      "vendorLabel": "Cascade Test Vendor",
+                                      "iconAsset": "api",
                                       "sortOrder": 10,
                                       "enabled": true
                                     }
                                     """))
                     .andExpect(status().isOk());
-            Long accountId = createVendorAccount(adminToken, "http://127.0.0.1:%d/v1".formatted(server.getAddress().getPort()));
+            Long accountId = createVendorAccount(
+                    adminToken,
+                    "cascade_test_vendor",
+                    "Cascade Test Account",
+                    "http://127.0.0.1:%d/v1".formatted(server.getAddress().getPort())
+            );
 
             mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/discover-models", accountId)
                             .header("Authorization", "Bearer " + adminToken))
@@ -524,7 +529,7 @@ class ModelVendorAccountDiscoveryApiTest {
                            'TEXT', 'ONLINE', 1, ?, 1, 1, 0)
                     """, config.getId());
 
-            mockMvc.perform(delete("/api/admin/v1/model-vendors/{vendorCode}", "openai_gateway")
+            mockMvc.perform(delete("/api/admin/v1/model-vendors/{vendorCode}", "cascade_test_vendor")
                             .header("Authorization", "Bearer " + adminToken))
                     .andExpect(status().isOk());
 
@@ -536,10 +541,10 @@ class ModelVendorAccountDiscoveryApiTest {
                     Integer.class,
                     accountId);
             Integer activeAccounts = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(1) FROM model_vendor_accounts WHERE vendor_code='openai_gateway' AND COALESCE(is_deleted,0)=0",
+                    "SELECT COUNT(1) FROM model_vendor_accounts WHERE vendor_code='cascade_test_vendor' AND COALESCE(is_deleted,0)=0",
                     Integer.class);
             Integer enabledVendors = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(1) FROM model_vendors WHERE vendor_code='openai_gateway' AND enabled=1",
+                    "SELECT COUNT(1) FROM model_vendors WHERE vendor_code='cascade_test_vendor' AND enabled=1",
                     Integer.class);
             assertThat(activeTools).isZero();
             assertThat(activeModels).isZero();
@@ -595,8 +600,8 @@ class ModelVendorAccountDiscoveryApiTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "vendorCode": "openai_gateway",
-                                  "accountName": "Broken Gateway",
+                                  "vendorCode": "ofox",
+                                  "accountName": "Broken oFox Gateway",
                                   "baseUrl": "http://127.0.0.1:1/v1",
                                   "extraAuthJson": "{\\"responseFormat\\":\\"url\\"}",
                                   "balanceQueryMode": "MANUAL",
@@ -644,7 +649,7 @@ class ModelVendorAccountDiscoveryApiTest {
                 """);
         try {
             String adminToken = loginAdmin();
-            Long accountId = createVendorAccount(adminToken, "openai_gateway", "Image Gateway",
+            Long accountId = createVendorAccount(adminToken, "ofox", "oFox Image Gateway",
                     "http://127.0.0.1:%d/v1".formatted(server.getAddress().getPort()));
             jdbcTemplate.update("UPDATE model_vendor_accounts SET health_status='OK' WHERE id=?", accountId);
             jdbcTemplate.update("""
@@ -737,7 +742,7 @@ class ModelVendorAccountDiscoveryApiTest {
     }
 
     private Long createVendorAccount(String adminToken, String baseUrl) throws Exception {
-        return createVendorAccount(adminToken, "openai_gateway", "Discovery Gateway", baseUrl);
+        return createVendorAccount(adminToken, "ofox", "oFox Discovery Gateway", baseUrl);
     }
 
     private Long createVendorAccount(String adminToken, String vendorCode, String accountName, String baseUrl) throws Exception {
