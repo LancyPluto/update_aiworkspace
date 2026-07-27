@@ -7,6 +7,8 @@ public record CreditLogResponse(
         Long userId,
         Long taskId,
         Long agentRunId,
+        String sourceType,
+        Long sourceRef,
         String logType,
         Integer amount,
         Integer frozenAmount,

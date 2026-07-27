@@ -598,6 +598,7 @@ class AdminAgentApiTest {
     }
 
     @Test
+    @Transactional
     void sunoVendorAccountTestUsesSunoProviderAcceptOnlyStrategy() throws Exception {
         mockExternalAuthDependencies();
         String adminToken = login("/api/admin/v1/auth/login", "admin");
@@ -622,6 +623,45 @@ class AdminAgentApiTest {
                 .getContentAsString();
         Long accountId = Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
 
+        mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "vendorAccountId": %d,
+                                  "displayName": "Suno V4 agent model",
+                                  "configCode": "suno_v4_account_probe_test",
+                                  "provider": "suno_music",
+                                  "modelName": "V4",
+                                  "baseUrl": "https://api.sunoapi.org",
+                                  "timeoutSeconds": 60,
+                                  "enabled": true,
+                                  "agentEnabled": true,
+                                  "isDefault": false,
+                                  "capabilities": ["MUSIC_GENERATION"]
+                                }
+                                """.formatted(accountId)))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "vendorAccountId": %d,
+                                  "displayName": "Suno V5 default model",
+                                  "configCode": "suno_v5_account_probe_test",
+                                  "provider": "suno_music",
+                                  "modelName": "V5",
+                                  "baseUrl": "https://api.sunoapi.org",
+                                  "timeoutSeconds": 60,
+                                  "enabled": true,
+                                  "agentEnabled": false,
+                                  "isDefault": true,
+                                  "capabilities": ["MUSIC_GENERATION"]
+                                }
+                                """.formatted(accountId)))
+                .andExpect(status().isOk());
+
         mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
@@ -635,43 +675,69 @@ class AdminAgentApiTest {
     }
 
     @Test
+    @Transactional
     void openaiGatewayVendorAccountTestUsesMediaGatewayProbeInsteadOfAgentChat() throws Exception {
         mockExternalAuthDependencies();
         String adminToken = login("/api/admin/v1/auth/login", "admin");
+        com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0),
+                0
+        );
+        server.createContext("/v1/models", exchange -> {
+            byte[] body = "{\"data\":[{\"id\":\"openai/gpt-image-2\"}]}"
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        try {
+            String baseUrl = "http://127.0.0.1:%d/v1".formatted(server.getAddress().getPort());
+            String response = mockMvc.perform(post("/api/admin/v1/model-vendor-accounts")
+                            .header("Authorization", "Bearer " + adminToken)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {
+                                      "vendorCode": "openai_gateway",
+                                      "accountName": "OpenAI gateway test",
+                                      "baseUrl": "%s",
+                                      "apiKey": "sk-test-gateway-key",
+                                      "balanceQueryMode": "MANUAL",
+                                      "enabled": true
+                                    }
+                                    """.formatted(baseUrl)))
+                    .andExpect(status().isOk())
+                    .andReturn()
+                    .getResponse()
+                    .getContentAsString();
+            Long accountId = Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+            jdbcTemplate.update("""
+                    INSERT INTO agent_model_configs(vendor_account_id, display_name, config_code, provider, model_name,
+                                                    base_url, api_key, billing_unit, capabilities,
+                                                    enabled, agent_enabled, is_default, is_deleted)
+                    VALUES(?, 'OpenAI Gateway Image', 'openai_gateway_account_probe', 'openai_images_gateway',
+                           'openai/gpt-image-2', ?, '', 'IMAGE_TOKEN', '["IMAGE_GENERATION"]', 1, 0, 1, 0)
+                    """, accountId, baseUrl);
 
-        String response = mockMvc.perform(post("/api/admin/v1/model-vendor-accounts")
-                        .header("Authorization", "Bearer " + adminToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "vendorCode": "openai_gateway",
-                                  "accountName": "oFox gateway test",
-                                  "baseUrl": "https://api.ofox.ai/v1",
-                                  "apiKey": "sk-test-ofox-key",
-                                  "balanceQueryMode": "MANUAL",
-                                  "enabled": true
-                                }
-                                """))
-                .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-        Long accountId = Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+            mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
+                            .header("Authorization", "Bearer " + adminToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.success").value(true))
+                    .andExpect(jsonPath("$.data.provider").value("openai_images_gateway"))
+                    .andExpect(jsonPath("$.data.modelName").value("openai/gpt-image-2"))
+                    .andExpect(jsonPath("$.data.account.healthStatus").value("OK"));
 
-        mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
-                        .header("Authorization", "Bearer " + adminToken))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.provider").value("openai_images_gateway"))
-                .andExpect(jsonPath("$.data.modelName").value("openai/gpt-image-2"))
-                .andExpect(jsonPath("$.data.message").value(org.hamcrest.Matchers.not(
-                        org.hamcrest.Matchers.containsString("unsupported model provider"))));
-
-        Mockito.verify(agentServiceClient, Mockito.never()).testModelConfig(argThat(request ->
-                request != null && "openai_images_gateway".equals(request.provider())));
+            Mockito.verify(agentServiceClient, Mockito.never()).testModelConfig(argThat(request ->
+                    request != null && "openai_images_gateway".equals(request.provider())));
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test
-    void vendorAccountTestDoesNotDependOnLinkedOpenAiCompatibleModelForMoonshot() throws Exception {
+    @Transactional
+    void vendorAccountTestUsesEnabledLinkedModelForMoonshot() throws Exception {
         mockExternalAuthDependencies();
         String adminToken = login("/api/admin/v1/auth/login", "admin");
 
@@ -706,9 +772,9 @@ class AdminAgentApiTest {
                                   "modelName": "kimi-k2.6",
                                   "baseUrl": "https://api.moonshot.cn/v1",
                                   "timeoutSeconds": 60,
-                                  "enabled": false,
+                                  "enabled": true,
                                   "agentEnabled": false,
-                                  "isDefault": false,
+                                  "isDefault": true,
                                   "capabilities": ["TEXT_GENERATION"]
                                 }
                                 """.formatted(accountId)))
@@ -719,13 +785,13 @@ class AdminAgentApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.success").value(true))
                 .andExpect(jsonPath("$.data.provider").value("openai_compatible"))
-                .andExpect(jsonPath("$.data.modelName").value("gpt-4o-mini"))
+                .andExpect(jsonPath("$.data.modelName").value("kimi-k2.6"))
                 .andExpect(jsonPath("$.data.account.healthStatus").value("OK"));
 
         Mockito.verify(agentServiceClient).testModelConfig(argThat(request ->
                 request != null
                         && "openai_compatible".equals(request.provider())
-                        && "gpt-4o-mini".equals(request.modelName())
+                        && "kimi-k2.6".equals(request.modelName())
                         && "https://api.moonshot.cn/v1".equals(request.baseUrl())
                         && "sk-moonshot-test".equals(request.apiKey())));
     }

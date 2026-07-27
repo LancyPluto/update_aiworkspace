@@ -29,6 +29,7 @@ class WorkflowSchemaContractTest {
         assertColumn("workflow_runs", "provider_cost_reserved_cny");
         assertColumn("workflow_provider_cost_budget_days", "budget_date");
         assertColumn("workflow_run_steps", "revision");
+        assertColumn("workflow_run_steps", "node_title");
         assertColumn("workflow_step_attempts", "claim_token");
         assertColumn("workflow_step_attempts", "cancellation_generation");
         assertColumn("workflow_step_charges", "status");

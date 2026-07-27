@@ -26,6 +26,7 @@ public class WorkflowChargeReconciler {
     private final WorkflowStepChargeMapper chargeMapper;
     private final WorkflowMetrics metrics;
     private final WorkflowRuntimeGate runtimeGate;
+    private final WorkflowCancellationService cancellationService;
 
     private long scanCursor;
     private boolean cycleInconsistent;
@@ -34,11 +35,13 @@ public class WorkflowChargeReconciler {
     public WorkflowChargeReconciler(WorkflowRunMapper runMapper,
                                     WorkflowStepChargeMapper chargeMapper,
                                     WorkflowMetrics metrics,
-                                    WorkflowRuntimeGate runtimeGate) {
+                                    WorkflowRuntimeGate runtimeGate,
+                                    WorkflowCancellationService cancellationService) {
         this.runMapper = runMapper;
         this.chargeMapper = chargeMapper;
         this.metrics = metrics;
         this.runtimeGate = runtimeGate;
+        this.cancellationService = cancellationService;
     }
 
     @Transactional(readOnly = true)
@@ -65,6 +68,9 @@ public class WorkflowChargeReconciler {
                     result.invalidCreditTransitions(),
                     result.providerCostReservationOverruns()
             );
+            if (cancellationService.isolateBillingReconciliationFailure(result.runId())) {
+                cancellationService.settlePersisted(result.runId());
+            }
         }
         return result;
     }

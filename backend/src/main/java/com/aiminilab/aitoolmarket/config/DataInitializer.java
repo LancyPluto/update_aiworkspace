@@ -1468,6 +1468,7 @@ public class DataInitializer implements CommandLineRunner {
         ensureColumn("workflow_runs", "developer_message", "ALTER TABLE workflow_runs ADD COLUMN developer_message TEXT NULL");
         ensureColumn("workflow_runs", "failure_trace_id", "ALTER TABLE workflow_runs ADD COLUMN failure_trace_id VARCHAR(64) NULL");
         ensureIndex("workflow_runs", "idx_workflow_runs_failure_trace", "CREATE INDEX idx_workflow_runs_failure_trace ON workflow_runs(failure_trace_id)");
+        ensureColumn("workflow_run_steps", "node_title", "ALTER TABLE workflow_run_steps ADD COLUMN node_title TEXT NULL AFTER node_id");
         ensureColumn("workflow_run_steps", "error_code", "ALTER TABLE workflow_run_steps ADD COLUMN error_code VARCHAR(64) NULL");
         ensureColumn("workflow_run_steps", "user_message", "ALTER TABLE workflow_run_steps ADD COLUMN user_message VARCHAR(255) NULL");
         ensureColumn("workflow_run_steps", "developer_message", "ALTER TABLE workflow_run_steps ADD COLUMN developer_message TEXT NULL");

@@ -1,5 +1,5 @@
 import { apiRequest, getRequestBaseUrl } from "./client"
-import type { BillingUsageLog, CreditAccount, PageResult, CreditLog, GiftCard, GiftCardPackage, RechargeOrder, RechargePackage } from "./types"
+import type { BillingUsageLog, CreditAccount, CreditStatementLog, PageResult, CreditLog, GiftCard, GiftCardPackage, RechargeOrder, RechargePackage } from "./types"
 
 /** GET /api/v1/credits/account */
 export async function fetchCreditAccount(options?: { token?: string | null }): Promise<CreditAccount> {
@@ -26,6 +26,17 @@ export async function fetchCreditUsageLogs(options?: {
   query?: Record<string, string | number | boolean | undefined>
 }): Promise<PageResult<BillingUsageLog>> {
   return apiRequest<PageResult<BillingUsageLog>>("GET", "/api/v1/credits/usage-logs", {
+    token: options?.token,
+    query: options?.query,
+  })
+}
+
+/** GET /api/v1/credits/statement-logs -- user-visible credit statement */
+export async function fetchCreditStatementLogs(options?: {
+  token?: string | null
+  query?: Record<string, string | number | boolean | undefined>
+}): Promise<PageResult<CreditStatementLog>> {
+  return apiRequest<PageResult<CreditStatementLog>>("GET", "/api/v1/credits/statement-logs", {
     token: options?.token,
     query: options?.query,
   })

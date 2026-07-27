@@ -55,9 +55,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         "workflow.runtime.execution-enabled=true",
         "workflow.runtime.real-billing-enabled=true",
         "workflow.runtime.confirmation-enabled=false",
-        "workflow.runtime.canary-percentage=100",
-        "workflow.runtime.max-run-cost-credits=100",
-        "workflow.runtime.max-user-daily-cost-credits=100",
         "spring.task.scheduling.enabled=false"
 })
 class WorkflowFailureInjectionTest {
@@ -123,23 +120,18 @@ class WorkflowFailureInjectionTest {
     }
 
     @Test
-    void fixedSnapshotBudgetUsesShanghaiDayBoundariesAndRejectsDailyOverflow() {
+    void accumulatedWorkflowUsageDoesNotBlockNewAdmission() {
         PublishedWorkflow published = insertWorkerWorkflow("p0_failure_daily", 40, 5);
         LocalDate today = LocalDate.now(SHANGHAI);
         insertCapturedUsage("daily-yesterday", 90, today.minusDays(1).atTime(23, 59, 59));
         insertCapturedUsage("daily-today", 50, today.atStartOfDay());
         insertCapturedUsage("daily-next-day", 90, today.plusDays(1).atStartOfDay());
+        insertCapturedUsage("daily-overflow", 20, today.atTime(12, 0));
 
         WorkflowRuntimeAdmission admitted = admissionService.admitNewRun(USER_ID, published.toolId());
 
         assertThat(admitted.paidRun()).isTrue();
         assertThat(admitted.estimatedRunCredits()).isEqualTo(40L);
-
-        insertCapturedUsage("daily-overflow", 20, today.atTime(12, 0));
-        assertBlocked(
-                () -> admissionService.admitNewRun(USER_ID, published.toolId()),
-                "user_daily_cost_limit_exceeded"
-        );
     }
 
     @Test
@@ -490,7 +482,7 @@ class WorkflowFailureInjectionTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"RESERVED", "RELEASED"})
-    void anyLostAttemptClosesAdmissionGateWithoutMutatingItsCharge(String chargeStatus) {
+    void anyLostAttemptMarksReconciliationUnhealthyWithoutBlockingOtherRuns(String chargeStatus) {
         PublishedWorkflow published = insertInlineWorkflow("p0_failure_lost_" + chargeStatus.toLowerCase());
         LostFixture lost = insertLostAttemptWithBalancedLedger(published, chargeStatus);
         int creditLogCountBefore = countCreditLogs(lost.chargeKey());
@@ -507,10 +499,8 @@ class WorkflowFailureInjectionTest {
                 lost.chargeKey()
         )).isEqualTo(chargeStatus);
         assertThat(countCreditLogs(lost.chargeKey())).isEqualTo(creditLogCountBefore);
-        assertBlocked(
-                () -> admissionService.admitNewRun(USER_ID, published.toolId()),
-                "reconciliation_not_healthy"
-        );
+        assertThat(admissionService.admitNewRun(USER_ID, published.toolId()).workflow())
+                .isNotNull();
     }
 
     private PublishedWorkflow insertWorkerWorkflow(String toolCode, int maxCreditCost, int fallbackCredits) {

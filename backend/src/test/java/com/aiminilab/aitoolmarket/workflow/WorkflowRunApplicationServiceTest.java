@@ -6,6 +6,7 @@ import com.aiminilab.aitoolmarket.task.dto.WorkerFailedRequest;
 import com.aiminilab.aitoolmarket.workflow.dto.CreateWorkflowRunCommand;
 import com.aiminilab.aitoolmarket.workflow.dto.WorkflowRunCreated;
 import com.aiminilab.aitoolmarket.workflow.config.WorkflowRuntimeGate;
+import com.aiminilab.aitoolmarket.workflow.service.WorkflowCancellationService;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowExecutionService;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowRecoveryScheduler;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowRunApplicationService;
@@ -43,11 +44,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         "spring.sql.init.schema-locations=classpath:schema-test.sql",
         "workflow.runtime.enabled=true",
         "workflow.runtime.execution-enabled=true",
-        "workflow.runtime.canary-percentage=100",
         "workflow.runtime.real-billing-enabled=true",
         "workflow.runtime.confirmation-enabled=true",
-        "workflow.runtime.max-run-cost-credits=3",
-        "workflow.runtime.max-user-daily-cost-credits=10000",
         "spring.task.scheduling.enabled=false"
 })
 class WorkflowRunApplicationServiceTest {
@@ -91,6 +89,9 @@ class WorkflowRunApplicationServiceTest {
 
     @Autowired
     private WorkflowExecutionService executionService;
+
+    @Autowired
+    private WorkflowCancellationService cancellationService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -213,6 +214,13 @@ class WorkflowRunApplicationServiceTest {
                 Integer.class,
                 first.runId()
         )).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT node_id, node_title FROM workflow_run_steps WHERE run_id = ? ORDER BY sequence_no",
+                first.runId()
+        )).containsExactly(
+                java.util.Map.of("node_id", "start", "node_title", "开始"),
+                java.util.Map.of("node_id", "output", "node_title", "输出")
+        );
 
         jdbcTemplate.update("UPDATE ai_tools SET status = 'OFFLINE', agent_surface_enabled = 0 WHERE id = ?", toolId);
         jdbcTemplate.update("UPDATE tool_workflows SET execution_enabled = 0 WHERE id = ?", workflowId);
@@ -893,6 +901,65 @@ class WorkflowRunApplicationServiceTest {
                 Integer.class,
                 agent.agentRunId()
         )).isEqualTo(1);
+    }
+
+    @Test
+    void billingReconciliationIsolationCommitsActiveRunFailureOutsideCallerTransaction() {
+        HistoricalRun historical = insertHistoricalAwaitingRun(31);
+        AgentLink agent = attachDelegatedAgentCall(historical.rootTaskId(), 1L, TOOL_CODE);
+        TransactionTemplate callerTransaction = new TransactionTemplate(transactionManager);
+
+        callerTransaction.executeWithoutResult(status -> {
+            assertThat(cancellationService.isolateBillingReconciliationFailure(historical.runId())).isTrue();
+            assertThat(cancellationService.settlePersisted(historical.runId())).isTrue();
+            status.setRollbackOnly();
+        });
+
+        assertThat(jdbcTemplate.queryForMap(
+                """
+                SELECT status, billing_status, error_code, error_message
+                FROM workflow_runs WHERE id = ?
+                """,
+                historical.runId()
+        )).containsEntry("status", "FAILED")
+                .containsEntry("billing_status", "RECONCILIATION_FAILED")
+                .containsEntry("error_code", "WORKFLOW_BILLING_RECONCILIATION_FAILED")
+                .containsEntry("error_message", "Workflow billing reconciliation failed");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM ai_tasks WHERE id = ?",
+                String.class,
+                historical.rootTaskId()
+        )).isEqualTo("FAILED");
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, error_code FROM agent_tool_calls WHERE id = ?",
+                agent.toolCallId()
+        )).containsEntry("status", "FAILED")
+                .containsEntry("error_code", "WORKFLOW_FAILED");
+    }
+
+    @Test
+    void billingReconciliationIsolationMarksTerminalRunForAuditWithoutReprojectingFailure() {
+        HistoricalRun historical = insertHistoricalAwaitingRun(32);
+        jdbcTemplate.update(
+                "UPDATE workflow_runs SET status = 'SUCCESS', revision = 4, finished_at = CURRENT_TIMESTAMP WHERE id = ?",
+                historical.runId()
+        );
+
+        assertThat(cancellationService.isolateBillingReconciliationFailure(historical.runId())).isFalse();
+        assertThat(cancellationService.isolateBillingReconciliationFailure(historical.runId())).isFalse();
+
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, billing_status, revision, error_code FROM workflow_runs WHERE id = ?",
+                historical.runId()
+        )).containsEntry("status", "SUCCESS")
+                .containsEntry("billing_status", "RECONCILIATION_FAILED")
+                .containsEntry("revision", 5L)
+                .containsEntry("error_code", null);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM ai_tasks WHERE id = ?",
+                String.class,
+                historical.rootTaskId()
+        )).isEqualTo("AWAITING_USER");
     }
 
     @Test

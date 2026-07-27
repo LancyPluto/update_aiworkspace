@@ -1,13 +1,17 @@
 package com.aiminilab.aitoolmarket.agent;
 
+import com.aiminilab.aitoolmarket.agent.client.AgentServiceClient;
+import com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigTestResponse;
 import com.aiminilab.aitoolmarket.agent.entity.AgentModelConfig;
 import com.aiminilab.aitoolmarket.agent.mapper.AgentModelConfigMapper;
 import com.aiminilab.aitoolmarket.auth.security.AuthTestTokens;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
@@ -18,6 +22,8 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -46,8 +52,11 @@ class ModelVendorAccountDiscoveryApiTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @MockBean
+    private AgentServiceClient agentServiceClient;
+
     @Test
-    void openAiAccountWithoutLinkedModelsUsesGatewayProbeInsteadOfAgentModelRequest() throws Exception {
+    void openAiGatewayAccountUsesEnabledLinkedMediaModel() throws Exception {
         HttpServer server = modelsServer("""
                 {
                   "object": "list",
@@ -58,15 +67,25 @@ class ModelVendorAccountDiscoveryApiTest {
                 """);
         try {
             String adminToken = loginAdmin();
-            Long accountId = createVendorAccount(adminToken, "openai", "Unbound OpenAI Gateway",
-                    "http://127.0.0.1:%d".formatted(server.getAddress().getPort()));
+            String baseUrl = "http://127.0.0.1:%d/v1".formatted(server.getAddress().getPort());
+            Long accountId = createVendorAccount(adminToken, "openai_gateway", "OpenAI Gateway", baseUrl);
+            bindEnabledModel(
+                    accountId,
+                    "openai-gateway-account-probe",
+                    "openai_images_gateway",
+                    "openai/gpt-image-2",
+                    baseUrl,
+                    "[\"IMAGE_GENERATION\"]"
+            );
 
             mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
                             .header("Authorization", "Bearer " + adminToken))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.success").value(true))
                     .andExpect(jsonPath("$.data.provider").value("openai_images_gateway"))
+                    .andExpect(jsonPath("$.data.modelName").value("openai/gpt-image-2"))
                     .andExpect(jsonPath("$.data.account.healthStatus").value("OK"));
+            Mockito.verify(agentServiceClient, Mockito.never()).testModelConfig(any());
         } finally {
             server.stop(0);
         }
@@ -118,49 +137,67 @@ class ModelVendorAccountDiscoveryApiTest {
     }
 
     @Test
-    void minimaxAccountUsesModelsProbeInsteadOfSendingAChatRequest() throws Exception {
-        HttpServer server = modelsServer("""
-                {
-                  "object": "list",
-                  "data": [
-                    {"id": "MiniMax-M2.7", "object": "model"}
-                  ]
-                }
-                """);
-        try {
-            String adminToken = loginAdmin();
-            Long accountId = createVendorAccount(adminToken, "minimax", "MiniMax models probe",
-                    "http://127.0.0.1:%d/v1".formatted(server.getAddress().getPort()));
+    void minimaxAccountWithoutEnabledModelFailsWithoutExternalRequest() throws Exception {
+        String adminToken = loginAdmin();
+        Long accountId = createVendorAccount(
+                adminToken,
+                "minimax",
+                "Unbound MiniMax account",
+                "http://127.0.0.1:1/v1"
+        );
 
-            mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
-                            .header("Authorization", "Bearer " + adminToken))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.success").value(true))
-                    .andExpect(jsonPath("$.data.provider").value("minimax"))
-                    .andExpect(jsonPath("$.data.modelName").value("MiniMax-M2.7"))
-                    .andExpect(jsonPath("$.data.account.healthStatus").value("OK"));
-        } finally {
-            server.stop(0);
-        }
+        mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.success").value(false))
+                .andExpect(jsonPath("$.data.message").value(org.hamcrest.Matchers.containsString("绑定并启用模型")))
+                .andExpect(jsonPath("$.data.provider").value(""))
+                .andExpect(jsonPath("$.data.modelName").value(""))
+                .andExpect(jsonPath("$.data.account.healthStatus").value("ERROR"));
+
+        Mockito.verify(agentServiceClient, Mockito.never()).testModelConfig(any());
     }
 
     @Test
-    void minimaxAccountReportsReachableWhenLegacyGatewayHasNoModelsEndpoint() throws Exception {
-        HttpServer server = statusServer(404, "<html><body>404 Not Found</body></html>");
-        try {
-            String adminToken = loginAdmin();
-            Long accountId = createVendorAccount(adminToken, "minimax", "MiniMax legacy gateway",
-                    "http://127.0.0.1:%d".formatted(server.getAddress().getPort()));
+    void minimaxAccountUsesEnabledLinkedModelThroughAgentService() throws Exception {
+        Mockito.when(agentServiceClient.testModelConfig(any()))
+                .thenAnswer(invocation -> {
+                    var request = invocation.getArgument(0, com.aiminilab.aitoolmarket.agent.dto.AgentModelConfigRequest.class);
+                    return new AgentModelConfigTestResponse(
+                            true,
+                            request.provider(),
+                            request.modelName(),
+                            8L,
+                            "ok",
+                            "pong"
+                    );
+                });
+        String adminToken = loginAdmin();
+        String baseUrl = "http://127.0.0.1:1/v1";
+        Long accountId = createVendorAccount(adminToken, "minimax", "MiniMax linked model", baseUrl);
+        bindEnabledModel(
+                accountId,
+                "minimax-account-probe",
+                "minimax",
+                "MiniMax-M2.7",
+                baseUrl,
+                "[\"TEXT_GENERATION\"]"
+        );
 
-            mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
-                            .header("Authorization", "Bearer " + adminToken))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.success").value(true))
-                    .andExpect(jsonPath("$.data.message").value(org.hamcrest.Matchers.containsString("未提供 /models")))
-                    .andExpect(jsonPath("$.data.account.healthStatus").value("OK"));
-        } finally {
-            server.stop(0);
-        }
+        mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.success").value(true))
+                .andExpect(jsonPath("$.data.provider").value("minimax"))
+                .andExpect(jsonPath("$.data.modelName").value("MiniMax-M2.7"))
+                .andExpect(jsonPath("$.data.account.healthStatus").value("OK"));
+
+        Mockito.verify(agentServiceClient).testModelConfig(argThat(request ->
+                request != null
+                        && "minimax".equals(request.provider())
+                        && "MiniMax-M2.7".equals(request.modelName())
+                        && baseUrl.equals(request.baseUrl())
+                        && "discovery-secret".equals(request.apiKey())));
     }
 
     @Test
@@ -168,15 +205,26 @@ class ModelVendorAccountDiscoveryApiTest {
         HttpServer server = statusServer(401, "{\"error\":\"unauthorized\"}");
         try {
             String adminToken = loginAdmin();
-            Long accountId = createVendorAccount(adminToken, "openai", "Unauthorized Gateway",
-                    "http://127.0.0.1:%d".formatted(server.getAddress().getPort()));
+            String baseUrl = "http://127.0.0.1:%d/v1".formatted(server.getAddress().getPort());
+            Long accountId = createVendorAccount(adminToken, "openai_gateway", "Unauthorized Gateway", baseUrl);
+            bindEnabledModel(
+                    accountId,
+                    "unauthorized-openai-gateway-probe",
+                    "openai_images_gateway",
+                    "openai/gpt-image-2",
+                    baseUrl,
+                    "[\"IMAGE_GENERATION\"]"
+            );
 
             mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
                             .header("Authorization", "Bearer " + adminToken))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.success").value(false))
                     .andExpect(jsonPath("$.data.message").value(org.hamcrest.Matchers.containsString("API Key 无效")))
+                    .andExpect(jsonPath("$.data.provider").value("openai_images_gateway"))
+                    .andExpect(jsonPath("$.data.modelName").value("openai/gpt-image-2"))
                     .andExpect(jsonPath("$.data.account.healthStatus").value("ERROR"));
+            Mockito.verify(agentServiceClient, Mockito.never()).testModelConfig(any());
         } finally {
             server.stop(0);
         }
@@ -523,6 +571,14 @@ class ModelVendorAccountDiscoveryApiTest {
                 .getResponse()
                 .getContentAsString();
         Long accountId = Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+        bindEnabledModel(
+                accountId,
+                "local-media-mock-account-probe",
+                "local_media_mock",
+                "local-media-mock",
+                "http://127.0.0.1:1/v1",
+                "[\"IMAGE_GENERATION\"]"
+        );
 
         mockMvc.perform(post("/api/admin/v1/model-vendor-accounts/{id}/test", accountId)
                         .header("Authorization", "Bearer " + adminToken))
@@ -588,7 +644,7 @@ class ModelVendorAccountDiscoveryApiTest {
                 """);
         try {
             String adminToken = loginAdmin();
-            Long accountId = createVendorAccount(adminToken, "openai", "Image Gateway",
+            Long accountId = createVendorAccount(adminToken, "openai_gateway", "Image Gateway",
                     "http://127.0.0.1:%d/v1".formatted(server.getAddress().getPort()));
             jdbcTemplate.update("UPDATE model_vendor_accounts SET health_status='OK' WHERE id=?", accountId);
             jdbcTemplate.update("""
@@ -703,5 +759,26 @@ class ModelVendorAccountDiscoveryApiTest {
                 .getResponse()
                 .getContentAsString();
         return Long.parseLong(response.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+    }
+
+    private void bindEnabledModel(Long accountId,
+                                  String configCode,
+                                  String provider,
+                                  String modelName,
+                                  String baseUrl,
+                                  String capabilities) {
+        jdbcTemplate.update("""
+                INSERT INTO agent_model_configs(vendor_account_id, display_name, config_code, provider, model_name,
+                                                base_url, api_key, billing_unit, capabilities,
+                                                enabled, agent_enabled, is_default, is_deleted)
+                VALUES(?, ?, ?, ?, ?, ?, '', 'PER_CALL', ?, 1, 0, 1, 0)
+                """,
+                accountId,
+                modelName,
+                configCode,
+                provider,
+                modelName,
+                baseUrl,
+                capabilities);
     }
 }

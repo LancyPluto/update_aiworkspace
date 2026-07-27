@@ -7,6 +7,7 @@ import com.aiminilab.aitoolmarket.common.dto.ApiResponse;
 import com.aiminilab.aitoolmarket.common.dto.PageResponse;
 import com.aiminilab.aitoolmarket.credit.dto.CreditAccountResponse;
 import com.aiminilab.aitoolmarket.credit.dto.CreditLogResponse;
+import com.aiminilab.aitoolmarket.credit.dto.CreditStatementLogResponse;
 import com.aiminilab.aitoolmarket.credit.dto.AlipayPayDiagnosticResponse;
 import com.aiminilab.aitoolmarket.credit.dto.CreateCustomRechargeOrderRequest;
 import com.aiminilab.aitoolmarket.credit.dto.CreateRechargeOrderRequest;
@@ -20,6 +21,7 @@ import com.aiminilab.aitoolmarket.credit.dto.RechargePaymentOptionsResponse;
 import com.aiminilab.aitoolmarket.credit.realtime.CreditEventStreamService;
 import com.aiminilab.aitoolmarket.credit.service.CreditRechargeService;
 import com.aiminilab.aitoolmarket.credit.service.CreditService;
+import com.aiminilab.aitoolmarket.credit.service.CreditStatementService;
 import com.aiminilab.aitoolmarket.credit.service.GiftCardService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -43,17 +45,20 @@ public class CreditController {
 
     private final CreditService creditService;
     private final CreditRechargeService creditRechargeService;
+    private final CreditStatementService creditStatementService;
     private final BillingService billingService;
     private final GiftCardService giftCardService;
     private final CreditEventStreamService creditEventStreamService;
 
     public CreditController(CreditService creditService,
                             CreditRechargeService creditRechargeService,
+                            CreditStatementService creditStatementService,
                             BillingService billingService,
                             GiftCardService giftCardService,
                             CreditEventStreamService creditEventStreamService) {
         this.creditService = creditService;
         this.creditRechargeService = creditRechargeService;
+        this.creditStatementService = creditStatementService;
         this.billingService = billingService;
         this.giftCardService = giftCardService;
         this.creditEventStreamService = creditEventStreamService;
@@ -86,6 +91,14 @@ public class CreditController {
                                                                         @RequestParam(required = false) Integer pageSize) {
         return ApiResponse.success(billingService.logs(pageNo, pageSize, AuthContext.get().userId(), null,
                 null, null, null, null, null, null));
+    }
+
+    @GetMapping("/statement-logs")
+    public ApiResponse<PageResponse<CreditStatementLogResponse>> statementLogs(
+            @RequestParam(required = false) Integer pageNo,
+            @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(creditStatementService.statementLogs(
+                AuthContext.get().userId(), pageNo, pageSize));
     }
 
     @GetMapping("/recharge-packages")

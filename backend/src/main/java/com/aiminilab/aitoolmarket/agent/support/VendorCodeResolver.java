@@ -131,7 +131,6 @@ public class VendorCodeResolver {
         return switch (normalized) {
             case "bailian_happyhorse", "dashscope", "aliyun_bailian" -> "qwen";
             case "kimi", "moonshot_compatible" -> "moonshot";
-            case "openai_gateway" -> "openai";
             case "suno_music" -> "suno";
             default -> normalized;
         };

@@ -3,8 +3,6 @@ package com.aiminilab.aitoolmarket.workflow.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 
 @ConfigurationProperties(prefix = "workflow.runtime")
 public class WorkflowRuntimeProperties {
@@ -15,15 +13,11 @@ public class WorkflowRuntimeProperties {
     private boolean shadowBillingEnabled;
     private boolean autoRetryEnabled;
     private boolean confirmationEnabled;
-    private List<Long> allowedUserIds = new ArrayList<>();
-    private int canaryPercentage;
     private Duration attemptTimeout = Duration.ofMinutes(15);
     private Duration recoveryInterval = Duration.ofMinutes(1);
     private int recoveryBatchSize = 100;
     private Duration reconciliationInterval = Duration.ofMinutes(15);
     private int reconciliationBatchSize = 100;
-    private int maxRunCostCredits;
-    private int maxUserDailyCostCredits;
 
     public boolean isEnabled() {
         return enabled;
@@ -73,22 +67,6 @@ public class WorkflowRuntimeProperties {
         this.confirmationEnabled = confirmationEnabled;
     }
 
-    public List<Long> getAllowedUserIds() {
-        return List.copyOf(allowedUserIds);
-    }
-
-    public void setAllowedUserIds(List<Long> allowedUserIds) {
-        this.allowedUserIds = allowedUserIds == null ? new ArrayList<>() : new ArrayList<>(allowedUserIds);
-    }
-
-    public int getCanaryPercentage() {
-        return canaryPercentage;
-    }
-
-    public void setCanaryPercentage(int canaryPercentage) {
-        this.canaryPercentage = canaryPercentage;
-    }
-
     public Duration getAttemptTimeout() {
         return attemptTimeout;
     }
@@ -127,22 +105,6 @@ public class WorkflowRuntimeProperties {
 
     public void setReconciliationBatchSize(int reconciliationBatchSize) {
         this.reconciliationBatchSize = reconciliationBatchSize;
-    }
-
-    public int getMaxRunCostCredits() {
-        return maxRunCostCredits;
-    }
-
-    public void setMaxRunCostCredits(int maxRunCostCredits) {
-        this.maxRunCostCredits = maxRunCostCredits;
-    }
-
-    public int getMaxUserDailyCostCredits() {
-        return maxUserDailyCostCredits;
-    }
-
-    public void setMaxUserDailyCostCredits(int maxUserDailyCostCredits) {
-        this.maxUserDailyCostCredits = maxUserDailyCostCredits;
     }
 
 }

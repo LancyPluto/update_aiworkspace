@@ -1013,6 +1013,44 @@ paths:
               schema:
                 $ref: "#/components/schemas/CreditLogPageApiResponse"
 
+  /api/v1/credits/statement-logs:
+    get:
+      tags: [Credits]
+      summary: 获取当前用户可见的统一算力对账流水
+      operationId: getCreditStatementLogs
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 以钱包实际变动为金额真源的分页对账流水
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditStatementLogPageApiResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/credits/usage-logs:
+    get:
+      tags: [Credits]
+      summary: 获取当前用户模型用量流水
+      operationId: getCreditUsageLogs
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageNo"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 当前用户模型用量流水分页列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingUsageLogPageApiResponse"
+
   /api/admin/v1/tools:
     get:
       tags: [AdminTools]
@@ -3442,6 +3480,14 @@ components:
           type: integer
           format: int64
           nullable: true
+        sourceType:
+          type: string
+          enum: [TASK, AGENT_RUN, PPT_STEP, WORKFLOW_STEP]
+          nullable: true
+        sourceRef:
+          type: integer
+          format: int64
+          nullable: true
         logType:
           $ref: "#/components/schemas/CreditLogType"
         amount:
@@ -3465,6 +3511,99 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    CreditStatementLogPageApiResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiResponse"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/CreditStatementLogPage"
+
+    CreditStatementLogPage:
+      type: object
+      properties:
+        list:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreditStatementLog"
+        total:
+          type: integer
+          format: int64
+        pageNo:
+          type: integer
+        pageSize:
+          type: integer
+        hasNext:
+          type: boolean
+
+    CreditStatementLog:
+      type: object
+      description: 用户可见的算力对账条目；amount 始终来自 credit_logs。
+      properties:
+        id:
+          type: integer
+          format: int64
+        userId:
+          type: integer
+          format: int64
+        sourceType:
+          type: string
+          enum: [TASK, AGENT_RUN, PPT_STEP, WORKFLOW_STEP]
+          nullable: true
+        sourceRef:
+          type: integer
+          format: int64
+          nullable: true
+        logType:
+          type: string
+          enum: [DEDUCT, RECHARGE, REFERRAL_BONUS, MANUAL_ADD, MANUAL_DEDUCT]
+        amount:
+          type: integer
+          format: int64
+          description: 实际入账或扣减的算力；DEDUCT 已按规范化来源聚合。
+        reason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        taskNo:
+          type: string
+          nullable: true
+        toolName:
+          type: string
+          nullable: true
+        agentRunId:
+          type: integer
+          format: int64
+          nullable: true
+        agentIntent:
+          type: string
+          nullable: true
+        workflowRunId:
+          type: integer
+          format: int64
+          nullable: true
+        workflowId:
+          type: integer
+          format: int64
+          nullable: true
+        workflowName:
+          type: string
+          nullable: true
+        workflowNodeId:
+          type: string
+          nullable: true
+        workflowStepName:
+          type: string
+          nullable: true
+        modelName:
+          type: string
+          nullable: true
+        provider:
+          type: string
+          nullable: true
 
     ManualGiftCardIssueRequest:
       type: object
@@ -4298,6 +4437,12 @@ components:
                 total:
                   type: integer
                   format: int64
+                pageNo:
+                  type: integer
+                pageSize:
+                  type: integer
+                hasNext:
+                  type: boolean
 
     BillingUsageLog:
       type: object
@@ -4307,13 +4452,43 @@ components:
           format: int64
         sourceType:
           type: string
-          enum: [TASK, AGENT_RUN]
+          enum: [TASK, AGENT_RUN, WORKFLOW_STEP]
         sourceId:
           type: integer
           format: int64
+        workflowRunId:
+          type: integer
+          format: int64
+          nullable: true
+        workflowId:
+          type: integer
+          format: int64
+          nullable: true
+        workflowName:
+          type: string
+          nullable: true
+        workflowNodeId:
+          type: string
+          nullable: true
+        workflowStepName:
+          type: string
+          nullable: true
+        taskNo:
+          type: string
+          nullable: true
+        inputModality:
+          type: string
+          nullable: true
+        outputModality:
+          type: string
+          nullable: true
         userId:
           type: integer
           format: int64
+        modelConfigId:
+          type: integer
+          format: int64
+          nullable: true
         provider:
           type: string
           nullable: true

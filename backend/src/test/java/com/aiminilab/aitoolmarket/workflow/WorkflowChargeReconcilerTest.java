@@ -6,6 +6,7 @@ import com.aiminilab.aitoolmarket.workflow.entity.WorkflowRun;
 import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowRunMapper;
 import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowStepChargeMapper;
 import com.aiminilab.aitoolmarket.workflow.metrics.WorkflowMetrics;
+import com.aiminilab.aitoolmarket.workflow.service.WorkflowCancellationService;
 import com.aiminilab.aitoolmarket.workflow.service.WorkflowChargeReconciler;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -14,14 +15,16 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class WorkflowChargeReconcilerTest {
 
     @Test
-    void mismatchRecordsMetricAndImmediatelyClosesGateWithoutChangingBalances() {
+    void mismatchRecordsMetricAndIsolatesOnlyTheInconsistentRun() {
         Fixture fixture = fixture();
         fixture.gate.markReconciliationHealthyAfterFullScan(fixture.gate.reconciliationFailureGeneration());
         WorkflowRun run = run(1L, "SUCCESS");
@@ -35,6 +38,8 @@ class WorkflowChargeReconcilerTest {
         assertThat(fixture.gate.isReconciliationHealthy()).isFalse();
         assertThat(fixture.registry.counter("workflow_reconciliation_total", "result", "inconsistent").count())
                 .isEqualTo(1);
+        verify(fixture.cancellationService).isolateBillingReconciliationFailure(1L);
+        verify(fixture.cancellationService).settlePersisted(1L);
     }
 
     @Test
@@ -110,6 +115,8 @@ class WorkflowChargeReconcilerTest {
         assertThat(result.inconsistent()).isZero();
         assertThat(result.cycleComplete()).isTrue();
         assertThat(fixture.gate.isReconciliationHealthy()).isTrue();
+        verify(fixture.cancellationService, never()).isolateBillingReconciliationFailure(1L);
+        verify(fixture.cancellationService, never()).settlePersisted(1L);
     }
 
     @Test
@@ -167,8 +174,12 @@ class WorkflowChargeReconcilerTest {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         WorkflowMetrics metrics = new WorkflowMetrics(registry);
         WorkflowRuntimeGate gate = new WorkflowRuntimeGate(new WorkflowRuntimeProperties());
-        WorkflowChargeReconciler reconciler = new WorkflowChargeReconciler(runMapper, chargeMapper, metrics, gate);
-        return new Fixture(runMapper, chargeMapper, registry, gate, reconciler);
+        WorkflowCancellationService cancellationService = mock(WorkflowCancellationService.class);
+        when(cancellationService.isolateBillingReconciliationFailure(anyLong())).thenReturn(true);
+        WorkflowChargeReconciler reconciler = new WorkflowChargeReconciler(
+                runMapper, chargeMapper, metrics, gate, cancellationService
+        );
+        return new Fixture(runMapper, chargeMapper, registry, gate, cancellationService, reconciler);
     }
 
     private WorkflowRun run(Long id, String status) {
@@ -182,6 +193,7 @@ class WorkflowChargeReconcilerTest {
                            WorkflowStepChargeMapper chargeMapper,
                            SimpleMeterRegistry registry,
                            WorkflowRuntimeGate gate,
+                           WorkflowCancellationService cancellationService,
                            WorkflowChargeReconciler reconciler) {
     }
 }

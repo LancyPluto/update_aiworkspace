@@ -259,7 +259,19 @@ public interface BillingUsageLogMapper extends BaseMapper<BillingUsageLog> {
 
     @Select("""
             <script>
-            SELECT l.id, l.source_type, l.source_id, task.task_no, tool.input_modality, tool.output_modality,
+            SELECT l.id, l.source_type, l.source_id,
+                   workflow_run.id AS workflow_run_id,
+                   workflow_run.workflow_id AS workflow_id,
+                   CASE
+                     WHEN workflow_def.id IS NULL THEN NULL
+                     WHEN NULLIF(TRIM(workflow_def.workflow_name), '') IS NULL
+                          OR LOWER(TRIM(workflow_def.workflow_name)) = 'default'
+                       THEN COALESCE(workflow_tool.tool_name, workflow_def.workflow_name)
+                     ELSE workflow_def.workflow_name
+                   END AS workflow_name,
+                   workflow_step.node_id AS workflow_node_id,
+                   COALESCE(NULLIF(TRIM(workflow_step.node_title), ''), workflow_step.node_id) AS workflow_step_name,
+                   task.task_no, tool.input_modality, tool.output_modality,
                    l.user_id, l.model_config_id, l.provider, l.model_name,
                    l.prompt_tokens, l.completion_tokens, l.total_tokens, l.input_token_price_per_1k,
                    l.output_token_price_per_1k, l.input_token_price_per_1m, l.output_token_price_per_1m,
@@ -276,6 +288,19 @@ public interface BillingUsageLogMapper extends BaseMapper<BillingUsageLog> {
             ) page ON l.id = page.id
             LEFT JOIN ai_tasks task ON l.source_type = 'TASK' AND l.source_id = task.id
             LEFT JOIN ai_tools tool ON task.tool_id = tool.id
+            LEFT JOIN workflow_run_steps workflow_step
+              ON l.source_type = 'WORKFLOW_STEP' AND l.source_id = workflow_step.id
+             AND EXISTS (
+                 SELECT 1
+                 FROM workflow_runs owned_workflow_run
+                 WHERE owned_workflow_run.id = workflow_step.run_id
+                   AND owned_workflow_run.user_id = l.user_id
+             )
+            LEFT JOIN workflow_runs workflow_run
+              ON workflow_step.run_id = workflow_run.id
+             AND workflow_run.user_id = l.user_id
+            LEFT JOIN tool_workflows workflow_def ON workflow_run.workflow_id = workflow_def.id
+            LEFT JOIN ai_tools workflow_tool ON workflow_run.tool_id = workflow_tool.id
             ORDER BY l.id DESC
             </script>
             """)
@@ -283,6 +308,11 @@ public interface BillingUsageLogMapper extends BaseMapper<BillingUsageLog> {
             @Arg(column = "id", javaType = Long.class),
             @Arg(column = "source_type", javaType = String.class),
             @Arg(column = "source_id", javaType = Long.class),
+            @Arg(column = "workflow_run_id", javaType = Long.class),
+            @Arg(column = "workflow_id", javaType = Long.class),
+            @Arg(column = "workflow_name", javaType = String.class),
+            @Arg(column = "workflow_node_id", javaType = String.class),
+            @Arg(column = "workflow_step_name", javaType = String.class),
             @Arg(column = "task_no", javaType = String.class),
             @Arg(column = "input_modality", javaType = String.class),
             @Arg(column = "output_modality", javaType = String.class),

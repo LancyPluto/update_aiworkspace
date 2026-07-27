@@ -24,12 +24,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
@@ -37,7 +35,6 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -94,7 +91,6 @@ class WorkflowRuntimeAdmissionServiceTest {
         when(workflowMapper.selectCanonicalPublishedByToolId(7L)).thenReturn(workflow);
         when(versionMapper.selectById(41L)).thenReturn(version);
         when(creditMapper.selectByUserIdForUpdate(11L)).thenReturn(new CreditAccount());
-        when(chargeMapper.sumCommittedCreditsForUserBetween(eq(11L), any(), any())).thenReturn(40L);
         when(chargeMapper.countUnsupportedProviderCostCurrenciesBetween(any(), any())).thenReturn(0);
         when(chargeMapper.countUnknownProviderCostsBetween(any(), any())).thenReturn(0);
     }
@@ -111,8 +107,8 @@ class WorkflowRuntimeAdmissionServiceTest {
     }
 
     @Test
-    void paidBudgetComesOnlyFromPinnedVersionAndCommittedDatabaseLedger() {
-        enableHealthyRuntime(100, 100);
+    void paidEstimateComesOnlyFromPinnedVersionWithoutDailyLedgerQuery() {
+        enableRuntime();
         version.setBillingPolicyJson(fallbackBillingPolicy(Map.of(
                 "writer", 20,
                 "renderer", 30
@@ -128,16 +124,12 @@ class WorkflowRuntimeAdmissionServiceTest {
         assertThat(admitted.estimatedRunCredits()).isEqualTo(50L);
         assertThat(admitted.providerCostReservedCny()).isEqualByComparingTo("0.000000");
 
-        ArgumentCaptor<LocalDateTime> start = ArgumentCaptor.forClass(LocalDateTime.class);
-        ArgumentCaptor<LocalDateTime> end = ArgumentCaptor.forClass(LocalDateTime.class);
-        verify(chargeMapper).sumCommittedCreditsForUserBetween(eq(11L), start.capture(), end.capture());
-        assertThat(start.getValue()).isEqualTo(LocalDateTime.of(2026, 7, 15, 0, 0));
-        assertThat(end.getValue()).isEqualTo(LocalDateTime.of(2026, 7, 16, 0, 0));
+        verify(chargeMapper, never()).sumCommittedCreditsForUserBetween(any(), any(), any());
     }
 
     @Test
     void operationScopeChargesTheSumOfAllRequestedWorkerNodes() {
-        enableHealthyRuntime(10, 100);
+        enableRuntime();
         version.setBillingPolicyJson(fallbackBillingPolicy(Map.of(
                 "script", 50,
                 "tts", 2,
@@ -170,7 +162,7 @@ class WorkflowRuntimeAdmissionServiceTest {
             "{\"mode\":\"WORKFLOW_STEP\",\"nodePolicies\":{\"writer\":{\"maxCreditCost\":9223372036854775807},\"renderer\":{\"maxCreditCost\":1}}}"
     })
     void missingInvalidOrOverflowingSnapshotCostFailsClosed(String billingPolicy) {
-        enableHealthyRuntime(Integer.MAX_VALUE, Integer.MAX_VALUE);
+        enableRuntime();
         version.setBillingPolicyJson(billingPolicy);
         when(dslService.parse(version.getNodesJson(), version.getEdgesJson(), version.getConfigJson()))
                 .thenReturn(dsl(worker("writer"), worker("renderer")));
@@ -180,7 +172,7 @@ class WorkflowRuntimeAdmissionServiceTest {
 
     @Test
     void legacySnapshotWithoutPricingSourceFailsBeforeBudgetChecks() throws Exception {
-        enableHealthyRuntime(100, 100);
+        enableRuntime();
         ObjectMapper mapper = new ObjectMapper();
         ObjectNode policy = (ObjectNode) mapper.readTree(fallbackBillingPolicy(Map.of("writer", 10)));
         ((ObjectNode) policy.path("nodePolicies").path("writer")).remove("pricingSource");
@@ -194,7 +186,7 @@ class WorkflowRuntimeAdmissionServiceTest {
 
     @Test
     void validModelPricingSnapshotCanBeAdmitted() {
-        enableHealthyRuntime(100, 100);
+        enableRuntime();
         version.setBillingPolicyJson(modelBillingPolicy("writer", 10));
         when(dslService.parse(version.getNodesJson(), version.getEdgesJson(), version.getConfigJson()))
                 .thenReturn(dsl(worker("writer")));
@@ -204,7 +196,7 @@ class WorkflowRuntimeAdmissionServiceTest {
 
     @Test
     void perCharacterModelPricingSnapshotCanBeAdmitted() {
-        enableHealthyRuntime(100, 100);
+        enableRuntime();
         version.setBillingPolicyJson(modelBillingPolicy("tts", 10, "PER_CHARACTER"));
         when(dslService.parse(version.getNodesJson(), version.getEdgesJson(), version.getConfigJson()))
                 .thenReturn(dsl(worker("tts", "comic.shot_tts")));
@@ -214,7 +206,7 @@ class WorkflowRuntimeAdmissionServiceTest {
 
     @Test
     void localComposeIsTheOnlyZeroCostWorkerAdmission() {
-        enableHealthyRuntime(100, 100);
+        enableRuntime();
         version.setBillingPolicyJson(localZeroCostBillingPolicy("compose", "comic.compose"));
         when(dslService.parse(version.getNodesJson(), version.getEdgesJson(), version.getConfigJson()))
                 .thenReturn(dsl(worker("compose", "comic.compose")));
@@ -228,7 +220,7 @@ class WorkflowRuntimeAdmissionServiceTest {
 
     @Test
     void confirmationNodeCannotStartWhileConfirmationSwitchIsOff() {
-        enableHealthyRuntime(100, 100);
+        enableRuntime();
         properties.setConfirmationEnabled(false);
         version.setBillingPolicyJson("{\"mode\":\"WORKFLOW_STEP\",\"nodePolicies\":{}}");
         WorkflowNodeDef confirmation = new WorkflowNodeDef(
@@ -247,7 +239,7 @@ class WorkflowRuntimeAdmissionServiceTest {
 
     @Test
     void canonicalWorkflowExecutionFlagDoesNotBlockAdmission() {
-        enableHealthyRuntime(100, 100);
+        enableRuntime();
         workflow.setExecutionEnabled(false);
         version.setBillingPolicyJson("{\"mode\":\"WORKFLOW_STEP\",\"nodePolicies\":{}}");
         when(dslService.parse(version.getNodesJson(), version.getEdgesJson(), version.getConfigJson()))
@@ -258,7 +250,7 @@ class WorkflowRuntimeAdmissionServiceTest {
 
     @Test
     void paidRunRecordsUnsupportedProviderCurrencyWithoutBlocking() {
-        enableHealthyRuntime(100, 100);
+        enableRuntime();
         version.setBillingPolicyJson(fallbackBillingPolicy(Map.of("writer", 10)));
         when(dslService.parse(version.getNodesJson(), version.getEdgesJson(), version.getConfigJson()))
                 .thenReturn(dsl(worker("writer")));
@@ -270,7 +262,7 @@ class WorkflowRuntimeAdmissionServiceTest {
 
     @Test
     void paidRunRecordsUnknownProviderCostWithoutBlocking() {
-        enableHealthyRuntime(100, 100);
+        enableRuntime();
         version.setBillingPolicyJson(fallbackBillingPolicy(Map.of("writer", 10)));
         when(dslService.parse(version.getNodesJson(), version.getEdgesJson(), version.getConfigJson()))
                 .thenReturn(dsl(worker("writer")));
@@ -280,14 +272,10 @@ class WorkflowRuntimeAdmissionServiceTest {
         verify(metrics).recordProviderCostAnomaly(WorkflowMetrics.ProviderCostAnomaly.ACTUAL_COST_UNKNOWN);
     }
 
-    private void enableHealthyRuntime(int maxRunCredits, int maxDailyCredits) {
+    private void enableRuntime() {
         properties.setEnabled(true);
         properties.setExecutionEnabled(true);
         properties.setRealBillingEnabled(true);
-        properties.setAllowedUserIds(List.of(11L));
-        properties.setMaxRunCostCredits(maxRunCredits);
-        properties.setMaxUserDailyCostCredits(maxDailyCredits);
-        gate.markReconciliationHealthyAfterFullScan(gate.reconciliationFailureGeneration());
     }
 
     private WorkflowNodeDef worker(String id) {

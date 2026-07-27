@@ -166,7 +166,7 @@ public interface AgentModelConfigMapper extends BaseMapper<AgentModelConfig> {
             WHERE vendor_account_id = #{vendorAccountId}
               AND COALESCE(is_deleted, 0) = 0
               AND enabled = 1
-            ORDER BY COALESCE(agent_enabled, 0) DESC, COALESCE(is_default, 0) DESC, id DESC
+            ORDER BY COALESCE(is_default, 0) DESC, COALESCE(agent_enabled, 0) DESC, id DESC
             LIMIT 1
             """)
     AgentModelConfig findFirstEnabledByVendorAccountId(@Param("vendorAccountId") Long vendorAccountId);

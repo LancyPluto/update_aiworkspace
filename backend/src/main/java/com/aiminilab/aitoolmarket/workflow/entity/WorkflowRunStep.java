@@ -13,6 +13,7 @@ public class WorkflowRunStep {
     private Long id;
     private Long runId;
     private String nodeId;
+    private String nodeTitle;
     private Integer sequenceNo;
     private String nodeDefType;
     private String status;
@@ -38,6 +39,8 @@ public class WorkflowRunStep {
     public void setRunId(Long runId) { this.runId = runId; }
     public String getNodeId() { return nodeId; }
     public void setNodeId(String nodeId) { this.nodeId = nodeId; }
+    public String getNodeTitle() { return nodeTitle; }
+    public void setNodeTitle(String nodeTitle) { this.nodeTitle = nodeTitle; }
     public Integer getSequenceNo() { return sequenceNo; }
     public void setSequenceNo(Integer sequenceNo) { this.sequenceNo = sequenceNo; }
     public String getNodeDefType() { return nodeDefType; }

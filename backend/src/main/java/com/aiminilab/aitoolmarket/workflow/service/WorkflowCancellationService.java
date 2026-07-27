@@ -14,6 +14,7 @@ import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowRunMapper;
 import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowRunStepMapper;
 import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowStepAttemptMapper;
 import com.aiminilab.aitoolmarket.workflow.mapper.WorkflowStepChargeMapper;
+import com.aiminilab.aitoolmarket.workflow.support.WorkflowFailureContract;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +26,12 @@ import java.util.Set;
 @Service
 public class WorkflowCancellationService {
 
+    private static final String BILLING_RECONCILIATION_STATUS = "RECONCILIATION_FAILED";
+    private static final String BILLING_RECONCILIATION_ERROR_CODE =
+            "WORKFLOW_BILLING_RECONCILIATION_FAILED";
+    private static final String BILLING_RECONCILIATION_ERROR_MESSAGE =
+            "Workflow billing reconciliation failed";
+
     private static final Set<String> ACTIVE_RUN_STATUSES = Set.of(
             "RUNNING", "AWAITING_USER", "AWAITING_FUNDS"
     );
@@ -33,6 +40,9 @@ public class WorkflowCancellationService {
     );
     private static final Set<String> RELEASABLE_ATTEMPT_STATUSES = Set.of(
             "CREATED", "DISPATCHED", "QUEUED", "RUNNING", "SUCCESS"
+    );
+    private static final Set<String> SAFE_ISOLATION_RELEASE_ATTEMPT_STATUSES = Set.of(
+            "CREATED", "DISPATCHED", "QUEUED"
     );
 
     private final WorkflowRunMapper runMapper;
@@ -44,6 +54,7 @@ public class WorkflowCancellationService {
     private final TaskMapper taskMapper;
     private final AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService;
     private final ComicWorkflowResultProjector comicWorkflowResultProjector;
+    private final WorkflowExecutionService executionService;
 
     public WorkflowCancellationService(WorkflowRunMapper runMapper,
                                        WorkflowRunStepMapper stepMapper,
@@ -53,7 +64,8 @@ public class WorkflowCancellationService {
                                        WorkflowBillingService billingService,
                                        TaskMapper taskMapper,
                                        AgentDelegatedToolCallLifecycleService delegatedToolCallLifecycleService,
-                                       ComicWorkflowResultProjector comicWorkflowResultProjector) {
+                                       ComicWorkflowResultProjector comicWorkflowResultProjector,
+                                       WorkflowExecutionService executionService) {
         this.runMapper = runMapper;
         this.stepMapper = stepMapper;
         this.attemptMapper = attemptMapper;
@@ -63,6 +75,7 @@ public class WorkflowCancellationService {
         this.taskMapper = taskMapper;
         this.delegatedToolCallLifecycleService = delegatedToolCallLifecycleService;
         this.comicWorkflowResultProjector = comicWorkflowResultProjector;
+        this.executionService = executionService;
     }
 
     @Transactional
@@ -89,6 +102,32 @@ public class WorkflowCancellationService {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean isolateBillingReconciliationFailure(Long runId) {
+        WorkflowRun run = runMapper.selectByIdForUpdate(runId);
+        if (run == null) {
+            throw new IllegalStateException("Workflow run not found during billing reconciliation: " + runId);
+        }
+        WorkflowFailureContract failure = WorkflowFailureContract.from(
+                BILLING_RECONCILIATION_ERROR_CODE,
+                BILLING_RECONCILIATION_ERROR_MESSAGE
+        );
+        if (TERMINAL_RUN_STATUSES.contains(run.getStatus())) {
+            markBillingReconciliationFailed(run);
+            return false;
+        }
+        if (ACTIVE_RUN_STATUSES.contains(run.getStatus())) {
+            beginBillingReconciliationIsolation(run, failure);
+        } else if ("CANCELLING".equals(run.getStatus())) {
+            markBillingReconciliationFailed(run);
+        } else {
+            markBillingReconciliationFailed(run);
+            return false;
+        }
+        markRootCancelling(run);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean settlePersisted(Long runId) {
         WorkflowRun run = runMapper.selectByIdForUpdate(runId);
         if (run == null || TERMINAL_RUN_STATUSES.contains(run.getStatus())) {
@@ -108,14 +147,50 @@ public class WorkflowCancellationService {
             throw conflict("工作流尚未进入取消状态");
         }
         String normalizedReason = normalizedReason(reason);
+        boolean billingReconciliationFailure = BILLING_RECONCILIATION_STATUS.equals(run.getBillingStatus());
         List<WorkflowStepAttempt> attempts = attemptMapper.selectByRunId(run.getId());
+        boolean hasUncertainAttempt = false;
         for (WorkflowStepAttempt attempt : attempts) {
+            AiTask child = billingReconciliationFailure && attempt.getChildTaskId() != null
+                    ? taskMapper.selectByIdForUpdate(attempt.getChildTaskId())
+                    : null;
             if (attempt.getChildTaskId() != null) {
                 taskMapper.cancel(
                         attempt.getChildTaskId(),
                         List.of(TaskStatus.QUEUED.name(), TaskStatus.PROCESSING.name(),
                                 TaskStatus.AWAITING_USER.name(), TaskStatus.AWAITING_FUNDS.name())
                 );
+            }
+            if (billingReconciliationFailure) {
+                if ("SUCCESS".equals(attempt.getStatus())) {
+                    if (attempt.getChildTaskId() == null || child == null) {
+                        hasUncertainAttempt = true;
+                        continue;
+                    }
+                    billingService.releaseDeferredSuccess(attempt.getId(), attempt.getChildTaskId());
+                    continue;
+                }
+                if (SAFE_ISOLATION_RELEASE_ATTEMPT_STATUSES.contains(attempt.getStatus())) {
+                    boolean providerNotCalled = "CREATED".equals(attempt.getStatus())
+                            ? attempt.getChildTaskId() == null
+                            : child != null && TaskStatus.QUEUED.name().equals(child.getStatus());
+                    if (providerNotCalled) {
+                        billingService.release(attempt.getId());
+                    } else {
+                        hasUncertainAttempt = true;
+                    }
+                    attemptMapper.cancelIfActive(attempt.getId(), normalizedReason);
+                    continue;
+                }
+                boolean providerOutcomeUncertain = "RUNNING".equals(attempt.getStatus())
+                        || "LOST".equals(attempt.getStatus())
+                        || (attempt.getChildTaskId() != null && child == null)
+                        || (child != null && TaskStatus.PROCESSING.name().equals(child.getStatus()));
+                if (providerOutcomeUncertain) {
+                    hasUncertainAttempt = true;
+                    attemptMapper.cancelIfActive(attempt.getId(), normalizedReason);
+                }
+                continue;
             }
             if (!RELEASABLE_ATTEMPT_STATUSES.contains(attempt.getStatus())) {
                 continue;
@@ -131,12 +206,16 @@ public class WorkflowCancellationService {
         stepMapper.cancelActiveByRunId(run.getId(), normalizedReason);
 
         boolean hasLostAttempt = attempts.stream().anyMatch(attempt -> "LOST".equals(attempt.getStatus()));
-        if (hasLostAttempt || chargeMapper.countReserved(run.getId()) > 0) {
+        if (hasUncertainAttempt || hasLostAttempt || chargeMapper.countReserved(run.getId()) > 0) {
             markRootCancelling(run);
             if (runMapper.deferCancellationReconciliation(run.getId(), revision(run)) != 1) {
                 throw conflict("工作流待对账状态已变化");
             }
             return false;
+        }
+        if (billingReconciliationFailure) {
+            executionService.finishBillingReconciliationFailure(run.getId());
+            return true;
         }
         AiTask rootTask = taskMapper.findById(run.getRootTaskId()).orElse(null);
         if (rootTask != null && !TaskStatus.CANCELLED.name().equals(rootTask.getStatus())) {
@@ -157,6 +236,42 @@ public class WorkflowCancellationService {
                 normalizedReason
         );
         return true;
+    }
+
+    private void beginBillingReconciliationIsolation(WorkflowRun run,
+                                                     WorkflowFailureContract failure) {
+        long expectedRevision = revision(run);
+        if (runMapper.beginBillingReconciliationIsolation(
+                run.getId(),
+                expectedRevision,
+                failure.userMessage(),
+                failure.developerMessage(),
+                failure.failureTraceId()
+        ) != 1) {
+            throw conflict("Workflow billing reconciliation isolation compare-and-set failed: " + run.getId());
+        }
+        run.setStatus("CANCELLING");
+        run.setBillingStatus(BILLING_RECONCILIATION_STATUS);
+        run.setCancellationGeneration((run.getCancellationGeneration() == null
+                ? 0L : run.getCancellationGeneration()) + 1);
+        run.setErrorCode(failure.errorCode());
+        run.setErrorMessage(failure.developerMessage());
+        run.setUserMessage(failure.userMessage());
+        run.setDeveloperMessage(failure.developerMessage());
+        run.setFailureTraceId(failure.failureTraceId());
+        run.setRevision(expectedRevision + 1);
+    }
+
+    private void markBillingReconciliationFailed(WorkflowRun run) {
+        if (BILLING_RECONCILIATION_STATUS.equals(run.getBillingStatus())) {
+            return;
+        }
+        long expectedRevision = revision(run);
+        if (runMapper.markBillingReconciliationFailed(run.getId(), expectedRevision) != 1) {
+            throw conflict("Workflow billing reconciliation audit compare-and-set failed: " + run.getId());
+        }
+        run.setBillingStatus(BILLING_RECONCILIATION_STATUS);
+        run.setRevision(expectedRevision + 1);
     }
 
     private void markRootCancelling(WorkflowRun run) {

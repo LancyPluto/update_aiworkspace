@@ -34,6 +34,8 @@ class OpenApiContractTest {
                 "/api/v1/tasks/{taskId}/regenerate:",
                 "/api/v1/credits/account:",
                 "/api/v1/credits/logs:",
+                "/api/v1/credits/statement-logs:",
+                "/api/v1/credits/usage-logs:",
                 "/api/admin/v1/auth/login:",
                 "/api/admin/v1/tools:",
                 "/api/admin/v1/tools/{toolId}:",

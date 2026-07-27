@@ -1416,6 +1416,7 @@ CREATE TABLE workflow_run_steps (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   run_id BIGINT NOT NULL,
   node_id VARCHAR(64) NOT NULL,
+  node_title CLOB,
   sequence_no INT NOT NULL DEFAULT 0,
   node_def_type VARCHAR(64) NOT NULL,
   status VARCHAR(32) NOT NULL DEFAULT 'PENDING',

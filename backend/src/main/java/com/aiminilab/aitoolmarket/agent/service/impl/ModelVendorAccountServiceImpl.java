@@ -22,6 +22,7 @@ import com.aiminilab.aitoolmarket.agent.service.ModelProviderMetadataService;
 import com.aiminilab.aitoolmarket.agent.service.ModelVendorAccountService;
 import com.aiminilab.aitoolmarket.agent.support.AgentVisionInputSupport;
 import com.aiminilab.aitoolmarket.agent.support.ModelCapabilitiesCodec;
+import com.aiminilab.aitoolmarket.agent.support.ModelConfigCredentialResolver;
 import com.aiminilab.aitoolmarket.agent.support.OpenAiCompatibleEndpointSupport;
 import com.aiminilab.aitoolmarket.agent.support.OpenAiCompatibleEndpointSupport.NormalizedEndpoint;
 import com.aiminilab.aitoolmarket.agent.support.VendorCodeResolver;
@@ -66,6 +67,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     private final AgentServiceClient agentServiceClient;
     private final VendorBalanceRefreshService balanceRefreshService;
     private final ModelCapabilitiesCodec capabilitiesCodec;
+    private final ModelConfigCredentialResolver credentialResolver;
     private final ObjectMapper objectMapper;
     private final ConnectivityProbeRegistry connectivityProbeRegistry;
     private final AccountModelRouteStateMapper routeStateMapper;
@@ -77,10 +79,11 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                                          ModelProviderMetadataService providerMetadataService,
                                          AgentServiceClient agentServiceClient,
                                          VendorBalanceRefreshService balanceRefreshService,
-                                          ModelCapabilitiesCodec capabilitiesCodec,
-                                          ObjectMapper objectMapper,
-                                          ConnectivityProbeRegistry connectivityProbeRegistry,
-                                          AccountModelRouteStateMapper routeStateMapper) {
+                                         ModelCapabilitiesCodec capabilitiesCodec,
+                                         ModelConfigCredentialResolver credentialResolver,
+                                         ObjectMapper objectMapper,
+                                         ConnectivityProbeRegistry connectivityProbeRegistry,
+                                         AccountModelRouteStateMapper routeStateMapper) {
         this.vendorAccountMapper = vendorAccountMapper;
         this.agentModelConfigMapper = agentModelConfigMapper;
         this.vendorCodeResolver = vendorCodeResolver;
@@ -89,6 +92,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         this.agentServiceClient = agentServiceClient;
         this.balanceRefreshService = balanceRefreshService;
         this.capabilitiesCodec = capabilitiesCodec;
+        this.credentialResolver = credentialResolver;
         this.objectMapper = objectMapper;
         this.connectivityProbeRegistry = connectivityProbeRegistry;
         this.routeStateMapper = routeStateMapper;
@@ -178,16 +182,22 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         if (registeredProbe.isPresent()) {
             return accountProbeResponse(account, registeredProbe.get());
         }
-        String providerCode = resolveAccountProbeProvider(account);
+
+        AgentModelConfig linked = agentModelConfigMapper.findFirstEnabledByVendorAccountId(account.getId());
+        if (linked == null) {
+            return missingEnabledModelResponse(account);
+        }
+        linked = credentialResolver.resolveForExecution(linked);
+        String providerCode = linked.getProvider() == null ? "" : linked.getProvider().trim();
         ModelProviderDefinition provider = providerRegistry.findByCode(providerCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAM_ERROR, "unsupported model provider for test"));
         if ("accept_only".equalsIgnoreCase(provider.testStrategy())) {
-            return testAcceptOnlyVendorAccount(account, providerCode, provider);
+            return testAcceptOnlyVendorAccount(account, providerCode, provider, linked);
         }
-        if (requiresMediaGatewayProbe(provider) || isOpenAiLikeVendor(account)) {
-            return testMediaGatewayVendorAccount(account, providerCode, provider);
+        if (requiresMediaGatewayProbe(provider)) {
+            return testMediaGatewayVendorAccount(account, providerCode, provider, linked);
         }
-        AgentModelConfigRequest testRequest = accountTestRequest(account, providerCode, provider, null);
+        AgentModelConfigRequest testRequest = accountTestRequest(account, providerCode, provider, linked);
         boolean success;
         String message;
         Long latencyMs;
@@ -239,6 +249,21 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
         );
     }
 
+    private ModelVendorAccountTestResponse missingEnabledModelResponse(ModelVendorAccount account) {
+        String message = "请先为该厂商账户绑定并启用模型后再测试";
+        applyHealth(account, "ERROR", message);
+        account.setUpdatedAt(LocalDateTime.now());
+        vendorAccountMapper.updateAccount(account);
+        return new ModelVendorAccountTestResponse(
+                false,
+                message,
+                null,
+                "",
+                "",
+                toResponse(account)
+        );
+    }
+
     private ModelVendorAccountTestResponse accountProbeResponse(
             ModelVendorAccount account,
             ConnectivityProbeResult result
@@ -268,19 +293,6 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 "",
                 toResponse(account)
         );
-    }
-
-    private String resolveAccountProbeProvider(ModelVendorAccount account) {
-        String vendor = account.getVendorCode() == null ? "" : account.getVendorCode().trim().toLowerCase(Locale.ROOT);
-        if ("openai".equals(vendor) || "openai_gateway".equals(vendor)) {
-            return "openai_images_gateway";
-        }
-        return resolveTestProvider(vendor);
-    }
-
-    private boolean isOpenAiLikeVendor(ModelVendorAccount account) {
-        String vendor = account == null || account.getVendorCode() == null ? "" : account.getVendorCode().trim().toLowerCase(Locale.ROOT);
-        return "openai".equals(vendor) || "openai_gateway".equals(vendor) || "minimax".equals(vendor);
     }
 
     @Override
@@ -690,9 +702,9 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                     linked.getProvider(),
                     linked.getModelName(),
                     linked.getBaseUrl() == null || linked.getBaseUrl().isBlank() ? account.getBaseUrl() : linked.getBaseUrl(),
-                    account.getApiKey(),
+                    resolveApiKey(account),
                     null,
-                    account.getExtraAuthJson(),
+                    linked.getExtraAuthJson(),
                     linked.getExecutionTask(),
                     linked.getExecutionOptionsJson(),
                     linked.getRequestSchemaJson(),
@@ -719,10 +731,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                     false,
                     linked.getCapabilities() == null || linked.getCapabilities().isBlank()
                             ? provider.capabilities()
-                            : java.util.Arrays.stream(linked.getCapabilities().split(","))
-                            .map(String::trim)
-                            .filter(value -> !value.isBlank())
-                            .toList(),
+                            : capabilitiesCodec.parse(linked.getCapabilities()),
                     null,
                     null
             ));
@@ -735,7 +744,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 providerCode,
                 provider.defaultModel(),
                 account.getBaseUrl(),
-                account.getApiKey(),
+                resolveApiKey(account),
                 null,
                 account.getExtraAuthJson(),
                 null,
@@ -834,9 +843,13 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
 
     private ModelVendorAccountTestResponse testMediaGatewayVendorAccount(ModelVendorAccount account,
                                                                          String providerCode,
-                                                                         ModelProviderDefinition provider) {
+                                                                         ModelProviderDefinition provider,
+                                                                         AgentModelConfig linked) {
         long startedAt = System.currentTimeMillis();
         String apiKey = resolveApiKey(account);
+        String modelName = linked == null || linked.getModelName() == null || linked.getModelName().isBlank()
+                ? provider.defaultModel()
+                : linked.getModelName();
         if (!hasUsableCredential(account)) {
             applyHealth(account, "ERROR", "账号凭据未配置");
             account.setUpdatedAt(LocalDateTime.now());
@@ -846,11 +859,14 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                     "账号凭据未配置，请在厂商账户中填写 API Key 或额外鉴权 JSON",
                     null,
                     providerCode,
-                    provider.defaultModel(),
+                    modelName,
                     toResponse(account)
             );
         }
-        String baseUrl = blankToNull(account.getBaseUrl());
+        String baseUrl = linked == null ? null : blankToNull(linked.getBaseUrl());
+        if (baseUrl == null || baseUrl.isBlank()) {
+            baseUrl = blankToNull(account.getBaseUrl());
+        }
         if (baseUrl == null || baseUrl.isBlank()) {
             baseUrl = provider.defaultBaseUrl();
         }
@@ -878,7 +894,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 message,
                 latencyMs,
                 providerCode,
-                provider.defaultModel(),
+                modelName,
                 toResponse(account)
         );
     }
@@ -918,7 +934,11 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
 
     private ModelVendorAccountTestResponse testAcceptOnlyVendorAccount(ModelVendorAccount account,
                                                                        String providerCode,
-                                                                       ModelProviderDefinition provider) {
+                                                                       ModelProviderDefinition provider,
+                                                                       AgentModelConfig linked) {
+        String modelName = linked == null || linked.getModelName() == null || linked.getModelName().isBlank()
+                ? provider.defaultModel()
+                : linked.getModelName();
         if (!hasUsableCredential(account)) {
             applyHealth(account, "ERROR", "账号凭据未配置");
             account.setUpdatedAt(LocalDateTime.now());
@@ -928,7 +948,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                     "账号凭据未配置，请在厂商账户中填写 API Key 或额外鉴权 JSON",
                     null,
                     providerCode,
-                    provider.defaultModel(),
+                    modelName,
                     toResponse(account)
             );
         }
@@ -944,7 +964,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                 message,
                 latencyMs,
                 providerCode,
-                provider.defaultModel(),
+                modelName,
                 toResponse(account)
         );
     }
@@ -1183,24 +1203,6 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
             return "MANUAL";
         }
         return mode.trim().toUpperCase(Locale.ROOT);
-    }
-
-    private String resolveTestProvider(String vendorCode) {
-        String normalized = vendorCode == null ? "" : vendorCode.trim().toLowerCase(Locale.ROOT);
-        if (providerRegistry.isSupported(normalized)) {
-            return normalized;
-        }
-        return switch (normalized) {
-            case "deepseek" -> "deepseek";
-            case "siliconflow" -> "siliconflow_images";
-            case "volcengine" -> "volcengine_images";
-            case "kling" -> "kling_video";
-            case "dashscope" -> "bailian_happyhorse";
-            case "minimax" -> "minimax";
-            case "openai_gateway" -> "openai_images_gateway";
-            case "mock" -> "mock";
-            default -> "openai_compatible";
-        };
     }
 
     private String mergeProxyFields(String extraAuthJson, String proxyMode, String proxyUrl) {
