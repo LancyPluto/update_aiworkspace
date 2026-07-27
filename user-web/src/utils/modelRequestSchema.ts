@@ -28,6 +28,7 @@ const TOOL_UI_META_KEYS = [
   "submitPolicy",
   "libraryEnabled",
   "libraryKind",
+  "slider",
 ] as const
 
 const IMAGE_OUTPUT_COUNT_KEYS = new Set([
@@ -200,13 +201,20 @@ function effectiveFieldType(
   if (!toolField) return modelFieldType
   const itemType = String(field.itemType || "").trim().toLowerCase()
   const hasEnum = Array.isArray(field.enum) && field.enum.length > 0
+  const numericField = field.type === "number" || field.type === "integer"
+  if (
+    numericField
+    && !hasEnum
+    && (toolField.fieldType === "number" || toolField.fieldType === "slider")
+  ) {
+    return toolField.fieldType
+  }
   if (
     field.key.trim() === "generationMode"
     || field.type === "array"
     || field.control === "upload"
     || field.type === "boolean"
-    || field.type === "number"
-    || field.type === "integer"
+    || numericField
     || hasEnum
     || ["image", "video", "audio"].includes(itemType)
   ) {
@@ -219,6 +227,34 @@ function effectiveFieldType(
     return toolField.fieldType
   }
   return modelFieldType
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+function effectiveSliderMeta(
+  field: ModelRequestSchemaField,
+  meta: Record<string, unknown>,
+): { min: number; max: number; step: number } | null {
+  const configured = recordValue(meta.slider)
+  const configuredMin = finiteNumber(configured?.min)
+  const configuredMax = finiteNumber(configured?.max)
+  const schemaMin = finiteNumber(field.min)
+  const schemaMax = finiteNumber(field.max)
+  const min = schemaMin === undefined
+    ? configuredMin
+    : configuredMin === undefined ? schemaMin : Math.max(schemaMin, configuredMin)
+  const max = schemaMax === undefined
+    ? configuredMax
+    : configuredMax === undefined ? schemaMax : Math.min(schemaMax, configuredMax)
+  if (min === undefined || max === undefined || max <= min) return null
+  const configuredStep = finiteNumber(configured?.step)
+  const schemaStep = finiteNumber(field.step)
+  const step = schemaStep && schemaStep > 0
+    ? schemaStep
+    : configuredStep && configuredStep > 0 ? configuredStep : 1
+  return { min, max, step }
 }
 
 function schemaMeta(field: ModelRequestSchemaField, options: FieldOption[]): Record<string, unknown> {
@@ -310,10 +346,18 @@ export function buildEffectiveToolFields(
     const toolField = toolFieldsByKey.get(key)
     const options = normalizeOptions(schemaField.enum)
     const modelFieldType = schemaFieldType(schemaField, options)
-    const fieldType = effectiveFieldType(schemaField, modelFieldType, toolField)
+    let fieldType = effectiveFieldType(schemaField, modelFieldType, toolField)
     const meta = {
       ...schemaMeta(schemaField, options),
       ...pickToolUiMeta(toolField),
+    }
+    if (fieldType === "slider") {
+      const slider = effectiveSliderMeta(schemaField, meta)
+      if (slider) meta.slider = slider
+      else {
+        delete meta.slider
+        fieldType = "number"
+      }
     }
     if (key === "prompt" && meta.core === undefined && meta.isCore === undefined) meta.core = true
     if (imageGenerationModel && isSingleImageOutputField(schemaField)) {

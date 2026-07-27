@@ -204,28 +204,33 @@ ALTER TABLE agent_model_configs
 
 **`model_vendor_balance_logs`** — 每次余额查询结果历史。
 
-### 4.5 厂商编码 `vendor_code` 与协议 `provider`
+### 4.5 厂商编码 `vendor_code` 与服务入口 `provider`
 
 两套编码分工：
 
 | 编码 | 来源 | 用途 |
 |------|------|------|
-| `vendor_code` | 产品定义 + 映射表 | UI 分栏、余额账户聚合 |
-| `provider` | [`model-providers.yml`](../backend/src/main/resources/model-providers.yml) | 能力校验、Worker 路由、`testStrategy` |
+| `vendor_code` | 真实凭据/计费运营方 + 映射表 | 账户归属、余额与账单聚合、管理端分栏 |
+| `provider` | [`model-providers.yml`](../backend/src/main/resources/model-providers.yml) | 可配置服务入口、能力校验、Worker 路由、`testStrategy` |
+
+兼容格式属于 `providerProtocol`，官方直连或第三方网关属于 `vendorKind`；二者都不能充当厂商身份。公开页面可以按 `upstreamVendor` 聚合为 OpenAI 等生态分组，但不会改变账户的 `vendor_code`。
 
 **推荐映射（示例）：**
 
 | vendor_code（栏目） | 归并的 provider |
 |---------------------|-----------------|
 | `deepseek` | `deepseek` |
-| `openai` | `openai_compatible`（upstream 为 OpenAI 时） |
+| `openai` | `openai_compatible`（仅限 OpenAI 官方签发和计费的账户） |
 | `siliconflow` | `siliconflow_images`, `siliconflow_speech`, `siliconflow_asr` |
 | `volcengine` | `volcengine_images`, `seedance`, `openai_compatible`（方舟 Chat，按 baseUrl / vendor 归属） |
 | `kling` | `kling_video` |
 | `minimax` | `minimax`, `minimax_speech`, `minimax_music`, `anthropic_compatible`（按 baseUrl 归属可配置） |
-| `openai_gateway` | `ofox_openai_images`, `openai_images_gateway`（`vendorKind=gateway`） |
+| `ofox` | `ofox_openai_images`（`providerProtocol=openai_images`、`vendorKind=gateway`） |
+| 真实网关运营方代码 | `openai_images_gateway` 等通用兼容 Provider；按实际凭据发行方和计费方归属 |
 
 映射配置建议新增 **`config/model-vendor-mapping.yml`** 或由 `model-providers.yml` 扩展字段 `vendorCode`，避免前端硬编码。
+
+历史 `openai_gateway` 账户迁移前必须确认真实运营方；无法识别时中止迁移并要求人工指定，不得默认并入 `openai` 或兜底虚拟厂商。
 
 ---
 

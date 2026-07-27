@@ -4,7 +4,7 @@ from client.openai_images_client import OpenAIImagesRequestNotSentError
 from handlers.image_generation_handler import ImageGenerationHandler, ImageProgressTicker, _resolve_openai_image_size
 
 
-def test_openai_gateway_4k_image_model_uses_allowed_sizes():
+def test_compatible_image_provider_4k_model_uses_allowed_sizes():
     model_config = {"provider": "openai_images_gateway", "modelName": "gpt-image-2-4k"}
 
     assert _resolve_openai_image_size({}, model_config) == "3072x2048"
@@ -12,7 +12,7 @@ def test_openai_gateway_4k_image_model_uses_allowed_sizes():
     assert _resolve_openai_image_size({"aspectRatio": "9:16"}, model_config) == "1728x3072"
 
 
-def test_openai_gateway_prefers_preserved_frontend_size_field():
+def test_compatible_image_provider_prefers_preserved_frontend_size_field():
     model_config = {"provider": "openai_images_gateway", "modelName": "gpt-image-2"}
 
     assert _resolve_openai_image_size(

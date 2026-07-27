@@ -261,6 +261,19 @@ export function supportsOptions(fieldType: string): boolean {
   return fieldType === "select" || fieldType === "radio" || fieldType === "aspect_ratio"
 }
 
+export function sliderMetaFromNumericOptions(options: FieldOptionRow[]): FieldUiMeta["slider"] | undefined {
+  const values = [...new Set(options
+    .map((option) => Number(option.value || option.label))
+    .filter((value) => Number.isFinite(value)))]
+    .sort((left, right) => left - right)
+  if (values.length < 2) return undefined
+  const steps = values.slice(1)
+    .map((value, index) => value - values[index])
+    .filter((value) => value > 0)
+  const step = steps.length > 0 ? Math.min(...steps) : 1
+  return { min: values[0], max: values[values.length - 1], step }
+}
+
 export function parseOptionsJson(raw?: string | null): FieldOptionRow[] {
   return parseFieldOptionsJson(raw).options
 }

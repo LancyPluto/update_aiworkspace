@@ -73,8 +73,18 @@ class UnifiedApiOverviewServiceImplTest {
         account.setAccountName("google-ofox");
         account.setBaseUrl("https://api.ofox.ai/v1");
         account.setEnabled(true);
+        AgentModelConfig model = new AgentModelConfig();
+        model.setId(360L);
+        model.setVendorAccountId(36L);
+        model.setDisplayName("Generic gateway model");
+        model.setConfigCode("generic_gateway_google_operator");
+        model.setProvider("openai_images_gateway");
+        model.setModelName("operator/image-model");
+        model.setCapabilities("[\"IMAGE_GENERATION\"]");
+        model.setEnabled(true);
         when(accountMapper.findAllActive()).thenReturn(List.of(account));
-        when(modelConfigMapper.findAllActive()).thenReturn(List.of());
+        when(modelConfigMapper.findAllActive()).thenReturn(List.of(model));
+        when(capabilitiesCodec.parse(any())).thenReturn(List.of("IMAGE_GENERATION"));
 
         UnifiedApiOverviewResponse response = service.overview();
 
@@ -84,6 +94,15 @@ class UnifiedApiOverviewServiceImplTest {
                 .satisfies(vendor -> assertThat(vendor.accounts())
                         .singleElement()
                         .satisfies(item -> assertThat(item.id()).isEqualTo(36L)));
+        assertThat(response.vendors())
+                .filteredOn(vendor -> "google".equals(vendor.vendorCode()))
+                .singleElement()
+                .satisfies(vendor -> {
+                    assertThat(vendor.models())
+                            .singleElement()
+                            .satisfies(item -> assertThat(item.id()).isEqualTo(360L));
+                    assertThat(vendor.supportedProviders()).containsExactly("openai_images_gateway");
+                });
         assertThat(response.vendors())
                 .filteredOn(vendor -> "openai".equals(vendor.vendorCode()))
                 .allSatisfy(vendor -> assertThat(vendor.accounts())

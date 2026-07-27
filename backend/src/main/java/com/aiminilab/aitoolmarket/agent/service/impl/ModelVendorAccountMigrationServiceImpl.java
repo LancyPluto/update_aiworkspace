@@ -51,6 +51,14 @@ public class ModelVendorAccountMigrationServiceImpl implements ModelVendorAccoun
                     continue;
                 }
                 String vendorCode = vendorCodeResolver.resolveVendorCode(config);
+                if (vendorCodeResolver.usesBoundAccountVendor(config.getProvider())
+                        && "other".equals(vendorCode)) {
+                    throw new IllegalStateException(
+                            "Cannot migrate unbound openai_images_gateway model "
+                                    + config.getId()
+                                    + ": select the actual credential issuer first"
+                    );
+                }
                 String groupKey = buildGroupKey(vendorCode, config);
                 Long accountId = findExistingAccountId(vendorCode, config, accountByGroupKey);
                 if (accountId == null) {
@@ -82,7 +90,7 @@ public class ModelVendorAccountMigrationServiceImpl implements ModelVendorAccoun
                 continue;
             }
             String vendor = account.getVendorCode() == null ? "" : account.getVendorCode().trim().toLowerCase(Locale.ROOT);
-            if (!"openai".equals(vendor) && !"openai_gateway".equals(vendor)) {
+            if (!"openai".equals(vendor) && !"ofox".equals(vendor)) {
                 continue;
             }
             account.setBalanceQueryMode("MANUAL");
@@ -90,7 +98,7 @@ public class ModelVendorAccountMigrationServiceImpl implements ModelVendorAccoun
             account.setBalanceStatus(balanceStatus(account));
             account.setUpdatedAt(LocalDateTime.now());
             vendorAccountMapper.updateAccount(account);
-            log.info("Adjusted OpenAI-compatible vendor account id={} balance_query_mode MANUAL", account.getId());
+            log.info("Adjusted OpenAI/oFox vendor account id={} balance_query_mode MANUAL", account.getId());
         }
     }
 

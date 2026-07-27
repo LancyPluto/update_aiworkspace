@@ -676,7 +676,7 @@ class AdminAgentApiTest {
 
     @Test
     @Transactional
-    void openaiGatewayVendorAccountTestUsesMediaGatewayProbeInsteadOfAgentChat() throws Exception {
+    void ofoxVendorAccountTestUsesGenericMediaGatewayProviderInsteadOfAgentChat() throws Exception {
         mockExternalAuthDependencies();
         String adminToken = login("/api/admin/v1/auth/login", "admin");
         com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(
@@ -699,8 +699,8 @@ class AdminAgentApiTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
                                     {
-                                      "vendorCode": "openai_gateway",
-                                      "accountName": "OpenAI gateway test",
+                                      "vendorCode": "ofox",
+                                      "accountName": "oFox gateway test",
                                       "baseUrl": "%s",
                                       "apiKey": "sk-test-gateway-key",
                                       "balanceQueryMode": "MANUAL",
@@ -716,7 +716,7 @@ class AdminAgentApiTest {
                     INSERT INTO agent_model_configs(vendor_account_id, display_name, config_code, provider, model_name,
                                                     base_url, api_key, billing_unit, capabilities,
                                                     enabled, agent_enabled, is_default, is_deleted)
-                    VALUES(?, 'OpenAI Gateway Image', 'openai_gateway_account_probe', 'openai_images_gateway',
+                    VALUES(?, 'oFox Generic Gateway Image', 'ofox_generic_gateway_account_probe', 'openai_images_gateway',
                            'openai/gpt-image-2', ?, '', 'IMAGE_TOKEN', '["IMAGE_GENERATION"]', 1, 0, 1, 0)
                     """, accountId, baseUrl);
 
@@ -733,6 +733,54 @@ class AdminAgentApiTest {
         } finally {
             server.stop(0);
         }
+    }
+
+    @Test
+    @Transactional
+    void genericImageGatewayProviderUsesBoundAccountRealVendor() throws Exception {
+        mockExternalAuthDependencies();
+        String adminToken = login("/api/admin/v1/auth/login", "admin");
+        String accountResponse = mockMvc.perform(post("/api/admin/v1/model-vendor-accounts")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "vendorCode": "google",
+                                  "accountName": "Third-party image gateway operator",
+                                  "baseUrl": "https://gateway.example/v1",
+                                  "apiKey": "gateway-secret",
+                                  "balanceQueryMode": "MANUAL",
+                                  "enabled": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        Long accountId = Long.parseLong(accountResponse.replaceAll("(?s).*\\\"id\\\"\\s*:\\s*(\\d+).*", "$1"));
+
+        mockMvc.perform(post("/api/admin/v1/agent/model-config")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "vendorAccountId": %d,
+                                  "displayName": "Generic image gateway",
+                                  "configCode": "generic_image_gateway_real_vendor_test",
+                                  "provider": "openai_images_gateway",
+                                  "modelName": "operator/image-model",
+                                  "baseUrl": "",
+                                  "timeoutSeconds": 60,
+                                  "enabled": true,
+                                  "agentEnabled": false,
+                                  "isDefault": false,
+                                  "capabilities": ["IMAGE_GENERATION"]
+                                }
+                                """.formatted(accountId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.vendorAccountId").value(accountId.intValue()))
+                .andExpect(jsonPath("$.data.provider").value("openai_images_gateway"))
+                .andExpect(jsonPath("$.data.channelCode").value("google"));
     }
 
     @Test

@@ -248,6 +248,36 @@ public class BillingServiceImpl implements BillingService {
         return true;
     }
 
+    @Override
+    @Transactional
+    public boolean attachProviderRequestId(Long usageId, String providerRequestId) {
+        if (usageId == null) {
+            throw new IllegalArgumentException("Billing usage id is required");
+        }
+        String normalizedRequestId = cleanNullable(providerRequestId, 128);
+        if (normalizedRequestId == null) {
+            return false;
+        }
+        BillingUsageLog existing = billingUsageLogMapper.selectByIdForUpdate(usageId);
+        if (existing == null) {
+            throw new IllegalStateException("Billing usage does not exist for provider request id");
+        }
+        if (existing.getProviderRequestId() != null) {
+            if (!existing.getProviderRequestId().equals(normalizedRequestId)) {
+                throw new IllegalStateException("Provider request id conflicts with existing billing usage");
+            }
+            return false;
+        }
+        if (billingUsageLogMapper.attachProviderRequestIdIfAbsent(usageId, normalizedRequestId) == 1) {
+            return true;
+        }
+        BillingUsageLog replay = billingUsageLogMapper.selectByIdForUpdate(usageId);
+        if (replay == null || !normalizedRequestId.equals(replay.getProviderRequestId())) {
+            throw new IllegalStateException("Provider request id could not be attached to billing usage");
+        }
+        return false;
+    }
+
     private Long recordUsageInternal(String idempotencyKey,
                                      String sourceType, Long sourceId, Long userId, AgentModelConfig modelConfig,
                                      Integer promptTokens, Integer completionTokens, Integer billableUnits,

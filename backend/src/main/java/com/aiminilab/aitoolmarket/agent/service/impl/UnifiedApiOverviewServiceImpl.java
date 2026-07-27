@@ -126,14 +126,13 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
                         vendorCode,
                         vendorCodeResolver.vendorLabel(vendorCode),
                         vendorCodeResolver.vendorIconAsset(vendorCode),
-                        providersForVendor(vendorCode),
+                        providersForVendor(vendorCode, modelsByVendor.getOrDefault(vendorCode, List.of())),
                         sortAccounts(accountsByVendor.getOrDefault(vendorCode, List.of())),
                         sortModels(modelsByVendor.getOrDefault(vendorCode, List.of()))
                 ))
                 .toList();
 
         List<UnifiedApiUnconfiguredVendorResponse> unconfigured = vendorCodeResolver.vendorCatalog().entrySet().stream()
-                .filter(entry -> !"openai_gateway".equals(entry.getKey()))
                 .filter(entry -> !"infinite_talk".equalsIgnoreCase(entry.getKey()))
                 .filter(entry -> !"infinitetalk".equalsIgnoreCase(entry.getKey()))
                 .filter(entry -> !configuredVendors.contains(vendorCodeResolver.canonicalVendorCode(entry.getKey())))
@@ -143,7 +142,7 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
                         entry.getKey(),
                         entry.getValue(),
                         vendorCodeResolver.vendorIconAsset(entry.getKey()),
-                        providersForVendor(entry.getKey())
+                        providersForVendor(entry.getKey(), List.of())
                 ))
                 .toList();
 
@@ -178,12 +177,7 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
                 return vendorCodeResolver.resolveEffectiveVendorCode(account);
             }
         }
-        String inferred = vendorCodeResolver.resolveVendorCode(config);
-        if (inferred != null && !inferred.isBlank() && !"other".equals(inferred)
-                && !"openai".equals(inferred) && !"openai_gateway".equals(inferred)) {
-            return inferred;
-        }
-        return inferred;
+        return vendorCodeResolver.resolveVendorCode(config);
     }
 
     private String routingExclusionReason(AgentModelConfig reference,
@@ -282,14 +276,20 @@ public class UnifiedApiOverviewServiceImpl implements UnifiedApiOverviewService 
         return left == null ? right == null : right != null && left.equalsIgnoreCase(right);
     }
 
-    private List<String> providersForVendor(String vendorCode) {
-        return providerRegistry.listAll().stream()
-                .filter(definition -> vendorCode.equals(vendorCodeResolver.resolveVendorCode(
-                        definition.code(),
-                        definition.defaultBaseUrl(),
-                        definition.label(),
-                        definition.defaultModel())))
-                .map(ModelProviderDefinition::code)
+    private List<String> providersForVendor(String vendorCode,
+                                            List<UnifiedApiModelItemResponse> configuredModels) {
+        return java.util.stream.Stream.concat(
+                        providerRegistry.listAll().stream()
+                                .filter(definition -> vendorCode.equals(vendorCodeResolver.resolveVendorCode(
+                                        definition.code(),
+                                        definition.defaultBaseUrl(),
+                                        definition.label(),
+                                        definition.defaultModel())))
+                                .map(ModelProviderDefinition::code),
+                        configuredModels.stream().map(UnifiedApiModelItemResponse::provider)
+                )
+                .filter(provider -> provider != null && !provider.isBlank())
+                .distinct()
                 .sorted()
                 .toList();
     }

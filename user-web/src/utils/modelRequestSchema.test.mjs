@@ -120,6 +120,25 @@ test("keeps tool-only business inputs while schema fields own upstream constrain
   assert.equal(fields[2].options.uiGroup, "business")
 })
 
+test("tool slider styling survives numeric model schema and submits a number", () => {
+  const [count] = schemaTools.buildEffectiveToolFields([
+    {
+      fieldKey: "count",
+      fieldName: "Generation count",
+      fieldType: "slider",
+      required: false,
+      sortOrder: 1,
+      options: { slider: { min: 1, max: 4, step: 1 } },
+    },
+  ], imageModel([
+    { key: "count", type: "integer", default: 1, min: 1, max: 10 },
+  ]))
+
+  assert.equal(count.fieldType, "slider")
+  assert.deepEqual(count.options.slider, { min: 1, max: 4, step: 1 })
+  assert.deepEqual(schemaTools.prepareModelParams([count], { count: "3" }), { count: 3 })
+})
+
 test("schema-backed models discard legacy tool media fields that are not in the model contract", () => {
   const fields = schemaTools.buildEffectiveToolFields([
     { fieldKey: "imageUrl", fieldName: "旧首帧", fieldType: "image", required: true, sortOrder: 1 },

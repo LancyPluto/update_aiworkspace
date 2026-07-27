@@ -59,6 +59,8 @@ public interface BillingService {
                                            BigDecimal providerCostAmount, String providerCostCurrency,
                                            String providerRequestId);
 
+    boolean attachProviderRequestId(Long usageId, String providerRequestId);
+
     /** Backward-compatible overload (no explicit vendor cost / markup). */
     default void recordUsage(String sourceType, Long sourceId, Long userId, AgentModelConfig modelConfig,
                              Integer promptTokens, Integer completionTokens, Integer billableUnits, Integer chargedCredits) {

@@ -950,6 +950,94 @@ class WorkflowLateCallbackTest {
     }
 
     @Test
+    void duplicateSuccessCanAttachProviderRequestIdWithoutReportedCost() throws Exception {
+        stepId = insertWorkflow("workflow_late_success_provider_request_id_test", 1);
+        configureSnapshotPricedStep(20, 100);
+        WorkflowStepAttempt active = scheduler.dispatch(stepId);
+        claim(active);
+        String callbackPath = "/api/internal/v1/tasks/%d/success".formatted(active.getChildTaskId());
+        String firstBody = """
+                {
+                  "resourceType": "JSON",
+                  "contentText": "{\\"ok\\":true}",
+                  "promptTokens": 10,
+                  "completionTokens": 5,
+                  "billableUnits": 1,
+                  "providerCalled": true,
+                  "claimToken": "worker-claim"
+                }
+                """;
+        String replayBody = """
+                {
+                  "resourceType": "JSON",
+                  "contentText": "{\\"ok\\":true}",
+                  "promptTokens": 10,
+                  "completionTokens": 5,
+                  "billableUnits": 1,
+                  "providerRequestId": "late-success-request-id-only",
+                  "providerCalled": true,
+                  "claimToken": "worker-claim"
+                }
+                """;
+
+        mockMvc.perform(signed(post(callbackPath), "POST", callbackPath, firstBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(firstBody))
+                .andExpect(status().isOk());
+        mockMvc.perform(signed(post(callbackPath), "POST", callbackPath, replayBody)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(replayBody))
+                .andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT attempt.provider_request_id AS attempt_request_id, "
+                        + "usage.provider_request_id AS usage_request_id "
+                        + "FROM workflow_step_attempts attempt "
+                        + "JOIN workflow_step_charges charge ON charge.attempt_id = attempt.id "
+                        + "JOIN billing_usage_logs usage ON usage.id = charge.billing_usage_id "
+                        + "WHERE attempt.id = ?",
+                active.getId()
+        )).containsEntry("attempt_request_id", "late-success-request-id-only")
+                .containsEntry("usage_request_id", "late-success-request-id-only");
+        assertThat(chargeReconciler.reconcileRun(runIdForStep()))
+                .extracting("invalidCreditTransitions", "consistent")
+                .containsExactly(0, true);
+    }
+
+    @Test
+    void duplicateSuccessCanAttachProviderRequestIdAfterCostWasRecorded() {
+        stepId = insertWorkflow("workflow_late_success_cost_then_request_id_test", 1);
+        configureSnapshotPricedStep(20, 100);
+        WorkflowStepAttempt active = scheduler.dispatch(stepId);
+        claim(active);
+        WorkerSuccessRequest first = new WorkerSuccessRequest(
+                "JSON", "{\"ok\":true}", 10, 5, 1,
+                new BigDecimal("0.222222"), "CNY", null, true, "worker-claim"
+        );
+        WorkerSuccessRequest replay = new WorkerSuccessRequest(
+                "JSON", "{\"ok\":true}", 10, 5, 1,
+                new BigDecimal("0.222222"), "CNY", "cost-then-request-id", true, "worker-claim"
+        );
+
+        internalTaskService.markSuccess(active.getChildTaskId(), first);
+        internalTaskService.markSuccess(active.getChildTaskId(), replay);
+
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT attempt.provider_request_id AS attempt_request_id, "
+                        + "usage.provider_request_id AS usage_request_id "
+                        + "FROM workflow_step_attempts attempt "
+                        + "JOIN workflow_step_charges charge ON charge.attempt_id = attempt.id "
+                        + "JOIN billing_usage_logs usage ON usage.id = charge.billing_usage_id "
+                        + "WHERE attempt.id = ?",
+                active.getId()
+        )).containsEntry("attempt_request_id", "cost-then-request-id")
+                .containsEntry("usage_request_id", "cost-then-request-id");
+        assertThat(chargeReconciler.reconcileRun(runIdForStep()))
+                .extracting("invalidCreditTransitions", "consistent")
+                .containsExactly(0, true);
+    }
+
+    @Test
     void duplicateSuccessCanAttachActualProviderCostReportedLaterExactlyOnce() throws Exception {
         stepId = insertWorkflow("workflow_late_success_provider_cost_callback_api_test", 1);
         configureSnapshotPricedStep(20, 100);

@@ -87,6 +87,10 @@ public class PublicModelOptionService {
     }
 
     private String resolveVendorCode(AgentModelConfig config, Map<Long, ModelVendorAccount> accountById) {
+        String publicVendorCode = vendorCodeResolver.resolvePublicVendorCode(config);
+        if (publicVendorCode != null && !publicVendorCode.isBlank() && !"other".equals(publicVendorCode)) {
+            return canonicalVendorCode(publicVendorCode);
+        }
         if (config.getVendorAccountId() != null) {
             ModelVendorAccount account = accountById.get(config.getVendorAccountId());
             if (account != null) {
@@ -97,9 +101,6 @@ public class PublicModelOptionService {
     }
 
     private static String canonicalVendorCode(String vendorCode) {
-        if ("openai_gateway".equalsIgnoreCase(vendorCode)) {
-            return "openai";
-        }
         return vendorCode == null || vendorCode.isBlank()
                 ? "other"
                 : vendorCode.trim().toLowerCase(Locale.ROOT);
