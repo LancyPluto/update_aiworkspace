@@ -1,0 +1,90 @@
+services:
+  backend:
+    depends_on:
+      banana-slides:
+        condition: service_healthy
+    environment:
+      PPT_ENGINE_BASE_URL: http://banana-slides:5000
+      PPT_ENGINE_CONNECT_TIMEOUT_MS: ${PPT_ENGINE_CONNECT_TIMEOUT_MS:-5000}
+      PPT_ENGINE_READ_TIMEOUT_MS: ${PPT_ENGINE_READ_TIMEOUT_MS:-300000}
+      NO_PROXY: ${CONTAINER_NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,agent-service,admin-frontend,user-web,nginx,banana-slides,host.docker.internal}
+
+  banana-slides-migrate:
+    image: ${BANANA_SLIDES_IMAGE:?BANANA_SLIDES_IMAGE must be an immutable ACR reference with @sha256}
+    restart: "no"
+    env_file:
+      - ../.env
+    environment:
+      TZ: Asia/Shanghai
+      DATABASE_URL: ${BANANA_DATABASE_URL:-mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-root123456}@mysql:3306/banana_slides?charset=utf8mb4}
+      BANANA_SKIP_AUTO_MIGRATE: "1"
+      KCD_PLATFORM_REQUIRED: "1"
+    command: ["/app/docker/migrate-backend.sh"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  banana-slides:
+    image: ${BANANA_SLIDES_IMAGE:?BANANA_SLIDES_IMAGE must be an immutable ACR reference with @sha256}
+    container_name: ai-supermarket-banana-slides
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      TZ: Asia/Shanghai
+      PORT: 5000
+      PYTHONUNBUFFERED: "1"
+      KCD_PLATFORM_REQUIRED: "1"
+      KCD_DISABLE_SETTINGS_API: "1"
+      BANANA_SKIP_AUTO_MIGRATE: "1"
+      DATABASE_URL: ${BANANA_DATABASE_URL:-mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-root123456}@mysql:3306/banana_slides?charset=utf8mb4}
+      MAX_BACKGROUND_TASK_WORKERS: ${BANANA_BACKGROUND_WORKERS:-4}
+      MAX_PENDING_BACKGROUND_TASKS: ${BANANA_PENDING_TASKS:-8}
+      MAX_DESCRIPTION_WORKERS: ${BANANA_DESCRIPTION_WORKERS:-4}
+      MAX_IMAGE_WORKERS: ${BANANA_IMAGE_WORKERS:-3}
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      all_proxy: ""
+      NO_PROXY: ${CONTAINER_NO_PROXY:-localhost,127.0.0.1,mysql,redis,rabbitmq,backend,banana-slides,host.docker.internal}
+    expose:
+      - "5000"
+    depends_on:
+      banana-slides-migrate:
+        condition: service_completed_successfully
+    volumes:
+      - banana_slides_instance:/app/backend/instance
+      # Banana's FileService stores generated page images and exports below
+      # UPLOAD_FOLDER, whose product-image default is /app/uploads.
+      - banana_slides_uploads:/app/uploads
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/readyz', timeout=3).read()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "${BANANA_SLIDES_CPU_LIMIT:-2.0}"
+          memory: ${BANANA_SLIDES_MEMORY_LIMIT:-4G}
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    dns:
+      - 223.5.5.5
+      - 1.1.1.1
+
+volumes:
+  banana_slides_instance:
+  banana_slides_uploads:

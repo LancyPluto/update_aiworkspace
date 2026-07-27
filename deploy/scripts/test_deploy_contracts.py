@@ -16,6 +16,16 @@ class DeployContractTests(unittest.TestCase):
     def read(self, relative_path: str) -> str:
         return (ROOT / relative_path).read_text(encoding="utf-8")
 
+    def test_ppt_release_entrypoint_is_pr_gated(self) -> None:
+        script = self.read("scripts/ppt-release.ps1")
+        workflow = self.read(".github/workflows/dev-delivery.yml")
+        self.assertIn('[ValidateSet("Validate", "CreatePr")]', script)
+        self.assertIn('Banana product fork has uncommitted changes', script)
+        self.assertIn('engines\\versions.lock.json', script)
+        self.assertIn('gh pr create --base $BaseBranch', script)
+        self.assertNotIn('gh pr merge', script)
+        self.assertIn('types: [opened, synchronize, reopened, ready_for_review]', workflow)
+
     def test_migrations_are_immutable_and_fail_closed(self) -> None:
         script = self.read("deploy/scripts/apply_sql_migrations.sh")
         self.assertIn("checksum_sha256", script)
@@ -149,7 +159,9 @@ class DeployContractTests(unittest.TestCase):
         cache_mount = (
             "RUN --mount=type=cache,target=/root/.m2/repository,sharing=locked"
         )
-        self.assertTrue(dockerfile.startswith("# syntax=docker/dockerfile:1.7\n"))
+        self.assertTrue(
+            dockerfile.startswith("# syntax=docker.1ms.run/docker/dockerfile:1.7\n")
+        )
         self.assertEqual(2, dockerfile.count(cache_mount))
         self.assertIn("mvn -B dependency:go-offline -DskipTests", dockerfile)
         self.assertNotRegex(
@@ -2364,6 +2376,35 @@ exit 2
             deploy.index("trap rollback_on_failure ERR"),
             deploy.index('git checkout -B "$GIT_BRANCH" deploy-target -f'),
         )
+
+    def test_ppt_release_uses_public_locked_acr_image_and_authenticated_smoke_gate(self) -> None:
+        linux_deploy = self.read("deploy/scripts/ci_remote_deploy_light.sh")
+        windows_deploy = self.read("deploy/scripts/remote_deploy_production.py")
+        preflight = self.read("deploy/scripts/verify_production_environment.sh")
+        health = self.read("deploy/scripts/verify_release_health.sh")
+        workflow = self.read(".github/workflows/dev-delivery.yml")
+        smoke = self.read("deploy/scripts/smoke_ppt_workbench.py")
+
+        for deploy in (linux_deploy, windows_deploy):
+            self.assertIn("-f docker-compose.ppt.yml", deploy)
+            self.assertIn("verify_ppt_model_pool.sh", deploy)
+            self.assertIn("pull banana-slides", deploy)
+        self.assertNotIn("build banana-slides", linux_deploy)
+        self.assertIn("crpi-e8y8tegbhx1vbpxm.cn-guangzhou.personal.cr.aliyuncs.com/aitools_wl/banana", preflight)
+        self.assertIn("@sha256:", preflight)
+        self.assertIn('engine["releaseStatus"] == "READY"', preflight)
+        self.assertIn("http://banana-slides:5000/health", health)
+        self.assertIn("/api/v2/ppt/capabilities", health)
+        self.assertIn("PPT_SMOKE_AUTH_TOKEN", workflow)
+        self.assertNotIn("ACR_USERNAME", workflow)
+        self.assertNotIn("ACR_PASSWORD", workflow)
+        self.assertNotIn("docker login", linux_deploy)
+        self.assertIn("public immutable Banana Slides image anonymously", linux_deploy)
+        self.assertIn('patch["BANANA_SLIDES_IMAGE"] = engine_lock', linux_deploy)
+        self.assertIn("ppt/presentation.xml", smoke)
+        self.assertIn('"pageCount": 3', smoke)
+        self.assertIn("PPT_WORKBENCH_ENABLED=true", linux_deploy)
+        self.assertIn('merged["PPT_WORKBENCH_ENABLED"] = "false"', self.read("deploy/scripts/rollback_release.sh"))
 
     def test_media_cache_backfill_is_dry_run_by_default(self) -> None:
         script = self.read("deploy/scripts/backfill_oss_cache_control.py")

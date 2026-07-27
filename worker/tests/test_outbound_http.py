@@ -167,6 +167,42 @@ def test_gateway_is_disabled_without_environment_even_if_model_snapshot_requests
     assert policy.proxies == {}
 
 
+def test_local_host_proxy_requires_explicit_local_guard() -> None:
+    with patch.dict(
+        os.environ,
+        {"PROJECT_MIHOMO_PROXY_URL": "http://host.docker.internal:3128"},
+        clear=True,
+    ):
+        assert resolve_outbound_proxy_policy().enabled is False
+
+    with patch.dict(
+        os.environ,
+        {
+            "PROJECT_MIHOMO_PROXY_URL": "http://host.docker.internal:3128",
+            "ALLOW_LOCAL_HOST_PROXY": "true",
+        },
+        clear=True,
+    ):
+        policy = resolve_outbound_proxy_policy()
+
+    assert policy.enabled is True
+    assert policy.proxy_url == "http://host.docker.internal:3128"
+
+
+def test_local_host_proxy_rejects_credentials_and_external_hosts() -> None:
+    for value in (
+        "http://user:secret@host.docker.internal:3128",
+        "http://proxy.example.com:3128",
+        "https://host.docker.internal:3128",
+    ):
+        with patch.dict(
+            os.environ,
+            {"PROJECT_MIHOMO_PROXY_URL": value, "ALLOW_LOCAL_HOST_PROXY": "true"},
+            clear=True,
+        ):
+            assert resolve_outbound_proxy_policy().enabled is False
+
+
 def test_redirect_re_evaluates_public_and_internal_targets() -> None:
     with (
         patch.dict(os.environ, {"PROJECT_MIHOMO_PROXY_URL": "http://mihomo:7890"}, clear=True),

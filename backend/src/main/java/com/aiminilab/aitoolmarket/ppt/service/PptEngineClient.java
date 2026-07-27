@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -18,10 +19,15 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.URI;
+import java.net.UnknownHostException;
+import java.net.http.HttpConnectTimeoutException;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 @Component
 public class PptEngineClient {
@@ -29,12 +35,28 @@ public class PptEngineClient {
     private final PptEngineProperties properties;
     private final ObjectMapper objectMapper;
     private final RestClient restClient;
+    private final RestClient healthRestClient;
+    private volatile boolean cachedHealthy;
+    private volatile long healthCacheUntilNanos;
+    private volatile long circuitOpenUntilNanos;
+    private int consecutiveHealthFailures;
 
     public PptEngineClient(PptEngineProperties properties, ObjectMapper objectMapper) {
         this.properties = properties;
         this.objectMapper = objectMapper;
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(properties.getEngine().getConnectTimeoutMs());
+        requestFactory.setReadTimeout(properties.getEngine().getReadTimeoutMs());
         this.restClient = RestClient.builder()
                 .baseUrl(normalizeBaseUrl(properties.getEngine().getBaseUrl()))
+                .requestFactory(requestFactory)
+                .build();
+        SimpleClientHttpRequestFactory healthFactory = new SimpleClientHttpRequestFactory();
+        healthFactory.setConnectTimeout(Math.min(properties.getEngine().getConnectTimeoutMs(), 2000));
+        healthFactory.setReadTimeout(2000);
+        this.healthRestClient = RestClient.builder()
+                .baseUrl(normalizeBaseUrl(properties.getEngine().getBaseUrl()))
+                .requestFactory(healthFactory)
                 .build();
     }
 
@@ -56,6 +78,17 @@ public class PptEngineClient {
 
     public JsonNode getProjectAction(String projectId, String actionPath) {
         return get("/api/projects/" + projectId + actionPath);
+    }
+
+    public JsonNode getSubmission(String projectId, String idempotencyKey) {
+        try {
+            return get("/api/projects/" + projectId + "/submissions/" + idempotencyKey);
+        } catch (PptEngineResponseException exception) {
+            if (exception.getStatusCode() == 404) {
+                return null;
+            }
+            throw exception;
+        }
     }
 
     public JsonNode putProjectAction(String projectId, String actionPath, Map<String, Object> body) {
@@ -93,7 +126,7 @@ public class PptEngineClient {
         } catch (BusinessException exception) {
             throw exception;
         } catch (RestClientException exception) {
-            throw engineError(exception);
+            throw engineError(exception, false);
         }
     }
 
@@ -114,14 +147,31 @@ public class PptEngineClient {
         put("/api/settings", body == null ? Map.of() : body);
     }
 
-    public boolean healthCheck() {
+    public synchronized boolean healthCheck() {
+        long now = System.nanoTime();
+        if (now < healthCacheUntilNanos) {
+            return cachedHealthy;
+        }
+        if (now < circuitOpenUntilNanos) {
+            return false;
+        }
         try {
-            restClient.get()
-                    .uri("/health")
+            healthRestClient.get()
+                    .uri("/readyz")
                     .retrieve()
                     .toBodilessEntity();
+            cachedHealthy = true;
+            consecutiveHealthFailures = 0;
+            circuitOpenUntilNanos = 0;
+            healthCacheUntilNanos = now + TimeUnit.SECONDS.toNanos(3);
             return true;
         } catch (Exception exception) {
+            cachedHealthy = false;
+            consecutiveHealthFailures++;
+            healthCacheUntilNanos = now + TimeUnit.SECONDS.toNanos(2);
+            if (consecutiveHealthFailures >= 3) {
+                circuitOpenUntilNanos = now + TimeUnit.SECONDS.toNanos(15);
+            }
             return false;
         }
     }
@@ -145,7 +195,7 @@ public class PptEngineClient {
                     .retrieve()
                     .toBodilessEntity();
         } catch (RestClientException exception) {
-            throw engineError(exception);
+            throw engineError(exception, true);
         }
     }
 
@@ -153,7 +203,7 @@ public class PptEngineClient {
         try {
             RestClient.RequestBodySpec spec = restClient.method(org.springframework.http.HttpMethod.valueOf(method))
                     .uri(path);
-            String responseBody;
+            byte[] responseBody;
             Map<String, Object> payload = body == null ? Map.of() : body;
             if ("POST".equals(method) || "PUT".equals(method)) {
                 responseBody = spec.contentType(MediaType.APPLICATION_JSON)
@@ -163,26 +213,27 @@ public class PptEngineClient {
                                 (request, response) -> {
                                     throw engineStatusError(response);
                                 })
-                        .body(String.class);
+                        .body(byte[].class);
             } else {
                 responseBody = spec.retrieve()
                         .onStatus(status -> status.isError() && !(allow201 && status.value() == 201),
                                 (request, response) -> {
                                     throw engineStatusError(response);
                                 })
-                        .body(String.class);
+                        .body(byte[].class);
             }
-            return parseSuccessBody(responseBody);
+            return parseSuccessBody(decodeBody(responseBody));
         } catch (BusinessException exception) {
             throw exception;
         } catch (RestClientException exception) {
-            throw engineError(exception);
+            boolean mutating = "POST".equals(method) || "PUT".equals(method) || "DELETE".equals(method);
+            throw engineError(exception, mutating);
         }
     }
 
     private JsonNode exchangeMultipart(String path, MultiValueMap<String, Object> formData) {
         try {
-            String responseBody = restClient.post()
+            byte[] responseBody = restClient.post()
                     .uri(path)
                     .contentType(MediaType.MULTIPART_FORM_DATA)
                     .body(formData)
@@ -190,12 +241,12 @@ public class PptEngineClient {
                     .onStatus(HttpStatusCode::isError, (request, response) -> {
                         throw engineStatusError(response);
                     })
-                    .body(String.class);
-            return parseSuccessBody(responseBody);
+                    .body(byte[].class);
+            return parseSuccessBody(decodeBody(responseBody));
         } catch (BusinessException exception) {
             throw exception;
         } catch (RestClientException exception) {
-            throw engineError(exception);
+            throw engineError(exception, true);
         }
     }
 
@@ -220,6 +271,12 @@ public class PptEngineClient {
         }
     }
 
+    private String decodeBody(byte[] responseBody) {
+        return responseBody == null || responseBody.length == 0
+                ? null
+                : new String(responseBody, StandardCharsets.UTF_8);
+    }
+
     private BusinessException engineStatusError(org.springframework.http.client.ClientHttpResponse response) {
         try {
             byte[] bytes = response.getBody().readAllBytes();
@@ -230,11 +287,43 @@ public class PptEngineClient {
         }
     }
 
-    private BusinessException engineError(Exception exception) {
+    private BusinessException engineError(Exception exception, boolean mutating) {
         if (exception instanceof RestClientResponseException responseException) {
             return engineErrorFromBody(responseException.getResponseBodyAsString(), responseException.getStatusCode().value());
         }
-        return new BusinessException(ErrorCode.PPT_ENGINE_ERROR, "无法连接 PPT 引擎: " + exception.getMessage());
+        boolean definitelyNotSubmitted = hasCause(exception, ConnectException.class)
+                || hasCause(exception, UnknownHostException.class)
+                || hasCause(exception, HttpConnectTimeoutException.class)
+                || isConnectTimeout(exception);
+        boolean outcomeUnknown = mutating && !definitelyNotSubmitted;
+        String message = outcomeUnknown
+                ? "PPT 引擎响应中断，提交结果待确认"
+                : "无法连接 PPT 引擎: " + exception.getMessage();
+        return new PptEngineTransportException(message, outcomeUnknown);
+    }
+
+    private boolean hasCause(Throwable error, Class<? extends Throwable> type) {
+        Throwable current = error;
+        while (current != null) {
+            if (type.isInstance(current)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private boolean isConnectTimeout(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof SocketTimeoutException
+                    && current.getMessage() != null
+                    && current.getMessage().toLowerCase().contains("connect")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private BusinessException engineErrorFromBody(String body, int statusCode) {
@@ -242,12 +331,12 @@ public class PptEngineClient {
             try {
                 JsonNode root = objectMapper.readTree(body);
                 String message = root.path("error").path("message").asText(root.path("message").asText("引擎请求失败"));
-                return new BusinessException(ErrorCode.PPT_ENGINE_ERROR, message);
+                return new PptEngineResponseException(statusCode, message);
             } catch (Exception ignored) {
                 // fall through
             }
         }
-        return new BusinessException(ErrorCode.PPT_ENGINE_ERROR, "引擎请求失败: HTTP " + statusCode);
+        return new PptEngineResponseException(statusCode, "引擎请求失败: HTTP " + statusCode);
     }
 
     public static MultiValueMap<String, Object> singleFilePart(String fieldName, MultipartFile file) {

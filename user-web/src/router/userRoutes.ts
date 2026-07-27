@@ -8,6 +8,15 @@ export const userRoutes = {
   get dashboard() {
     return { name: "Dashboard" }
   },
+  get ppt() {
+    return { name: "PptProjects" }
+  },
+  get pptNew() {
+    return { name: "PptProjectCreate" }
+  },
+  pptProject(projectId: string | number) {
+    return { name: "PptProjectWorkspace", params: { projectId: String(projectId) } }
+  },
   get home() {
     return { name: "Home" }
   },

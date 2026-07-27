@@ -14,6 +14,7 @@ import com.aiminilab.aitoolmarket.common.error.AuthErrors;
 import com.aiminilab.aitoolmarket.common.error.ErrorContractResponseFactory;
 import com.aiminilab.aitoolmarket.common.error.ErrorDefinition;
 import com.aiminilab.aitoolmarket.task.support.ProviderCheckpointLimits;
+import com.aiminilab.aitoolmarket.ppt.security.PptExecutionTokenService;
 import com.aiminilab.aitoolmarket.user.mapper.UserMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.Filter;
@@ -30,6 +31,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StreamUtils;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -49,6 +51,24 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
     private final InternalRequestSignatureVerifier internalRequestSignatureVerifier;
     private final UserMapper userMapper;
     private final AuthMetrics authMetrics;
+    private final PptExecutionTokenService pptExecutionTokenService;
+
+    @Autowired
+    public AuthInterceptor(JwtTokenProvider jwtTokenProvider,
+                           ObjectMapper objectMapper,
+                           ErrorContractResponseFactory responseFactory,
+                           InternalRequestSignatureVerifier internalRequestSignatureVerifier,
+                           UserMapper userMapper,
+                           AuthMetrics authMetrics,
+                           PptExecutionTokenService pptExecutionTokenService) {
+        this.jwtTokenProvider = jwtTokenProvider;
+        this.objectMapper = objectMapper;
+        this.responseFactory = responseFactory;
+        this.internalRequestSignatureVerifier = internalRequestSignatureVerifier;
+        this.userMapper = userMapper;
+        this.authMetrics = authMetrics;
+        this.pptExecutionTokenService = pptExecutionTokenService;
+    }
 
     public AuthInterceptor(JwtTokenProvider jwtTokenProvider,
                            ObjectMapper objectMapper,
@@ -56,12 +76,8 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
                            InternalRequestSignatureVerifier internalRequestSignatureVerifier,
                            UserMapper userMapper,
                            AuthMetrics authMetrics) {
-        this.jwtTokenProvider = jwtTokenProvider;
-        this.objectMapper = objectMapper;
-        this.responseFactory = responseFactory;
-        this.internalRequestSignatureVerifier = internalRequestSignatureVerifier;
-        this.userMapper = userMapper;
-        this.authMetrics = authMetrics;
+        this(jwtTokenProvider, objectMapper, responseFactory,
+                internalRequestSignatureVerifier, userMapper, authMetrics, null);
     }
 
     @Override
@@ -72,6 +88,15 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
         HttpServletResponse response = (HttpServletResponse) servletResponse;
         if (!request.getRequestURI().startsWith("/api/internal/v1/")) {
             filterChain.doFilter(servletRequest, servletResponse);
+            return;
+        }
+        if (isPptModelInvocationRequest(request)
+                && pptExecutionTokenService != null
+                && pptExecutionTokenService.accepts(request.getHeader("Authorization"))) {
+            request.setAttribute(
+                    ErrorContractResponseFactory.INTERNAL_SIGNATURE_VERIFIED_ATTRIBUTE,
+                    Boolean.TRUE);
+            filterChain.doFilter(request, response);
             return;
         }
 
@@ -122,6 +147,12 @@ public class AuthInterceptor implements HandlerInterceptor, Filter {
     private boolean isProviderCheckpointRequest(HttpServletRequest request) {
         return "POST".equalsIgnoreCase(request.getMethod())
                 && request.getRequestURI().matches("/api/internal/v1/tasks/[^/]+/provider-checkpoint");
+    }
+
+    private boolean isPptModelInvocationRequest(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        return path.equals("/api/internal/v1/ppt/model-invocations")
+                || path.matches("/api/internal/v1/ppt/model-invocations/[^/]+");
     }
 
     @Override

@@ -1,9 +1,12 @@
 param(
     [ValidateSet("auto", "0", "1")]
     [string]$StartInfra = $(if ($env:START_INFRA) { $env:START_INFRA } else { "auto" }),
+    [ValidateSet("auto", "0", "1")]
+    [string]$StartPpt = $(if ($env:START_PPT) { $env:START_PPT } else { "auto" }),
     [ValidateSet("check", "auto", "0", "1")]
     [string]$ApplySql = $(if ($env:APPLY_SQL) { $env:APPLY_SQL } else { "check" }),
     [switch]$InstallDeps,
+    [switch]$PreflightOnly,
     [ValidateRange(1, 16)]
     [int]$WorkerCount = $(if ($env:WORKER_PROCESS_COUNT) { [int]$env:WORKER_PROCESS_COUNT } else { 2 })
 )
@@ -157,6 +160,73 @@ function Test-HttpReady($Url, $Seconds) {
         }
     }
     return $false
+}
+
+function Set-LocalContainerProxyFromWindows {
+    if ([Environment]::GetEnvironmentVariable("LOCAL_CONTAINER_PROXY_URL", "Process")) {
+        Write-Host "[PROXY] Local container proxy: configured explicitly"
+        return
+    }
+    if (-not $IsWindows -and $env:OS -ne "Windows_NT") {
+        return
+    }
+    try {
+        $settings = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+        if ([int]$settings.ProxyEnable -ne 1) {
+            return
+        }
+        $match = [regex]::Match([string]$settings.ProxyServer, '(?:(?:https?|socks)=)?(?:127\.0\.0\.1|localhost):(\d+)')
+        if (-not $match.Success) {
+            return
+        }
+        $port = [int]$match.Groups[1].Value
+        if ($port -lt 1 -or $port -gt 65535) {
+            return
+        }
+        [Environment]::SetEnvironmentVariable(
+            "LOCAL_CONTAINER_PROXY_URL",
+            "http://host.docker.internal:$port",
+            "Process"
+        )
+        Write-Host "[PROXY] Local container proxy: detected Windows loopback port $port"
+    } catch {
+        Write-Host "[PROXY] Local container proxy: not detected ($($_.Exception.Message))"
+    }
+}
+
+function Test-LocalTcpListener($Port) {
+    $Client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $Result = $Client.BeginConnect("127.0.0.1", $Port, $null, $null)
+        if (-not $Result.AsyncWaitHandle.WaitOne(350)) {
+            return $false
+        }
+        $Client.EndConnect($Result)
+        return $true
+    } catch {
+        return $false
+    } finally {
+        $Client.Dispose()
+    }
+}
+
+function Assert-HostAppPortsAvailable {
+    $Ports = @(
+        @{ Port = 8080; Name = "Backend" },
+        @{ Port = 8090; Name = "Agent Service" },
+        @{ Port = 5173; Name = "User Web" },
+        @{ Port = 5174; Name = "Admin Web" }
+    )
+    $Conflicts = @($Ports | Where-Object { Test-LocalTcpListener $_.Port })
+    if ($Conflicts.Count -eq 0) {
+        Write-Host "[OK] Host app ports are available"
+        return
+    }
+    Write-Host "[ERROR] Host app ports are already occupied:"
+    $Conflicts | ForEach-Object { Write-Host "  $($_.Name): $($_.Port)" }
+    Write-Host "[INFO] This usually means the Docker app stack or another dev launcher is already running."
+    Write-Host "[INFO] Inspect it with: docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.ppt.yml ps"
+    throw "Refusing to launch duplicate host services. Stop the existing app services, then rerun this script."
 }
 
 function Get-SqlMigrationFiles {
@@ -475,7 +545,139 @@ function Start-InfraIfNeeded {
     throw "Timed out waiting for infra services: $($InfraServices -join ', ')."
 }
 
+function Test-PptEnabled {
+    if ($StartPpt -eq "1") {
+        return $true
+    }
+    if ($StartPpt -eq "0") {
+        return $false
+    }
+    return $env:PPT_WORKBENCH_ENABLED -and
+        $env:PPT_WORKBENCH_ENABLED.Trim().ToLowerInvariant() -in @("1", "true", "yes", "on")
+}
+
+function Write-PptEngineFailureDiagnostics {
+    Write-Host "[DIAG] PPT compose services:"
+    & docker compose --env-file (Join-Path $Root ".env") `
+        -f (Join-Path $Root "deploy\docker-compose.yml") `
+        -f (Join-Path $Root "deploy\docker-compose.ppt.yml") `
+        -f (Join-Path $Root "deploy\docker-compose.ppt.local.yml") `
+        ps banana-slides banana-slides-migrate
+    Write-Host "[DIAG] Banana migration log:"
+    & docker logs --tail 80 deploy-banana-slides-migrate-1 2>&1
+    Write-Host "[DIAG] Banana application log:"
+    & docker logs --tail 80 ai-supermarket-banana-slides 2>&1
+}
+
+function Start-PptEngineIfNeeded {
+    if (-not (Test-PptEnabled)) {
+        Write-Host "[SKIP] PPT engine startup disabled"
+        return
+    }
+    Require-Command "docker" "Docker Desktop"
+    if (-not $env:BANANA_SLIDES_IMAGE) {
+        throw "PPT is enabled but BANANA_SLIDES_IMAGE is missing from .env."
+    }
+    $PptDataDir = $env:BANANA_SLIDES_LOCAL_DATA_DIR
+    foreach ($Directory in @(
+        $PptDataDir,
+        (Join-Path $PptDataDir "instance"),
+        (Join-Path $PptDataDir "uploads")
+    )) {
+        if (-not (Test-Path -LiteralPath $Directory)) {
+            New-Item -ItemType Directory -Path $Directory -Force | Out-Null
+        }
+    }
+    Write-Host "[OK] Local PPT data: $PptDataDir"
+
+    Write-Section "Starting local PPT engine"
+    $ComposeFiles = @(
+        (Join-Path $Root "deploy\docker-compose.yml"),
+        (Join-Path $Root "deploy\docker-compose.ppt.yml"),
+        (Join-Path $Root "deploy\docker-compose.ppt.local.yml")
+    )
+    $ComposeArgs = @("compose", "--env-file", (Join-Path $Root ".env"))
+    foreach ($ComposeFile in $ComposeFiles) {
+        $ComposeArgs += @("-f", $ComposeFile)
+    }
+    $ComposeArgs += @("up", "-d", "banana-slides")
+    & docker @ComposeArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-PptEngineFailureDiagnostics
+        throw "Failed to start Banana Slides. Review the compose, migration, and application diagnostics above."
+    }
+
+    $PptPort = if ($env:BANANA_SLIDES_LOCAL_PORT) { $env:BANANA_SLIDES_LOCAL_PORT } else { "5000" }
+    $HealthUrl = "http://127.0.0.1:$PptPort/readyz"
+    Write-Host "[..] Waiting for Banana Slides: $HealthUrl"
+    if (-not (Test-HttpReady $HealthUrl 90)) {
+        Write-PptEngineFailureDiagnostics
+        throw "Banana Slides did not become ready at $HealthUrl within 90 seconds."
+    }
+    Write-Host "[OK] Banana Slides is ready"
+}
+
+function Write-PptDiagnostics {
+    if (-not (Test-PptEnabled)) {
+        return
+    }
+    Write-Section "PPT diagnostics"
+    $PptPort = if ($env:BANANA_SLIDES_LOCAL_PORT) { $env:BANANA_SLIDES_LOCAL_PORT } else { "5000" }
+    Write-Host "Host -> Banana:    http://127.0.0.1:$PptPort"
+    Write-Host "Banana -> Backend: $env:PPT_MODEL_GATEWAY_BASE_URL"
+    Write-Host "Platform assets:   $env:GENERATED_MEDIA_DIR"
+    Write-Host "Banana instance:   $(Join-Path $env:BANANA_SLIDES_LOCAL_DATA_DIR 'instance')"
+    Write-Host "Banana uploads:    $(Join-Path $env:BANANA_SLIDES_LOCAL_DATA_DIR 'uploads')"
+    Write-Host "Banana exports:    $(Join-Path $env:BANANA_SLIDES_LOCAL_DATA_DIR 'uploads\<project-id>\exports')"
+    try {
+        $Runner = New-MysqlRunner
+        if ($Runner) {
+            $HasJobs = Invoke-MysqlScalar $Runner "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='ppt_jobs';"
+            if ($HasJobs -eq "1") {
+                $Rows = Invoke-MysqlScalar $Runner "SELECT CONCAT(id,' | user=',user_id,' | project=',project_id,' | ',job_type,' | ',status,' | ',COALESCE(error_code,'-'),' | ',DATE_FORMAT(updated_at,'%Y-%m-%d %H:%i:%s')) FROM ppt_jobs ORDER BY id DESC LIMIT 1;"
+                if ($Rows) {
+                    Write-Host "Latest PPT job:    $Rows"
+                } else {
+                    Write-Host "Latest PPT job:    none"
+                }
+                $Active = Invoke-MysqlScalar $Runner "SELECT CONCAT('jobs=',COUNT(*),', users=',COUNT(DISTINCT user_id)) FROM ppt_jobs WHERE status IN ('CREATED','CREDIT_RESERVED','SUBMITTED','RUNNING','RECONCILING');"
+                Write-Host "Active PPT work:   $Active"
+                $LatestChild = Invoke-MysqlScalar $Runner "SELECT CONCAT('invocation=',i.id,', task=',t.id,', ',t.status,', queueWaitSec=',COALESCE(TIMESTAMPDIFF(SECOND,t.queued_at,t.started_at),0)) FROM ppt_model_invocations i JOIN ai_tasks t ON t.id=i.ai_task_id ORDER BY i.id DESC LIMIT 1;"
+                if ($LatestChild) {
+                    Write-Host "Latest model task: $LatestChild"
+                }
+                $PendingOutbox = Invoke-MysqlScalar $Runner "SELECT CONCAT('events=',COUNT(*),', oldestSec=',COALESCE(MAX(TIMESTAMPDIFF(SECOND,created_at,NOW())),0)) FROM task_outbox_events WHERE status='PENDING';"
+                Write-Host "Pending outbox:    $PendingOutbox"
+            } else {
+                Write-Host "[WARN] ppt_jobs table is missing. Apply SQL migrations with -ApplySql 1."
+            }
+        }
+    } catch {
+        Write-Host "[WARN] Could not read PPT database diagnostics: $($_.Exception.Message)"
+    }
+
+    $RabbitNames = @(& docker ps --format "{{.Names}}" 2>$null)
+    if ($LASTEXITCODE -eq 0 -and ($RabbitNames -contains "ai-supermarket-rabbitmq")) {
+        Write-Host "RabbitMQ queues:"
+        $PreviousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $QueueRows = @(& docker exec ai-supermarket-rabbitmq rabbitmqctl list_queues --timeout 5 name messages_ready messages_unacknowledged consumers 2>&1)
+            $QueueExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $PreviousErrorActionPreference
+        }
+        if ($QueueExitCode -eq 0) {
+            $QueueRows | Select-Object -First 12 | ForEach-Object { Write-Host "  $_" }
+        } else {
+            Write-Host "  [WARN] Queue diagnostics unavailable (exit $QueueExitCode)."
+        }
+    }
+    Write-Host "Live engine logs:  docker logs -f ai-supermarket-banana-slides"
+}
+
 Import-DotEnv (Join-Path $Root ".env")
+Set-LocalContainerProxyFromWindows
 
 Set-DefaultEnv "INTERNAL_API_TOKEN" "local-internal-token"
 Set-DefaultEnv "BACKEND_INTERNAL_BASE_URL" "http://127.0.0.1:8080"
@@ -500,10 +702,31 @@ Set-DefaultEnv "RABBITMQ_PASSWORD" "guest"
 Set-DefaultEnv "RABBITMQ_TASK_QUEUE" "ai.tool.normal"
 Set-DefaultEnv "GENERATED_MEDIA_DIR" (Join-Path $Root "data\generated-media")
 Set-DefaultEnv "GENERATED_MEDIA_PUBLIC_BASE_URL" "/generated"
+Set-DefaultEnv "BANANA_SLIDES_LOCAL_PORT" "5000"
+Set-DefaultEnv "BANANA_SLIDES_LOCAL_DATA_DIR" (Join-Path $Root ".local\banana-slides")
+# This launcher runs the backend on the Windows host. Keep these addresses
+# distinct from the production Docker-network values in .env/compose.
+[Environment]::SetEnvironmentVariable(
+    "PPT_ENGINE_BASE_URL",
+    "http://127.0.0.1:$env:BANANA_SLIDES_LOCAL_PORT",
+    "Process"
+)
+[Environment]::SetEnvironmentVariable(
+    "PPT_MODEL_GATEWAY_BASE_URL",
+    "http://host.docker.internal:8080",
+    "Process"
+)
 
 Write-Section "AI Tool Market - Local Dev Launcher"
 Write-Host "Root:          $Root"
+try {
+    $GitBranch = (& git -c safe.directory=$($Root.Replace("\", "/")) -C $Root branch --show-current 2>$null).Trim()
+} catch {
+    $GitBranch = "(unavailable)"
+}
+Write-Host "Git branch:    $GitBranch"
 Write-Host "Infra mode:    $StartInfra"
+Write-Host "PPT mode:      $StartPpt"
 Write-Host "SQL check:     $ApplySql"
 Write-Host "Backend:       http://localhost:8080"
 Write-Host "Agent Service: http://localhost:8090"
@@ -512,13 +735,24 @@ Write-Host "Admin Web:     http://localhost:5174"
 Write-Host "Queue backend: $env:TASK_QUEUE_BACKEND"
 Write-Host "Worker:        $WorkerCount x $env:TASK_QUEUE_BACKEND queue consumers"
 
+Start-InfraIfNeeded
+Apply-LocalSqlMigrations
+Start-PptEngineIfNeeded
+Write-PptDiagnostics
+
+if ($PreflightOnly) {
+    Write-Section "Preflight complete"
+    Write-Host "No host application process was started (-PreflightOnly)."
+    exit 0
+}
+
+Assert-HostAppPortsAvailable
 Require-Command "java" "JDK 17+"
 Require-Command "mvn" "Maven 3.8+"
 Require-Command "npm" "Node.js/npm"
-Require-Command "python" "Python 3.11+"
-
-Start-InfraIfNeeded
-Apply-LocalSqlMigrations
+if (-not (Test-Path -LiteralPath $VenvPython)) {
+    Require-Command "python" "Python 3.11+"
+}
 
 Install-NodeDeps "user-web"
 Install-NodeDeps "admin-frontend"
@@ -555,5 +789,9 @@ Write-Host "Backend health:  http://localhost:8080/api/health"
 Write-Host "Agent health:    http://localhost:8090/health"
 Write-Host "User Web:        http://localhost:5173"
 Write-Host "Admin Web:       http://localhost:5174"
+if (Test-PptEnabled) {
+    Write-Host "Banana readiness:http://127.0.0.1:$env:BANANA_SLIDES_LOCAL_PORT/readyz"
+    Write-Host "PPT engine logs: docker logs -f ai-supermarket-banana-slides"
+}
 Write-Host ""
 Write-Host "Close each opened terminal window to stop that service."

@@ -18,6 +18,7 @@ import {
   Music,
   Pause,
   Play,
+  Presentation,
   Plus,
   Rows3,
   Search,
@@ -212,6 +213,7 @@ const modalityLabels: Record<string, string> = {
   VIDEO: "视频",
   AUDIO: "音乐",
   TEXT: "文本",
+  PPT_WORKSPACE: "PPT 工作台",
 }
 
 const composerModeLabels: Record<string, string> = {
@@ -219,6 +221,7 @@ const composerModeLabels: Record<string, string> = {
   VIDEO: "文/图生视频",
   AUDIO: "文生音乐",
   TEXT: "文本生成",
+  PPT_WORKSPACE: "结构化演示创作",
 }
 
 const modalityDescriptions: Record<string, string> = {
@@ -226,6 +229,7 @@ const modalityDescriptions: Record<string, string> = {
   VIDEO: "短片、运镜、动态素材",
   AUDIO: "配音、音效、音乐",
   TEXT: "文案、脚本、营销内容",
+  PPT_WORKSPACE: "大纲、页面、视觉与导出",
 }
 
 const modalityIcons = {
@@ -233,6 +237,7 @@ const modalityIcons = {
   VIDEO: Video,
   AUDIO: Music,
   TEXT: FileText,
+  PPT_WORKSPACE: Presentation,
 }
 
 function resolveDashboardModality(tool: Pick<ToolSummary, "toolCode" | "outputModality">) {
@@ -249,13 +254,13 @@ const toolsByModality = computed(() => {
 })
 
 const modalityTabs = computed(() => {
-  const order = ["IMAGE", "VIDEO", "AUDIO", "TEXT"]
+  const order = ["IMAGE", "VIDEO", "AUDIO", "PPT_WORKSPACE"]
   return order
     .map((key) => ({
       key,
       label: modalityLabels[key] || key,
       description: modalityDescriptions[key] || "AI 生成工具",
-      count: toolsByModality.value.get(key)?.length || 0,
+      count: key === "PPT_WORKSPACE" ? 1 : toolsByModality.value.get(key)?.length || 0,
       icon: modalityIcons[key as keyof typeof modalityIcons] || Sparkles,
     }))
 })
@@ -751,6 +756,10 @@ function normalizeModality(value?: string | null) {
 }
 
 function selectModality(key: string) {
+  if (key === "PPT_WORKSPACE") {
+    void router.push(userRoutes.ppt)
+    return
+  }
   selectedModality.value = key
   selectedToolCode.value = toolsByModality.value.get(key)?.[0]?.toolCode || null
   featuredToolsExpanded.value = false

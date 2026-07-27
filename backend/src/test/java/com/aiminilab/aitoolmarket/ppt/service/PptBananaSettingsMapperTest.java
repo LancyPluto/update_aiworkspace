@@ -45,6 +45,23 @@ class PptBananaSettingsMapperTest {
     }
 
     @Test
+    void mapsPlatformGptImage2GatewayWithoutASecondPptCredential() {
+        AgentModelConfig image = new AgentModelConfig();
+        image.setProvider("ofox_openai_images");
+        image.setModelName("openai/gpt-image-2");
+        image.setBaseUrl("https://api.ofox.ai/v1");
+        image.setApiKey("platform-account-key");
+
+        Map<String, Object> body = PptBananaSettingsMapper.toBananaSettings(null, image);
+
+        assertEquals("openai", body.get("ai_provider_format"));
+        assertEquals("openai", body.get("image_model_source"));
+        assertEquals("openai/gpt-image-2", body.get("image_model"));
+        assertEquals("platform-account-key", body.get("image_api_key"));
+        assertEquals("https://api.ofox.ai/v1", body.get("image_api_base_url"));
+    }
+
+    @Test
     void resolveBananaSourceHandlesAliases() {
         assertEquals("doubao", PptBananaSettingsMapper.resolveBananaSource("seedance"));
         assertEquals("gemini", PptBananaSettingsMapper.resolveBananaSource("google_gemini"));

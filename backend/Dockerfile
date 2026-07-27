@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker.1ms.run/docker/dockerfile:1.7
 # Build from repository root: docker build -f backend/Dockerfile .
 ARG DOCKER_REGISTRY=
 FROM ${DOCKER_REGISTRY:-}maven:3.9-eclipse-temurin-17 AS build

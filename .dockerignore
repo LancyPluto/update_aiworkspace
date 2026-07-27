@@ -1,0 +1,11 @@
+.git
+.worktrees
+.env
+
+**/node_modules
+**/dist
+**/target
+**/.next
+**/.pytest_cache
+**/__pycache__
+**/*.pyc

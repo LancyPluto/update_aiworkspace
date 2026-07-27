@@ -1,0 +1,9 @@
+{
+  "success": true,
+  "data": {
+    "task_id": "banana-task-fixture-001",
+    "status": "processing",
+    "progress": 42,
+    "message": "正在生成页面"
+  }
+}

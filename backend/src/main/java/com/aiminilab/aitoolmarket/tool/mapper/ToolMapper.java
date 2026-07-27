@@ -24,6 +24,7 @@ public interface ToolMapper extends BaseMapper<AiTool> {
             WHERE t.is_deleted = 0
             <if test="onlineOnly">
               AND t.status = 'ONLINE'
+              AND COALESCE(t.execution_mode, '') != 'INTERNAL'
             </if>
             <if test="!onlineOnly and status != null and status.trim() != ''">
               AND t.status = #{status}
@@ -122,6 +123,7 @@ public interface ToolMapper extends BaseMapper<AiTool> {
             WHERE t.is_deleted = 0
             <if test="onlineOnly">
               AND t.status = 'ONLINE'
+              AND COALESCE(t.execution_mode, '') != 'INTERNAL'
             </if>
             <if test="!onlineOnly and status != null and status.trim() != ''">
               AND t.status = #{status}

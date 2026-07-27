@@ -160,6 +160,7 @@ dump_failure_diagnostics() {
       ai-supermarket-agent-service \
       ai-supermarket-admin-frontend \
       ai-supermarket-user-web \
+      ai-supermarket-banana-slides \
       ai-supermarket-nginx \
       ai-supermarket-prometheus \
       ai-supermarket-grafana \
@@ -208,11 +209,20 @@ for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
   backend="$(container_status ai-supermarket-backend)"
   worker="$(container_status ai-supermarket-worker)"
   agent="$(container_status ai-supermarket-agent-service)"
+  banana="$(container_status ai-supermarket-banana-slides)"
   public_code="$(http_status "https://$PUBLIC_HOST/" --resolve "$PUBLIC_HOST:443:127.0.0.1")"
   api_code="$(http_status http://127.0.0.1:8080/api/health)"
   backend_readiness_code="$(http_status http://127.0.0.1:8080/actuator/health/readiness)"
   admin_code="$(http_status http://127.0.0.1:5174/admin)"
   agent_code="$(http_status http://127.0.0.1:8090/health)"
+  ppt_capabilities_code="$(http_status http://127.0.0.1:8080/api/v2/ppt/capabilities)"
+  if docker exec ai-supermarket-backend sh -c \
+      "python -c \"import urllib.request; urllib.request.urlopen('http://banana-slides:5000/health', timeout=5).read()\"" \
+      >/dev/null 2>&1; then
+    ppt_engine_internal=ok
+  else
+    ppt_engine_internal=failed
+  fi
 
   monitoring_ready=true
   grafana=skipped
@@ -281,9 +291,9 @@ for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
     fi
   fi
 
-  printf 'Release health attempt %s/%s: app nginx=%s user-web=%s backend=%s worker=%s agent=%s; http public=%s api=%s backend-readiness=%s admin=%s agent=%s\n' \
-    "$attempt" "$MAX_ATTEMPTS" "$nginx" "$user_web" "$backend" "$worker" "$agent" \
-    "$public_code" "$api_code" "$backend_readiness_code" "$admin_code" "$agent_code"
+  printf 'Release health attempt %s/%s: app nginx=%s user-web=%s backend=%s worker=%s agent=%s banana=%s; http public=%s api=%s backend-readiness=%s admin=%s agent=%s ppt-capabilities=%s ppt-engine=%s\n' \
+    "$attempt" "$MAX_ATTEMPTS" "$nginx" "$user_web" "$backend" "$worker" "$agent" "$banana" \
+    "$public_code" "$api_code" "$backend_readiness_code" "$admin_code" "$agent_code" "$ppt_capabilities_code" "$ppt_engine_internal"
   printf '  monitoring required=%s containers grafana=%s prometheus=%s loki=%s alloy=%s node-exporter=%s cadvisor=%s blackbox=%s; http grafana=%s prometheus=%s loki=%s alloy=%s; metrics alloy=%s cadvisor=%s container-cpu=%s container-memory=%s loki-logs=%s\n' \
     "$REQUIRE_MONITORING" "$grafana" "$prometheus" "$loki" "$alloy" "$node_exporter" "$cadvisor" "$blackbox" \
     "$grafana_code" "$prometheus_code" "$loki_code" "$alloy_code" "$alloy_metric" "$cadvisor_metric" \
@@ -294,11 +304,14 @@ for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
       && is_container_ready "$backend" \
       && is_container_ready "$worker" \
       && is_container_ready "$agent" \
+      && is_container_ready "$banana" \
       && is_http_ready "$public_code" \
       && is_http_ready "$api_code" \
       && [ "$backend_readiness_code" = "200" ] \
       && is_http_ready "$admin_code" \
       && is_http_ready "$agent_code" \
+      && [[ "$ppt_capabilities_code" =~ ^(200|401)$ ]] \
+      && [ "$ppt_engine_internal" = ok ] \
       && [ "$monitoring_ready" = true ] \
       && worker_media_runtime_ready; then
     assert_backend_runtime_unchanged

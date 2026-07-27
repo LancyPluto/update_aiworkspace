@@ -23,7 +23,6 @@ class PptAdminWorkflowServiceTest {
             null,
             new PptWorkflowService(null, new PptEngineProperties(), new ObjectMapper()),
             null,
-            null,
             engineApiSettingsService,
             new ObjectMapper()
     );

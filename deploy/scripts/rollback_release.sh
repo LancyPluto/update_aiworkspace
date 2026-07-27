@@ -95,6 +95,7 @@ root = read_env(root_path)
 deploy = read_env(deploy_path)
 merged = {**deploy, **root}
 merged["CADVISOR_IMAGE"] = os.environ["CADVISOR_IMAGE"]
+merged["PPT_WORKBENCH_ENABLED"] = "false"
 
 critical_keys = (
     "JWT_SECRET",
@@ -124,11 +125,18 @@ out = [line for line in lines if line.split("=", 1)[0].strip() not in keys]
 out.extend(f"{key}={value}" for key, value in merged.items())
 deploy_path.parent.mkdir(parents=True, exist_ok=True)
 deploy_path.write_text("\n".join(out) + "\n", encoding="utf-8")
-print("restored production env for rollback")
+root_lines = root_path.read_text(encoding="utf-8", errors="replace").splitlines() if root_path.exists() else []
+root_lines = [
+    line for line in root_lines
+    if line.split("=", 1)[0].strip() != "PPT_WORKBENCH_ENABLED"
+]
+root_lines.append("PPT_WORKBENCH_ENABLED=false")
+root_path.write_text("\n".join(root_lines) + "\n", encoding="utf-8")
+print("restored production env for rollback; PPT workbench generation fuse is closed")
 PY
 
 cd "$REMOTE_DIR/deploy"
-compose_args=(--env-file ../.env -f docker-compose.yml -f docker-compose.nginx.yml)
+compose_args=(--env-file ../.env -f docker-compose.yml -f docker-compose.ppt.yml -f docker-compose.nginx.yml)
 if [ -f docker-compose.monitoring.yml ]; then
   compose_args+=(-f docker-compose.monitoring.yml)
 fi

@@ -28,6 +28,7 @@ add_secret_bearing_services() {
   add backend
   add worker
   add agent-service
+  add banana-slides
 }
 
 add_monitoring_services() {
@@ -49,7 +50,7 @@ else
 fi
 
 if [ "${#files[@]}" -eq 0 ] || [ -z "${files[0]:-}" ]; then
-  echo "backend worker agent-service admin-frontend user-web nginx prometheus grafana loki alloy node-exporter cadvisor blackbox-exporter"
+  echo "backend worker agent-service banana-slides admin-frontend user-web nginx prometheus grafana loki alloy node-exporter cadvisor blackbox-exporter"
   exit 0
 fi
 
@@ -63,7 +64,14 @@ for f in "${files[@]}"; do
     agent-service/*) add agent-service ;;
     admin-frontend/*) add admin-frontend; add nginx ;;
     user-web/*) add user-web; add nginx ;;
-    engines/banana-slides/*) add banana-slides ;;
+    engines/contracts/*|engines/third-party/*|engines/versions.lock.json)
+      add banana-slides
+      add backend
+      ;;
+    deploy/docker-compose.ppt.yml)
+      add banana-slides
+      add backend
+      ;;
     deploy/docker-compose.monitoring.yml|deploy/monitoring/*)
       add_monitoring_services
       add nginx
@@ -86,7 +94,7 @@ for f in "${files[@]}"; do
 done
 
 if [ "${#services[@]}" -eq 0 ]; then
-  echo "backend worker agent-service admin-frontend user-web nginx prometheus grafana loki alloy node-exporter cadvisor blackbox-exporter"
+  echo "backend worker agent-service banana-slides admin-frontend user-web nginx prometheus grafana loki alloy node-exporter cadvisor blackbox-exporter"
 else
   echo "${services[*]}"
 fi

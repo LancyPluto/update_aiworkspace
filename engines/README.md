@@ -1,36 +1,40 @@
-# PPT 引擎（banana-slides）
+# PPT 引擎
 
-本目录存放 PPT 生成引擎源码，与超市 `backend` BFF 通过 HTTP 对接。
+本目录保存 PPT 渲染引擎的版本锁、API 契约、许可证快照和部署元数据。
+引擎源码由独立 Fork 管理，不再复制进主仓库。
 
 ## 目录
 
 ```text
 engines/
-  banana-slides/     # 仅保留引擎后端（Flask API）；不含 banana 自带前端
-    backend/         # /api/projects、/api/settings 等
+  contracts/         # 平台实际消费的窄 API 契约与响应夹具
+  third-party/       # 第三方许可证与修改说明
+  versions.lock.json # 上游 commit、Fork commit、镜像 digest 和能力版本
   README.md
 ```
 
-**用户界面**在超市 `user-web` 的 PPT 工作台（见前端开发文档），**不要**启动 `engines/banana-slides` 里上游自带的 `frontend` 服务。
+用户界面只存在于 `user-web` 的 PPT 工作台。不要部署或公开 Banana
+自带前端，浏览器也不得直接访问引擎。
 
 ## 与超市的关系
 
 | 组件 | 职责 |
 | --- | --- |
 | `backend` `/api/v1/ppt/*` | 鉴权、算力、项目 binding、代理引擎 |
-| `engines/banana-slides` | 大纲 / 描述 / 出图 / 导出 |
-| 管理端 `agent_model_configs` | 模型与 API Key（方案 A 同步到引擎 `/api/settings`） |
+| Banana Slides 固定镜像 | 大纲 / 描述 / 出图 / 导出 |
+| 管理端 `agent_model_configs` / vendor account | 模型、账户路由与 API Key 的唯一配置源 |
+| PPT 平台模型桥 | 每次任务提交前解析执行凭证并同步到引擎 `/api/settings` |
 
 用户**不**直接访问本引擎；仅内网或本机 `PPT_ENGINE_BASE_URL`。
+PPT 不维护第二套模型配置：工作流显式绑定优先；未绑定时自动使用平台
+启用的默认文本模型，并优先选择平台 GPT Image 2.0 生图配置。
 
 ## 本地开发
 
-### 1. 引擎环境变量
+### 1. 准备固定镜像
 
 ```bash
-cd engines/banana-slides
-cp .env.example .env
-# 编辑 .env 填入 API Key（冷启动兜底；运营配置以管理端同步为准）
+export BANANA_SLIDES_IMAGE='registry.cn-hangzhou.aliyuncs.com/<namespace>/banana-slides@sha256:<digest>'
 ```
 
 ### 2. Docker 启动引擎（推荐）
@@ -38,10 +42,14 @@ cp .env.example .env
 在仓库根目录：
 
 ```bash
-docker compose -f deploy/docker-compose.yml up -d banana-slides
+docker compose \
+  -f deploy/docker-compose.yml \
+  -f deploy/docker-compose.ppt.yml \
+  up -d banana-slides backend
 ```
 
-宿主机访问：`http://127.0.0.1:5001`（映射容器 5000）。
+引擎不映射宿主机公网端口。backend 通过 Docker 内部服务名
+`http://banana-slides:5000` 访问。
 
 ### 3. 启动超市 backend
 
@@ -50,21 +58,18 @@ cd backend
 PPT_ENGINE_BASE_URL=http://127.0.0.1:5001 AGENT_ENABLED=false mvn spring-boot:run
 ```
 
-Docker 内 backend 默认 `PPT_ENGINE_BASE_URL=http://host.docker.internal:5001`（见 `deploy/docker-compose.yml`）。  
-若使用 Clash 等工具，`banana-slides` 主机名可能被解析到假 IP（198.18.x），导致「header parser received no bytes」，请勿仅用 `http://banana-slides:5000`。
+宿主机单独调试时可以显式映射临时端口；生产 Compose 不开放该端口。
 
-## 更新引擎代码
+## 更新引擎
 
-从上游同步（示例，源仓库路径按你本机调整）：
+1. 在产品 Fork 中合并并审查上游 commit。
+2. 运行 Fork 的测试和镜像构建。
+3. 推送到阿里云 ACR，并取得不可变 digest。
+4. 更新 `versions.lock.json`、契约夹具、LICENSE 和 NOTICE。
+5. 使用 Compose 配置检查和后端契约测试验证后再部署。
 
-```bash
-rsync -a --delete \
-  --exclude='.git' --exclude='.venv' --exclude='node_modules' --exclude='frontend' \
-  --exclude='__pycache__' --exclude='uploads' --exclude='backend/instance' --exclude='.env' \
-  /path/to/banana_slider/banana-slides/ \
-  engines/banana-slides/
-# 同步后若误带入 frontend，可删除：rm -rf engines/banana-slides/frontend
-```
+`versions.lock.json` 中任一 Fork、许可证或镜像字段为空时，只表示开发契约，
+不得作为生产发布依据。
 
 ## 相关文档
 

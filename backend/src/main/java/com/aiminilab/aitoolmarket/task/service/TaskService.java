@@ -17,6 +17,13 @@ public interface TaskService {
 
     TaskStatusResponse createForAgentTool(Long userId, CreateTaskRequest request, int excludeFrozen);
 
+    /**
+     * Creates a provider-routed child task whose user billing is owned by a
+     * parent PPT job. Provider usage is still audited, but task credits are not
+     * frozen or charged a second time.
+     */
+    TaskStatusResponse createForPptInvocation(Long userId, CreateTaskRequest request);
+
     TaskStatusResponse createWorkflowRoot(Long userId, String toolCode, JsonNode params, String clientRequestId);
 
     TaskEstimateResponse estimate(Long userId, EstimateTaskRequest request);

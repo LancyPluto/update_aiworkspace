@@ -56,6 +56,25 @@ const router = createRouter({
           component: DashboardPage,
         },
         {
+          path: "ppt",
+          name: "PptProjects",
+          meta: { requiresAuth: true },
+          component: () => import("@/pages/PptWorkspace/ProjectListPage.vue"),
+        },
+        {
+          path: "ppt/new",
+          name: "PptProjectCreate",
+          meta: { requiresAuth: true },
+          component: () => import("@/pages/PptWorkspace/ProjectCreatePage.vue"),
+        },
+        {
+          path: "ppt/:projectId",
+          name: "PptProjectWorkspace",
+          meta: { requiresAuth: true },
+          component: () => import("@/pages/PptWorkspace/WorkspacePage.vue"),
+          props: true,
+        },
+        {
           path: "agent",
           name: "AgentHome",
           meta: { requiresAuth: true },

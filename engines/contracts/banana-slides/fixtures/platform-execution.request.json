@@ -1,0 +1,11 @@
+{
+  "platform_execution": {
+    "provider": "KCD_PLATFORM",
+    "project_id": 42,
+    "job_id": 108,
+    "idempotency_key": "ppt:7:auto-42-GENERATE_OUTLINE",
+    "gateway_base_url": "http://backend:8080",
+    "execution_token": "<task-scoped-token>"
+  },
+  "autoContinue": true
+}

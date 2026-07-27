@@ -57,6 +57,18 @@ class ToolIntegrationResolverTest {
     }
 
     @Test
+    void preservesMigratedWorkspaceRouteFromLegacyPptBlock() {
+        AiTool tool = tool("banana_ppt_generator", """
+                <!-- ppt-workflow:{"integrationMode":"PPT_WORKSPACE","customUiRoute":"/ppt","apiPrefix":"/api/v2/ppt"} -->
+                """);
+
+        ToolIntegrationConfig config = resolver.resolve(tool);
+
+        assertEquals("/ppt", config.getCustomUiRoute());
+        assertEquals("/api/v2/ppt", config.getApiPrefix());
+    }
+
+    @Test
     void defaultsToStandardTaskWhenNoMarker() {
         ToolIntegrationConfig config = resolver.resolve(tool("plain_tool", "普通文案工具说明"));
 

@@ -13,6 +13,13 @@ server:
 spring:
   application:
     name: ai-tool-market-backend
+  task:
+    scheduling:
+      # PPT engine calls may synchronously wait for platform child tasks. Keep
+      # outbox publishing and reconciliation schedulers from starving behind
+      # one long-running recovery pass.
+      pool:
+        size: ${SPRING_TASK_SCHEDULING_POOL_SIZE:4}
   rabbitmq:
     username: ${RABBITMQ_USERNAME:guest}
     password: ${RABBITMQ_PASSWORD:guest}
@@ -194,6 +201,9 @@ workflow:
     reconciliation-batch-size: ${WORKFLOW_RUNTIME_RECONCILIATION_BATCH_SIZE:100}
 
 ppt:
+  workbench-enabled: ${PPT_WORKBENCH_ENABLED:true}
+  model-gateway-base-url: ${PPT_MODEL_GATEWAY_BASE_URL:http://backend:8080}
+  execution-token-ttl-seconds: ${PPT_EXECUTION_TOKEN_TTL_SECONDS:3600}
   engine:
     # macOS 上 5000 常被 AirPlay Receiver 占用并返回 403；本机 Docker 引擎映射为 5001
     base-url: ${PPT_ENGINE_BASE_URL:http://127.0.0.1:5001}
