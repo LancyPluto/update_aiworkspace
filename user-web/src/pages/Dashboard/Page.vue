@@ -293,7 +293,7 @@ const selectedModelLabel = computed(() =>
 )
 
 const effectiveFields = computed(() =>
-  buildEffectiveToolFields(selectedChatTool.value?.fields || [], selectedSupportedModel.value),
+  buildEffectiveToolFields(selectedChatTool.value?.fields || [], selectedSupportedModel.value, selectedChatTool.value),
 )
 
 const selectedRequestSchema = computed(() =>
@@ -966,7 +966,7 @@ function activateModelContext(
   preferStored = true,
 ) {
   const model = supportedModels.value.find((item) => item.modelConfigId === modelConfigId) || null
-  const fields = buildEffectiveToolFields(selectedChatTool.value?.fields || [], model)
+  const fields = buildEffectiveToolFields(selectedChatTool.value?.fields || [], model, selectedChatTool.value)
   const prepared = prepareModelParams(fields, source)
   const mode = generationModeValue(fields, prepared)
   const key = capabilityBucketKey(modelConfigId, mode)
@@ -2260,7 +2260,7 @@ async function loadSelectedToolDetail(toolCode: string) {
       ? requestedModelId
       : resolveDefaultModelConfigId(models, detail.defaultModelConfigId)
     const initialModel = models.find((model) => model.modelConfigId === initialModelId) || null
-    const fields = buildEffectiveToolFields(detail.fields || [], initialModel)
+    const fields = buildEffectiveToolFields(detail.fields || [], initialModel, detail)
     const subjectReplay = buildSubjectReplayParams(fields)
     let initialParams = replayParams.value
     if (subjectReplay) {

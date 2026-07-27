@@ -129,7 +129,7 @@ public class VendorCodeResolver {
     public String canonicalVendorCode(String vendorCode) {
         String normalized = vendorCode == null ? "" : vendorCode.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
-            case "dashscope", "aliyun_bailian" -> "qwen";
+            case "bailian_happyhorse", "dashscope", "aliyun_bailian" -> "qwen";
             case "kimi", "moonshot_compatible" -> "moonshot";
             case "openai_gateway" -> "openai";
             case "suno_music" -> "suno";

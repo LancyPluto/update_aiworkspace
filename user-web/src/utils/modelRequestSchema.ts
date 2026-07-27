@@ -8,6 +8,10 @@ import type {
 
 type FieldOptionValue = string | number | boolean
 type FieldOption = { label: string; value: FieldOptionValue }
+type ToolOutputContext = {
+  outputModality?: string | null
+  toolType?: string | null
+}
 
 const TOOL_UI_META_KEYS = [
   "core",
@@ -49,6 +53,15 @@ function hasImageGenerationCapability(model?: ToolSupportedModel | null): boolea
   return (model?.capabilities || []).some((capability) =>
     String(capability).trim().toUpperCase() === "IMAGE_GENERATION",
   )
+}
+
+function isImageToolOutput(context?: ToolOutputContext | null): boolean {
+  if (!context) return true
+  const outputModality = String(context.outputModality || "").trim().toUpperCase()
+  if (outputModality) return outputModality === "IMAGE"
+  const toolType = String(context.toolType || "").trim().toUpperCase()
+  if (toolType) return toolType === "IMAGE" || toolType.startsWith("IMAGE_")
+  return true
 }
 
 function isSingleImageOutputField(field: ModelRequestSchemaField): boolean {
@@ -261,8 +274,9 @@ export function parseModelRequestSchema(value: ToolSupportedModel["requestSchema
 export function buildEffectiveToolFields(
   toolFields: ToolField[],
   model?: ToolSupportedModel | null,
+  context?: ToolOutputContext | null,
 ): ToolField[] {
-  const imageGenerationModel = hasImageGenerationCapability(model)
+  const imageGenerationModel = hasImageGenerationCapability(model) && isImageToolOutput(context)
   const schema = parseModelRequestSchema(model?.requestSchemaJson)
   if (!schema) {
     return imageGenerationModel

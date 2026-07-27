@@ -5,6 +5,11 @@ import pytest
 import handlers.workflow_step_handler as workflow_step_handler
 from client.backend_client import BackendClientError
 from client.model_client import ModelClientError
+from client.seedance_video_client import (
+    SEEDANCE_PRIVACY_ERROR_CODE,
+    SEEDANCE_PRIVACY_USER_MESSAGE,
+    SeedancePrivacyContentError,
+)
 from handlers.workflow_step_handler import (
     WorkflowStepHandler,
     _extract_json,
@@ -419,6 +424,30 @@ class UsageSequenceModelClient:
             "promptTokens": prompt_tokens,
             "completionTokens": completion_tokens,
         }
+
+
+def test_workflow_preserves_seedance_privacy_failure_contract():
+    backend = SettlementBackendClient()
+    handler = WorkflowStepHandler(backend_client=backend)
+    error = SeedancePrivacyContentError(
+        "seedance request rejected",
+        delivery_state="REJECTED",
+        retry_scope="NONE",
+        failure_stage="BEFORE_PROVIDER",
+        http_status=400,
+        provider_error_code="InputImageSensitiveContentDetected.PrivacyInformation",
+        provider_request_id="seedance-workflow-privacy",
+    )
+
+    handler._mark_failed_safe(334, error, trace_id="trace-workflow-privacy")
+
+    assert backend.failed_payload["errorCode"] == SEEDANCE_PRIVACY_ERROR_CODE
+    assert backend.failed_payload["userMessage"] == SEEDANCE_PRIVACY_USER_MESSAGE
+    assert backend.failed_payload["providerErrorCode"] == (
+        "InputImageSensitiveContentDetected.PrivacyInformation"
+    )
+    assert backend.failed_payload["providerRequestId"] == "seedance-workflow-privacy"
+    assert backend.failed_payload["retryScope"] == "NONE"
 
 
 def test_checkpointed_text_retry_accumulates_usage_and_replays_without_provider_call():

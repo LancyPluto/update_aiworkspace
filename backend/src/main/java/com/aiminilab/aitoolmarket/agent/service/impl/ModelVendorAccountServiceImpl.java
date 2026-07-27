@@ -98,7 +98,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
     public List<ModelVendorAccountResponse> adminList(String vendorCode) {
         List<ModelVendorAccount> accounts = vendorCode == null || vendorCode.isBlank()
                 ? vendorAccountMapper.findAllActive()
-                : vendorAccountMapper.findActiveByVendorCode(vendorCode.trim());
+                : vendorAccountMapper.findActiveByVendorCode(vendorCodeResolver.canonicalVendorCode(vendorCode));
         return accounts.stream().map(this::toResponse).toList();
     }
 
@@ -996,7 +996,7 @@ public class ModelVendorAccountServiceImpl implements ModelVendorAccountService 
                                             ModelVendorAccountRequest request,
                                             ModelVendorAccount existing,
                                             LocalDateTime now) {
-        account.setVendorCode(request.vendorCode().trim().toLowerCase(Locale.ROOT));
+        account.setVendorCode(vendorCodeResolver.canonicalVendorCode(request.vendorCode()));
         account.setAccountName(request.accountName().trim());
         NormalizedEndpoint normalizedEndpoint = OpenAiCompatibleEndpointSupport.normalize(request.baseUrl());
         account.setBaseUrl(blankToNull(normalizedEndpoint.baseUrl()));

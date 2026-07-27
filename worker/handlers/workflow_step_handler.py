@@ -9,6 +9,7 @@ from typing import Any
 from client.backend_client import BackendClient, BackendClientError
 from handlers.error_classifier import classify_model_error
 from client.model_client import ModelClient, ModelClientError
+from client.provider_error import ProviderCallError, structured_failure_payload
 from client.seedance_video_client import SeedanceVideoClient, SeedanceVideoError, SeedanceVideoTimeoutError
 from client.siliconflow_video_client import SiliconFlowVideoClient, SiliconFlowVideoError
 from client.openai_images_client import OpenAIImagesClient
@@ -1889,10 +1890,16 @@ class WorkflowStepHandler:
 
     def _mark_failed_safe(self, task_id: int, error: Exception, trace_id: str | None = None) -> None:
         try:
+            structured_error_code = str(getattr(error, "error_code", "") or "").strip()
+            structured_user_message = str(getattr(error, "user_message", "") or "").strip()
             failure_payload = {
-                "errorCode": classify_model_error(str(error)),
+                "errorCode": structured_error_code or classify_model_error(str(error)),
                 "errorMessage": str(error),
             }
+            if structured_user_message:
+                failure_payload["userMessage"] = structured_user_message
+            if isinstance(error, ProviderCallError):
+                failure_payload.update(structured_failure_payload(error))
             failure_payload.update(_provider_failure_accounting_payload(error))
             self.backend_client.mark_failed(
                 task_id,

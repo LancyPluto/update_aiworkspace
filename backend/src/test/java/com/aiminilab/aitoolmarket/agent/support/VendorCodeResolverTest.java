@@ -128,6 +128,13 @@ class VendorCodeResolverTest {
     }
 
     @Test
+    void aliyunVendorAliasesCanonicalizeToQwen() {
+        assertThat(resolver.canonicalVendorCode("bailian_happyhorse")).isEqualTo("qwen");
+        assertThat(resolver.canonicalVendorCode("dashscope")).isEqualTo("qwen");
+        assertThat(resolver.canonicalVendorCode("aliyun_bailian")).isEqualTo("qwen");
+    }
+
+    @Test
     void agnesProvidersAreGroupedAsAgnesVendor() {
         assertThat(resolver.resolveVendorCode("agnes_chat", "https://apihub.agnes-ai.com/v1", "Agnes 2.0", "agnes-2.0-flash"))
                 .isEqualTo("agnes");
