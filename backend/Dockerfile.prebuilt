@@ -1,0 +1,14 @@
+# Local rebuild when in-container Maven downloads are flaky.
+# Build from repository root:
+#   cd backend && ./mvnw -DskipTests package
+#   docker build -f backend/Dockerfile.prebuilt -t deploy-backend .
+ARG DOCKER_REGISTRY=
+FROM ${DOCKER_REGISTRY:-}eclipse-temurin:17-jre-jammy
+
+WORKDIR /app
+
+COPY backend/target/ai-tool-market-backend-*.jar /app/app.jar
+
+EXPOSE 8080
+
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]

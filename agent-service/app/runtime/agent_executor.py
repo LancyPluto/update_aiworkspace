@@ -201,9 +201,12 @@ class AgentExecutor:
                 ),
             )
 
+            # 首次命中某个 Skill 时，当前 Action 生成时还没有看到完整 SOP，
+            # 因此先注入 Skill，再进入下一轮让模型重新生成 Action，本轮不执行工具。
             if tool_calls and await self._maybe_hydrate_for_tool_calls(context, messages, tool_calls):
                 continue
 
+            # 保存模型的 Action；如果没有 tool_calls，这条 assistant 消息就是最终回答。
             messages.append(self._assistant_message(turn))
 
             if not tool_calls:
@@ -226,6 +229,7 @@ class AgentExecutor:
             for call in tool_calls:
                 outcome = await self._execute_tool_call(context, call, messages)
                 if outcome.pending_confirmation is not None:
+                    # 高风险或未获自动调用授权的工具暂停 Run，持久化现场后等待用户确认。
                     await self._save_checkpoint(context, messages, iteration, outcome.pending_confirmation)
                     return AgentExecutorResult(
                         pending_confirmation=outcome.pending_confirmation,
@@ -242,6 +246,7 @@ class AgentExecutor:
                         stop_reason="finish_tool",
                         last_tool_result=outcome.tool_result,
                     )
+                # 工具成功或失败的结构化结果都是 Observation，下一轮模型据此继续、修参或收尾。
                 messages.append(outcome.tool_message)
                 if outcome.tool_result is not None:
                     executed_tools += 1
@@ -427,10 +432,12 @@ class AgentExecutor:
     ) -> bool:
         if not tool_calls:
             return False
+        # 一批并行 Action 以第一个工具确定需要加载的 Skill；命中后整批 Action 都会重新生成。
         tool_code = resolve_canonical_tool_code(tool_calls[0].name, context.availableTools) or tool_calls[0].name
         result = await self._skill_hydration.hydrate_for_tool(context, tool_code, self._hydrated_skill_codes)
         if result is None:
             return False
+        # Skill 是系统提示词，不是可执行代码。追加后由外层 continue 发起下一次模型调用。
         messages.append(hydration_message(result))
         return True
 

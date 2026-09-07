@@ -50,6 +50,7 @@ public class AgentSkillBundleServiceImpl implements AgentSkillBundleService {
     @Transactional
     public AgentSkillBundleResponse saveDraft(String skillCode, UpdateAgentSkillBundleRequest request) {
         AgentSkillBundle latest = mapper.selectLatestBySkillCode(skillCode);
+        // 已有草稿就原地更新；最新版本已发布时，复制配置并创建下一个版本的草稿。
         AgentSkillBundle draft = latest != null && "DRAFT".equalsIgnoreCase(latest.getStatus())
                 ? latest
                 : cloneAsNextDraft(skillCode, latest);
@@ -72,6 +73,7 @@ public class AgentSkillBundleServiceImpl implements AgentSkillBundleService {
         if (latest == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "Skill Bundle 不存在");
         }
+        // 一个 skillCode 只保留一个线上版本，历史已发布版本转为 ARCHIVED 以便审计和回溯。
         mapper.selectList(new LambdaQueryWrapper<AgentSkillBundle>()
                 .eq(AgentSkillBundle::getSkillCode, skillCode)
                 .eq(AgentSkillBundle::getStatus, "PUBLISHED"))
@@ -98,6 +100,7 @@ public class AgentSkillBundleServiceImpl implements AgentSkillBundleService {
 
     @Override
     public List<AgentSkillDescriptorResponse> listAvailableSkillDescriptors(List<AgentToolDescriptorResponse> availableTools) {
+        // 首次构建 Agent Run Context 时只下发 Skill 摘要；完整 SOP 等模型选中工具后再按需读取。
         Set<String> visibleToolCodes = new LinkedHashSet<>();
         if (availableTools != null) {
             for (AgentToolDescriptorResponse tool : availableTools) {

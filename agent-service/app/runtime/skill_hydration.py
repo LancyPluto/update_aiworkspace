@@ -30,6 +30,7 @@ class SkillHydrationService:
         tool_code: str,
         hydrated_skill_codes: set[str],
     ) -> SkillHydrationResult | None:
+        # 没有匹配 Skill、功能关闭或本 Run 已加载过时，原 Tool Action 可以直接继续执行。
         if not settings.agent_skill_hydration_enabled:
             return None
         match = _find_skill_for_tool(context, tool_code)
@@ -39,6 +40,7 @@ class SkillHydrationService:
         if skill.skillCode in hydrated_skill_codes:
             return None
         try:
+            # 完整 SOP 保存在 Java 后端数据库中，这里通过带内部签名的 HTTP 接口按需读取。
             payload = await self.backend.get_agent_skill(skill.skillCode)
         except Exception as exc:
             await self._emit_hydration_event(
@@ -68,6 +70,7 @@ class SkillHydrationService:
         examples = payload.get("examples")
         examples_text = _format_examples(examples)
         session_state = format_session_state_context(context)
+        # 把数据库中的 SOP、示例和当前会话状态封装成一条 system 消息交给模型。
         content = (
             f"<SkillHydration skill_code=\"{skill.skillCode}\" "
             f"display_name=\"{skill.displayName}\" version=\"{payload.get('version') or skill.version or ''}\">\n"
@@ -85,6 +88,7 @@ class SkillHydrationService:
             content=content,
             token_estimate=max(1, len(content) // 4),
         )
+        # 同一个 Skill 在单次 Run 中最多触发一次 Action 重生成，避免重复增加模型调用。
         hydrated_skill_codes.add(skill.skillCode)
         await self._emit_hydration_event(
             context,
@@ -143,6 +147,7 @@ def _find_skill_for_tool(context: RunContext, tool_code: str):
     normalized = (tool_code or "").strip().lower()
     if not normalized:
         return None
+    # Run Context 只包含“已发布且至少匹配一个当前可见工具”的 Skill 摘要。
     for skill in context.availableSkills or []:
         for pattern in skill.toolCodes or []:
             token = str(pattern or "").strip().lower()
