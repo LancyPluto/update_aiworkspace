@@ -1,7 +1,7 @@
 """Unified context window / truncation manager for all agent engines.
 
 This module centralises the previously-duplicated history-windowing logic that
-lived inside ``agent_graph.engine``, ``deep_agents_engine`` and ``tool_call_loop``.
+lived inside the graph engine and tool-call helpers.
 
 Goals (Phase 1 of the context-cost refactor):
 

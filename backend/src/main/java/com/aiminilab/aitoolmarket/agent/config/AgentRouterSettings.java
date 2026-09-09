@@ -5,13 +5,11 @@ public final class AgentRouterSettings {
     public static final String ENABLED_KEY = "agent.router.enabled";
     public static final String PROMPT_KEY = "agent.router.prompt";
     public static final String MIN_CONFIDENCE_KEY = "agent.router.min_confidence";
-    public static final String FALLBACK_TO_RULES_KEY = "agent.router.fallback_to_rules";
     public static final String HISTORY_TURNS_KEY = "agent.router.history_turns";
     public static final String RECENT_TOOL_CALLS_KEY = "agent.router.recent_tool_calls";
 
     public static final boolean DEFAULT_ENABLED = true;
     public static final String DEFAULT_MIN_CONFIDENCE = "0.7";
-    public static final boolean DEFAULT_FALLBACK_TO_RULES = true;
     public static final int DEFAULT_HISTORY_TURNS = 4;
     public static final int DEFAULT_RECENT_TOOL_CALLS = 5;
 
@@ -32,7 +30,6 @@ public final class AgentRouterSettings {
         defaults.put(ENABLED_KEY, String.valueOf(DEFAULT_ENABLED));
         defaults.put(PROMPT_KEY, DEFAULT_PROMPT);
         defaults.put(MIN_CONFIDENCE_KEY, DEFAULT_MIN_CONFIDENCE);
-        defaults.put(FALLBACK_TO_RULES_KEY, String.valueOf(DEFAULT_FALLBACK_TO_RULES));
         defaults.put(HISTORY_TURNS_KEY, String.valueOf(DEFAULT_HISTORY_TURNS));
         defaults.put(RECENT_TOOL_CALLS_KEY, String.valueOf(DEFAULT_RECENT_TOOL_CALLS));
         return defaults;

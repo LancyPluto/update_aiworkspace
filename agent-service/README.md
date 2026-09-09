@@ -6,29 +6,21 @@ FastAPI service for the Cloud Universal Agent.
 
 - FastAPI for the internal HTTP API.
 - LangChain-compatible message/tool boundaries for model and tool orchestration.
-- Three selectable execution engines (see Runtime Engines below).
+- A single LangGraph execution engine (`AgentGraphEngine`).
 - Workspace memory and controlled tool calling are built into every runtime.
 
-## Runtime Engines
+## Runtime
 
-`RuntimeRouter.select_engine` picks one of three engines per run:
+`AgentRuntime` always invokes `AgentGraphEngine` for every run:
 
-1. `LegacyDispatcherEngine` (default / rollback) — the pre-refactor single-turn
-   router that classifies intent once and dispatches at most one product tool.
-   This engine does NOT use a state graph.
-2. `AgentGraphEngine` — the multi-step agentic loop built on a LangGraph
-   `StateGraph`. It performs native function-calling over product tools, chains
-   multiple tools, reflects on failures, and surfaces a plan/todo. Enabled via
-   `AGENT_GRAPH_ENGINE_ENABLED=true` or per-run via
-   `runtimeSettings.intelligenceLevel=graph`.
-3. `DeepAgentsRuntimeEngine` (native deepagents) — optional planning/sub-agent
-   layer, enabled via `AGENT_DEEP_AGENTS_ENABLED=true`.
-
-All three execute product tools exclusively through
+1. The LangGraph `StateGraph` performs semantic intent decisions, tool selection,
+   parameter completion, retries, plans, confirmation pauses, checkpoint recovery,
+   and final answers. Product tools remain behind the Java backend bridge.
+The graph executes product tools exclusively through
 `ToolOrchestrator.execute_with_guard` -> `BackendToolBridge` -> backend task
 APIs, so the model can never bypass credit, permission, or confirmation checks.
 
-> Full architecture & maintenance guide (engines, graph loop, HITL checkpoint,
+> Full architecture & maintenance guide (graph loop, HITL checkpoint,
 > event contract, file map): [docs/agent/架构与维护指南.md](../docs/agent/架构与维护指南.md).
 
 ## Local Run
@@ -50,22 +42,15 @@ pytest -q
 
 ## Agent Tool Routing
 
-Routing lives in `app/routing/` as a layered pipeline:
+The graph performs semantic routing; `app/routing/` supplies deterministic
+guards and policy validation:
 
 1. **StateGuard** — deterministic only (empty message, pending tool context, structured field follow-ups)
-2. **LLMClassifier** — semantic intent + tool selection (`attachmentSignals`, `capabilityFlags`, v2 prompt)
-3. **ToolResolver** — optional function-calling refinement when classifier confidence is below threshold
-4. **PolicyValidator** — capability gates (file analysis / RAG / workflow) and modality checks
-
-Legacy shims remain at `app/core/intent_router.py` and `app/runtime/agent_router_service.py`.
+2. **PolicyValidator** — capability gates (file analysis / RAG / workflow) and modality checks
 
 Configure behavior via env:
 
 ```powershell
-AGENT_LLM_ROUTER_ENABLED=true
-AGENT_ROUTING_V2_ENABLED=true
-AGENT_ROUTING_V2_SHADOW_MODE=false
-AGENT_ROUTING_V2_LLM_ONLY=false
 AGENT_CAPABILITY_FILE_ANALYSIS=false
 AGENT_PRODUCT_TOOL_LOOP_ENABLED=true
 ```

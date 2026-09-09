@@ -14,9 +14,6 @@ from app.config import settings
 
 from app.core.schemas import ChatMessage, RunContext
 
-from app.routing.llm_classifier import LLMClassifier
-
-from app.routing.state_guard import StateGuard
 
 from app.routing.types import IntentResult
 
@@ -24,7 +21,6 @@ from app.routing.v2.routing_context import build_routing_messages
 
 from app.routing.v2.thread_state import build_thread_state
 
-from app.runtime.router_context import router_history_turns, slice_history_by_turns
 
 from app.runtime.tool_disclosure import select_relevant_tools
 
@@ -49,31 +45,8 @@ ROUTER_PROMPT_BLOCKED_BYTES = 200_000
 
 
 def semantic_router_enabled(context: RunContext) -> bool:
-
-    if bool(getattr(settings, "agent_unified_router_enabled", True)):
-
-        if context.routerSettings is None:
-
-            return True
-
-        return bool(context.routerSettings.enabled)
-
-    return llm_router_enabled(context)
-
-
-
-
-
-def llm_router_enabled(context: RunContext) -> bool:
-
-    if not bool(getattr(settings, "agent_llm_router_enabled", False)):
-
-        return False
-
     if context.routerSettings is None:
-
         return True
-
     return bool(context.routerSettings.enabled)
 
 
@@ -124,59 +97,19 @@ def estimate_router_prompt_bytes(
 
     context: RunContext,
 
-    classifier: LLMClassifier,
-
-    guard_intent: IntentResult,
-
     *,
 
     workspace_memory_context: str = "",
 
 ) -> int:
-
-    if bool(getattr(settings, "agent_unified_router_enabled", True)):
-
-        if not context.availableTools:
-
-            return 0
-
-        messages = build_routing_messages(
-
-            context,
-
-            thread_state=build_thread_state(context),
-
-            workspace_memory_context=workspace_memory_context,
-
-        )
-
-        return sum(len((m.content or "").encode("utf-8")) for m in messages)
-
-
-
-    if not llm_router_enabled(context) or not context.availableTools:
-
+    if not context.availableTools:
         return 0
-
-    candidates = classifier._candidate_payload(context)
-
-    history_slice = slice_history_by_turns(context.history, router_history_turns(context))
-
-    prompt = classifier._build_prompt(
-
+    messages = build_routing_messages(
         context,
-
-        guard_intent,
-
-        candidates,
-
-        history_slice,
-
+        thread_state=build_thread_state(context),
         workspace_memory_context=workspace_memory_context,
-
     )
-
-    return len(prompt.encode("utf-8"))
+    return sum(len((m.content or "").encode("utf-8")) for m in messages)
 
 
 
@@ -222,8 +155,6 @@ def build_next_actions(
 
     intent_result: IntentResult | None,
 
-    unified_router_on: bool = False,
-
 ) -> list[str]:
 
     actions: list[str] = []
@@ -238,13 +169,7 @@ def build_next_actions(
 
     if router_on and router_prompt_bytes >= ROUTER_PROMPT_WARNING_BYTES:
 
-        if unified_router_on:
-
-            actions.append("lower AGENT_ROUTER_HISTORY_CLIP or AGENT_TOOL_SHORTLIST_K")
-
-        else:
-
-            actions.append("disable LLM router or lower AGENT_ROUTER_CANDIDATE_LIMIT")
+        actions.append("lower AGENT_ROUTER_HISTORY_CLIP or AGENT_TOOL_SHORTLIST_K")
 
     if not product_loop_on:
 
@@ -304,8 +229,6 @@ async def build_route_readiness(
 
     *,
 
-    classifier: LLMClassifier | None = None,
-
     guard_intent: IntentResult | None = None,
 
     workspace_memory_context: str = "",
@@ -313,10 +236,6 @@ async def build_route_readiness(
     intent_result: IntentResult | None = None,
 
 ) -> dict[str, Any]:
-
-    guard = guard_intent or StateGuard().classify(context)
-
-    router = classifier or LLMClassifier(None, model_client)
 
     available_tool_count = len(context.availableTools or [])
 
@@ -326,19 +245,11 @@ async def build_route_readiness(
 
         context,
 
-        router,
-
-        guard,
-
         workspace_memory_context=workspace_memory_context,
 
     )
 
-    unified_router_on = bool(getattr(settings, "agent_unified_router_enabled", True)) and semantic_router_enabled(context)
-
-    llm_router_on = llm_router_enabled(context)
-
-    router_on = unified_router_on or llm_router_on
+    router_on = semantic_router_enabled(context)
 
     product_loop_on = product_tool_loop_enabled(context)
 
@@ -374,8 +285,6 @@ async def build_route_readiness(
 
         intent_result=intent_result,
 
-        unified_router_on=unified_router_on,
-
     )
 
     return {
@@ -392,9 +301,9 @@ async def build_route_readiness(
 
         "nextActions": next_actions,
 
-        "llmRouterEnabled": llm_router_on,
+        "llmRouterEnabled": router_on,
 
-        "unifiedRouterEnabled": unified_router_on,
+        "unifiedRouterEnabled": router_on,
 
         "productToolLoopEnabled": product_loop_on,
 

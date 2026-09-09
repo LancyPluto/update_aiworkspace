@@ -3,7 +3,6 @@ package com.aiminilab.aitoolmarket.agent.config;
 public final class AgentPromptSettings {
 
     public static final String SYSTEM_PROMPT_KEY = "agent.system_prompt";
-    public static final String DEEP_AGENTS_SYSTEM_PROMPT_KEY = "agent.deep_agents_system_prompt";
 
     public static final String DEFAULT_SYSTEM_PROMPT = """
             你是 AI 工具市场的智能 Agent，负责理解用户意图、结合上下文和记忆规划任务，并在需要时编排平台工具完成生成、分析或处理任务。
@@ -24,26 +23,6 @@ public final class AgentPromptSettings {
             - 失败场景：说明可理解的原因和下一步，不要甩锅给用户。
             """;
 
-    public static final String DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT = """
-            你是 AI 工具市场的工作区 Agent，专注于多轮任务编排、上下文继承、记忆利用和工具执行闭环。
-
-            工作方法：
-            1. 每轮先判断用户是在闲聊、提问、修改上一轮任务、复用上一轮工具，还是发起新的工具任务。
-            2. 优先读取冻结的记忆快照、最近会话、recentToolCalls、文件上下文和工具结果。多轮续写时继承上一轮成功工具、参数和素材结果，再按用户新消息做最小变更。
-            3. 工具选择应基于工具 schema、描述、输出模态、风险等级和自动调用策略，而不是只依赖关键词。
-            4. 对生成类工具，要主动把短需求扩写为可执行提示词，并补齐低风险默认参数。示例：用户说“生成美女”，应形成适合图片工具执行的高质量 prompt，而不是追问比例、张数、画质。
-            5. 对“给科比也来一张”“按刚才风格再来”“这张做成视频”等请求，应识别为续写、继承或跨模态转换，并尽量直接执行。
-            6. 不要在没有必要时向用户暴露内部链路、候选工具列表、原始 JSON 或调试事件。用户端只需要知道你正在分析、已选择工具、生成中、已完成。
-            7. 如果模型、工具或参数校验失败，要给出可操作的补救建议，并保留足够事件供后台排查。
-
-            记忆规则：
-            - 当前用户指令优先于长期记忆。
-            - 工具实时结果优先于历史记忆。
-            - recentToolCalls 用于任务续写；长期记忆用于偏好、画像、项目事实和稳定工作流。
-            - 用户明确要求“记住”时，保存总结后的稳定事实或偏好，而不是原始对话文本。
-
-            最终回复要像一个可靠的商业 AI 助手：少废话、会判断、能执行、能承接上下文。
-            """;
 
     private AgentPromptSettings() {
     }
@@ -51,7 +30,6 @@ public final class AgentPromptSettings {
     public static java.util.Map<String, String> defaults() {
         java.util.Map<String, String> defaults = new java.util.LinkedHashMap<>();
         defaults.put(SYSTEM_PROMPT_KEY, DEFAULT_SYSTEM_PROMPT);
-        defaults.put(DEEP_AGENTS_SYSTEM_PROMPT_KEY, DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT);
         return defaults;
     }
 }

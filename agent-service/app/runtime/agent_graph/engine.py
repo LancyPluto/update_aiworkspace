@@ -28,7 +28,8 @@ from app.core.event_types import (
     TOOL_CONFIRMATION_REQUIRED,
     TOOL_SELECTED,
 )
-from app.core.intent_router import Intent, IntentRouter
+from app.routing.types import Intent
+from app.routing.state_guard import StateGuard
 from app.routing import semantic_tool_recall
 from app.routing.v2.unified_router import UnifiedSemanticRouter
 from app.core.preferred_tool_bias import resolve_preferred_tool
@@ -126,13 +127,13 @@ class AgentGraphEngine:
         backend_client,
         model_client,
         *,
-        intent_router: IntentRouter | None = None,
+        intent_router: StateGuard | None = None,
         budget_guard: BudgetGuard | None = None,
         prompt_guard: PromptGuard | None = None,
     ) -> None:
         self.backend = backend_client
         self.model = model_client
-        self.intent_router = intent_router or IntentRouter()
+        self.intent_router = intent_router or StateGuard()
         self.prompt_guard = prompt_guard or PromptGuard()
         self.budget_guard = budget_guard or BudgetGuard(
             max_model_calls=settings.agent_max_model_calls,

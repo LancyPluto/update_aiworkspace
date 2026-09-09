@@ -568,16 +568,12 @@ public class AgentRunServiceImpl implements AgentRunService {
                 parseBooleanSetting(settings.get(AgentRuntimeSettings.TOOL_STREAM_RELAY_ENABLED_KEY), AgentRuntimeSettings.DEFAULT_TOOL_STREAM_RELAY_ENABLED),
                 parseBooleanSetting(settings.get(AgentRuntimeSettings.PRODUCT_TOOL_LOOP_ENABLED_KEY), AgentRuntimeSettings.DEFAULT_PRODUCT_TOOL_LOOP_ENABLED),
                 parseIntSetting(settings.get(AgentRuntimeSettings.PRODUCT_TOOL_LOOP_MAX_CALLS_KEY), AgentRuntimeSettings.DEFAULT_PRODUCT_TOOL_LOOP_MAX_CALLS, 1, 20),
-                parseBooleanSetting(settings.get(AgentRuntimeSettings.PRODUCT_TOOL_LOOP_FALLBACK_TO_ROUTER_KEY), AgentRuntimeSettings.DEFAULT_PRODUCT_TOOL_LOOP_FALLBACK_TO_ROUTER),
+                parseBooleanSetting(settings.get(AgentRuntimeSettings.CHECKPOINT_ENABLED_KEY), AgentRuntimeSettings.DEFAULT_CHECKPOINT_ENABLED),
                 intelligenceLevel
         );
         String agentSystemPrompt = nonBlankOrDefault(
                 settings.get(AgentPromptSettings.SYSTEM_PROMPT_KEY),
                 AgentPromptSettings.DEFAULT_SYSTEM_PROMPT
-        );
-        String deepAgentsSystemPrompt = nonBlankOrDefault(
-                settings.get(AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY),
-                AgentPromptSettings.DEFAULT_DEEP_AGENTS_SYSTEM_PROMPT
         );
         var memorySettings = new com.aiminilab.aitoolmarket.agent.dto.AgentMemorySettingsResponse(
                 parseBooleanSetting(settings.get(AgentMemorySettings.AUTO_SAVE_ENABLED_KEY), AgentMemorySettings.DEFAULT_AUTO_SAVE_ENABLED),
@@ -601,7 +597,6 @@ public class AgentRunServiceImpl implements AgentRunService {
                 parseBooleanSetting(settings.get(AgentRouterSettings.ENABLED_KEY), AgentRouterSettings.DEFAULT_ENABLED),
                 nonBlankOrDefault(settings.get(AgentRouterSettings.PROMPT_KEY), AgentRouterSettings.DEFAULT_PROMPT),
                 parseDoubleSetting(settings.get(AgentRouterSettings.MIN_CONFIDENCE_KEY), 0.7D, 0D, 1D),
-                parseBooleanSetting(settings.get(AgentRouterSettings.FALLBACK_TO_RULES_KEY), AgentRouterSettings.DEFAULT_FALLBACK_TO_RULES),
                 routerHistoryTurns,
                 recentToolCallLimit
         );
@@ -646,7 +641,6 @@ public class AgentRunServiceImpl implements AgentRunService {
                 ),
                 resolveModelConfigForRun(run),
                 agentSystemPrompt,
-                deepAgentsSystemPrompt,
                 memorySettings,
                 routerSettings,
                 runtimeSettings,

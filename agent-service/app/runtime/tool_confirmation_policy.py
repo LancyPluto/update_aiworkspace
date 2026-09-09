@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.core.intent_router import IntentRouter
+from app.routing.state_guard import StateGuard as IntentRouter
 from app.core.schemas import RunContext, ToolDescriptor
 from app.tools.registry import requested_output_modality, tool_supports_modality
 

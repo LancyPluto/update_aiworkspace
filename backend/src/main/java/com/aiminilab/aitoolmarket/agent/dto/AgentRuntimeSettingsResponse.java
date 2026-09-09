@@ -16,7 +16,7 @@ public record AgentRuntimeSettingsResponse(
         Boolean toolStreamRelayEnabled,
         Boolean productToolLoopEnabled,
         Integer productToolLoopMaxCalls,
-        Boolean productToolLoopFallbackToRouter,
+        Boolean checkpointEnabled,
         String intelligenceLevel
 ) {
 }

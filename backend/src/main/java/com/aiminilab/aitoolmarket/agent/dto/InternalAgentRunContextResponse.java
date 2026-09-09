@@ -20,7 +20,6 @@ public record InternalAgentRunContextResponse(
         AgentContextWindowResponse contextWindow,
         InternalAgentModelConfigResponse modelConfig,
         String agentSystemPrompt,
-        String deepAgentsSystemPrompt,
         AgentMemorySettingsResponse memorySettings,
         AgentRouterSettingsResponse routerSettings,
         AgentRuntimeSettingsResponse runtimeSettings,

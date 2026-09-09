@@ -14,7 +14,7 @@ from app.core.event_types import (
     TOOL_CALL_REQUESTED,
 )
 from app.config import settings
-from app.core.intent_router import Intent, IntentResult
+from app.routing.types import Intent, IntentResult
 from app.core.preferred_tool_bias import (
     apply_preferred_tool_override,
     message_suggests_tool_use,

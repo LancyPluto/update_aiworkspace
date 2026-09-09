@@ -8,7 +8,7 @@ from app.core.schemas import RunContext, ToolDescriptor
 from app.tools.registry import ToolRegistry, infer_output_modality
 
 if TYPE_CHECKING:
-    from app.core.intent_router import IntentResult
+    from app.routing.types import IntentResult
 
 
 def preferred_tool_code(context: RunContext) -> str | None:
@@ -38,7 +38,7 @@ def message_suggests_tool_use(message: str) -> bool:
 
 def inject_preferred_tool_hint(context: RunContext, result: IntentResult) -> IntentResult:
     """Attach preferred tool as routing hint without forcing infrastructure short-circuit."""
-    from app.core.intent_router import Intent
+    from app.routing.types import Intent
 
     preferred = preferred_tool_code(context)
     if not preferred or not message_suggests_tool_use(context.message):
@@ -59,7 +59,7 @@ def inject_preferred_tool_hint(context: RunContext, result: IntentResult) -> Int
 
 def apply_preferred_tool_override(context: RunContext, result: IntentResult) -> IntentResult:
     """When LLM chose tool_use, prefer the user-selected tool if available."""
-    from app.core.intent_router import Intent
+    from app.routing.types import Intent
 
     if result.intent != Intent.TOOL_USE:
         return result
@@ -95,5 +95,4 @@ def sort_tools_with_preferred(context: RunContext, tools: list[ToolDescriptor]) 
     preferred_tools = [tool for tool in tools if tool.toolCode == preferred]
     others = [tool for tool in tools if tool.toolCode != preferred]
     return preferred_tools + others
-
 

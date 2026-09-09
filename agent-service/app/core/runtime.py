@@ -9,31 +9,11 @@ from app.config import Settings
 from app.core.schemas import RunFail
 from app.runtime.context_manager import ContextManager
 from app.runtime.conversation_summary import ensure_rolling_conversation_summary
-from app.runtime.router import RuntimeRouter
+from app.runtime.agent_graph import AgentGraphEngine
 from app.tools.backend_tool import ToolExecutionError
 
 TERMINAL_RUN_STATUSES = {"SUCCESS", "FAILED", "CANCELLED", "TIMEOUT"}
 logger = logging.getLogger(__name__)
-
-
-def _requested_runtime(context) -> str | None:
-    """Derive an explicit engine request from per-run runtime settings.
-
-    Lets the backend opt a single run into the multi-step graph engine via
-    ``runtimeSettings.intelligenceLevel`` without flipping the global flag.
-    """
-    runtime_settings = getattr(context, "runtimeSettings", None)
-    level = getattr(runtime_settings, "intelligenceLevel", None) if runtime_settings else None
-    if not level:
-        return None
-    normalized = str(level).strip().lower()
-    if normalized in {"graph", "agent_graph", "agent-graph", "multi_step", "agentic"}:
-        return "agent_graph"
-    if normalized in {"deep_agents", "deep-agents", "deepagents"}:
-        return "deep_agents"
-    if normalized in {"legacy", "basic", "default"}:
-        return "legacy"
-    return None
 
 
 class AgentRuntime:
@@ -43,14 +23,12 @@ class AgentRuntime:
         model_client: ModelClient | None = None,
         *,
         model_client_factory=ModelClient,
-        runtime_router_factory=RuntimeRouter,
         default_settings: Settings | None = None,
     ) -> None:
         self.backend = backend_client
         self.model_client = model_client
         self._injected_model_client = model_client is not None
         self.model_client_factory = model_client_factory
-        self.runtime_router_factory = runtime_router_factory
         self.default_settings = default_settings or Settings()
 
     async def execute_run(self, run_id: int) -> None:
@@ -69,13 +47,8 @@ class AgentRuntime:
                 audited_model = AuditedModelClient(model_client, ModelRequestAuditRecorder(self.backend, run_id))
                 model_client = audited_model
             context = await self._with_rolling_summary(context, model_client)
-            engine = self.runtime_router_factory(
-                self.backend,
-                model_client,
-                deep_agents_enabled=self.default_settings.agent_deep_agents_enabled,
-                graph_engine_enabled=self.default_settings.agent_graph_engine_enabled,
-            ).select_engine(message=context.message, requested_runtime=_requested_runtime(context))
-            engine_name = engine.__class__.__name__
+            engine = AgentGraphEngine(self.backend, model_client)
+            engine_name = "AgentGraphEngine"
             await engine.run(context)
             record_run_completed(entrypoint, "success", "none", engine_name, time.perf_counter() - started_at)
         except BackendClientError as exc:
@@ -115,13 +88,8 @@ class AgentRuntime:
                 audited_model = AuditedModelClient(model_client, ModelRequestAuditRecorder(self.backend, run_id))
                 model_client = audited_model
             context = await self._with_rolling_summary(context, model_client)
-            engine = self.runtime_router_factory(
-                self.backend,
-                model_client,
-                deep_agents_enabled=self.default_settings.agent_deep_agents_enabled,
-                graph_engine_enabled=self.default_settings.agent_graph_engine_enabled,
-            ).select_engine(message=context.message, requested_runtime=_requested_runtime(context))
-            engine_name = engine.__class__.__name__
+            engine = AgentGraphEngine(self.backend, model_client)
+            engine_name = "AgentGraphEngine"
             await engine.run_confirmed_tool(context, tool_code)
             record_tool_call(tool_code, "success")
             record_run_completed(entrypoint, "success", "none", engine_name, time.perf_counter() - started_at)
@@ -156,15 +124,7 @@ class AgentRuntime:
         except ModelClientError as exc:
             logger.warning("Route debug falls back to mock model because model config is unavailable: %s", exc)
             model_client = self.model_client_factory(Settings(model_provider="mock", model_name="mock"))
-        router = self.runtime_router_factory(
-            self.backend,
-            model_client,
-            deep_agents_enabled=self.default_settings.agent_deep_agents_enabled,
-            graph_engine_enabled=self.default_settings.agent_graph_engine_enabled,
-        )
-        selector = getattr(router, "select_debug_engine", router.select_engine)
-        engine = selector(message=context.message, requested_runtime=_requested_runtime(context))
-        return await engine.debug_route(context)
+        return await AgentGraphEngine(self.backend, model_client).debug_route(context)
 
     async def _model_client(self, context=None) -> ModelClient:
         # Respect externally injected clients (tests/mocks), but avoid reusing

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.core.intent_router import IntentResult
+from app.routing.types import IntentResult
 from app.core.schemas import RunContext, ToolDescriptor
 from app.tools.registry import infer_output_modality, requested_output_modality
 

@@ -20,7 +20,7 @@ public final class AgentRuntimeSettings {
     public static final String TOOL_STREAM_RELAY_ENABLED_KEY = "agent.runtime.tool_stream_relay_enabled";
     public static final String PRODUCT_TOOL_LOOP_ENABLED_KEY = "agent.runtime.product_tool_loop_enabled";
     public static final String PRODUCT_TOOL_LOOP_MAX_CALLS_KEY = "agent.runtime.product_tool_loop_max_calls";
-    public static final String PRODUCT_TOOL_LOOP_FALLBACK_TO_ROUTER_KEY = "agent.runtime.product_tool_loop_fallback_to_router";
+    public static final String CHECKPOINT_ENABLED_KEY = "agent.runtime.checkpoint_enabled";
     public static final String AUDIT_PAYLOAD_RETENTION_DAYS_KEY = "agent.audit.payload_retention_days";
 
     public static final int DEFAULT_MAX_MODEL_CALLS = 5;
@@ -38,7 +38,7 @@ public final class AgentRuntimeSettings {
     public static final boolean DEFAULT_TOOL_STREAM_RELAY_ENABLED = true;
     public static final boolean DEFAULT_PRODUCT_TOOL_LOOP_ENABLED = true;
     public static final int DEFAULT_PRODUCT_TOOL_LOOP_MAX_CALLS = 1;
-    public static final boolean DEFAULT_PRODUCT_TOOL_LOOP_FALLBACK_TO_ROUTER = true;
+    public static final boolean DEFAULT_CHECKPOINT_ENABLED = true;
     public static final int DEFAULT_AUDIT_PAYLOAD_RETENTION_DAYS = 30;
 
     private AgentRuntimeSettings() {
@@ -61,7 +61,7 @@ public final class AgentRuntimeSettings {
         defaults.put(TOOL_STREAM_RELAY_ENABLED_KEY, String.valueOf(DEFAULT_TOOL_STREAM_RELAY_ENABLED));
         defaults.put(PRODUCT_TOOL_LOOP_ENABLED_KEY, String.valueOf(DEFAULT_PRODUCT_TOOL_LOOP_ENABLED));
         defaults.put(PRODUCT_TOOL_LOOP_MAX_CALLS_KEY, String.valueOf(DEFAULT_PRODUCT_TOOL_LOOP_MAX_CALLS));
-        defaults.put(PRODUCT_TOOL_LOOP_FALLBACK_TO_ROUTER_KEY, String.valueOf(DEFAULT_PRODUCT_TOOL_LOOP_FALLBACK_TO_ROUTER));
+        defaults.put(CHECKPOINT_ENABLED_KEY, String.valueOf(DEFAULT_CHECKPOINT_ENABLED));
         defaults.put(AUDIT_PAYLOAD_RETENTION_DAYS_KEY, String.valueOf(DEFAULT_AUDIT_PAYLOAD_RETENTION_DAYS));
         return defaults;
     }

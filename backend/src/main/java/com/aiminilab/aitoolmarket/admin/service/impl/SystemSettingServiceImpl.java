@@ -199,7 +199,6 @@ public class SystemSettingServiceImpl implements SystemSettingService {
 
     private boolean isVersionedSetting(String key) {
         return AgentPromptSettings.SYSTEM_PROMPT_KEY.equals(key)
-                || AgentPromptSettings.DEEP_AGENTS_SYSTEM_PROMPT_KEY.equals(key)
                 || AgentRouterSettings.PROMPT_KEY.equals(key)
                 || AgentMemorySettings.WRITE_PROMPT_KEY.equals(key)
                 || AgentMemorySettings.RETRIEVAL_PROMPT_KEY.equals(key)

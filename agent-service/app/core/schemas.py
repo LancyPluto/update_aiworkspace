@@ -183,7 +183,6 @@ class AgentRouterSettings(BaseModel):
     enabled: bool = True
     prompt: str | None = None
     minConfidence: float = 0.7
-    fallbackToRules: bool = True
     historyTurns: int = 4
     recentToolCallLimit: int = 5
 
@@ -204,7 +203,7 @@ class RuntimeSettings(BaseModel):
     toolStreamRelayEnabled: bool | None = None
     productToolLoopEnabled: bool | None = None
     productToolLoopMaxCalls: int | None = None
-    productToolLoopFallbackToRouter: bool | None = None
+    checkpointEnabled: bool | None = None
     intelligenceLevel: str | None = None
 
 
@@ -326,7 +325,6 @@ class RunContext(BaseModel):
     contextWindow: ContextWindow | None = None
     modelConfig: AgentModelConfig | None = None
     agentSystemPrompt: str | None = None
-    deepAgentsSystemPrompt: str | None = None
     memorySettings: MemorySettings | None = None
     routerSettings: AgentRouterSettings | None = None
     runtimeSettings: RuntimeSettings | None = None
