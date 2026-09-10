@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, interrupt
 
 from app.config import settings
 from app.core.budget_guard import BudgetExceeded, BudgetGuard, BudgetState
@@ -212,23 +213,17 @@ class AgentGraphEngine:
     async def run_confirmed_tool(self, context: RunContext, tool_code: str) -> None:
         try:
             await self._prepare_run(context, emit_run_started=False)
-            registry = ToolRegistry(context)
-            tool = registry.get(tool_code)
-            if tool is None:
-                answer = "请补充你想完成的目标、对象和期望输出，我再帮你选择合适的工具。"
-                await self._emit_answer(context.runId, answer)
-                await self._complete_run(context, answer, intent=Intent.NEEDS_CLARIFICATION.value)
-                return
-            checkpoint = await self._load_checkpoint(context)
-            arguments = self._checkpoint_tool_arguments(checkpoint, tool) or await self._confirmed_tool_arguments(context, tool)
-            await self.backend.append_event(
-                context.runId,
-                RunEventCreate(eventType=TOOL_SELECTED, eventText=tool.toolCode, eventJson={"toolCode": tool.toolCode, "confirmed": True}),
+            if self._compiled is None:
+                self._compiled = self._build_graph()
+            final_state: AgentState = await self._compiled.ainvoke(
+                Command(resume={"toolCode": tool_code, "approved": True}),
+                config={"recursion_limit": max(8, self._max_iterations * 4), "configurable": {"thread_id": f"agent-run:{context.runId}"}},
             )
-            result = await self.tool_orchestrator.execute_with_guard(context, tool, self._budget, arguments=arguments)
-            seeded = await self._seed_state_after_tool(context, tool, arguments, result, checkpoint=checkpoint)
+            if final_state.get("__interrupt__"):
+                return
+            answer = final_state.get("final_answer") or ""
             await self._clear_checkpoint(context)
-            await self._run_graph(context, seeded)
+            await self._complete_run(context, answer, intent="agent_graph")
         except BudgetExceeded as exc:
             await self._fail_run(context.runId, exc.error_code, exc.message)
         except ToolExecutionError as exc:
@@ -312,10 +307,10 @@ class AgentGraphEngine:
                 "modelTurns": int(final_state.get("iteration", 0)),
                 "maxModelTurns": self._max_iterations,
                 "maxToolExecutions": self._max_tool_executions,
-                "awaitingConfirmation": bool(final_state.get("pending_confirmation")),
+                "awaitingConfirmation": bool(final_state.get("pending_confirmation") or final_state.get("__interrupt__")),
             }),
         )
-        if final_state.get("pending_confirmation"):
+        if final_state.get("pending_confirmation") or final_state.get("__interrupt__"):
             # Run pauses for user confirmation; persist a checkpoint so the loop
             # can resume with its plan/artifacts intact, then let the backend
             # mark the run WAITING on the confirmation event.
@@ -552,7 +547,7 @@ class AgentGraphEngine:
             execution_args = await self._build_product_arguments(context, tool, arguments)
 
             if not self._should_auto_call(context, tool):
-                # Pause for user confirmation (Phase 1: ends the graph; resumed via confirm-tool).
+                # LangGraph persists this exact node boundary before returning the interrupt.
                 await self.backend.append_event(
                     context.runId,
                     RunEventCreate(eventType=TOOL_CONFIRMATION_REQUIRED, eventText=tool.toolCode, eventJson={
@@ -564,25 +559,22 @@ class AgentGraphEngine:
                         "arguments": execution_args,
                     }),
                 )
-                return {
-                    "messages": new_messages,
-                    "pending_confirmation": {
-                        "toolCode": tool.toolCode,
-                        "alias": name,
-                        "callId": call_id,
-                        "arguments": execution_args,
-                    },
-                    "pending_tool_calls": [],
-                    **({"plan": plan_update} if plan_update is not None else {}),
-                    **({"artifacts": artifacts} if artifacts else {}),
-                }
+                approval = interrupt({"toolCode": tool.toolCode, "callId": call_id, "arguments": execution_args})
+                if not isinstance(approval, dict) or approval.get("toolCode") != tool.toolCode or not approval.get("approved"):
+                    raise ToolExecutionError("tool confirmation was rejected", "TOOL_CONFIRMATION_REJECTED")
 
             await self.backend.append_event(
                 context.runId,
                 RunEventCreate(eventType=TOOL_SELECTED, eventText=tool.toolCode, eventJson={"toolCode": tool.toolCode}),
             )
             try:
-                result = await self.tool_orchestrator.execute_with_guard(context, tool, self._budget, arguments=execution_args)
+                result = await self.tool_orchestrator.execute_with_guard(
+                    context, tool, self._budget, arguments=execution_args,
+                    idempotency_key=f"agent-run:{context.runId}:call:{call_id}",
+                )
+                # A third-party call may naturally return after cancellation. Re-check
+                # before publishing any success event or advancing the graph state.
+                await self._check_cancelled()
             except ToolExecutionError as exc:
                 # Reflect / retry: surface the failure to the model so it can fix
                 # arguments and retry, but bound retries per tool to avoid loops.

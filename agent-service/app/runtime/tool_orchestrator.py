@@ -30,6 +30,7 @@ class ToolOrchestrator:
         budget: BudgetState,
         *,
         arguments: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         prepared = await self._prepare_execution_arguments(context, tool, arguments=arguments)
         _raise_image_prompt_schema_validation_if_needed(context, tool, prepared)
@@ -38,7 +39,9 @@ class ToolOrchestrator:
             return {"missing_tool_arguments": missing}
 
         self._budget_guard_provider().reserve_tool_call(budget, 0)
-        return await self.tool_bridge.execute_with_args(context, tool, prepared)
+        if idempotency_key is None:
+            return await self.tool_bridge.execute_with_args(context, tool, prepared)
+        return await self.tool_bridge.execute_with_args(context, tool, prepared, idempotency_key=idempotency_key)
 
     async def _prepare_execution_arguments(
         self,

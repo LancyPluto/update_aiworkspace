@@ -5,19 +5,56 @@ import com.aiminilab.aitoolmarket.agent.support.AgentFailureMessage;
 import com.aiminilab.aitoolmarket.common.error.ErrorMessageSanitizer;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Insert;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 import org.slf4j.MDC;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.time.LocalDateTime;
 import com.aiminilab.aitoolmarket.agent.dto.AdminAgentRunListItemResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AdminAgentRunStatsResponse;
 
 public interface AgentRunMapper extends BaseMapper<AgentRun> {
+
+    @Update("""
+            INSERT INTO agent_run_execution_leases(run_id, owner_token, lease_expires_at, created_at, updated_at)
+            VALUES(#{runId}, #{ownerToken}, #{expiresAt}, #{now}, #{now})
+            ON DUPLICATE KEY UPDATE
+              owner_token = IF(owner_token = #{ownerToken} OR lease_expires_at <= #{now}, #{ownerToken}, owner_token),
+              lease_expires_at = IF(owner_token = #{ownerToken} OR lease_expires_at <= #{now}, #{expiresAt}, lease_expires_at),
+              updated_at = IF(owner_token = #{ownerToken} OR lease_expires_at <= #{now}, #{now}, updated_at)
+            """)
+    void acquireExecutionLease(@Param("runId") Long runId, @Param("ownerToken") String ownerToken,
+                               @Param("expiresAt") LocalDateTime expiresAt, @Param("now") LocalDateTime now);
+
+    @Select("SELECT owner_token FROM agent_run_execution_leases WHERE run_id=#{runId}")
+    String selectExecutionLeaseOwner(@Param("runId") Long runId);
+
+    @Update("UPDATE agent_run_execution_leases SET lease_expires_at=#{expiresAt}, updated_at=#{now} WHERE run_id=#{runId} AND owner_token=#{ownerToken}")
+    int renewExecutionLease(@Param("runId") Long runId, @Param("ownerToken") String ownerToken,
+                             @Param("expiresAt") LocalDateTime expiresAt, @Param("now") LocalDateTime now);
+
+    @Update("DELETE FROM agent_run_execution_leases WHERE run_id=#{runId} AND owner_token=#{ownerToken}")
+    int releaseExecutionLease(@Param("runId") Long runId, @Param("ownerToken") String ownerToken);
+
+    @Select("""
+            SELECT id FROM agent_runs
+            WHERE status IN ('SUCCESS', 'FAILED', 'CANCELLED', 'TIMEOUT')
+              AND finished_at IS NOT NULL AND finished_at < #{cutoff}
+              AND EXISTS (SELECT 1 FROM agent_langgraph_checkpoints c WHERE c.run_id = agent_runs.id)
+            ORDER BY id LIMIT #{limit}
+            """)
+    List<Long> findExpiredLangGraphCheckpointRuns(@Param("cutoff") LocalDateTime cutoff, @Param("limit") int limit);
+
+    @Delete("<script>DELETE FROM agent_langgraph_checkpoint_writes WHERE run_id IN <foreach item='id' collection='runIds' open='(' separator=',' close=')'>#{id}</foreach></script>")
+    int deleteExpiredLangGraphCheckpointWrites(@Param("runIds") List<Long> runIds);
+
+    @Delete("<script>DELETE FROM agent_langgraph_checkpoints WHERE run_id IN <foreach item='id' collection='runIds' open='(' separator=',' close=')'>#{id}</foreach></script>")
+    int deleteExpiredLangGraphCheckpoints(@Param("runIds") List<Long> runIds);
 
     @Update("""
             INSERT INTO agent_langgraph_checkpoints

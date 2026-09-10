@@ -12,6 +12,7 @@ public class AgentToolCall {
     private Long runId;
     private Long userId;
     private String toolCode;
+    private String idempotencyKey;
     private Long taskId;
     private String status;
     private String argumentsJson;
@@ -33,6 +34,8 @@ public class AgentToolCall {
     public void setUserId(Long userId) { this.userId = userId; }
     public String getToolCode() { return toolCode; }
     public void setToolCode(String toolCode) { this.toolCode = toolCode; }
+    public String getIdempotencyKey() { return idempotencyKey; }
+    public void setIdempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; }
     public Long getTaskId() { return taskId; }
     public void setTaskId(Long taskId) { this.taskId = taskId; }
     public String getStatus() { return status; }

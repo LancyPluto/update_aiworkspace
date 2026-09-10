@@ -612,6 +612,7 @@ CREATE TABLE agent_tool_calls (
   run_id BIGINT NOT NULL,
   user_id BIGINT NOT NULL,
   tool_code VARCHAR(128) NOT NULL,
+  idempotency_key VARCHAR(180),
   task_id BIGINT,
   status VARCHAR(32) NOT NULL,
   arguments_json JSON NOT NULL,

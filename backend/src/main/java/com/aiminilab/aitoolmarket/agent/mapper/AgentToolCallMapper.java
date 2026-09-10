@@ -18,10 +18,10 @@ import java.util.Optional;
 public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
 
     @Insert("""
-            INSERT INTO agent_tool_calls(run_id, user_id, tool_code, task_id, status, arguments_json, result_json,
+            INSERT INTO agent_tool_calls(run_id, user_id, tool_code, idempotency_key, task_id, status, arguments_json, result_json,
                                          error_code, error_message, user_message, developer_message, failure_trace_id,
                                          started_at, finished_at, created_at)
-            VALUES(#{call.runId}, #{call.userId}, #{call.toolCode}, #{call.taskId}, #{call.status}, #{call.argumentsJson}, #{call.resultJson},
+            VALUES(#{call.runId}, #{call.userId}, #{call.toolCode}, #{call.idempotencyKey}, #{call.taskId}, #{call.status}, #{call.argumentsJson}, #{call.resultJson},
                    #{call.errorCode}, #{call.errorMessage}, #{call.userMessage}, #{call.developerMessage}, #{call.failureTraceId},
                    #{call.startedAt}, #{call.finishedAt}, #{call.createdAt})
             """)
@@ -149,6 +149,9 @@ public interface AgentToolCallMapper extends BaseMapper<AgentToolCall> {
             LIMIT 1
             """)
     AgentToolCall selectLatestByRunIdAndToolCode(@Param("runId") Long runId, @Param("toolCode") String toolCode);
+
+    @Select("SELECT * FROM agent_tool_calls WHERE run_id = #{runId} AND idempotency_key = #{idempotencyKey} LIMIT 1")
+    AgentToolCall selectByRunIdAndIdempotencyKey(@Param("runId") Long runId, @Param("idempotencyKey") String idempotencyKey);
 
     @Update("""
             UPDATE agent_tool_calls

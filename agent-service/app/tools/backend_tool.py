@@ -218,7 +218,7 @@ class BackendToolBridge:
                     return None
             return None
 
-    async def execute_with_args(self, context: RunContext, tool: ToolDescriptor, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def execute_with_args(self, context: RunContext, tool: ToolDescriptor, arguments: dict[str, Any], *, idempotency_key: str | None = None) -> dict[str, Any]:
         if tool.toolCode == "xiaohongshu_copywriting":
             arguments = _with_xiaohongshu_defaults(context.message, arguments)
         arguments = enforce_locked_field_defaults(tool, arguments, user_message=context.message)
@@ -248,7 +248,7 @@ class BackendToolBridge:
                 eventJson=emit_attachment_resolved_payload(context, tool, arguments),
             ),
         )
-        call = await self.backend.create_tool_call(context.runId, ToolCallCreate(toolCode=tool.toolCode, argumentsJson=arguments))
+        call = await self.backend.create_tool_call(context.runId, ToolCallCreate(toolCode=tool.toolCode, argumentsJson=arguments, idempotencyKey=idempotency_key))
         task_params = compile_v2_lite_image_task_params(arguments, context=context) if _is_v2_lite_image_schema(tool) else arguments
         task_id: int | None = None
         try:

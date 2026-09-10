@@ -27,6 +27,7 @@ async def test_retry_openai_compatible_call_retries_then_succeeds():
 
 def test_format_connection_error_reports_proxy_and_no_proxy(monkeypatch):
     monkeypatch.setenv("HTTP_PROXY", "http://host.docker.internal:7890")
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
     monkeypatch.setenv("NO_PROXY", "localhost,api.deepseek.com")
 
     message = _format_connection_error(httpx.ConnectError("ConnectError"))

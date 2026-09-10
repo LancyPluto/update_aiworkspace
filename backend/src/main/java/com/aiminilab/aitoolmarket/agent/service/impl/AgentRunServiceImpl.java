@@ -1038,7 +1038,9 @@ public class AgentRunServiceImpl implements AgentRunService {
         if (!"RUNNING".equals(run.getStatus())) {
             throw new BusinessException(ErrorCode.AGENT_RUN_NOT_CANCELLABLE, "当前 Agent 运行不可创建工具调用");
         }
-        AgentToolCall existing = agentToolCallMapper.selectLatestByRunIdAndToolCode(runId, request.toolCode());
+        AgentToolCall existing = request.idempotencyKey() == null || request.idempotencyKey().isBlank()
+                ? null
+                : agentToolCallMapper.selectByRunIdAndIdempotencyKey(runId, request.idempotencyKey());
         if (existing != null) {
             return AgentToolCallResponse.from(existing);
         }
@@ -1048,6 +1050,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         call.setRunId(runId);
         call.setUserId(run.getUserId());
         call.setToolCode(request.toolCode());
+        call.setIdempotencyKey(request.idempotencyKey());
         call.setStatus("RUNNING");
         call.setArgumentsJson(toJsonOrEmpty(request.argumentsJson()));
         call.setStartedAt(now);
@@ -1185,14 +1188,6 @@ public class AgentRunServiceImpl implements AgentRunService {
             agentMessageMapper.updateContentText(assistant.getId(), contentText, null);
         }
         agentSessionMapper.updateActiveLeaf(run.getSessionId(), assistant.getId(), now);
-        appendEventInternal(
-                runId,
-                run.getUserId(),
-                "message.completed",
-                contentText,
-                toJson(Map.of("content", contentText, "source", "streaming_answer_snapshot")),
-                now
-        );
         return AgentRunResponse.from(findRun(runId));
     }
 
@@ -1438,6 +1433,28 @@ public class AgentRunServiceImpl implements AgentRunService {
         findRun(runId);
         agentRunMapper.deleteLangGraphCheckpointWrites(runId, threadId);
         agentRunMapper.deleteLangGraphCheckpoint(runId, threadId);
+    }
+
+    @Override
+    @Transactional
+    public boolean acquireExecutionLease(Long runId, String ownerToken, int leaseSeconds) {
+        LocalDateTime now = LocalDateTime.now();
+        agentRunMapper.acquireExecutionLease(runId, ownerToken, now.plusSeconds(Math.max(1, Math.min(leaseSeconds, 300))), now);
+        return Objects.equals(ownerToken, agentRunMapper.selectExecutionLeaseOwner(runId));
+    }
+
+    @Override
+    @Transactional
+    public boolean renewExecutionLease(Long runId, String ownerToken, int leaseSeconds) {
+        LocalDateTime now = LocalDateTime.now();
+        return agentRunMapper.renewExecutionLease(runId, ownerToken,
+                now.plusSeconds(Math.max(1, Math.min(leaseSeconds, 300))), now) > 0;
+    }
+
+    @Override
+    @Transactional
+    public void releaseExecutionLease(Long runId, String ownerToken) {
+        agentRunMapper.releaseExecutionLease(runId, ownerToken);
     }
 
     private com.fasterxml.jackson.databind.JsonNode readCheckpointPayload(String value) {

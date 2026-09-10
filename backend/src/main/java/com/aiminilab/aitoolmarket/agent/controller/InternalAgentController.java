@@ -311,6 +311,31 @@ public class InternalAgentController {
         return ApiResponse.success(null);
     }
 
+    @PostMapping("/runs/{runId}/execution-lease/acquire")
+    public ApiResponse<com.aiminilab.aitoolmarket.agent.dto.ExecutionLeaseResponse> acquireExecutionLease(
+            @PathVariable Long runId, @RequestBody java.util.Map<String, Object> request) {
+        String owner = String.valueOf(request.getOrDefault("ownerToken", ""));
+        int seconds = request.get("leaseSeconds") instanceof Number n ? n.intValue() : 60;
+        return ApiResponse.success(com.aiminilab.aitoolmarket.agent.dto.ExecutionLeaseResponse.acquired(
+                agentRunService.acquireExecutionLease(runId, owner, seconds)));
+    }
+
+    @PostMapping("/runs/{runId}/execution-lease/renew")
+    public ApiResponse<com.aiminilab.aitoolmarket.agent.dto.ExecutionLeaseResponse> renewExecutionLease(
+            @PathVariable Long runId, @RequestBody java.util.Map<String, Object> request) {
+        String owner = String.valueOf(request.getOrDefault("ownerToken", ""));
+        int seconds = request.get("leaseSeconds") instanceof Number n ? n.intValue() : 60;
+        return ApiResponse.success(com.aiminilab.aitoolmarket.agent.dto.ExecutionLeaseResponse.renewed(
+                agentRunService.renewExecutionLease(runId, owner, seconds)));
+    }
+
+    @DeleteMapping("/runs/{runId}/execution-lease")
+    public ApiResponse<Void> releaseExecutionLease(@PathVariable Long runId,
+            @org.springframework.web.bind.annotation.RequestParam String ownerToken) {
+        agentRunService.releaseExecutionLease(runId, ownerToken);
+        return ApiResponse.success(null);
+    }
+
     @PostMapping("/runs/{runId}/complete")
     public ApiResponse<AgentRunResponse> completeRun(@PathVariable Long runId,
                                                      @Valid @RequestBody CompleteAgentRunRequest request) {

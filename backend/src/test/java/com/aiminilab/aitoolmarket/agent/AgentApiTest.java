@@ -177,7 +177,7 @@ class AgentApiTest {
     }
 
     @Test
-    void streamingAnswerSnapshotIsPublishedAsRenderableEvent() throws Exception {
+    void streamingAnswerSnapshotDoesNotCompleteTheMessage() throws Exception {
         mockExternalAuthDependencies();
         register("agent_stream_snapshot_user");
         String token = login("agent_stream_snapshot_user");
@@ -198,9 +198,7 @@ class AgentApiTest {
         mockMvc.perform(get("/api/v1/agent/runs/{runId}/events", runId)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.list[1].eventType").value("message.completed"))
-                .andExpect(jsonPath("$.data.list[1].eventText").value("第一段内容，第二段内容"))
-                .andExpect(jsonPath("$.data.list[1].eventJson").value(org.hamcrest.Matchers.containsString("第一段内容，第二段内容")));
+                .andExpect(jsonPath("$.data.list[?(@.eventType == 'message.completed')]").isEmpty());
     }
 
     @Test
@@ -297,6 +295,7 @@ class AgentApiTest {
                         "/api/internal/v1/agent/runs/%d/tool-calls".formatted(runId), """
                                 {
                                   "toolCode": "xiaohongshu_copywriting",
+                                  "idempotencyKey": "agent-run:17:call:confirmation-1",
                                   "argumentsJson": {
                                     "topic": "launch"
                                   }
@@ -306,6 +305,7 @@ class AgentApiTest {
                         .content("""
                                 {
                                   "toolCode": "xiaohongshu_copywriting",
+                                  "idempotencyKey": "agent-run:17:call:confirmation-1",
                                   "argumentsJson": {
                                     "topic": "launch"
                                   }
@@ -350,6 +350,7 @@ class AgentApiTest {
                         "/api/internal/v1/agent/runs/%d/tool-calls".formatted(runId), """
                                 {
                                   "toolCode": "xiaohongshu_copywriting",
+                                  "idempotencyKey": "agent-run:17:call:confirmation-1",
                                   "argumentsJson": {
                                     "topic": "launch"
                                   }
@@ -359,6 +360,7 @@ class AgentApiTest {
                         .content("""
                                 {
                                   "toolCode": "xiaohongshu_copywriting",
+                                  "idempotencyKey": "agent-run:17:call:confirmation-1",
                                   "argumentsJson": {
                                     "topic": "launch"
                                   }

@@ -380,6 +380,21 @@ class BackendClient:
         except BackendClientError:
             logger.debug("clear native graph checkpoint failed (non-fatal) runId=%s", run_id)
 
+    async def acquire_execution_lease(self, run_id: int, owner_token: str, lease_seconds: int = 60) -> bool:
+        data = await self._request("POST", f"/api/internal/v1/agent/runs/{run_id}/execution-lease/acquire", {
+            "ownerToken": owner_token, "leaseSeconds": lease_seconds,
+        })
+        return bool(data.get("acquired")) if isinstance(data, dict) else False
+
+    async def renew_execution_lease(self, run_id: int, owner_token: str, lease_seconds: int = 60) -> bool:
+        data = await self._request("POST", f"/api/internal/v1/agent/runs/{run_id}/execution-lease/renew", {
+            "ownerToken": owner_token, "leaseSeconds": lease_seconds,
+        })
+        return bool(data.get("renewed")) if isinstance(data, dict) else False
+
+    async def release_execution_lease(self, run_id: int, owner_token: str) -> None:
+        await self._request("DELETE", f"/api/internal/v1/agent/runs/{run_id}/execution-lease?ownerToken={owner_token}")
+
     async def upsert_streaming_answer(self, run_id: int, content_text: str) -> None:
         await self._request(
             "PUT",

@@ -10,6 +10,7 @@ class FakeBridge:
     def __init__(self):
         self.executed = False
         self.arguments = None
+        self.idempotency_key = None
 
     def build_arguments(self, context, tool, *, apply_placeholder_defaults=True):
         return {"userRequest": context.message}
@@ -20,9 +21,10 @@ class FakeBridge:
     async def enrich_arguments(self, message, tool, existing_args=None, context=None):
         return existing_args or {}
 
-    async def execute_with_args(self, context, tool, arguments):
+    async def execute_with_args(self, context, tool, arguments, *, idempotency_key=None):
         self.executed = True
         self.arguments = arguments
+        self.idempotency_key = idempotency_key
         return {"success": True}
 
 
@@ -69,6 +71,20 @@ async def test_tool_orchestrator_allows_tool_cost_above_agent_run_budget():
     assert bridge.executed is True
     assert budget.tool_calls == 1
     assert budget.consumed_credits == 0
+
+
+@pytest.mark.asyncio
+async def test_tool_orchestrator_forwards_tool_call_idempotency_key():
+    bridge = FakeBridge()
+    orchestrator = ToolOrchestrator(bridge, lambda: BudgetGuard(max_tool_calls=1))  # type: ignore[arg-type]
+    context = RunContext(runId=42, sessionId=1, userId=1, message="执行工具", creditBudget=10)
+    tool = ToolDescriptor(toolCode="safe_tool", toolName="Safe", inputSchema={"type": "object", "properties": {}})
+
+    await orchestrator.execute_with_guard(
+        context, tool, BudgetState(credit_budget=10), idempotency_key="agent-run:42:call:call-1"
+    )
+
+    assert bridge.idempotency_key == "agent-run:42:call:call-1"
 
 
 @pytest.mark.asyncio

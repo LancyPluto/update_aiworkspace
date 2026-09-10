@@ -9,6 +9,7 @@ from app.core.event_types import (
     MESSAGE_COMPLETED,
     PLAN_UPDATED,
     SKILL_HYDRATED,
+    TOOL_CALL_EXECUTED,
     TOOL_CALL_LOOP_COMPLETED,
     TOOL_CONFIRMATION_REQUIRED,
     TOOL_SELECTED,
@@ -225,8 +226,91 @@ async def test_graph_engine_chat_only_completes_run():
     assert backend.completed_runs[0].finalAnswer == "你好，我可以帮你做什么？"
     assert backend.completed_runs[0].intent == "agent_graph"
     assert MESSAGE_COMPLETED in _event_types(backend)
+    assert _event_types(backend).count(MESSAGE_COMPLETED) == 1
     assert TOOL_CALL_LOOP_COMPLETED in _event_types(backend)
     assert not backend.failed_runs
+
+
+@pytest.mark.asyncio
+async def test_graph_engine_cancelled_before_model_does_not_complete_or_call_model():
+    backend = FakeBackend()
+    model = FakeModel([ChatTurnResult(content="must not be requested", tool_calls=[])])
+    context = RunContext(runId=11, sessionId=2, userId=3, message="取消这个运行", status="CANCELLED")
+
+    await AgentGraphEngine(backend, model).run(context)
+
+    assert model.calls == []
+    assert backend.completed_runs == []
+    assert backend.failed_runs == []
+
+
+@pytest.mark.asyncio
+async def test_graph_engine_cancelled_while_waiting_confirmation_does_not_execute_tool():
+    backend = FakeBackend()
+    tool = ToolDescriptor(
+        toolCode="video_gen",
+        toolName="Video Generator",
+        description="Generate a video",
+        autoCallable=False,
+        estimatedCreditCost=50,
+        inputSchema={"type": "object", "required": ["prompt"], "properties": {"prompt": {"type": "string"}}},
+    )
+    context = RunContext(
+        runId=12, sessionId=2, userId=3, message="取消等待中的确认", availableTools=[tool], creditBudget=100,
+    )
+    model = FakeModel([ChatTurnResult(content="", tool_calls=[
+        ChatToolCall(id="waiting-1", name="agent_tool__video_gen", arguments={"prompt": "a dog"}),
+    ])])
+
+    await AgentGraphEngine(backend, model).run(context)
+    assert backend.checkpoint is not None
+    backend.run_context = RunContext(**{**context.__dict__, "status": "CANCELLED"})
+
+    await AgentGraphEngine(backend, FakeModel([])).run_confirmed_tool(context, "video_gen")
+
+    assert backend.tasks == []
+    assert backend.completed_tool_calls == []
+    assert backend.completed_runs == []
+    assert backend.failed_runs == []
+    assert backend.checkpoint_cleared
+
+
+class _CancelAfterTaskBackend(FakeBackend):
+    async def create_task(self, payload):
+        task = await super().create_task(payload)
+        self.run_context = RunContext(runId=13, sessionId=2, userId=3, message="", status="CANCELLED")
+        return task
+
+
+@pytest.mark.asyncio
+async def test_graph_engine_does_not_publish_success_after_tool_returns_to_cancelled_run():
+    detail = TaskDetailResponse(
+        taskId=300,
+        status="SUCCESS",
+        result=TaskResultResponse(resourceType="image", contentText="https://cdn.example/cancelled.png"),
+    )
+    backend = _CancelAfterTaskBackend(task_detail=detail)
+    tool = ToolDescriptor(
+        toolCode="image_gen",
+        toolName="Image Generator",
+        description="Generate an image",
+        autoCallable=True,
+        inputSchema={"type": "object", "required": ["prompt"], "properties": {"prompt": {"type": "string"}}},
+    )
+    context = RunContext(
+        runId=13, sessionId=2, userId=3, message="生成后取消", availableTools=[tool], creditBudget=100,
+    )
+    model = FakeModel([ChatTurnResult(content="", tool_calls=[
+        ChatToolCall(id="cancel-after-tool", name="agent_tool__image_gen", arguments={"prompt": "a cat"}),
+    ])])
+
+    await AgentGraphEngine(backend, model).run(context)
+
+    assert backend.tasks, "the in-flight third-party call should be allowed to return"
+    assert TOOL_CALL_EXECUTED not in _event_types(backend)
+    assert MESSAGE_COMPLETED not in _event_types(backend)
+    assert backend.completed_runs == []
+    assert backend.failed_runs == []
 
 
 @pytest.mark.asyncio

@@ -68,4 +68,7 @@ public interface AgentRunService {
     java.util.List<com.aiminilab.aitoolmarket.agent.dto.LangGraphCheckpointResponse> listLangGraphCheckpoints(Long runId, String threadId, String checkpointNs, String beforeCheckpointId, Integer limit, java.util.Map<String, Object> metadataFilter);
     void saveLangGraphCheckpointWrites(Long runId, com.aiminilab.aitoolmarket.agent.dto.UpsertLangGraphCheckpointWritesRequest request);
     void clearLangGraphCheckpoint(Long runId, String threadId);
+    boolean acquireExecutionLease(Long runId, String ownerToken, int leaseSeconds);
+    boolean renewExecutionLease(Long runId, String ownerToken, int leaseSeconds);
+    void releaseExecutionLease(Long runId, String ownerToken);
 }

@@ -372,6 +372,7 @@ class RunFail(BaseModel):
 class ToolCallCreate(BaseModel):
     toolCode: str
     argumentsJson: dict[str, Any] = Field(default_factory=dict)
+    idempotencyKey: str | None = None
 
 
 class ToolCallComplete(BaseModel):

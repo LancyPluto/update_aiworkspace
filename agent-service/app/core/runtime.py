@@ -1,5 +1,7 @@
 ﻿import logging
 import time
+import asyncio
+import uuid
 
 from app.observability.metrics import record_run_completed, record_run_started, record_tool_call
 from app.observability.model_request_audit import AuditedModelClient, ModelRequestAuditRecorder
@@ -37,6 +39,11 @@ class AgentRuntime:
         started_at = time.perf_counter()
         audited_model = None
         record_run_started(entrypoint)
+        lease = await self._acquire_lease(run_id)
+        if lease is False:
+            record_run_completed(entrypoint, "skipped", "execution_locked", engine_name, time.perf_counter() - started_at)
+            return
+        lease_task = asyncio.create_task(self._renew_lease(run_id, lease)) if isinstance(lease, str) else None
         try:
             context = await self.backend.get_run_context(run_id)
             if getattr(context, "status", None) in TERMINAL_RUN_STATUSES:
@@ -69,6 +76,9 @@ class AgentRuntime:
             await self._fail(run_id, "AGENT_INTERNAL_ERROR", str(exc))
             record_run_completed(entrypoint, "failed", "AGENT_INTERNAL_ERROR", engine_name, time.perf_counter() - started_at)
         finally:
+            if lease_task is not None:
+                lease_task.cancel()
+            await self._release_lease(run_id, lease)
             if audited_model is not None:
                 audited_model.schedule_audit_flush()
 
@@ -78,6 +88,11 @@ class AgentRuntime:
         started_at = time.perf_counter()
         audited_model = None
         record_run_started(entrypoint)
+        lease = await self._acquire_lease(run_id)
+        if lease is False:
+            record_run_completed(entrypoint, "skipped", "execution_locked", engine_name, time.perf_counter() - started_at)
+            return
+        lease_task = asyncio.create_task(self._renew_lease(run_id, lease)) if isinstance(lease, str) else None
         try:
             context = await self.backend.get_run_context(run_id)
             if getattr(context, "status", None) in TERMINAL_RUN_STATUSES:
@@ -115,8 +130,45 @@ class AgentRuntime:
             record_tool_call(tool_code, "failed")
             record_run_completed(entrypoint, "failed", "AGENT_INTERNAL_ERROR", engine_name, time.perf_counter() - started_at)
         finally:
+            if lease_task is not None:
+                lease_task.cancel()
+            await self._release_lease(run_id, lease)
             if audited_model is not None:
                 audited_model.schedule_audit_flush()
+
+    async def _acquire_lease(self, run_id: int) -> str | None | bool:
+        acquire = getattr(self.backend, "acquire_execution_lease", None)
+        if not callable(acquire):
+            return None
+        owner = f"agent-service:{uuid.uuid4()}"
+        if not await acquire(run_id, owner, 60):
+            return False
+        return owner
+
+    async def _release_lease(self, run_id: int, owner: str | None | bool) -> None:
+        if not isinstance(owner, str):
+            return
+        release = getattr(self.backend, "release_execution_lease", None)
+        if callable(release):
+            try:
+                await release(run_id, owner)
+            except Exception:
+                logger.warning("failed to release agent execution lease runId=%s", run_id, exc_info=True)
+
+    async def _renew_lease(self, run_id: int, owner: str) -> None:
+        renew = getattr(self.backend, "renew_execution_lease", None)
+        if not callable(renew):
+            return
+        try:
+            while True:
+                await asyncio.sleep(20)
+                if not await renew(run_id, owner, 60):
+                    logger.warning("agent execution lease was lost runId=%s", run_id)
+                    return
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.warning("failed to renew agent execution lease runId=%s", run_id, exc_info=True)
 
     async def debug_route(self, context):
         try:
