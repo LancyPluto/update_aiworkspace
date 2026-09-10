@@ -58,6 +58,10 @@ class FakeBackend:
         self.checkpoint = None
         self.checkpoint_saves = 0
         self.checkpoint_cleared = False
+        self.native_checkpoint_cleared = False
+        self.native_checkpoints = []
+        self.native_writes = {}
+        self.run_context = None
 
     async def save_graph_checkpoint(self, run_id, checkpoint_json):
         self.checkpoint = checkpoint_json
@@ -69,6 +73,41 @@ class FakeBackend:
     async def clear_graph_checkpoint(self, run_id):
         self.checkpoint = None
         self.checkpoint_cleared = True
+
+    async def clear_native_graph_checkpoint(self, run_id, thread_id):
+        self.native_checkpoint_cleared = True
+        self.native_checkpoints = []
+
+    async def save_native_graph_checkpoint(self, run_id, thread_id, checkpoint_ns, checkpoint_id, checkpoint_serde,
+                                           checkpoint_payload, metadata_json="{}", parent_checkpoint_id=None):
+        self.native_checkpoints.append({"threadId": thread_id, "checkpointNs": checkpoint_ns, "checkpointId": checkpoint_id,
+                                        "checkpointSerde": checkpoint_serde, "checkpointPayload": checkpoint_payload,
+                                        "metadataJson": metadata_json, "parentCheckpointId": parent_checkpoint_id})
+
+    async def load_native_graph_checkpoint(self, run_id, thread_id, checkpoint_ns="", checkpoint_id=None):
+        rows = [row for row in self.native_checkpoints if row["threadId"] == thread_id and row["checkpointNs"] == checkpoint_ns]
+        if checkpoint_id:
+            rows = [row for row in rows if row["checkpointId"] == checkpoint_id]
+        if not rows:
+            return None
+        row = dict(rows[-1])
+        row["pendingWrites"] = self.native_writes.get((thread_id, checkpoint_ns, row["checkpointId"]), [])
+        return row
+
+    async def save_native_graph_checkpoint_writes(self, run_id, thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, writes):
+        key = (thread_id, checkpoint_ns, checkpoint_id)
+        bucket = self.native_writes.setdefault(key, [])
+        bucket.extend([{**write, "taskId": task_id, "taskPath": task_path} for write in writes])
+
+    async def list_native_graph_checkpoints(self, run_id, thread_id, checkpoint_ns, before_checkpoint_id, limit, metadata_filter):
+        rows = [row for row in self.native_checkpoints if row["threadId"] == thread_id and row["checkpointNs"] == checkpoint_ns]
+        if before_checkpoint_id:
+            index = next((i for i, row in enumerate(rows) if row["checkpointId"] == before_checkpoint_id), len(rows))
+            rows = rows[:index]
+        return list(reversed(rows[-limit:] if limit else rows))
+
+    async def get_run_context(self, run_id):
+        return self.run_context
 
     async def append_event(self, run_id, event):
         self.events.append(event)

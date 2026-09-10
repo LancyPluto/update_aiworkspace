@@ -319,6 +319,67 @@ class BackendClient:
         except BackendClientError:
             logger.debug("clear graph checkpoint failed (non-fatal) runId=%s", run_id)
 
+    async def save_native_graph_checkpoint(
+        self,
+        run_id: int,
+        thread_id: str,
+        checkpoint_ns: str,
+        checkpoint_id: str,
+        checkpoint_serde: str,
+        checkpoint_payload: str,
+        metadata_json: str = "{}",
+        parent_checkpoint_id: str | None = None,
+    ) -> None:
+        await self._request(
+            "PUT",
+            f"/api/internal/v1/agent/runs/{run_id}/langgraph-checkpoint",
+            {
+                "threadId": thread_id,
+                "checkpointNs": checkpoint_ns,
+                "checkpointId": checkpoint_id,
+                "checkpointSerde": checkpoint_serde,
+                "checkpointPayload": checkpoint_payload,
+                "metadataJson": metadata_json,
+                "parentCheckpointId": parent_checkpoint_id,
+            },
+        )
+
+    async def load_native_graph_checkpoint(self, run_id: int, thread_id: str, checkpoint_ns: str = "", checkpoint_id: str | None = None) -> dict[str, Any] | None:
+        query = f"threadId={thread_id}&checkpointNs={checkpoint_ns}"
+        if checkpoint_id:
+            query += f"&checkpointId={checkpoint_id}"
+        data = await self._request(
+            "GET",
+            f"/api/internal/v1/agent/runs/{run_id}/langgraph-checkpoint?{query}",
+        )
+        return data if isinstance(data, dict) and data.get("checkpointPayload") else None
+
+    async def save_native_graph_checkpoint_writes(self, run_id: int, thread_id: str, checkpoint_ns: str,
+                                                   checkpoint_id: str, task_id: str, task_path: str,
+                                                   writes: list[dict[str, Any]]) -> None:
+        await self._request("PUT", f"/api/internal/v1/agent/runs/{run_id}/langgraph-checkpoint-writes", {
+            "threadId": thread_id, "checkpointNs": checkpoint_ns, "checkpointId": checkpoint_id,
+            "taskId": task_id, "taskPath": task_path, "writes": writes,
+        })
+
+    async def list_native_graph_checkpoints(self, run_id: int, thread_id: str, checkpoint_ns: str,
+                                             before_checkpoint_id: str | None, limit: int | None,
+                                             metadata_filter: dict[str, Any]) -> list[dict[str, Any]]:
+        data = await self._request("POST", f"/api/internal/v1/agent/runs/{run_id}/langgraph-checkpoints/search", {
+            "threadId": thread_id, "checkpointNs": checkpoint_ns, "beforeCheckpointId": before_checkpoint_id,
+            "limit": limit, "metadataFilter": metadata_filter,
+        })
+        return data.get("list", []) if isinstance(data, dict) else []
+
+    async def clear_native_graph_checkpoint(self, run_id: int, thread_id: str) -> None:
+        try:
+            await self._request(
+                "DELETE",
+                f"/api/internal/v1/agent/runs/{run_id}/langgraph-checkpoint?threadId={thread_id}",
+            )
+        except BackendClientError:
+            logger.debug("clear native graph checkpoint failed (non-fatal) runId=%s", run_id)
+
     async def upsert_streaming_answer(self, run_id: int, content_text: str) -> None:
         await self._request(
             "PUT",
@@ -438,5 +499,3 @@ def _truncate(value: str, limit: int = 1200) -> str:
     if len(value) <= limit:
         return value
     return value[:limit] + "...<truncated>"
-
-

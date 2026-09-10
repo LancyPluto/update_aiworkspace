@@ -63,4 +63,9 @@ public interface AgentRunService {
     String getGraphCheckpoint(Long runId);
 
     void clearGraphCheckpoint(Long runId);
+    void saveLangGraphCheckpoint(Long runId, String threadId, String checkpointNs, String checkpointId, String checkpointSerde, String checkpointPayload, String metadataJson, String parentCheckpointId);
+    com.aiminilab.aitoolmarket.agent.dto.LangGraphCheckpointResponse getLangGraphCheckpoint(Long runId, String threadId, String checkpointNs, String checkpointId);
+    java.util.List<com.aiminilab.aitoolmarket.agent.dto.LangGraphCheckpointResponse> listLangGraphCheckpoints(Long runId, String threadId, String checkpointNs, String beforeCheckpointId, Integer limit, java.util.Map<String, Object> metadataFilter);
+    void saveLangGraphCheckpointWrites(Long runId, com.aiminilab.aitoolmarket.agent.dto.UpsertLangGraphCheckpointWritesRequest request);
+    void clearLangGraphCheckpoint(Long runId, String threadId);
 }

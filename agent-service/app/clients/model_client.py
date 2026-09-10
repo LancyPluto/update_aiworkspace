@@ -47,6 +47,9 @@ class ChatTurnResult:
 class StreamPart:
     kind: str
     text: str
+    tool_call_index: int | None = None
+    tool_call_id: str = ""
+    tool_call_name: str = ""
 
 
 class ModelClient:
@@ -130,9 +133,49 @@ class ModelClient:
             async for part in self._chat_openai_compatible_stream_parts_direct(messages, tools=tools):
                 yield part
             return
-        async for chunk in self.chat_stream(messages, tools=tools):
-            if chunk:
-                yield StreamPart(kind="text", text=chunk)
+        if self._should_stream_locally():
+            turn = await self.chat_turn(messages, tools=tools)
+            if turn.content:
+                yield StreamPart(kind="text", text=turn.content)
+            for call in turn.tool_calls:
+                yield StreamPart(
+                    kind="tool_call",
+                    text=json.dumps(call.arguments, ensure_ascii=False),
+                    tool_call_index=0,
+                    tool_call_id=call.id,
+                    tool_call_name=call.name,
+                )
+            return
+        if not hasattr(self._chat_model, "astream"):
+            turn = await self.chat_turn(messages, tools=tools)
+            if turn.content:
+                yield StreamPart(kind="text", text=turn.content)
+            return
+        kwargs = {}
+        safe_tools = _prepare_tools_for_provider(tools, self.settings.model_provider)
+        if safe_tools:
+            kwargs["tools"] = safe_tools
+        try:
+            async for chunk in self._chat_model.astream(_to_langchain_messages(messages), **kwargs):
+                self._record_usage(chunk)
+                text = _message_content(chunk, allow_empty=True)
+                if text:
+                    yield StreamPart(kind="text", text=text)
+                for index, call in enumerate(getattr(chunk, "tool_calls", []) or []):
+                    if not isinstance(call, dict):
+                        continue
+                    args = call.get("args", "")
+                    if isinstance(args, dict):
+                        args = json.dumps(args, ensure_ascii=False)
+                    yield StreamPart(
+                        kind="tool_call",
+                        text=str(args or ""),
+                        tool_call_index=index,
+                        tool_call_id=str(call.get("id") or ""),
+                        tool_call_name=str(call.get("name") or ""),
+                    )
+        except Exception as exception:
+            raise ModelClientError(f"model stream failed: {_format_exception(exception)}") from exception
 
     async def chat_stream(self, messages: list[ChatMessage], tools: list[dict[str, Any]] | None = None) -> AsyncIterator[str]:
         if not self._uses_injected_chat_model and self._should_use_direct_openai_stream():
@@ -654,6 +697,19 @@ def _openai_compatible_stream_parts(data: Any) -> list[StreamPart]:
             parts.append(StreamPart(kind="reasoning", text=reasoning_text))
         if text:
             parts.append(StreamPart(kind="text", text=text))
+    tool_calls = delta.get("tool_calls")
+    if isinstance(tool_calls, list):
+        for item in tool_calls:
+            if not isinstance(item, dict):
+                continue
+            function = item.get("function") if isinstance(item.get("function"), dict) else {}
+            parts.append(StreamPart(
+                kind="tool_call",
+                text=str(function.get("arguments") or ""),
+                tool_call_index=item.get("index"),
+                tool_call_id=str(item.get("id") or ""),
+                tool_call_name=str(function.get("name") or ""),
+            ))
     return parts
 
 

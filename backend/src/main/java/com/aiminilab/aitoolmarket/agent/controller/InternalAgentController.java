@@ -18,6 +18,10 @@ import com.aiminilab.aitoolmarket.agent.dto.FailAgentToolCallRequest;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentSessionSearchItemResponse;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentSessionSearchRequest;
 import com.aiminilab.aitoolmarket.agent.dto.UpsertAgentGraphCheckpointRequest;
+import com.aiminilab.aitoolmarket.agent.dto.UpsertLangGraphCheckpointRequest;
+import com.aiminilab.aitoolmarket.agent.dto.LangGraphCheckpointResponse;
+import com.aiminilab.aitoolmarket.agent.dto.UpsertLangGraphCheckpointWritesRequest;
+import com.aiminilab.aitoolmarket.agent.dto.SearchLangGraphCheckpointsRequest;
 import com.aiminilab.aitoolmarket.agent.dto.UpsertStreamingAgentAnswerRequest;
 import com.aiminilab.aitoolmarket.agent.dto.InternalAgentRunContextResponse;
 import com.aiminilab.aitoolmarket.agent.dto.AgentSkillBundleResponse;
@@ -266,6 +270,44 @@ public class InternalAgentController {
     @DeleteMapping("/runs/{runId}/graph-checkpoint")
     public ApiResponse<Void> clearGraphCheckpoint(@PathVariable Long runId) {
         agentRunService.clearGraphCheckpoint(runId);
+        return ApiResponse.success(null);
+    }
+
+    @PutMapping("/runs/{runId}/langgraph-checkpoint")
+    public ApiResponse<LangGraphCheckpointResponse> saveLangGraphCheckpoint(
+            @PathVariable Long runId,
+            @Valid @RequestBody UpsertLangGraphCheckpointRequest request) {
+        agentRunService.saveLangGraphCheckpoint(runId, request.threadId(), request.checkpointNs(), request.checkpointId(),
+                request.checkpointSerde(), request.checkpointPayload(), request.metadataJson(), request.parentCheckpointId());
+        return ApiResponse.success(agentRunService.getLangGraphCheckpoint(runId, request.threadId(), request.checkpointNs(), request.checkpointId()));
+    }
+
+    @GetMapping("/runs/{runId}/langgraph-checkpoint")
+    public ApiResponse<LangGraphCheckpointResponse> getLangGraphCheckpoint(
+            @PathVariable Long runId, @org.springframework.web.bind.annotation.RequestParam String threadId,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String checkpointNs,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String checkpointId) {
+        return ApiResponse.success(agentRunService.getLangGraphCheckpoint(runId, threadId, checkpointNs, checkpointId));
+    }
+
+    @PutMapping("/runs/{runId}/langgraph-checkpoint-writes")
+    public ApiResponse<Void> saveLangGraphCheckpointWrites(@PathVariable Long runId,
+            @Valid @RequestBody UpsertLangGraphCheckpointWritesRequest request) {
+        agentRunService.saveLangGraphCheckpointWrites(runId, request);
+        return ApiResponse.success(null);
+    }
+
+    @PostMapping("/runs/{runId}/langgraph-checkpoints/search")
+    public ApiResponse<java.util.Map<String, Object>> listLangGraphCheckpoints(@PathVariable Long runId,
+            @Valid @RequestBody SearchLangGraphCheckpointsRequest request) {
+        return ApiResponse.success(java.util.Map.of("list", agentRunService.listLangGraphCheckpoints(runId, request.threadId(),
+                request.checkpointNs(), request.beforeCheckpointId(), request.limit(), request.metadataFilter())));
+    }
+
+    @DeleteMapping("/runs/{runId}/langgraph-checkpoint")
+    public ApiResponse<Void> clearLangGraphCheckpoint(
+            @PathVariable Long runId, @org.springframework.web.bind.annotation.RequestParam String threadId) {
+        agentRunService.clearLangGraphCheckpoint(runId, threadId);
         return ApiResponse.success(null);
     }
 

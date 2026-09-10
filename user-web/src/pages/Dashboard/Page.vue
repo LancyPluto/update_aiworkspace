@@ -1872,9 +1872,13 @@ function onToolCoverError(tool: ToolSummary) {
 }
 
 function usesComparisonToolCover(tool: ToolSummary): boolean {
-  return tool.cardMedia.mediaDisplayMode === "comparison"
-    && Boolean(tool.cardMedia.comparisonOriginalUrl)
-    && Boolean(tool.cardMedia.comparisonEffectUrl)
+  // `cardMedia` was introduced after the original summary payload.  Keep the
+  // dashboard usable while an older backend is being rolled out by treating a
+  // missing media block as an ordinary cover, rather than aborting the render.
+  const media = tool.cardMedia
+  return media?.mediaDisplayMode === "comparison"
+    && Boolean(media.comparisonOriginalUrl)
+    && Boolean(media.comparisonEffectUrl)
     && !brokenToolCoverIds.value.has(tool.toolCode)
 }
 

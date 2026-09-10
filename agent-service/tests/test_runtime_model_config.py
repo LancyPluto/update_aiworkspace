@@ -11,6 +11,7 @@ class FakeBackend:
         self.events = []
         self.completed = []
         self.failed = []
+        self.native_checkpoints = []
 
     async def append_event(self, run_id, event):
         self.events.append((run_id, event.eventType))
@@ -35,6 +36,22 @@ class FakeBackend:
     async def fail_run(self, run_id, request):
         self.failed.append((run_id, request.errorCode, request.errorMessage))
 
+    async def load_native_graph_checkpoint(self, run_id, thread_id, checkpoint_ns="", checkpoint_id=None):
+        return None
+
+    async def save_native_graph_checkpoint(self, run_id, thread_id, checkpoint_ns, checkpoint_id, checkpoint_serde,
+                                           checkpoint_payload, metadata_json="{}", parent_checkpoint_id=None):
+        self.native_checkpoints.append(checkpoint_id)
+
+    async def save_native_graph_checkpoint_writes(self, run_id, thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, writes):
+        return None
+
+    async def list_native_graph_checkpoints(self, run_id, thread_id, checkpoint_ns, before_checkpoint_id, limit, metadata_filter):
+        return []
+
+    async def clear_native_graph_checkpoint(self, run_id, thread_id):
+        return None
+
 
 class FakeModelClient:
     created_settings = []
@@ -51,6 +68,10 @@ class FakeModelClient:
 
     async def chat_stream(self, messages):
         yield await self.chat(messages)
+
+    async def chat_stream_parts(self, messages, tools=None):
+        from app.clients.model_client import StreamPart
+        yield StreamPart(kind="text", text="real model answer")
 
 
 @pytest.mark.asyncio

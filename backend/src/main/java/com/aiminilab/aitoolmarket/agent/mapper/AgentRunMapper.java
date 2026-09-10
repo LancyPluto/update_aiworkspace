@@ -19,6 +19,76 @@ import com.aiminilab.aitoolmarket.agent.dto.AdminAgentRunStatsResponse;
 
 public interface AgentRunMapper extends BaseMapper<AgentRun> {
 
+    @Update("""
+            INSERT INTO agent_langgraph_checkpoints
+              (run_id, thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint_json, metadata_json,
+               created_at, updated_at)
+            VALUES (#{runId}, #{threadId}, #{checkpointNs}, #{checkpointId}, #{parentCheckpointId}, #{checkpointJson}, #{metadataJson},
+                    #{now}, #{now})
+            ON DUPLICATE KEY UPDATE
+              parent_checkpoint_id = VALUES(parent_checkpoint_id),
+              checkpoint_json = VALUES(checkpoint_json),
+              metadata_json = VALUES(metadata_json),
+              updated_at = VALUES(updated_at)
+            """)
+    void upsertLangGraphCheckpoint(@Param("runId") Long runId,
+                                   @Param("threadId") String threadId,
+                                   @Param("checkpointNs") String checkpointNs,
+                                   @Param("checkpointId") String checkpointId,
+                                   @Param("checkpointJson") String checkpointJson,
+                                   @Param("metadataJson") String metadataJson,
+                                   @Param("parentCheckpointId") String parentCheckpointId,
+                                   @Param("now") LocalDateTime now);
+
+    @Select("""
+            SELECT run_id, thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint_json, metadata_json
+            FROM agent_langgraph_checkpoints
+            WHERE run_id = #{runId} AND thread_id = #{threadId} AND checkpoint_ns = #{checkpointNs}
+              AND (#{checkpointId} IS NULL OR checkpoint_id = #{checkpointId})
+            ORDER BY id DESC LIMIT 1
+            """)
+    java.util.Map<String, Object> selectLangGraphCheckpoint(@Param("runId") Long runId,
+                                                             @Param("threadId") String threadId,
+                                                             @Param("checkpointNs") String checkpointNs,
+                                                             @Param("checkpointId") String checkpointId);
+
+    @Insert("""
+            INSERT INTO agent_langgraph_checkpoint_writes
+              (run_id, thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, write_index, channel_name, value_type, value_base64, created_at)
+            VALUES (#{runId}, #{threadId}, #{checkpointNs}, #{checkpointId}, #{taskId}, #{taskPath}, #{writeIndex}, #{channelName}, #{valueType}, #{valueBase64}, #{now})
+            ON DUPLICATE KEY UPDATE channel_name=VALUES(channel_name), value_type=VALUES(value_type), value_base64=VALUES(value_base64), created_at=VALUES(created_at)
+            """)
+    void upsertLangGraphCheckpointWrite(@Param("runId") Long runId, @Param("threadId") String threadId,
+        @Param("checkpointNs") String checkpointNs, @Param("checkpointId") String checkpointId, @Param("taskId") String taskId,
+        @Param("taskPath") String taskPath, @Param("writeIndex") Integer writeIndex, @Param("channelName") String channelName,
+        @Param("valueType") String valueType, @Param("valueBase64") String valueBase64, @Param("now") LocalDateTime now);
+
+    @Select("""
+            SELECT task_id, task_path, write_index, channel_name, value_type, value_base64
+            FROM agent_langgraph_checkpoint_writes WHERE run_id=#{runId} AND thread_id=#{threadId}
+              AND checkpoint_ns=#{checkpointNs} AND checkpoint_id=#{checkpointId} ORDER BY task_id, write_index
+            """)
+    List<java.util.Map<String, Object>> selectLangGraphCheckpointWrites(@Param("runId") Long runId, @Param("threadId") String threadId,
+        @Param("checkpointNs") String checkpointNs, @Param("checkpointId") String checkpointId);
+
+    @Select("""
+            SELECT run_id, thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint_json, metadata_json
+            FROM agent_langgraph_checkpoints WHERE run_id=#{runId} AND thread_id=#{threadId} AND checkpoint_ns=#{checkpointNs}
+              AND (#{beforeCheckpointId} IS NULL OR id < (SELECT id FROM agent_langgraph_checkpoints x WHERE x.run_id=#{runId} AND x.thread_id=#{threadId} AND x.checkpoint_ns=#{checkpointNs} AND x.checkpoint_id=#{beforeCheckpointId} LIMIT 1))
+            ORDER BY id DESC LIMIT #{limit}
+            """)
+    List<java.util.Map<String, Object>> listLangGraphCheckpoints(@Param("runId") Long runId, @Param("threadId") String threadId,
+        @Param("checkpointNs") String checkpointNs, @Param("beforeCheckpointId") String beforeCheckpointId, @Param("limit") int limit);
+
+    @Update("""
+            DELETE FROM agent_langgraph_checkpoints
+            WHERE run_id = #{runId} AND thread_id = #{threadId}
+            """)
+    void deleteLangGraphCheckpoint(@Param("runId") Long runId, @Param("threadId") String threadId);
+
+    @Update("DELETE FROM agent_langgraph_checkpoint_writes WHERE run_id=#{runId} AND thread_id=#{threadId}")
+    void deleteLangGraphCheckpointWrites(@Param("runId") Long runId, @Param("threadId") String threadId);
+
     @Insert("""
             INSERT INTO agent_runs(session_id, user_id, status, intent, model_config_id, model_provider_code, model_name,
                                    estimated_credits, consumed_credits, error_code, error_message,

@@ -13,6 +13,7 @@ import com.aiminilab.aitoolmarket.agent.dto.AgentToolDescriptorResponse;
 import com.aiminilab.aitoolmarket.agent.dto.BindAgentToolCallTaskRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CompleteAgentRunRequest;
 import com.aiminilab.aitoolmarket.agent.dto.UpsertStreamingAgentAnswerRequest;
+import com.aiminilab.aitoolmarket.agent.dto.LangGraphCheckpointResponse;
 import com.aiminilab.aitoolmarket.agent.dto.CompleteAgentToolCallRequest;
 import com.aiminilab.aitoolmarket.agent.dto.ConfirmAgentToolRequest;
 import com.aiminilab.aitoolmarket.agent.dto.CreateAgentMessageRequest;
@@ -1380,6 +1381,81 @@ public class AgentRunServiceImpl implements AgentRunService {
     public void clearGraphCheckpoint(Long runId) {
         findRun(runId);
         agentRunMapper.updateGraphCheckpoint(runId, null, LocalDateTime.now());
+    }
+
+    @Override
+    @Transactional
+    public void saveLangGraphCheckpoint(Long runId, String threadId, String checkpointNs, String checkpointId,
+                                         String checkpointSerde, String checkpointPayload, String metadataJson, String parentCheckpointId) {
+        findRun(runId);
+        String checkpointJson = objectMapper.createObjectNode().put("serde", checkpointSerde).put("payload", checkpointPayload).toString();
+        agentRunMapper.upsertLangGraphCheckpoint(runId, threadId, checkpointNs == null ? "" : checkpointNs, checkpointId, checkpointJson, metadataJson,
+                parentCheckpointId, LocalDateTime.now());
+    }
+
+    @Override
+    public LangGraphCheckpointResponse getLangGraphCheckpoint(Long runId, String threadId, String checkpointNs, String checkpointId) {
+        findRun(runId);
+        var row = agentRunMapper.selectLangGraphCheckpoint(runId, threadId, checkpointNs == null ? "" : checkpointNs, checkpointId);
+        if (row == null) {
+            return new LangGraphCheckpointResponse(runId, threadId, checkpointNs == null ? "" : checkpointNs, null, null, null, null, null, List.of());
+        }
+        var payload = readCheckpointPayload((String) row.get("checkpoint_json"));
+        String resolvedCheckpointId = String.valueOf(row.get("checkpoint_id"));
+        return new LangGraphCheckpointResponse(
+                runId, threadId,
+                (String) row.get("checkpoint_ns"), payload.path("serde").asText(), payload.path("payload").asText(),
+                (String) row.get("metadata_json"),
+                resolvedCheckpointId, (String) row.get("parent_checkpoint_id"), checkpointWrites(runId, threadId, checkpointNs, resolvedCheckpointId));
+    }
+
+    @Override
+    public List<LangGraphCheckpointResponse> listLangGraphCheckpoints(Long runId, String threadId, String checkpointNs,
+            String beforeCheckpointId, Integer limit, java.util.Map<String, Object> metadataFilter) {
+        findRun(runId);
+        int effectiveLimit = limit == null ? 100 : Math.max(1, Math.min(limit, 500));
+        return agentRunMapper.listLangGraphCheckpoints(runId, threadId, checkpointNs == null ? "" : checkpointNs, beforeCheckpointId, effectiveLimit).stream()
+                .filter(row -> metadataMatches((String) row.get("metadata_json"), metadataFilter))
+                .map(row -> getLangGraphCheckpoint(runId, threadId, (String) row.get("checkpoint_ns"), String.valueOf(row.get("checkpoint_id"))))
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public void saveLangGraphCheckpointWrites(Long runId, com.aiminilab.aitoolmarket.agent.dto.UpsertLangGraphCheckpointWritesRequest request) {
+        findRun(runId);
+        LocalDateTime now = LocalDateTime.now();
+        for (var write : request.writes()) {
+            agentRunMapper.upsertLangGraphCheckpointWrite(runId, request.threadId(), request.checkpointNs() == null ? "" : request.checkpointNs(),
+                    request.checkpointId(), request.taskId(), request.taskPath() == null ? "" : request.taskPath(), write.writeIndex(),
+                    write.channelName(), write.valueType(), write.valueBase64(), now);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void clearLangGraphCheckpoint(Long runId, String threadId) {
+        findRun(runId);
+        agentRunMapper.deleteLangGraphCheckpointWrites(runId, threadId);
+        agentRunMapper.deleteLangGraphCheckpoint(runId, threadId);
+    }
+
+    private com.fasterxml.jackson.databind.JsonNode readCheckpointPayload(String value) {
+        try { return objectMapper.readTree(value); } catch (Exception ignored) { return objectMapper.createObjectNode(); }
+    }
+
+    private boolean metadataMatches(String metadataJson, java.util.Map<String, Object> filter) {
+        if (filter == null || filter.isEmpty()) return true;
+        try {
+            var node = objectMapper.readTree(metadataJson == null ? "{}" : metadataJson);
+            return filter.entrySet().stream().allMatch(entry -> node.has(entry.getKey()) && String.valueOf(entry.getValue()).equals(node.path(entry.getKey()).asText()));
+        } catch (Exception ignored) { return false; }
+    }
+
+    private List<com.aiminilab.aitoolmarket.agent.dto.LangGraphCheckpointWriteResponse> checkpointWrites(Long runId, String threadId, String checkpointNs, String checkpointId) {
+        return agentRunMapper.selectLangGraphCheckpointWrites(runId, threadId, checkpointNs == null ? "" : checkpointNs, checkpointId).stream()
+                .map(row -> new com.aiminilab.aitoolmarket.agent.dto.LangGraphCheckpointWriteResponse((String) row.get("task_id"), (String) row.get("task_path"),
+                        ((Number) row.get("write_index")).intValue(), (String) row.get("channel_name"), (String) row.get("value_type"), (String) row.get("value_base64"))).toList();
     }
 
     private CreateAgentMessageResponse executeStartRun(Long userId,

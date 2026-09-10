@@ -16,6 +16,7 @@ from app.core.event_types import (
     MEMORY_CONTEXT_FROZEN,
     MESSAGE_COMPLETED,
     MESSAGE_DELTA,
+    REASONING_DELTA,
     PLAN_UPDATED,
     REFLECT_RETRY,
     RUN_STARTED,
@@ -60,6 +61,7 @@ from app.runtime.agent_graph.state import (
     deserialize_checkpoint,
     serialize_checkpoint,
 )
+from app.runtime.agent_graph.backend_checkpointer import BackendCheckpointSaver
 from app.runtime.context_manager import ContextManager, trim_tool_output_by_tokens
 from app.runtime.product_tool_call_loop import _alias_for_tool_code
 from app.runtime.product_tool_call_loop import _format_skill_catalog
@@ -168,7 +170,7 @@ class AgentGraphEngine:
         self._hydrated_skill_codes: set[str] = set()
         self._skill_hydration = SkillHydrationService(backend_client)
         self._memory_tools_enabled: bool = False
-        self._compiled = self._build_graph()
+        self._compiled = None
 
     # ------------------------------------------------------------------ #
     # Public engine API
@@ -186,10 +188,26 @@ class AgentGraphEngine:
         except BudgetExceeded as exc:
             await self._fail_run(context.runId, exc.error_code, exc.message)
         except ToolExecutionError as exc:
+            if exc.error_code == "AGENT_CANCELLED":
+                await self._clear_checkpoint(context)
+                return
             await self._fail_run(context.runId, exc.error_code or "TOOL_CALL_FAILED", str(exc))
         except Exception as exc:  # pragma: no cover - defensive runtime boundary.
             LOGGER.exception("agent graph run failed runId=%s", context.runId)
             await self._fail_run(context.runId, "AGENT_INTERNAL_ERROR", str(exc))
+
+    async def _check_cancelled(self) -> None:
+        context = self._context
+        if context is None:
+            return
+        status = str(getattr(context, "status", "") or "").upper()
+        if status in {"CANCELLED", "TIMEOUT"}:
+            raise ToolExecutionError("Agent run was cancelled", "AGENT_CANCELLED")
+        loader = getattr(self.backend, "get_run_context", None)
+        if loader is not None:
+            refreshed = await loader(context.runId)
+            if str(getattr(refreshed, "status", "") or "").upper() in {"CANCELLED", "TIMEOUT"}:
+                raise ToolExecutionError("Agent run was cancelled", "AGENT_CANCELLED")
 
     async def run_confirmed_tool(self, context: RunContext, tool_code: str) -> None:
         try:
@@ -214,6 +232,9 @@ class AgentGraphEngine:
         except BudgetExceeded as exc:
             await self._fail_run(context.runId, exc.error_code, exc.message)
         except ToolExecutionError as exc:
+            if exc.error_code == "AGENT_CANCELLED":
+                await self._clear_checkpoint(context)
+                return
             await self._fail_run(context.runId, exc.error_code or "TOOL_CALL_FAILED", str(exc))
         except Exception as exc:  # pragma: no cover
             LOGGER.exception("agent graph confirmed-tool run failed runId=%s tool=%s", context.runId, tool_code)
@@ -256,9 +277,17 @@ class AgentGraphEngine:
         graph.add_conditional_edges("agent", self._route_after_agent, {"agent": "agent", "tools": "tools", "finalize": "finalize"})
         graph.add_conditional_edges("tools", self._route_after_tools, {"agent": "agent", "finalize": "finalize", "end": END})
         graph.add_edge("finalize", END)
-        return graph.compile()
+        if self._context is None:
+            return graph.compile()
+        return graph.compile(checkpointer=BackendCheckpointSaver(
+            self.backend,
+            run_id=self._context.runId,
+            thread_id=f"agent-run:{self._context.runId}",
+        ))
 
     async def _run_graph(self, context: RunContext, initial: AgentState) -> None:
+        if self._compiled is None:
+            self._compiled = self._build_graph()
         await self.backend.append_event(
             context.runId,
             RunEventCreate(eventType=TOOL_CALL_LOOP_STARTED, eventJson={
@@ -270,7 +299,10 @@ class AgentGraphEngine:
         )
         final_state: AgentState = await self._compiled.ainvoke(
             initial,
-            config={"recursion_limit": max(8, self._max_iterations * 4)},
+            config={
+                "recursion_limit": max(8, self._max_iterations * 4),
+                "configurable": {"thread_id": f"agent-run:{context.runId}"},
+            },
         )
         await self.backend.append_event(
             context.runId,
@@ -304,6 +336,7 @@ class AgentGraphEngine:
     async def _agent_node(self, state: AgentState) -> dict[str, Any]:
         context = self._context
         assert context is not None
+        await self._check_cancelled()
         if settings.agent_tool_disclosure_enabled:
             # Recompute the shortlist for the current step so chained outputs
             # (e.g. an image just produced) surface the right next-step tools.
@@ -311,7 +344,7 @@ class AgentGraphEngine:
         iteration = int(state.get("iteration", 0)) + 1
         self._guard.reserve_model_call(self._budget)
         with model_audit_scope("tool.loop", iteration):
-            turn = await self.model.chat_turn(state["messages"], tools=self._tool_defs, tool_choice="auto")
+            turn = await self._stream_chat_turn(state["messages"])
         tool_calls = list(getattr(turn, "tool_calls", []) or [])
         await self.backend.append_event(
             context.runId,
@@ -351,6 +384,56 @@ class AgentGraphEngine:
             update["pending_tool_calls"] = []
         return update
 
+    async def _stream_chat_turn(self, messages: list[ChatMessage]):
+        streamer = getattr(self.model, "chat_stream_parts", None)
+        if not callable(streamer):
+            return await self.model.chat_turn(messages, tools=self._tool_defs, tool_choice="auto")
+        text_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        calls: dict[int, dict[str, Any]] = {}
+        try:
+            async for part in streamer(messages, tools=self._tool_defs):
+                if part.kind == "text" and part.text:
+                    text_parts.append(part.text)
+                    self._streamed_model_text = True
+                    await self.backend.append_event(self._context.runId, RunEventCreate(
+                        eventType=MESSAGE_DELTA, eventText=part.text, eventJson={"delta": part.text}
+                    ))
+                elif part.kind == "reasoning" and part.text:
+                    reasoning_parts.append(part.text)
+                    await self.backend.append_event(self._context.runId, RunEventCreate(
+                        eventType=REASONING_DELTA, eventText=part.text, eventJson={"delta": part.text}
+                    ))
+                elif part.kind == "tool_call":
+                    index = int(part.tool_call_index or 0)
+                    call = calls.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                    call["id"] = call["id"] or part.tool_call_id
+                    call["name"] = call["name"] or part.tool_call_name
+                    call["arguments"] += part.text or ""
+            tool_calls = []
+            for index, call in sorted(calls.items()):
+                if not call["id"] or not call["name"]:
+                    raise ToolExecutionError(f"incomplete streamed tool call at index {index}", "MODEL_TOOL_CALL_INCOMPLETE")
+                try:
+                    arguments = json.loads(call["arguments"])
+                except json.JSONDecodeError:
+                    raise ToolExecutionError(f"invalid streamed tool arguments at index {index}", "MODEL_TOOL_ARGUMENTS_INVALID")
+                from app.clients.model_client import ChatToolCall
+                tool_calls.append(ChatToolCall(
+                    id=call["id"],
+                    name=call["name"],
+                    arguments=arguments if isinstance(arguments, dict) else {},
+                ))
+            from app.clients.model_client import ChatTurnResult
+            return ChatTurnResult(
+                content="".join(text_parts),
+                reasoning="".join(reasoning_parts),
+                tool_calls=tool_calls,
+                finish_reason="stream",
+            )
+        except ToolExecutionError:
+            raise
+
     async def _first_step_unified_route(self, context: RunContext, state: AgentState) -> dict[str, Any] | None:
         """Align graph first step with UnifiedSemanticRouter tool selection."""
         memory_items = await self.memory_runtime.fetch_items(context)
@@ -387,12 +470,14 @@ class AgentGraphEngine:
     async def _tools_node(self, state: AgentState) -> dict[str, Any]:
         context = self._context
         assert context is not None
+        await self._check_cancelled()
         registry = ToolRegistry(context)
         new_messages: list[ChatMessage] = []
         artifacts: list[dict[str, Any]] = []
         plan_update: list[dict[str, Any]] | None = None
         # Respect the remaining tool-call budget within a single turn.
         for call in state.get("pending_tool_calls", []):
+            await self._check_cancelled()
             name = call["name"]
             call_id = call["id"]
             arguments = call.get("arguments") or {}
@@ -571,6 +656,7 @@ class AgentGraphEngine:
     async def _finalize_node(self, state: AgentState) -> dict[str, Any]:
         context = self._context
         assert context is not None
+        await self._check_cancelled()
         answer = (state.get("final_answer") or state.get("last_content") or "").strip()
         if not answer:
             answer = await self._summarize_when_silent(context, state)
@@ -720,6 +806,7 @@ class AgentGraphEngine:
         )
 
     def _fresh_state(self, messages: list[ChatMessage]) -> AgentState:
+        self._streamed_model_text = False
         return {
             "messages": list(messages),
             "iteration": 0,
@@ -1016,21 +1103,18 @@ class AgentGraphEngine:
     async def _save_checkpoint(self, context: RunContext, state: AgentState) -> None:
         saver = getattr(self.backend, "save_graph_checkpoint", None)
         if not callable(saver):
-            return
-        try:
-            await saver(context.runId, serialize_checkpoint(state))
-        except Exception:
-            LOGGER.warning("failed to persist graph checkpoint runId=%s", context.runId, exc_info=True)
+            raise RuntimeError("backend does not provide business checkpoint persistence")
+        payload = serialize_checkpoint(state)
+        await saver(context.runId, payload)
 
     async def _load_checkpoint(self, context: RunContext) -> dict[str, Any] | None:
         loader = getattr(self.backend, "load_graph_checkpoint", None)
-        if not callable(loader):
-            return None
-        try:
-            blob = await loader(context.runId)
-        except Exception:
-            LOGGER.debug("failed to load graph checkpoint runId=%s", context.runId, exc_info=True)
-            return None
+        blob = None
+        if callable(loader):
+            try:
+                blob = await loader(context.runId)
+            except Exception:
+                LOGGER.debug("failed to load graph checkpoint runId=%s", context.runId, exc_info=True)
         if not blob:
             return None
         try:
@@ -1041,12 +1125,11 @@ class AgentGraphEngine:
 
     async def _clear_checkpoint(self, context: RunContext) -> None:
         clearer = getattr(self.backend, "clear_graph_checkpoint", None)
-        if not callable(clearer):
-            return
-        try:
-            await clearer(context.runId)
-        except Exception:
-            LOGGER.debug("failed to clear graph checkpoint runId=%s", context.runId, exc_info=True)
+        if callable(clearer):
+            try:
+                await clearer(context.runId)
+            except Exception:
+                LOGGER.debug("failed to clear graph checkpoint runId=%s", context.runId, exc_info=True)
 
     def _checkpoint_tool_arguments(self, checkpoint: dict[str, Any] | None, tool: ToolDescriptor) -> dict[str, Any] | None:
         if not checkpoint:
@@ -1061,8 +1144,9 @@ class AgentGraphEngine:
     # ------------------------------------------------------------------ #
     async def _emit_answer(self, run_id: int, answer: str) -> None:
         normalized = (answer or "").strip()
-        for chunk in _chunks(normalized, 32):
-            await self.backend.append_event(run_id, RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}))
+        if not getattr(self, "_streamed_model_text", False):
+            for chunk in _chunks(normalized, 32):
+                await self.backend.append_event(run_id, RunEventCreate(eventType=MESSAGE_DELTA, eventText=chunk, eventJson={"delta": chunk}))
         upsert = getattr(self.backend, "upsert_streaming_answer", None)
         if callable(upsert) and normalized:
             try:
@@ -1100,6 +1184,10 @@ class AgentGraphEngine:
                 promptTokens=usage["promptTokens"],
                 completionTokens=usage["completionTokens"],
             ))
+            if error_code == "AGENT_CANCELLED":
+                context = self._context
+                if context is not None:
+                    await self._clear_checkpoint(context)
         except Exception:
             LOGGER.exception("failed to report agent graph run failure runId=%s code=%s", run_id, error_code)
 

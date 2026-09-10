@@ -5,7 +5,7 @@ from typing import Annotated, Any, TypedDict
 
 from app.core.schemas import ChatMessage
 
-CHECKPOINT_VERSION = 1
+CHECKPOINT_VERSION = 2
 
 
 def _extend(left: list | None, right: list | None) -> list:
@@ -47,6 +47,7 @@ def serialize_checkpoint(state: AgentState) -> str:
     """
     payload = {
         "version": CHECKPOINT_VERSION,
+        "kind": "agent_graph_business_checkpoint",
         "messages": [m.model_dump(mode="json", by_alias=True, exclude_none=True) for m in state.get("messages", [])],
         "plan": state.get("plan", []),
         "artifacts": state.get("artifacts", []),
@@ -58,6 +59,10 @@ def serialize_checkpoint(state: AgentState) -> str:
 
 def deserialize_checkpoint(blob: str) -> dict[str, Any]:
     data = json.loads(blob)
+    if data.get("kind") not in (None, "agent_graph_business_checkpoint"):
+        raise ValueError("unsupported agent graph checkpoint kind")
+    if int(data.get("version", 1)) > CHECKPOINT_VERSION:
+        raise ValueError("agent graph checkpoint is newer than this runtime")
     messages = [ChatMessage.model_validate(m) for m in data.get("messages", [])]
     return {
         "messages": messages,
