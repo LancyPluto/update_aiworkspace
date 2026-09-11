@@ -358,7 +358,11 @@ class ModelClient:
                         self._record_openai_usage(data)
                         if emit_parts:
                             for part in _openai_compatible_stream_parts(data):
-                                if part.text:
+                                # Function-call streams often carry the call id and name in a
+                                # metadata-only first delta, then send arguments in later
+                                # deltas. Keep that first delta so the graph can assemble the
+                                # complete call.
+                                if part.kind == "tool_call" or part.text:
                                     yield part
                         else:
                             delta = _openai_compatible_stream_delta(data)

@@ -32,6 +32,7 @@ from app.core.event_types import (
 )
 from app.routing.types import Intent
 from app.routing.state_guard import StateGuard
+from app.routing.helpers import looks_like_tool_request
 from app.routing import semantic_tool_recall
 from app.routing.v2.unified_router import UnifiedSemanticRouter
 from app.core.preferred_tool_bias import resolve_preferred_tool
@@ -903,7 +904,7 @@ class AgentGraphEngine:
         modality = requested_output_modality(context.message)
         if not modality or not tool_supports_modality(tool, modality):
             return False
-        return self.intent_router._looks_like_tool_request(context.message)
+        return looks_like_tool_request(context.message)
 
     def _modality_mismatch(self, context: RunContext, tool: ToolDescriptor) -> str | None:
         requested = requested_output_modality(context.message)

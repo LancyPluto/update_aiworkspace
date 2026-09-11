@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.routing.state_guard import StateGuard as IntentRouter
+from app.routing.helpers import looks_like_tool_request
 from app.core.schemas import RunContext, ToolDescriptor
 from app.tools.registry import requested_output_modality, tool_supports_modality
 
@@ -30,4 +31,4 @@ class ToolConfirmationPolicy:
         modality = requested_output_modality(context.message)
         if not modality or not tool_supports_modality(tool, modality):
             return False
-        return self.intent_router._looks_like_tool_request(context.message)
+        return looks_like_tool_request(context.message)

@@ -52,8 +52,29 @@ class FakeAsyncResponse:
         return self.payload
 
 
+class FakeStreamResponse:
+    status_code = 200
+
+    def __init__(self, lines):
+        self.lines = lines
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    async def aread(self):
+        return b""
+
+    async def aiter_lines(self):
+        for line in self.lines:
+            yield line
+
+
 class FakeAsyncHttpClient:
     requests = []
+    stream_lines = []
 
     def __init__(self, timeout=None):
         self.timeout = timeout
@@ -71,6 +92,10 @@ class FakeAsyncHttpClient:
     async def get(self, url, headers=None):
         FakeAsyncHttpClient.requests.append({"method": "GET", "url": url, "headers": headers, "timeout": self.timeout})
         return FakeAsyncResponse({}, content=b"image-bytes", headers={"content-type": "image/png"})
+
+    def stream(self, method, url, headers=None, json=None):
+        FakeAsyncHttpClient.requests.append({"method": method, "url": url, "headers": headers, "json": json, "timeout": self.timeout})
+        return FakeStreamResponse(self.stream_lines)
 
 
 @pytest.mark.asyncio
@@ -205,6 +230,35 @@ async def test_model_client_streams_siliconflow_locally():
     assert chunks == ["provider answer"]
     assert langchain_model.stream_calls == 0
     assert langchain_model.messages[0][0].type == "human"
+
+
+@pytest.mark.asyncio
+async def test_openai_compatible_stream_keeps_metadata_only_tool_call_delta(monkeypatch):
+    FakeAsyncHttpClient.requests = []
+    FakeAsyncHttpClient.stream_lines = [
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_cat","function":{"name":"gpt_image2","arguments":""}}]}}]}',
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"prompt\\":\\"a cat\\"}"}}]}}]}',
+        "data: [DONE]",
+    ]
+    monkeypatch.setattr("app.clients.model_client.httpx.AsyncClient", FakeAsyncHttpClient)
+    client = ModelClient(
+        Settings(model_provider="deepseek", model_api_base_url="https://api.deepseek.com", model_api_key="key"),
+        chat_model=FakeLangChainModel("unused"),
+    )
+
+    parts = [
+        part
+        async for part in client._chat_openai_compatible_stream_direct(
+            [ChatMessage(role="user", content="draw a cat")],
+            tools=[{"type": "function", "function": {"name": "gpt_image2", "parameters": {"type": "object", "properties": {"prompt": {"type": "string"}}}}}],
+            emit_parts=True,
+        )
+    ]
+
+    assert [(part.kind, part.tool_call_id, part.tool_call_name, part.text) for part in parts] == [
+        ("tool_call", "call_cat", "gpt_image2", ""),
+        ("tool_call", "", "", '{"prompt":"a cat"}'),
+    ]
 
 
 @pytest.mark.asyncio

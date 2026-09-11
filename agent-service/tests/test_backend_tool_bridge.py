@@ -623,6 +623,19 @@ def test_compile_v2_lite_image_task_params_generate_uses_physical_prompt_and_ref
     assert "references" not in params
 
 
+def test_compile_v2_lite_image_task_params_omits_agent_auto_aspect_ratio():
+    params = compile_v2_lite_image_task_params(
+        {
+            "operation": "generate",
+            "generation_prompt": "一只在窗边晒太阳的猫。",
+            "aspect_ratio": "auto",
+        }
+    )
+
+    assert "aspectRatio" not in params
+    assert "aspect_ratio" not in params
+
+
 def test_compile_v2_lite_image_task_params_resolves_current_reference_alias_with_context():
     from app.tools.backend_tool import compile_v2_lite_image_task_params
 

@@ -231,6 +231,20 @@ async def test_graph_engine_chat_only_completes_run():
     assert not backend.failed_runs
 
 
+def test_graph_engine_auto_calls_matching_direct_generation_request_with_default_state_guard():
+    tool = ToolDescriptor(
+        toolCode="image_gen",
+        toolName="Image Generator",
+        description="Generate an image",
+        autoCallable=False,
+        outputModality="image",
+        inputSchema={"type": "object", "properties": {"prompt": {"type": "string"}}},
+    )
+    context = RunContext(runId=2, sessionId=2, userId=3, message="帮我生成一只猫的图片")
+
+    assert AgentGraphEngine(FakeBackend(), FakeModel([]))._should_auto_call(context, tool) is True
+
+
 @pytest.mark.asyncio
 async def test_graph_engine_cancelled_before_model_does_not_complete_or_call_model():
     backend = FakeBackend()

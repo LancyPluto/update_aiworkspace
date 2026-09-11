@@ -1182,9 +1182,15 @@ def compile_v2_lite_image_task_params(
         physical["reference_images"] = reference_images
 
     aspect_ratio = str(source.get("aspect_ratio") or source.get("aspectRatio") or "").strip()
-    if aspect_ratio:
+    # `auto` is an Agent-facing sentinel, not a provider value.  Preserve concrete
+    # user-selected ratios, but let the selected model's request schema supply its
+    # own default when the Agent has no ratio preference.
+    if aspect_ratio and aspect_ratio.lower() != "auto":
         physical["aspectRatio"] = aspect_ratio
         physical.pop("aspect_ratio", None)
+    elif aspect_ratio:
+        physical.pop("aspect_ratio", None)
+        physical.pop("aspectRatio", None)
 
     if "negative_prompt" in source and source.get("negative_prompt") not in (None, ""):
         physical["negative_prompt"] = source.get("negative_prompt")
