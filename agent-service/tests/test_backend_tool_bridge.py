@@ -6,7 +6,7 @@ from app.clients.backend_client import WorkflowDelegationUncertainError
 from app.config import settings
 from app.core.schemas import AgentFileContext, ChatMessage, RecentToolCallContext, ReferenceMention, RunContext, RuntimeSettings, TaskDetailResponse, ToolDescriptor
 from app.runtime.tool_orchestrator import _raise_image_prompt_schema_validation_if_needed
-from app.tools.backend_tool import BackendToolBridge, ToolExecutionError, _with_attached_file_defaults, compile_v2_lite_image_task_params, enforce_locked_field_defaults, finalize_generation_arguments
+from app.tools.backend_tool import BackendToolBridge, ToolExecutionError, _with_attached_file_defaults, compile_v2_lite_image_task_params, enforce_locked_field_defaults, finalize_generation_arguments, normalize_arguments_for_input_schema
 
 
 def _xiaohongshu_like_schema() -> dict:
@@ -1456,6 +1456,40 @@ def test_enforce_locked_field_defaults_respects_explicit_image_count_and_ratio()
     assert locked["count"] == 2
     assert locked["aspect_ratio"] == "16:9"
     assert locked["prompt"] == "test"
+
+
+def test_normalize_arguments_coerces_string_default_to_integer_for_agent_image_schema():
+    tool = ToolDescriptor(
+        toolCode="gpt_image2",
+        toolName="GPT-image2",
+        autoCallable=True,
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "count": {"type": "integer", "minimum": 1, "maximum": 4},
+                "prompt": {"type": "string"},
+                "aspect_ratio": {"type": "string"},
+            },
+        },
+    )
+
+    normalized = normalize_arguments_for_input_schema(
+        tool,
+        {"count": "1", "prompt": "湖边日落", "aspect_ratio": "16:9"},
+    )
+
+    assert normalized == {"count": 1, "prompt": "湖边日落", "aspect_ratio": "16:9"}
+
+
+def test_normalize_arguments_leaves_non_numeric_integer_value_for_backend_validation():
+    tool = ToolDescriptor(
+        toolCode="gpt_image2",
+        toolName="GPT-image2",
+        autoCallable=True,
+        inputSchema={"type": "object", "properties": {"count": {"type": "integer"}}},
+    )
+
+    assert normalize_arguments_for_input_schema(tool, {"count": "one"})["count"] == "one"
 
 
 def test_custom_mode_default_does_not_override_model_true():

@@ -223,6 +223,12 @@ class BackendToolBridge:
             arguments = _with_xiaohongshu_defaults(context.message, arguments)
         arguments = enforce_locked_field_defaults(tool, arguments, user_message=context.message)
         arguments = resolve_media_argument_pointers(context, arguments)
+        # Tool field defaults are persisted as strings, while a model contract can
+        # require typed JSON values (for example, count: 1 instead of count: "1").
+        # Normalize only values whose complete textual representation is valid for
+        # the declared input-schema type; invalid values remain untouched so the
+        # backend can return its normal validation error.
+        arguments = normalize_arguments_for_input_schema(tool, arguments)
         attachment_errors = validate_attachment_arguments(context, arguments)
         if attachment_errors:
             message = format_attachment_error(attachment_errors)
@@ -576,6 +582,51 @@ def _empty_value(value: Any) -> bool:
     if isinstance(value, (list, dict)):
         return not value
     return False
+
+
+def normalize_arguments_for_input_schema(tool: ToolDescriptor, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Coerce safe scalar defaults/LLM values to the tool JSON-schema types.
+
+    Agent field metadata stores ``defaultValue`` as text and LLM JSON can likewise
+    produce numeric values as strings.  The backend model contract intentionally
+    validates types strictly, so this boundary normalizes unambiguous scalar
+    representations before persisting the tool call and creating the task.
+    """
+    properties = tool.inputSchema.get("properties", {}) if isinstance(tool.inputSchema, dict) else {}
+    if not isinstance(properties, dict) or not arguments:
+        return arguments
+    normalized = dict(arguments)
+    for key, value in arguments.items():
+        property_schema = properties.get(key)
+        if not isinstance(property_schema, dict):
+            continue
+        normalized[key] = _coerce_schema_scalar(value, property_schema)
+    return normalized
+
+
+def _coerce_schema_scalar(value: Any, property_schema: dict[str, Any]) -> Any:
+    raw_type = property_schema.get("type")
+    types = {str(item).strip().lower() for item in raw_type} if isinstance(raw_type, list) else {
+        str(raw_type).strip().lower()
+    }
+    types.discard("")
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        return value
+    if "integer" in types and re.fullmatch(r"[+-]?\d+", text):
+        return int(text)
+    if "number" in types and re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", text):
+        numeric = float(text)
+        return int(numeric) if numeric.is_integer() else numeric
+    if "boolean" in types:
+        lowered = text.lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+    return value
 
 
 def enforce_locked_field_defaults(
