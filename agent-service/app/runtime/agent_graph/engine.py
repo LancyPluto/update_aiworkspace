@@ -653,7 +653,11 @@ class AgentGraphEngine:
         answer = (state.get("final_answer") or state.get("last_content") or "").strip()
         if not answer:
             answer = await self._summarize_when_silent(context, state)
-        await self._emit_answer(context.runId, answer)
+        await self._emit_answer(
+            context.runId,
+            answer,
+            content_json=_media_content_json(state.get("artifacts") or []),
+        )
         return {"final_answer": answer, "finished": True}
 
     # ------------------------------------------------------------------ #
@@ -1135,7 +1139,13 @@ class AgentGraphEngine:
     # ------------------------------------------------------------------ #
     # Run completion / streaming
     # ------------------------------------------------------------------ #
-    async def _emit_answer(self, run_id: int, answer: str) -> None:
+    async def _emit_answer(
+        self,
+        run_id: int,
+        answer: str,
+        *,
+        content_json: dict[str, Any] | None = None,
+    ) -> None:
         normalized = (answer or "").strip()
         if not getattr(self, "_streamed_model_text", False):
             for chunk in _chunks(normalized, 32):
@@ -1143,7 +1153,7 @@ class AgentGraphEngine:
         upsert = getattr(self.backend, "upsert_streaming_answer", None)
         if callable(upsert) and normalized:
             try:
-                await upsert(run_id, normalized)
+                await upsert(run_id, normalized, content_json)
             except Exception:
                 LOGGER.debug("streaming answer upsert failed runId=%s", run_id)
         await self.backend.append_event(run_id, RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=normalized, eventJson={"content": normalized}))
@@ -1215,6 +1225,43 @@ def _schema_validation_clarification(tool_code: str, details: Any) -> str:
     if latest_preview:
         answer += f"\n\n当前可继承的上一张图视觉描述片段：{latest_preview}"
     return answer
+
+
+def _media_content_json(artifacts: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Convert successful tool media into message attachments independent of LLM prose."""
+    attachments: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for artifact in artifacts:
+        resource_type = str(artifact.get("resourceType") or "").upper()
+        if resource_type not in {"IMAGE", "VIDEO", "AUDIO"}:
+            continue
+        try:
+            payload = json.loads(str(artifact.get("contentText") or ""))
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        plural_key = {"IMAGE": "images", "VIDEO": "videos", "AUDIO": "audios"}[resource_type]
+        entries = payload.get(plural_key)
+        if not isinstance(entries, list):
+            continue
+        for index, entry in enumerate(entries, start=1):
+            if not isinstance(entry, dict):
+                continue
+            url = str(entry.get("url") or entry.get("downloadUrl") or "").strip()
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            extension = {"IMAGE": "jpg", "VIDEO": "mp4", "AUDIO": "mp3"}[resource_type]
+            attachments.append({
+                "id": f"tool-{artifact.get('taskId') or 'result'}-{resource_type.lower()}-{index}",
+                "name": f"生成{ {'IMAGE': '图片', 'VIDEO': '视频', 'AUDIO': '音频'}[resource_type] } {index}",
+                "contentType": {"IMAGE": "image/jpeg", "VIDEO": "video/mp4", "AUDIO": "audio/mpeg"}[resource_type],
+                "url": url,
+                "downloadUrl": str(entry.get("downloadUrl") or url).strip(),
+                "source": str(artifact.get("toolCode") or "agent_tool"),
+            })
+    return {"attachments": attachments} if attachments else None
 
 
 def _schema_validation_retry_nudge() -> str:

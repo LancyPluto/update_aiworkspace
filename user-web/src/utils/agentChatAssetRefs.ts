@@ -100,27 +100,27 @@ export function collectSessionAssets(messages: AgentMessage[]): ChatAssetRef[] {
   const counters: Record<ChatAssetKind, number> = { image: 0, audio: 0, video: 0 }
 
   for (const message of messages) {
-    if (message.role === "USER") {
-      const payload = parseMessageJson(message.contentJson)
-      const raw = payload.attachments
-      if (Array.isArray(raw)) {
-        for (const item of raw) {
-          if (!item || typeof item !== "object") continue
-          const record = item as Record<string, unknown>
-          const url = typeof record.url === "string" ? record.url : typeof record.downloadUrl === "string" ? record.downloadUrl : ""
-          const name = typeof record.name === "string" ? record.name : "附件"
-          const contentType = typeof record.contentType === "string" ? record.contentType : undefined
-          if (!url) continue
-          const lowerType = (contentType || name).toLowerCase()
-          if (lowerType.includes("video") || url.endsWith(".mp4")) {
-            pushAsset(assets, seen, counters, "video", url, name, contentType)
-          } else if (lowerType.includes("audio") || /\.(mp3|wav|m4a)(\?|$)/i.test(url)) {
-            pushAsset(assets, seen, counters, "audio", url, name, contentType)
-          } else {
-            pushAsset(assets, seen, counters, "image", url, name, contentType)
-          }
+    const payload = parseMessageJson(message.contentJson)
+    const raw = payload.attachments
+    if (Array.isArray(raw)) {
+      for (const item of raw) {
+        if (!item || typeof item !== "object") continue
+        const record = item as Record<string, unknown>
+        const url = typeof record.url === "string" ? record.url : typeof record.downloadUrl === "string" ? record.downloadUrl : ""
+        const name = typeof record.name === "string" ? record.name : "附件"
+        const contentType = typeof record.contentType === "string" ? record.contentType : undefined
+        if (!url) continue
+        const lowerType = (contentType || name).toLowerCase()
+        if (lowerType.includes("video") || url.endsWith(".mp4")) {
+          pushAsset(assets, seen, counters, "video", url, name, contentType)
+        } else if (lowerType.includes("audio") || /\.(mp3|wav|m4a)(\?|$)/i.test(url)) {
+          pushAsset(assets, seen, counters, "audio", url, name, contentType)
+        } else {
+          pushAsset(assets, seen, counters, "image", url, name, contentType)
         }
       }
+    }
+    if (message.role === "USER") {
       continue
     }
 

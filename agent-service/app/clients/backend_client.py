@@ -395,11 +395,19 @@ class BackendClient:
     async def release_execution_lease(self, run_id: int, owner_token: str) -> None:
         await self._request("DELETE", f"/api/internal/v1/agent/runs/{run_id}/execution-lease?ownerToken={owner_token}")
 
-    async def upsert_streaming_answer(self, run_id: int, content_text: str) -> None:
+    async def upsert_streaming_answer(
+        self,
+        run_id: int,
+        content_text: str,
+        content_json: dict[str, Any] | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {"contentText": content_text}
+        if content_json:
+            payload["contentJson"] = json.dumps(content_json, ensure_ascii=False)
         await self._request(
             "PUT",
             f"/api/internal/v1/agent/runs/{run_id}/streaming-answer",
-            {"contentText": content_text},
+            payload,
         )
 
     async def update_conversation_summary(self, run_id: int, conversation_summary: str) -> None:

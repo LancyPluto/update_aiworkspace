@@ -125,6 +125,9 @@ class ImageGenerationHandler:
     def handle(self, message: dict[str, Any]) -> dict[str, Any]:
         task_id = int(message["taskId"])
         trace_id = message.get("traceId")
+        # Progress is reported from a background thread. ContextVars do not
+        # propagate to that thread, so retain the queue lease token explicitly.
+        claim_token = message.get("__claimToken") or message.get("claimToken")
         progress_ticker: ImageProgressTicker | None = None
         try:
             context = message.get("__executionContext") or self.backend_client.get_execution_context(task_id, trace_id=trace_id)
@@ -135,7 +138,13 @@ class ImageGenerationHandler:
                 return {"status": "SKIPPED", "taskId": task_id, "taskStatus": status, "traceId": trace_id}
             model_config = context.get("modelConfig") or {}
             params = apply_request_mapping(context.get("params"), model_config)
-            self._mark_processing_safe(task_id, progress=1, progress_message="实时进度：1%", trace_id=trace_id)
+            self._mark_processing_safe(
+                task_id,
+                progress=1,
+                progress_message="实时进度：1%",
+                trace_id=trace_id,
+                claim_token=claim_token,
+            )
             provider = str(model_config.get("provider") or context.get("modelProviderCode") or "").lower()
             provider_registry.require_capability(provider, "IMAGE_GENERATION")
             provider_registry.require_worker_ready(provider)
@@ -274,7 +283,7 @@ class ImageGenerationHandler:
                 _json_for_log(params),
                 _json_for_log(image_request),
             )
-            progress_ticker = self._image_progress_ticker(task_id, trace_id).start()
+            progress_ticker = self._image_progress_ticker(task_id, trace_id, claim_token).start()
             urls = client.generate_images(**image_request)
             usage = getattr(client, "last_usage", {}) or {}
 
@@ -421,24 +430,33 @@ class ImageGenerationHandler:
         progress: int,
         progress_message: str,
         trace_id: str | None,
+        claim_token: str | None = None,
     ) -> None:
         try:
-            self.backend_client.mark_processing(
-                task_id,
-                progress=progress,
-                progress_message=progress_message,
-                trace_id=trace_id,
-            )
+            kwargs: dict[str, Any] = {
+                "progress": progress,
+                "progress_message": progress_message,
+                "trace_id": trace_id,
+            }
+            if claim_token:
+                kwargs["claim_token"] = claim_token
+            self.backend_client.mark_processing(task_id, **kwargs)
         except BackendClientError:
             LOGGER.warning("failed to mark image task processing before state update taskId=%s", task_id, exc_info=True)
 
-    def _image_progress_ticker(self, task_id: int, trace_id: str | None) -> ImageProgressTicker:
+    def _image_progress_ticker(
+        self,
+        task_id: int,
+        trace_id: str | None,
+        claim_token: str | None = None,
+    ) -> ImageProgressTicker:
         return ImageProgressTicker(
             lambda progress: self._mark_processing_safe(
                 task_id,
                 progress=progress,
                 progress_message=f"实时进度：{progress}%",
                 trace_id=trace_id,
+                claim_token=claim_token,
             ),
             current_progress=1,
             interval_seconds=self.progress_interval_seconds,

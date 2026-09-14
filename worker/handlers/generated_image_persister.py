@@ -1,5 +1,6 @@
 import base64
 import mimetypes
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -39,7 +40,12 @@ class GeneratedImagePersister:
 
     def __init__(self) -> None:
         self.output_dir = asset_storage.local_root
-        self.timeout = (10, 120)
+        # Generated image URLs can be briefly unavailable while the provider
+        # propagates the object to its CDN. Give the download a realistic
+        # connection/read budget and retry only transient transport failures.
+        self.timeout = (20, 180)
+        self.max_download_attempts = 3
+        self.retry_delay_seconds = 1.0
 
     def persist_images(self, *, task_id: int, urls: list[str]) -> list[dict[str, str]]:
         persisted: list[PersistedImage] = []
@@ -64,19 +70,23 @@ class GeneratedImagePersister:
         return self._download(source_url)
 
     def _download(self, source_url: str) -> tuple[bytes, str | None]:
-        try:
-            with safe_get(source_url, stream=True, timeout=self.timeout) as response:
-                response.raise_for_status()
-                content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
-                chunks: list[bytes] = []
-                for chunk in response.iter_content(chunk_size=1024 * 512):
-                    if chunk:
-                        chunks.append(chunk)
-        except UrlSecurityError as exc:
-            raise GeneratedImagePersistError(f"image URL rejected for security: {exc}") from exc
-        except requests.RequestException as exc:
-            raise GeneratedImagePersistError(f"download generated image failed: {exc}") from exc
-        return b"".join(chunks), content_type or None
+        for attempt in range(1, self.max_download_attempts + 1):
+            try:
+                with safe_get(source_url, stream=True, timeout=self.timeout) as response:
+                    response.raise_for_status()
+                    content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+                    chunks: list[bytes] = []
+                    for chunk in response.iter_content(chunk_size=1024 * 512):
+                        if chunk:
+                            chunks.append(chunk)
+                return b"".join(chunks), content_type or None
+            except UrlSecurityError as exc:
+                raise GeneratedImagePersistError(f"image URL rejected for security: {exc}") from exc
+            except requests.RequestException as exc:
+                if attempt == self.max_download_attempts:
+                    raise GeneratedImagePersistError(f"download generated image failed: {exc}") from exc
+                time.sleep(self.retry_delay_seconds * attempt)
+        raise AssertionError("unreachable")
 
     def _read_data_url(self, data_url: str) -> tuple[bytes, str | None]:
         header, separator, encoded = data_url.partition(",")

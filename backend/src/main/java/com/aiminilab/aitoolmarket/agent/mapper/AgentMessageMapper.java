@@ -203,11 +203,14 @@ public interface AgentMessageMapper extends BaseMapper<AgentMessage> {
 
     @Update("""
             UPDATE agent_messages
-            SET content_text = #{contentText}, edited_at = #{editedAt}
+            SET content_text = #{contentText},
+                content_json = COALESCE(#{contentJson}, content_json),
+                edited_at = #{editedAt}
             WHERE id = #{messageId}
             """)
     int updateContentText(@Param("messageId") Long messageId,
                           @Param("contentText") String contentText,
+                          @Param("contentJson") String contentJson,
                           @Param("editedAt") LocalDateTime editedAt);
 
     @Select("""

@@ -20,6 +20,12 @@ file_checksum() {
   sha256sum "$1" | awk '{print $1}'
 }
 
+epoch_millis() {
+  # GNU date supports %N, but the BSD date bundled with macOS does not.
+  # Second-level timing is sufficient for migration audit records.
+  printf '%s000\n' "$(date +%s)"
+}
+
 echo "==> Waiting for MySQL ($MYSQL_CONTAINER)"
 ready=0
 for _ in $(seq 1 60); do
@@ -112,7 +118,13 @@ echo "==> Verify and apply SQL files from $SQL_DIR"
 applied=0
 skipped=0
 shopt -s nullglob
-mapfile -t migration_files < <(printf '%s\n' "$SQL_DIR"/*.sql | sort)
+# macOS ships Bash 3.2, which does not provide `mapfile`. Build the same
+# sorted file list with a portable read loop so this deployment utility works
+# both on developer machines and Linux servers.
+migration_files=()
+while IFS= read -r file; do
+  migration_files+=("$file")
+done < <(printf '%s\n' "$SQL_DIR"/*.sql | sort)
 for file in "${migration_files[@]}"; do
   name="$(basename "$file")"
   checksum="$(file_checksum "$file")"
@@ -198,10 +210,10 @@ for file in "${migration_files[@]}"; do
   fi
 
   echo "  RUN $name"
-  started_ms="$(date +%s%3N)"
+  started_ms="$(epoch_millis)"
   docker exec -i -e MYSQL_PWD="$MYSQL_PASS" "$MYSQL_CONTAINER" \
     mysql --default-character-set=utf8mb4 -u"$MYSQL_USER" "$MYSQL_DB" < "$file"
-  finished_ms="$(date +%s%3N)"
+  finished_ms="$(epoch_millis)"
   execution_ms=$((finished_ms - started_ms))
   mysql_q "$MYSQL_DB" -e "INSERT INTO _sql_migration_log(name, checksum_sha256, execution_ms) VALUES ('${name}', '${checksum}', ${execution_ms});"
   applied=$((applied + 1))

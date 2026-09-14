@@ -187,7 +187,7 @@ function openAttachmentPreview(file: MessageAttachment) {
           </div>
         </div>
         <template v-else>
-          <div v-if="message.role === 'USER' && attachments.length" class="message-attachments">
+          <div v-if="attachments.length" class="message-attachments">
             <article
               v-for="file in attachments"
               :key="file.id"

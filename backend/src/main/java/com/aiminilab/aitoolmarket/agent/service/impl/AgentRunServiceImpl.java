@@ -1167,6 +1167,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             return AgentRunResponse.from(run);
         }
         String contentText = request.contentText() == null ? "" : request.contentText().trim();
+        String contentJson = request.contentJson() == null ? null : request.contentJson().trim();
         if (contentText.isEmpty()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "流式正文不能为空");
         }
@@ -1178,6 +1179,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             assistant.setUserId(run.getUserId());
             assistant.setRole("ASSISTANT");
             assistant.setContentText(contentText);
+            assistant.setContentJson(contentJson == null || contentJson.isEmpty() ? null : contentJson);
             assistant.setRunId(runId);
             assistant.setParentMessageId(run.getSourceUserMessageId());
             assistant.setStatus("ACTIVE");
@@ -1185,7 +1187,11 @@ public class AgentRunServiceImpl implements AgentRunService {
             assistant.setCreatedAt(now);
             agentMessageMapper.insertMessage(assistant);
         } else {
-            agentMessageMapper.updateContentText(assistant.getId(), contentText, null);
+            agentMessageMapper.updateContentText(
+                    assistant.getId(), contentText,
+                    contentJson == null || contentJson.isEmpty() ? null : contentJson,
+                    null
+            );
         }
         agentSessionMapper.updateActiveLeaf(run.getSessionId(), assistant.getId(), now);
         return AgentRunResponse.from(findRun(runId));
@@ -1234,7 +1240,7 @@ public class AgentRunServiceImpl implements AgentRunService {
             assistant.setCreatedAt(now);
             agentMessageMapper.insertMessage(assistant);
         } else {
-            agentMessageMapper.updateContentText(assistant.getId(), request.finalAnswer(), null);
+            agentMessageMapper.updateContentText(assistant.getId(), request.finalAnswer(), null, null);
         }
         creditService.settle(run.getUserId(), CreditSourceType.AGENT_RUN, runId, consumedCredits);
         creditService.release(run.getUserId(), CreditSourceType.AGENT_RUN, runId, estimatedCredits - consumedCredits);
