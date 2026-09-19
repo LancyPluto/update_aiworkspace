@@ -707,6 +707,39 @@ class AgentApiTest {
     }
 
     @Test
+    void executionLeaseFencesWritesAndRecoverySnapshotKeepsRuntimeState() throws Exception {
+        mockExternalAuthDependencies();
+        register("agent_recovery_fence_user");
+        LoginResult login = loginWithUser("agent_recovery_fence_user");
+        Long sessionId = createSession(login.token(), "Recovery Fence");
+        Long runId = sendMessage(login.token(), sessionId, "Test durable recovery state").runId();
+        String acquirePath = "/api/internal/v1/agent/runs/" + runId + "/execution-lease/acquire";
+        String acquire = "{\"ownerToken\":\"runtime-one\",\"leaseSeconds\":60}";
+        mockMvc.perform(signed(post(acquirePath), "POST", acquirePath, acquire)
+                        .contentType(MediaType.APPLICATION_JSON).content(acquire))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.acquired").value(true));
+        String runtimePath = "/api/internal/v1/agent/runs/" + runId + "/recovery/runtime";
+        String runtime = "{\"runtimeJson\":\"{\\\"version\\\":1}\"}";
+        mockMvc.perform(signed(put(runtimePath), "PUT", runtimePath, runtime)
+                        .header("X-Agent-Run-Id", runId).header("X-Agent-Execution-Owner", "runtime-one")
+                        .contentType(MediaType.APPLICATION_JSON).content(runtime))
+                .andExpect(status().isOk());
+        String snapshotPath = "/api/internal/v1/agent/runs/" + runId + "/recovery";
+        mockMvc.perform(signed(get(snapshotPath), "GET", snapshotPath, ""))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.runtimeJson").value("{\"version\":1}"))
+                .andExpect(jsonPath("$.data.toolCalls").isEmpty());
+        jdbcTemplate.update("UPDATE agent_run_execution_leases SET lease_expires_at=TIMESTAMPADD(MINUTE,-1,CURRENT_TIMESTAMP) WHERE run_id=?", runId);
+        mockMvc.perform(signed(put(runtimePath), "PUT", runtimePath, runtime)
+                        .header("X-Agent-Run-Id", runId).header("X-Agent-Execution-Owner", "runtime-one")
+                        .contentType(MediaType.APPLICATION_JSON).content(runtime))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("AGENT_EXECUTION_LEASE_LOST"));
+        String renewPath = "/api/internal/v1/agent/runs/" + runId + "/execution-lease/renew";
+        mockMvc.perform(signed(post(renewPath), "POST", renewPath, acquire)
+                        .contentType(MediaType.APPLICATION_JSON).content(acquire))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.renewed").value(false));
+    }
+
+    @Test
     void agentServiceNotificationFailureDoesNotFailSendMessageRequest() throws Exception {
         mockExternalAuthDependencies();
         register("agent_notify_failure_user");
@@ -721,19 +754,18 @@ class AgentApiTest {
         mockMvc.perform(get("/api/v1/agent/runs/{runId}", runId)
                         .header("Authorization", "Bearer " + login.token()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("FAILED"))
-                .andExpect(jsonPath("$.data.errorCode").value("AGENT_SERVICE_NOTIFY_FAILED"));
+                .andExpect(jsonPath("$.data.status").value("RUNNING"));
 
         mockMvc.perform(get("/api/v1/agent/runs/{runId}/events", runId)
                         .header("Authorization", "Bearer " + login.token()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].eventType").value("run.started"))
-                .andExpect(jsonPath("$.data.list[1].eventType").value("run.failed"));
+                .andExpect(jsonPath("$.data.list[1].eventType").value("run.dispatch_pending"));
 
         var account = creditService.account(login.userId());
         org.assertj.core.api.Assertions.assertThat(account.balance()).isEqualTo(200);
-        org.assertj.core.api.Assertions.assertThat(account.frozen()).isZero();
-        org.assertj.core.api.Assertions.assertThat(account.available()).isEqualTo(200);
+        org.assertj.core.api.Assertions.assertThat(account.frozen()).isPositive();
+        org.assertj.core.api.Assertions.assertThat(account.available()).isEqualTo(200 - account.frozen());
     }
 
     @Test

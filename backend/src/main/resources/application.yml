@@ -141,6 +141,11 @@ app:
       aliyun-template-code: ${ALIYUN_SMS_TEMPLATE_CODE:}
       aliyun-template-param-name: ${ALIYUN_SMS_TEMPLATE_PARAM_NAME:code}
   agent:
+    auto-recovery-enabled: ${AGENT_AUTO_RECOVERY_ENABLED:false}
+    auto-recovery-max-attempts: ${AGENT_AUTO_RECOVERY_MAX_ATTEMPTS:5}
+    stale-run-after-minutes: ${AGENT_STALE_RUN_AFTER_MINUTES:15}
+    stale-run-recovery-interval-ms: ${AGENT_RECOVERY_SCAN_INTERVAL_MS:60000}
+    stale-run-recovery-batch-size: ${AGENT_RECOVERY_BATCH_SIZE:20}
     enabled: ${AGENT_ENABLED:true}
     service-base-url: ${AGENT_SERVICE_BASE_URL:http://127.0.0.1:8090}
     max-active-runs-per-user: ${AGENT_MAX_ACTIVE_RUNS_PER_USER:1}

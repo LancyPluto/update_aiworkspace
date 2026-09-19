@@ -7,5 +7,8 @@ class AgentRuntimeEngine(Protocol):
     async def run(self, context: RunContext) -> None:
         pass
 
+    async def recover(self, context: RunContext) -> None:
+        pass
+
     async def run_confirmed_tool(self, context: RunContext, tool_code: str) -> None:
         pass

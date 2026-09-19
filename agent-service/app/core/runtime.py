@@ -1,4 +1,5 @@
-﻿import logging
+from app.core.execution import execution_identity, recovering, LeaseLost, RecoveryDeferred, RecoveryUnsafe
+import logging
 import time
 import asyncio
 import uuid
@@ -34,141 +35,124 @@ class AgentRuntime:
         self.default_settings = default_settings or Settings()
 
     async def execute_run(self, run_id: int) -> None:
-        entrypoint = "run"
-        engine_name = "unknown"
-        started_at = time.perf_counter()
-        audited_model = None
-        record_run_started(entrypoint)
-        lease = await self._acquire_lease(run_id)
-        if lease is False:
-            record_run_completed(entrypoint, "skipped", "execution_locked", engine_name, time.perf_counter() - started_at)
-            return
-        lease_task = asyncio.create_task(self._renew_lease(run_id, lease)) if isinstance(lease, str) else None
-        try:
-            context = await self.backend.get_run_context(run_id)
-            if getattr(context, "status", None) in TERMINAL_RUN_STATUSES:
-                record_run_completed(entrypoint, "skipped", "terminal_status", engine_name, time.perf_counter() - started_at)
-                return
-            model_client = await self._model_client(context)
-            if _supports_model_requests(model_client):
-                audited_model = AuditedModelClient(model_client, ModelRequestAuditRecorder(self.backend, run_id))
-                model_client = audited_model
-            context = await self._with_rolling_summary(context, model_client)
-            engine = AgentGraphEngine(self.backend, model_client)
-            engine_name = "AgentGraphEngine"
-            await engine.run(context)
-            record_run_completed(entrypoint, "success", "none", engine_name, time.perf_counter() - started_at)
-        except BackendClientError as exc:
-            logger.exception("Agent run failed while calling backend, runId=%s", run_id)
-            await self._fail(run_id, "BACKEND_CALL_FAILED", str(exc))
-            record_run_completed(entrypoint, "failed", "BACKEND_CALL_FAILED", engine_name, time.perf_counter() - started_at)
-        except ModelClientError as exc:
-            logger.exception("Agent run failed while calling model provider, runId=%s", run_id)
-            await self._fail(run_id, "MODEL_CALL_FAILED", str(exc))
-            record_run_completed(entrypoint, "failed", "MODEL_CALL_FAILED", engine_name, time.perf_counter() - started_at)
-        except ToolExecutionError as exc:
-            error_code = exc.error_code or "TOOL_CALL_FAILED"
-            logger.exception("Agent run failed while executing tool, runId=%s", run_id)
-            await self._fail(run_id, error_code, str(exc))
-            record_run_completed(entrypoint, "failed", error_code, engine_name, time.perf_counter() - started_at)
-        except Exception as exc:  # pragma: no cover - defensive runtime boundary.
-            logger.exception("Agent run failed with internal error, runId=%s", run_id)
-            await self._fail(run_id, "AGENT_INTERNAL_ERROR", str(exc))
-            record_run_completed(entrypoint, "failed", "AGENT_INTERNAL_ERROR", engine_name, time.perf_counter() - started_at)
-        finally:
-            if lease_task is not None:
-                lease_task.cancel()
-            await self._release_lease(run_id, lease)
-            if audited_model is not None:
-                audited_model.schedule_audit_flush()
+        await self._execute_owned(run_id)
 
     async def execute_confirmed_tool(self, run_id: int, tool_code: str) -> None:
-        entrypoint = "confirmed_tool"
-        engine_name = "unknown"
+        # A matching durable approval is consumed by recovery, never inferred from this notification.
+        await self._execute_owned(run_id, confirmation=tool_code)
+
+    async def recover_run(self, run_id: int, owner_token: str) -> None:
+        await self._execute_owned(run_id, owner_token=owner_token)
+
+    async def _execute_owned(self, run_id: int, *, owner_token: str | None = None, confirmation: str | None = None) -> None:
+        entrypoint = "recover" if owner_token else ("confirmed_tool" if confirmation else "run")
         started_at = time.perf_counter()
         audited_model = None
-        record_run_started(entrypoint)
-        lease = await self._acquire_lease(run_id)
+        engine = None
+        if owner_token:
+            lease = f"agent-service:{uuid.uuid4()}"
+            if not await self.backend.adopt_execution_lease(run_id, owner_token, lease):
+                return
+        else:
+            lease = await self._acquire_lease(run_id)
         if lease is False:
-            record_run_completed(entrypoint, "skipped", "execution_locked", engine_name, time.perf_counter() - started_at)
             return
-        lease_task = asyncio.create_task(self._renew_lease(run_id, lease)) if isinstance(lease, str) else None
+        identity_token = execution_identity.set((run_id, lease) if isinstance(lease, str) else None)
+        recovery_token = recovering.set(bool(owner_token or confirmation))
+        parent = asyncio.current_task()
+        lease_task = None
+        preserve = False
+        outcome = "success"
+        record_run_started(entrypoint)
         try:
+            if owner_token and not await self.backend.renew_execution_lease(run_id, lease, 60):
+                raise LeaseLost()
+            if isinstance(lease, str):
+                lease_task = asyncio.create_task(self._renew_lease(run_id, lease, parent))
             context = await self.backend.get_run_context(run_id)
-            if getattr(context, "status", None) in TERMINAL_RUN_STATUSES:
-                record_run_completed(entrypoint, "skipped", "terminal_status", engine_name, time.perf_counter() - started_at)
+            if context.status in TERMINAL_RUN_STATUSES or context.status == "WAITING_USER_CONFIRMATION":
                 return
             model_client = await self._model_client(context)
             if _supports_model_requests(model_client):
                 audited_model = AuditedModelClient(model_client, ModelRequestAuditRecorder(self.backend, run_id))
                 model_client = audited_model
-            context = await self._with_rolling_summary(context, model_client)
             engine = AgentGraphEngine(self.backend, model_client)
-            engine_name = "AgentGraphEngine"
-            await engine.run_confirmed_tool(context, tool_code)
-            record_tool_call(tool_code, "success")
-            record_run_completed(entrypoint, "success", "none", engine_name, time.perf_counter() - started_at)
-        except BackendClientError as exc:
-            logger.exception("Agent confirmed-tool run failed while calling backend, runId=%s, toolCode=%s", run_id, tool_code)
-            await self._fail(run_id, "BACKEND_CALL_FAILED", str(exc))
-            record_tool_call(tool_code, "failed")
-            record_run_completed(entrypoint, "failed", "BACKEND_CALL_FAILED", engine_name, time.perf_counter() - started_at)
-        except ModelClientError as exc:
-            logger.exception("Agent confirmed-tool run failed while calling model provider, runId=%s, toolCode=%s", run_id, tool_code)
-            await self._fail(run_id, "MODEL_CALL_FAILED", str(exc))
-            record_tool_call(tool_code, "failed")
-            record_run_completed(entrypoint, "failed", "MODEL_CALL_FAILED", engine_name, time.perf_counter() - started_at)
-        except ToolExecutionError as exc:
-            error_code = exc.error_code or "TOOL_CALL_FAILED"
-            logger.exception("Agent confirmed-tool run failed while executing tool, runId=%s, toolCode=%s", run_id, tool_code)
-            await self._fail(run_id, error_code, str(exc))
-            record_tool_call(tool_code, "failed")
-            record_run_completed(entrypoint, "failed", error_code, engine_name, time.perf_counter() - started_at)
-        except Exception as exc:  # pragma: no cover - defensive runtime boundary.
-            logger.exception("Agent confirmed-tool run failed with internal error, runId=%s, toolCode=%s", run_id, tool_code)
-            await self._fail(run_id, "AGENT_INTERNAL_ERROR", str(exc))
-            record_tool_call(tool_code, "failed")
-            record_run_completed(entrypoint, "failed", "AGENT_INTERNAL_ERROR", engine_name, time.perf_counter() - started_at)
+            if owner_token or confirmation:
+                await engine.recover(context)
+            else:
+                # Duplicate execute notifications after a crash must not reset an existing graph.
+                loader = getattr(self.backend, "recovery_snapshot", None)
+                snapshot = await loader(run_id) if loader else {}
+                checkpoint = snapshot.get("checkpoint") or {}
+                if checkpoint.get("checkpointId") or snapshot.get("hasStarted") or snapshot.get("toolCalls") or snapshot.get("runtimeJson") or snapshot.get("hasOperations"):
+                    recovering.set(True)
+                    await engine.recover(context)
+                else:
+                    context = await self._with_rolling_summary(context, model_client)
+                    await engine.run(context)
+        except (LeaseLost, asyncio.CancelledError):
+            preserve = True
+            outcome = "lease_lost"
+            logger.warning("agent execution stopped after lease loss or shutdown runId=%s", run_id)
+        except RecoveryUnsafe as exc:
+            outcome = "unsafe"
+            await self.backend.recovery_outcome(run_id, str(exc), permanent=True)
+        except (RecoveryDeferred, BackendClientError) as exc:
+            preserve = True
+            outcome = "deferred"
+            try:
+                await self.backend.recovery_outcome(run_id, getattr(exc, "error_code", "") or type(exc).__name__)
+            except (BackendClientError, LeaseLost):
+                logger.warning("could not persist recovery outcome runId=%s", run_id)
+        except Exception as exc:
+            outcome = "failed"
+            if engine is not None:
+                await engine._fail_run(run_id, getattr(exc, "error_code", None) or "AGENT_INTERNAL_ERROR", str(exc))
+            else:
+                await self._fail(run_id, getattr(exc, "error_code", None) or "AGENT_INTERNAL_ERROR", str(exc))
         finally:
             if lease_task is not None:
                 lease_task.cancel()
-            await self._release_lease(run_id, lease)
-            if audited_model is not None:
-                audited_model.schedule_audit_flush()
+                await asyncio.gather(lease_task, return_exceptions=True)
+            if audited_model is not None and not preserve:
+                try:
+                    await audited_model.flush_audit()
+                except (Exception, LeaseLost):
+                    logger.warning("audit flush interrupted runId=%s", run_id)
+            if not preserve:
+                await self._release_lease(run_id, lease)
+            record_run_completed(entrypoint, outcome, "none", "AgentGraphEngine", time.perf_counter() - started_at)
+            execution_identity.reset(identity_token)
+            recovering.reset(recovery_token)
 
     async def _acquire_lease(self, run_id: int) -> str | None | bool:
         acquire = getattr(self.backend, "acquire_execution_lease", None)
         if not callable(acquire):
             return None
         owner = f"agent-service:{uuid.uuid4()}"
-        if not await acquire(run_id, owner, 60):
-            return False
-        return owner
+        return owner if await acquire(run_id, owner, 60) else False
 
     async def _release_lease(self, run_id: int, owner: str | None | bool) -> None:
         if not isinstance(owner, str):
             return
-        release = getattr(self.backend, "release_execution_lease", None)
-        if callable(release):
-            try:
-                await release(run_id, owner)
-            except Exception:
-                logger.warning("failed to release agent execution lease runId=%s", run_id, exc_info=True)
+        try:
+            await self.backend.release_execution_lease(run_id, owner)
+        except Exception:
+            logger.warning("failed to release agent execution lease runId=%s", run_id)
 
-    async def _renew_lease(self, run_id: int, owner: str) -> None:
-        renew = getattr(self.backend, "renew_execution_lease", None)
-        if not callable(renew):
-            return
+    async def _renew_lease(self, run_id: int, owner: str, execution_task=None) -> None:
         try:
             while True:
                 await asyncio.sleep(20)
-                if not await renew(run_id, owner, 60):
-                    logger.warning("agent execution lease was lost runId=%s", run_id)
-                    return
+                if not await self.backend.renew_execution_lease(run_id, owner, 60):
+                    raise LeaseLost()
         except asyncio.CancelledError:
-            return
+            # LeaseLost is cancellation-shaped but must cancel the graph as well.
+            if execution_task is not None and not asyncio.current_task().cancelling():
+                execution_task.cancel()
         except Exception:
-            logger.warning("failed to renew agent execution lease runId=%s", run_id, exc_info=True)
+            if execution_task is not None:
+                execution_task.cancel()
 
     async def debug_route(self, context):
         try:

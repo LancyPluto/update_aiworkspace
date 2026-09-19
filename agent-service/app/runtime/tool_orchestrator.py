@@ -22,6 +22,7 @@ class ToolOrchestrator:
     def __init__(self, tool_bridge: BackendToolBridge, budget_guard_provider: Callable[[], BudgetGuard]) -> None:
         self.tool_bridge = tool_bridge
         self._budget_guard_provider = budget_guard_provider
+        self.reserve_callback = None
 
     async def execute_with_guard(
         self,
@@ -38,7 +39,10 @@ class ToolOrchestrator:
         if missing:
             return {"missing_tool_arguments": missing}
 
-        self._budget_guard_provider().reserve_tool_call(budget, 0)
+        if self.reserve_callback is not None:
+            await self.reserve_callback(budget, idempotency_key)
+        else:
+            self._budget_guard_provider().reserve_tool_call(budget, 0)
         if idempotency_key is None:
             return await self.tool_bridge.execute_with_args(context, tool, prepared)
         return await self.tool_bridge.execute_with_args(context, tool, prepared, idempotency_key=idempotency_key)

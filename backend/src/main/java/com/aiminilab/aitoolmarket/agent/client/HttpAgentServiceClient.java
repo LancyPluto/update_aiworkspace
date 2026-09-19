@@ -52,6 +52,11 @@ public class HttpAgentServiceClient implements AgentServiceClient {
     }
 
     @Override
+    public void recoverRun(Long runId, String ownerToken) {
+        postInternal("/internal/v1/agent/runs/" + runId + "/recover", toJson(Map.of("ownerToken", ownerToken)));
+    }
+
+    @Override
     public void confirmTool(Long runId, String toolCode) {
         postInternal("/internal/v1/agent/runs/" + runId + "/confirm-tool", "{\"toolCode\":\"" + escapeJson(toolCode) + "\"}");
     }
@@ -129,7 +134,7 @@ public class HttpAgentServiceClient implements AgentServiceClient {
 
         HttpRequest request = HttpRequest.newBuilder(uri)
                 .version(HttpClient.Version.HTTP_1_1)
-                .timeout(REQUEST_TIMEOUT)
+                .timeout(path.endsWith("/recover") ? Duration.ofSeconds(5) : REQUEST_TIMEOUT)
                 .header("Content-Type", "application/json")
                 .header("X-Internal-Timestamp", timestamp)
                 .header("X-Internal-Nonce", nonce)

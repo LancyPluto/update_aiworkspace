@@ -63,6 +63,19 @@ class FakeBackend:
         self.native_checkpoints = []
         self.native_writes = {}
         self.run_context = None
+        self.runtime_json = None
+        self.approvals = []
+
+    async def save_recovery_runtime(self, run_id, state):
+        import json
+        self.runtime_json = json.dumps(state)
+
+    async def recovery_snapshot(self, run_id):
+        return {"status": getattr(self.run_context, "status", None), "checkpoint": await self.load_native_graph_checkpoint(run_id, f"agent-run:{run_id}") or {},
+                "runtimeJson": self.runtime_json, "confirmations": self.approvals}
+
+    async def recovery_outcome(self, run_id, error=None, *, permanent=False, waiting=False):
+        pass
 
     async def save_graph_checkpoint(self, run_id, checkpoint_json):
         self.checkpoint = checkpoint_json
@@ -286,7 +299,7 @@ async def test_graph_engine_cancelled_while_waiting_confirmation_does_not_execut
     assert backend.completed_tool_calls == []
     assert backend.completed_runs == []
     assert backend.failed_runs == []
-    assert backend.checkpoint_cleared
+    assert backend.checkpoint is not None
 
 
 class _CancelAfterTaskBackend(FakeBackend):
@@ -549,10 +562,11 @@ async def test_graph_engine_checkpoints_on_pause_and_resumes_on_confirm():
     # User confirms -> resume on a fresh engine instance (simulates a new request).
     resume_model = FakeModel([ChatTurnResult(content="视频已生成：https://cdn.example/v.mp4", tool_calls=[])])
     resume_engine = AgentGraphEngine(backend, resume_model)
+    backend.approvals = [{"callId": "c1", "toolCode": "video_gen", "approvedAt": "now"}]
     await resume_engine.run_confirmed_tool(context, "video_gen")
 
     assert backend.completed_tool_calls, "confirmed tool should execute on resume"
-    assert backend.checkpoint_cleared
+    assert backend.checkpoint is not None
     assert backend.completed_runs[0].finalAnswer.startswith("视频已生成")
 
 

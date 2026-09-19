@@ -29,8 +29,8 @@ class FakeEngine:
     async def run(self, context):
         self.runs.append(context)
 
-    async def run_confirmed_tool(self, context, tool_code):
-        self.confirmed.append((context, tool_code))
+    async def recover(self, context):
+        self.confirmed.append(context)
 
     async def debug_route(self, context):
         self.debug.append(context)
@@ -66,6 +66,6 @@ async def test_confirmed_tool_and_debug_route_use_graph_engine(graph_engine):
     await runtime.execute_confirmed_tool(9, "xiaohongshu_copywriting")
     result = await runtime.debug_route(backend.context)
 
-    assert graph_engine.instances[0].confirmed == [(backend.context, "xiaohongshu_copywriting")]
+    assert graph_engine.instances[0].confirmed == [backend.context]
     assert graph_engine.instances[1].debug == [backend.context]
     assert result == {"ok": True}

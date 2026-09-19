@@ -1,11 +1,12 @@
-﻿import asyncio
+from app.core.execution import RecoveryDeferred, recovering
+import asyncio
 import json
 import logging
 import re
 import time
 from typing import Any
 
-from app.clients.backend_client import BackendBusinessError, WorkflowDelegationUncertainError
+from app.clients.backend_client import BackendClientError, BackendBusinessError, WorkflowDelegationUncertainError
 from app.config import settings
 from app.credit_messages import credit_message_from_backend_error
 from app.core.attachment_catalog import build_reference_plan, current_attachment_alias, llm_token_for_mention, readable_positional_prompt, resolve_media_argument_pointers
@@ -218,7 +219,46 @@ class BackendToolBridge:
                     return None
             return None
 
+    async def reconcile_existing_call(self, context: RunContext, call) -> None:
+        """Resolve persisted side effects before advancing any graph node; never dispatch here."""
+        if str(call.status).upper() in {"SUCCESS", "FAILED", "CANCELLED", "TIMEOUT", "DELEGATED"}:
+            return
+        task_id = call.taskId
+        if task_id is None:
+            task = await self.backend.find_task_by_request(
+                context.runId, context.userId, f"agent-run-{context.runId}-tool-call-{call.id}")
+            if task is None:
+                return  # Authoritative absence; the replayed node may submit with the original key.
+            task_id = task.taskId
+            await self.backend.bind_tool_call_task(call.id, task_id)
+        detail = await self._wait_for_task(context, call.toolCode, task_id)
+        if detail.status != "SUCCESS":
+            await self.backend.fail_tool_call(call.id, ToolCallFail(
+                errorCode=detail.errorCode or f"TASK_{detail.status}", errorMessage=_format_task_failure(call.toolCode, detail)))
+            return
+        arguments = call.argumentsJson or {}
+        if isinstance(arguments, str):
+            arguments = json.loads(arguments)
+        content = detail.result.contentText if detail.result else ""
+        result = _tool_result(call.toolCode, call.id, arguments, task_id, detail.status,
+                              _agent_visible_content(call.toolCode, content), detail.result.resourceType if detail.result else None)
+        await self.backend.complete_tool_call(call.id, ToolCallComplete(resultJson=result))
+        await self.backend.append_event(context.runId, RunEventCreate(
+            eventType="run.recovery_task_reused", eventJson={"toolCallId": call.id, "taskId": task_id}))
+
     async def execute_with_args(self, context: RunContext, tool: ToolDescriptor, arguments: dict[str, Any], *, idempotency_key: str | None = None) -> dict[str, Any]:
+        lookup = getattr(self.backend, "find_tool_call", None)
+        existing = await lookup(context.runId, idempotency_key) if idempotency_key and callable(lookup) else None
+        if existing is not None and str(existing.status).upper() == "SUCCESS":
+            saved = existing.resultJson
+            if isinstance(saved, str):
+                saved = json.loads(saved)
+            if isinstance(saved, dict):
+                return saved
+            raise RecoveryDeferred("Successful tool call has no persisted result")
+        if existing is not None and getattr(existing, "argumentsJson", None):
+            saved_arguments = existing.argumentsJson
+            arguments = json.loads(saved_arguments) if isinstance(saved_arguments, str) else saved_arguments
         if tool.toolCode == "xiaohongshu_copywriting":
             arguments = _with_xiaohongshu_defaults(context.message, arguments)
         arguments = enforce_locked_field_defaults(tool, arguments, user_message=context.message)
@@ -230,7 +270,7 @@ class BackendToolBridge:
         # backend can return its normal validation error.
         arguments = normalize_arguments_for_input_schema(tool, arguments)
         attachment_errors = validate_attachment_arguments(context, arguments)
-        if attachment_errors:
+        if attachment_errors and existing is None:
             message = format_attachment_error(attachment_errors)
             await self.backend.append_event(
                 context.runId,
@@ -254,7 +294,20 @@ class BackendToolBridge:
                 eventJson=emit_attachment_resolved_payload(context, tool, arguments),
             ),
         )
-        call = await self.backend.create_tool_call(context.runId, ToolCallCreate(toolCode=tool.toolCode, argumentsJson=arguments, idempotencyKey=idempotency_key))
+        call = existing or await self.backend.create_tool_call(context.runId, ToolCallCreate(toolCode=tool.toolCode, argumentsJson=arguments, idempotencyKey=idempotency_key))
+        call_status = str(getattr(call, "status", "") or "").upper()
+        if call_status == "SUCCESS":
+            saved = getattr(call, "resultJson", None)
+            if isinstance(saved, str):
+                saved = json.loads(saved)
+            if isinstance(saved, dict):
+                return saved
+            raise RecoveryDeferred("Successful tool call has no persisted result")
+        if call_status in {"FAILED", "CANCELLED", "TIMEOUT"}:
+            raise ToolExecutionError(getattr(call, "errorMessage", None) or "Original tool call failed", getattr(call, "errorCode", None) or "TOOL_TASK_FAILED")
+        saved_arguments = getattr(call, "argumentsJson", None)
+        if saved_arguments:
+            arguments = json.loads(saved_arguments) if isinstance(saved_arguments, str) else saved_arguments
         task_params = compile_v2_lite_image_task_params(arguments, context=context) if _is_v2_lite_image_schema(tool) else arguments
         task_id: int | None = None
         try:
@@ -270,15 +323,26 @@ class BackendToolBridge:
                     delegated.status,
                     delegated.runUrl,
                 )
-            task = await self.backend.create_task(
-                TaskCreate(
-                    userId=context.userId,
-                    toolCode=tool.toolCode,
-                    params=task_params,
-                    clientRequestId=f"agent-run-{context.runId}-tool-call-{call.id}",
-                    excludeFrozen=context.creditBudget,
+            task_id = getattr(call, "taskId", None)
+            request_id = f"agent-run-{context.runId}-tool-call-{call.id}"
+            task = None
+            if task_id is not None and not recovering.get():
+                task = await self.backend.get_task_detail(context.userId, task_id)
+            elif callable(getattr(self.backend, "find_task_by_request", None)):
+                task = await self.backend.find_task_by_request(context.runId, context.userId, request_id)
+            if task is None:
+                task = await self.backend.create_task(
+                    TaskCreate(
+                        userId=context.userId,
+                        toolCode=tool.toolCode,
+                        params=task_params,
+                        clientRequestId=f"agent-run-{context.runId}-tool-call-{call.id}",
+                        excludeFrozen=context.creditBudget,
+                    )
                 )
-            )
+            else:
+                await self.backend.append_event(context.runId, RunEventCreate(
+                    eventType="run.recovery_task_reused", eventJson={"toolCallId": call.id, "taskId": task.taskId}))
             task_id = task.taskId
             bind_error: str | None = None
             try:
@@ -310,8 +374,12 @@ class BackendToolBridge:
                 ),
             )
             task_detail = await self._wait_for_task(context, tool.toolCode, task.taskId)
+        except RecoveryDeferred:
+            raise
         except ToolExecutionError as exc:
-            if "task" in locals():
+            if recovering.get() and exc.error_code == "TOOL_TASK_TIMEOUT":
+                raise RecoveryDeferred("Existing external task is still running") from exc
+            if "task" in locals() and not recovering.get():
                 await self._cancel_task(context.userId, task.taskId)
             await self.backend.fail_tool_call(call.id, ToolCallFail(errorCode="TOOL_TASK_FAILED", errorMessage=str(exc)))
             raise
@@ -324,7 +392,9 @@ class BackendToolBridge:
             )
             raise
         except BackendBusinessError as exc:
-            if task_id is not None:
+            if exc.status_code is None or exc.status_code >= 500:
+                raise RecoveryDeferred("Task outcome requires reconciliation") from exc
+            if task_id is not None and not recovering.get():
                 await self._cancel_task(context.userId, task_id)
             if exc.error_code in {"CREDIT_NOT_ENOUGH", "AGENT_CREDIT_NOT_ENOUGH"}:
                 message = credit_message_from_backend_error(exc, tool.toolCode)
@@ -336,8 +406,10 @@ class BackendToolBridge:
             message = _format_tool_error(tool.toolCode, task_id, None, None, str(exc))
             await self.backend.fail_tool_call(call.id, ToolCallFail(errorCode="TOOL_TASK_FAILED", errorMessage=message))
             raise ToolExecutionError(message, error_code="TOOL_TASK_FAILED") from exc
+        except BackendClientError as exc:
+            raise RecoveryDeferred("Task submission or query outcome is uncertain") from exc
         except Exception as exc:
-            if task_id is not None:
+            if task_id is not None and not recovering.get():
                 await self._cancel_task(context.userId, task_id)
             message = _format_tool_error(tool.toolCode, task_id, None, None, f"{type(exc).__name__}: {exc}")
             await self.backend.fail_tool_call(call.id, ToolCallFail(errorCode="TOOL_TASK_FAILED", errorMessage=message))
@@ -371,7 +443,7 @@ class BackendToolBridge:
         last_status = ""
         last_detail = None
         stream_state: dict[str, int] = {"emitted_len": 0}
-        while time.monotonic() <= deadline:
+        while recovering.get() or time.monotonic() <= deadline:
             detail = await self.backend.get_task_detail(context.userId, task_id)
             last_detail = detail
             if detail.status != last_status:

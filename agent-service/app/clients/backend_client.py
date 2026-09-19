@@ -1,4 +1,7 @@
-﻿import json
+import hashlib
+from urllib.parse import urlencode
+from app.core.execution import execution_identity, operation_identity, LeaseLost
+import json
 import logging
 import time
 from typing import Any
@@ -80,6 +83,29 @@ class BackendClient:
         self.settings = settings
         self.base_url = settings.backend_internal_base_url.rstrip("/")
         self._client = http_client or httpx.AsyncClient(timeout=10, trust_env=False)
+
+    async def adopt_execution_lease(self, run_id: int, expected: str, owner: str) -> bool:
+        data = await self._request("POST", f"/api/internal/v1/agent/runs/{run_id}/execution-lease/adopt", {"expectedOwner": expected, "ownerToken": owner})
+        return bool(data.get("acquired"))
+
+    async def recovery_snapshot(self, run_id: int) -> dict[str, Any]:
+        return await self._request("GET", f"/api/internal/v1/agent/runs/{run_id}/recovery")
+
+    async def save_recovery_runtime(self, run_id: int, state: dict[str, Any]) -> None:
+        await self._request("PUT", f"/api/internal/v1/agent/runs/{run_id}/recovery/runtime", {"runtimeJson": json.dumps(state, ensure_ascii=False)})
+
+    async def recovery_outcome(self, run_id: int, error: str | None = None, *, permanent: bool = False, waiting: bool = False) -> None:
+        await self._request("POST", f"/api/internal/v1/agent/runs/{run_id}/recovery/outcome", {"error": error, "permanent": permanent, "waiting": waiting})
+
+    async def find_tool_call(self, run_id: int, idempotency_key: str):
+        query = urlencode({"idempotencyKey": idempotency_key})
+        data = await self._request("GET", f"/api/internal/v1/agent/runs/{run_id}/recovery/tool-call?{query}")
+        return ToolCallResponse.model_validate(data) if data else None
+
+    async def find_task_by_request(self, run_id: int, user_id: int, request_id: str):
+        query = urlencode({"userId": user_id, "clientRequestId": request_id})
+        data = await self._request("GET", f"/api/internal/v1/agent/runs/{run_id}/recovery/task?{query}")
+        return TaskDetailResponse.model_validate(data) if data else None
 
     async def get_run_context(self, run_id: int) -> RunContext:
         data = await self._request("GET", f"/api/internal/v1/agent/runs/{run_id}/context")
@@ -429,6 +455,15 @@ class BackendClient:
         if payload is not None:
             data = payload.model_dump(mode="json", by_alias=True, exclude_none=True) if hasattr(payload, "model_dump") else payload
             body = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        identity = execution_identity.get()
+        if identity is not None:
+            headers["X-Agent-Run-Id"] = str(identity[0])
+            headers["X-Agent-Execution-Owner"] = identity[1]
+        operation = operation_identity.get()
+        # Database-only memory writes and artifact records are replayed transactionally.
+        if operation and method in {"POST", "PUT", "DELETE"} and ("/memory" in path or path.endswith("/artifacts")) and not path.endswith("/retrieve"):
+            digest = hashlib.sha256((operation + "|" + method + "|" + path + ("|" + hashlib.sha256(body).hexdigest() if operation == "post-run-memory" or path.endswith("/artifacts") else "")).encode()).hexdigest()
+            headers["X-Agent-Operation-Key"] = digest
         headers.update(signature_headers(method, path, body, self.settings.internal_api_token))
         trace_id = current_trace_id()
         if trace_id:
@@ -444,6 +479,8 @@ class BackendClient:
 
     def _parse_response(self, response: httpx.Response) -> dict[str, Any]:
         payload = self._read_json_payload(response)
+        if isinstance(payload, dict) and payload.get("code") == "AGENT_EXECUTION_LEASE_LOST":
+            raise LeaseLost("Execution ownership lost")
         if response.status_code < 200 or response.status_code >= 300:
             if isinstance(payload, dict) and (payload.get("errorCode") or payload.get("code")):
                 self._raise_business_error(response, payload)

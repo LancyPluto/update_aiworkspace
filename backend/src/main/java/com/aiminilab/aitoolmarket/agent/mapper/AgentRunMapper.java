@@ -20,13 +20,28 @@ import com.aiminilab.aitoolmarket.agent.dto.AdminAgentRunStatsResponse;
 
 public interface AgentRunMapper extends BaseMapper<AgentRun> {
 
+    @Select("SELECT COUNT(*) FROM agent_run_recovery WHERE run_id=#{runId} AND attempts>0")
+    int hasRecoveryAttempts(@Param("runId") Long runId);
+
+    @Select("SELECT CURRENT_TIMESTAMP")
+    LocalDateTime databaseNow();
+
+    @Select("SELECT status FROM agent_runs WHERE id=#{runId} FOR UPDATE")
+    String lockRunStatus(@Param("runId") Long runId);
+
+    @Insert("INSERT INTO agent_run_confirmations(run_id,call_id,tool_code,created_at) VALUES (#{runId},#{callId},#{toolCode},CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE tool_code=VALUES(tool_code)")
+    void recordConfirmation(@Param("runId") Long runId, @Param("callId") String callId, @Param("toolCode") String toolCode);
+
+    @Update("UPDATE agent_run_confirmations SET approved_at=CURRENT_TIMESTAMP WHERE run_id=#{runId} AND call_id=(SELECT call_id FROM (SELECT call_id FROM agent_run_confirmations WHERE run_id=#{runId} AND approved_at IS NULL AND tool_code=#{toolCode} ORDER BY created_at DESC LIMIT 1) pending)")
+    int approveConfirmation(@Param("runId") Long runId, @Param("toolCode") String toolCode);
+
     @Update("""
             INSERT INTO agent_run_execution_leases(run_id, owner_token, lease_expires_at, created_at, updated_at)
             VALUES(#{runId}, #{ownerToken}, #{expiresAt}, #{now}, #{now})
             ON DUPLICATE KEY UPDATE
-              owner_token = IF(owner_token = #{ownerToken} OR lease_expires_at <= #{now}, #{ownerToken}, owner_token),
-              lease_expires_at = IF(owner_token = #{ownerToken} OR lease_expires_at <= #{now}, #{expiresAt}, lease_expires_at),
-              updated_at = IF(owner_token = #{ownerToken} OR lease_expires_at <= #{now}, #{now}, updated_at)
+              owner_token = CASE WHEN owner_token = #{ownerToken} OR lease_expires_at <= #{now} THEN #{ownerToken} ELSE owner_token END,
+              lease_expires_at = CASE WHEN owner_token = #{ownerToken} OR lease_expires_at <= #{now} THEN #{expiresAt} ELSE lease_expires_at END,
+              updated_at = CASE WHEN owner_token = #{ownerToken} OR lease_expires_at <= #{now} THEN #{now} ELSE updated_at END
             """)
     void acquireExecutionLease(@Param("runId") Long runId, @Param("ownerToken") String ownerToken,
                                @Param("expiresAt") LocalDateTime expiresAt, @Param("now") LocalDateTime now);
@@ -34,9 +49,12 @@ public interface AgentRunMapper extends BaseMapper<AgentRun> {
     @Select("SELECT owner_token FROM agent_run_execution_leases WHERE run_id=#{runId}")
     String selectExecutionLeaseOwner(@Param("runId") Long runId);
 
-    @Update("UPDATE agent_run_execution_leases SET lease_expires_at=#{expiresAt}, updated_at=#{now} WHERE run_id=#{runId} AND owner_token=#{ownerToken}")
+    @Update("UPDATE agent_run_execution_leases SET lease_expires_at=#{expiresAt}, updated_at=#{now} WHERE run_id=#{runId} AND owner_token=#{ownerToken} AND lease_expires_at>#{now}")
     int renewExecutionLease(@Param("runId") Long runId, @Param("ownerToken") String ownerToken,
                              @Param("expiresAt") LocalDateTime expiresAt, @Param("now") LocalDateTime now);
+
+    @Update("UPDATE agent_run_execution_leases SET lease_expires_at=CURRENT_TIMESTAMP WHERE run_id=#{runId} AND owner_token=#{ownerToken}")
+    void expireExecutionLease(@Param("runId") Long runId, @Param("ownerToken") String ownerToken);
 
     @Update("DELETE FROM agent_run_execution_leases WHERE run_id=#{runId} AND owner_token=#{ownerToken}")
     int releaseExecutionLease(@Param("runId") Long runId, @Param("ownerToken") String ownerToken);

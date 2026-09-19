@@ -12,6 +12,8 @@ public interface AgentServiceClient {
 
     void executeRun(Long runId);
 
+    default void recoverRun(Long runId, String ownerToken) { throw new UnsupportedOperationException("Recovery unavailable"); }
+
     void confirmTool(Long runId, String toolCode);
 
     AgentFileParseResult parseFile(String filename, String contentType, byte[] content);

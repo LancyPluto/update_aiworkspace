@@ -18,6 +18,18 @@ async def execute_run(run_id: int, request: Request, background_tasks: Backgroun
     return {"runId": run_id, "status": "accepted"}
 
 
+@router.post("/internal/v1/agent/runs/{run_id}/recover")
+async def recover_run(run_id: int, request: Request, background_tasks: BackgroundTasks):
+    await _verify_internal_request(request)
+    payload = await request.json()
+    owner = payload.get("ownerToken")
+    if not isinstance(owner, str) or not owner or len(owner) > 128:
+        raise HTTPException(status_code=400, detail="ownerToken is required")
+    # Always acknowledge promptly; the durable lease, not HTTP completion, tracks work.
+    background_tasks.add_task(request.app.state.runtime.recover_run, run_id, owner)
+    return {"runId": run_id, "status": "accepted"}
+
+
 @router.post("/internal/v1/agent/runs/{run_id}/confirm-tool")
 async def confirm_tool(run_id: int, request: Request, background_tasks: BackgroundTasks):
     await _verify_internal_request(request)

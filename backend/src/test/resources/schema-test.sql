@@ -1925,3 +1925,82 @@ CREATE TABLE provider_callback_inbox (
 );
 CREATE INDEX idx_provider_callback_inbox_task ON provider_callback_inbox(task_id, provider_code, received_at);
 CREATE INDEX idx_provider_callback_inbox_pending ON provider_callback_inbox(process_status, received_at);
+
+CREATE TABLE IF NOT EXISTS agent_run_execution_leases (
+  run_id BIGINT NOT NULL,
+  owner_token VARCHAR(128) NOT NULL,
+  lease_expires_at DATETIME NOT NULL,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  PRIMARY KEY (run_id),
+  CONSTRAINT fk_agent_run_execution_lease_run FOREIGN KEY (run_id) REFERENCES agent_runs(id)
+);
+
+CREATE TABLE IF NOT EXISTS agent_run_recovery (
+  run_id BIGINT NOT NULL PRIMARY KEY,
+  attempts INT NOT NULL DEFAULT 0,
+  next_attempt_at DATETIME NULL,
+  owner_token VARCHAR(128) NULL,
+  last_error VARCHAR(1000) NULL,
+  runtime_json MEDIUMTEXT NULL,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  INDEX idx_agent_recovery_due (next_attempt_at, run_id)
+);
+CREATE TABLE IF NOT EXISTS agent_run_confirmations (
+  run_id BIGINT NOT NULL,
+  call_id VARCHAR(180) NOT NULL,
+  tool_code VARCHAR(128) NOT NULL,
+  approved_at DATETIME NULL,
+  created_at DATETIME NOT NULL,
+  PRIMARY KEY (run_id, call_id)
+);
+CREATE TABLE IF NOT EXISTS agent_run_operations (
+  run_id BIGINT NOT NULL,
+  operation_key VARCHAR(240) NOT NULL,
+  response_json MEDIUMTEXT NOT NULL,
+  created_at DATETIME NOT NULL,
+  PRIMARY KEY (run_id, operation_key)
+);
+
+CREATE TABLE IF NOT EXISTS agent_langgraph_checkpoints (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  run_id BIGINT NOT NULL,
+  thread_id VARCHAR(128) NOT NULL,
+  checkpoint_ns VARCHAR(255) NOT NULL DEFAULT '',
+  checkpoint_id VARCHAR(128) NOT NULL,
+  parent_checkpoint_id VARCHAR(128) NULL,
+  checkpoint_json MEDIUMTEXT NOT NULL,
+  metadata_json MEDIUMTEXT NULL,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_agent_langgraph_checkpoint (run_id, thread_id, checkpoint_ns, checkpoint_id),
+  KEY idx_agent_langgraph_checkpoint_head (run_id, thread_id, checkpoint_ns, id DESC),
+  CONSTRAINT fk_agent_langgraph_checkpoint_run
+    FOREIGN KEY (run_id) REFERENCES agent_runs(id)
+);
+
+CREATE TABLE IF NOT EXISTS agent_langgraph_checkpoint_writes (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  run_id BIGINT NOT NULL,
+  thread_id VARCHAR(128) NOT NULL,
+  checkpoint_ns VARCHAR(255) NOT NULL DEFAULT '',
+  checkpoint_id VARCHAR(128) NOT NULL,
+  task_id VARCHAR(128) NOT NULL,
+  task_path VARCHAR(512) NOT NULL DEFAULT '',
+  write_index INT NOT NULL,
+  channel_name VARCHAR(255) NOT NULL,
+  value_type VARCHAR(128) NOT NULL,
+  value_base64 MEDIUMTEXT NOT NULL,
+  created_at DATETIME NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_agent_langgraph_write (run_id, thread_id, checkpoint_ns, checkpoint_id, task_id, write_index),
+  KEY idx_agent_langgraph_write_checkpoint (run_id, thread_id, checkpoint_ns, checkpoint_id, id),
+  CONSTRAINT fk_agent_langgraph_write_run
+    FOREIGN KEY (run_id) REFERENCES agent_runs(id)
+);
+
+CREATE INDEX idx_agent_runs_recovery_scan ON agent_runs(status, updated_at, id);
+CREATE INDEX idx_agent_lease_expiry ON agent_run_execution_leases(lease_expires_at, run_id);
+CREATE UNIQUE INDEX uk_agent_tool_calls_run_idempotency ON agent_tool_calls(run_id, idempotency_key);

@@ -400,6 +400,7 @@ public class AgentRunServiceImpl implements AgentRunService {
     @Override
     @Transactional
     public AgentRunResponse confirmTool(Long userId, Long runId, ConfirmAgentToolRequest request) {
+        agentRunMapper.lockRunStatus(runId);
         AgentRun run = findRun(runId, userId);
         if (!CONFIRMABLE_STATUSES.contains(run.getStatus())) {
             if ("RUNNING".equals(run.getStatus())) {
@@ -434,6 +435,7 @@ public class AgentRunServiceImpl implements AgentRunService {
         if (agentRunMapper.markRunningIfStatus(runId, "WAITING_USER_CONFIRMATION", now) == 0) {
             return AgentRunResponse.from(findRun(runId, userId));
         }
+        agentRunMapper.approveConfirmation(runId, request.toolCode());
         appendEventInternal(runId, userId, "tool.confirmed", request.toolCode(), "{\"toolCode\":\"" + request.toolCode() + "\"}", now);
         runAfterCommit(() -> notifyAgentService(run.getId(), () -> agentServiceClient.confirmTool(run.getId(), request.toolCode())));
         return AgentRunResponse.from(findRun(runId, userId));
@@ -915,6 +917,10 @@ public class AgentRunServiceImpl implements AgentRunService {
         AgentRun run = findRun(runId);
         LocalDateTime now = LocalDateTime.now();
         if ("tool.confirmation_required".equals(request.eventType())) {
+            JsonNode confirmation = objectMapper.valueToTree(request.eventJson());
+            if (confirmation != null && confirmation.hasNonNull("callId")) {
+                agentRunMapper.recordConfirmation(runId, confirmation.path("callId").asText(), confirmation.path("toolCode").asText());
+            }
             agentRunMapper.markWaitingForConfirmationIfStatus(runId, "RUNNING", now);
             persistPendingToolContextFromConfirmation(run, request.eventJson(), now);
         }
@@ -1248,6 +1254,9 @@ public class AgentRunServiceImpl implements AgentRunService {
         billingService.recordUsage("AGENT_RUN", runId, run.getUserId(), modelConfig,
                 request.promptTokens(), request.completionTokens(), null, consumedCredits,
                 completedQuote.vendorCost(), completedQuote.markupRatio());
+        if (agentRunMapper.hasRecoveryAttempts(runId) > 0) {
+            appendEventInternal(runId, run.getUserId(), "run.recovery_completed", "Agent 已自动恢复并完成", null, now);
+        }
         appendEventInternal(runId, run.getUserId(), "run.completed", "Agent 运行已完成", null, now);
         agentSessionMapper.updateActiveLeaf(run.getSessionId(), assistant.getId(), now);
         agentRateLimitService.decrementActiveRun(run.getUserId(), runId);
@@ -1334,7 +1343,8 @@ public class AgentRunServiceImpl implements AgentRunService {
         ) == 0) {
             return AgentRunResponse.from(findRun(runId));
         }
-        failOpenToolCalls(runId, run.getUserId(), request.errorCode(), failure, now);
+        if (request.errorCode() == null || !request.errorCode().startsWith("AGENT_RECOVERY_"))
+            failOpenToolCalls(runId, run.getUserId(), request.errorCode(), failure, now);
         if (consumedCredits > 0) {
             creditService.settle(run.getUserId(), CreditSourceType.AGENT_RUN, runId, consumedCredits);
         }
@@ -1444,7 +1454,8 @@ public class AgentRunServiceImpl implements AgentRunService {
     @Override
     @Transactional
     public boolean acquireExecutionLease(Long runId, String ownerToken, int leaseSeconds) {
-        LocalDateTime now = LocalDateTime.now();
+        if (ownerToken == null || ownerToken.isBlank() || !Set.of("CREATED", "RUNNING").contains(agentRunMapper.lockRunStatus(runId))) return false;
+        LocalDateTime now = agentRunMapper.databaseNow();
         agentRunMapper.acquireExecutionLease(runId, ownerToken, now.plusSeconds(Math.max(1, Math.min(leaseSeconds, 300))), now);
         return Objects.equals(ownerToken, agentRunMapper.selectExecutionLeaseOwner(runId));
     }
@@ -1452,7 +1463,8 @@ public class AgentRunServiceImpl implements AgentRunService {
     @Override
     @Transactional
     public boolean renewExecutionLease(Long runId, String ownerToken, int leaseSeconds) {
-        LocalDateTime now = LocalDateTime.now();
+        if (TERMINAL_STATUSES.contains(agentRunMapper.lockRunStatus(runId))) return false;
+        LocalDateTime now = agentRunMapper.databaseNow();
         return agentRunMapper.renewExecutionLease(runId, ownerToken,
                 now.plusSeconds(Math.max(1, Math.min(leaseSeconds, 300))), now) > 0;
     }
@@ -1460,7 +1472,9 @@ public class AgentRunServiceImpl implements AgentRunService {
     @Override
     @Transactional
     public void releaseExecutionLease(Long runId, String ownerToken) {
-        agentRunMapper.releaseExecutionLease(runId, ownerToken);
+        String state = agentRunMapper.lockRunStatus(runId);
+        if ("RUNNING".equals(state) || "CREATED".equals(state)) agentRunMapper.expireExecutionLease(runId, ownerToken);
+        else agentRunMapper.releaseExecutionLease(runId, ownerToken);
     }
 
     private com.fasterxml.jackson.databind.JsonNode readCheckpointPayload(String value) {
@@ -2507,10 +2521,9 @@ public class AgentRunServiceImpl implements AgentRunService {
                 return;
             }
             LOGGER.warn("agent service notification failed, runId={}", runId, exception);
-            failRun(runId, new FailAgentRunRequest(
-                    "AGENT_SERVICE_NOTIFY_FAILED",
-                    "Agent 服务暂时不可用，请稍后重试"
-            ));
+            AgentRun run = findRun(runId);
+            appendEventInternal(runId, run.getUserId(), "run.dispatch_pending", "Agent 服务暂时不可用，等待自动恢复",
+                    toJson(Map.of("errorCode", "AGENT_SERVICE_NOTIFY_FAILED")), LocalDateTime.now());
         }
     }
 

@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+from app.core.execution import RecoveryDeferred, RecoveryUnsafe, operation_identity, recovering
+from app.core.schemas import ToolCallResponse
+from app.clients.backend_client import BackendClientError
+
 import json
 import hashlib
 import logging
@@ -173,6 +178,13 @@ class AgentGraphEngine:
         self._skill_hydration = SkillHydrationService(backend_client)
         self._memory_tools_enabled: bool = False
         self._compiled = None
+        self._reserved_tool_ids: set[str] = set()
+        self._observed_failure_ids: set[str] = set()
+        self._approvals: dict[str, str] = {}
+        self._prior_usage = {"promptTokens": 0, "completionTokens": 0}
+        self._curation_status = "pending"
+        self.tool_orchestrator.reserve_callback = self._reserve_tool
+
 
     # ------------------------------------------------------------------ #
     # Public engine API
@@ -180,6 +192,7 @@ class AgentGraphEngine:
     async def run(self, context: RunContext) -> None:
         try:
             await self._prepare_run(context)
+            await self._persist_runtime()
             guard_result = self.prompt_guard.inspect(context.message)
             if guard_result.rejected:
                 await self._emit_answer(context.runId, guard_result.message or "")
@@ -194,9 +207,131 @@ class AgentGraphEngine:
                 await self._clear_checkpoint(context)
                 return
             await self._fail_run(context.runId, exc.error_code or "TOOL_CALL_FAILED", str(exc))
+        except (BackendClientError, RecoveryDeferred, RecoveryUnsafe):
+            raise
         except Exception as exc:  # pragma: no cover - defensive runtime boundary.
             LOGGER.exception("agent graph run failed runId=%s", context.runId)
             await self._fail_run(context.runId, "AGENT_INTERNAL_ERROR", str(exc))
+
+    async def recover(self, context: RunContext) -> None:
+        snapshot = await self.backend.recovery_snapshot(context.runId)
+        if snapshot.get("status") in {"WAITING_USER_CONFIRMATION", "SUCCESS", "FAILED", "CANCELLED", "TIMEOUT"}:
+            return
+        checkpoint = snapshot.get("checkpoint") or {}
+        if not checkpoint.get("checkpointId"):
+            try:
+                state = json.loads(snapshot.get("runtimeJson") or "null")
+            except (TypeError, ValueError):
+                raise RecoveryUnsafe("Invalid runtime state without a graph checkpoint")
+            untouched = state and state.get("version") == 1 and state.get("budget", {}).get("model_calls") == 0 and state.get("budget", {}).get("tool_calls") == 0
+            if snapshot.get("toolCalls") or snapshot.get("hasOperations") or ((snapshot.get("hasStarted") or state) and not untouched):
+                raise RecoveryUnsafe("Missing checkpoint for a run with execution evidence")
+            await self.run(context)
+            return
+        await self._prepare_run(context, emit_run_started=False)
+        try:
+            runtime = json.loads(snapshot.get("runtimeJson") or "null")
+            if not runtime or runtime.get("version") != 1:
+                raise RecoveryUnsafe("Missing or incompatible runtime checkpoint")
+            self._budget = BudgetState(**runtime["budget"])
+            self._reserved_tool_ids = set(runtime.get("reservedToolIds", []))
+            self._tool_failures = runtime.get("toolFailures", {})
+            self._observed_failure_ids = set(runtime.get("observedFailureIds", []))
+            self._expanded_tool_codes = set(runtime.get("expandedToolCodes", []))
+            self._hydrated_skill_codes = set(runtime.get("hydratedSkillCodes", []))
+            self._pending_schema_validation_tool_code = runtime.get("pendingSchemaValidationToolCode")
+            self._run_artifacts = runtime.get("artifacts", [])
+            self._prior_usage = runtime.get("usage", {"promptTokens": 0, "completionTokens": 0})
+            self._curation_status = runtime.get("curationStatus", "pending")
+            if runtime.get("memoryToolExecuted"):
+                self._memory_tool_executed_runs.add(context.runId)
+            self._approvals = {str(c["callId"]): str(c["toolCode"]) for c in snapshot.get("confirmations", []) if c.get("approvedAt")}
+            self._refresh_tool_defs(context, artifacts=self._run_artifacts)
+            self._compiled = self._build_graph()
+            config = {"recursion_limit": max(8, self._max_iterations * 4), "configurable": {"thread_id": f"agent-run:{context.runId}"}}
+            graph_state = await self._compiled.aget_state(config)
+        except BackendClientError:
+            raise
+        except RecoveryUnsafe:
+            raise
+        except Exception as exc:
+            raise RecoveryUnsafe("Cannot decode persisted graph state") from exc
+        interrupts = [item for task in graph_state.tasks for item in task.interrupts]
+        graph_input = None
+        if interrupts:
+            approvals = {}
+            for item in interrupts:
+                value = item.value if isinstance(item.value, dict) else {}
+                if self._approvals.get(str(value.get("callId"))) != value.get("toolCode"):
+                    await self.backend.recovery_outcome(context.runId, waiting=True)
+                    return
+                approvals[item.id] = {"toolCode": value["toolCode"], "approved": True, "arguments": value.get("arguments")}
+            graph_input = Command(resume=approvals)
+        token = recovering.set(True)
+        try:
+            for call in snapshot.get("toolCalls") or []:
+                await self.tool_bridge.reconcile_existing_call(context, ToolCallResponse.model_validate(call))
+        finally:
+            recovering.reset(token)
+        await self.backend.append_event(context.runId, RunEventCreate(eventType="run.recovery_started"))
+        if not graph_state.next and not interrupts:
+            if not graph_state.values.get("finished"):
+                raise RecoveryUnsafe("Checkpoint has no resumable node or final answer")
+            await self._complete_run(context, graph_state.values.get("final_answer") or "", intent="agent_graph")
+            return
+        while True:
+            final_state = await self._compiled.ainvoke(graph_input, config=config)
+            await self._persist_runtime()
+            pending = final_state.get("__interrupt__") or []
+            if not pending:
+                break
+            approvals = {}
+            for item in pending:
+                value = item.value if isinstance(item.value, dict) else {}
+                if self._approvals.get(str(value.get("callId"))) != value.get("toolCode"):
+                    await self.backend.recovery_outcome(context.runId, waiting=True)
+                    return
+                approvals[item.id] = {"toolCode": value["toolCode"], "approved": True, "arguments": value.get("arguments")}
+            graph_input = Command(resume=approvals)
+        if final_state.get("pending_confirmation"):
+            await self.backend.recovery_outcome(context.runId, waiting=True)
+            return
+        await self._complete_run(context, final_state.get("final_answer") or "", intent="agent_graph")
+
+    async def _persist_runtime(self) -> None:
+        saver = getattr(self.backend, "save_recovery_runtime", None)
+        if not callable(saver):
+            return
+        usage = self._model_usage()
+        await saver(self._context.runId, {
+            "version": 1, "budget": asdict(self._budget), "curationStatus": self._curation_status,
+            "memoryToolExecuted": self._context.runId in self._memory_tool_executed_runs,
+            "reservedToolIds": sorted(self._reserved_tool_ids), "observedFailureIds": sorted(self._observed_failure_ids),
+            "toolFailures": self._tool_failures, "expandedToolCodes": sorted(self._expanded_tool_codes),
+            "hydratedSkillCodes": sorted(self._hydrated_skill_codes),
+            "pendingSchemaValidationToolCode": self._pending_schema_validation_tool_code,
+            "artifacts": self._run_artifacts,
+            "usage": {key: self._prior_usage.get(key, 0) + usage.get(key, 0) for key in ("promptTokens", "completionTokens")},
+        })
+
+    async def _reserve_tool(self, budget, key) -> None:
+        if key and key in self._reserved_tool_ids:
+            return
+        self._guard.reserve_tool_call(budget, 0)
+        if key:
+            self._reserved_tool_ids.add(key)
+        await self._persist_runtime()
+
+    def _durable_node(self, name, node):
+        async def invoke(state):
+            token = operation_identity.set(f"node:{name}:{state.get('iteration', 0)}")
+            try:
+                result = await node(state)
+                await self._persist_runtime()
+                return result
+            finally:
+                operation_identity.reset(token)
+        return invoke
 
     async def _check_cancelled(self) -> None:
         context = self._context
@@ -212,29 +347,8 @@ class AgentGraphEngine:
                 raise ToolExecutionError("Agent run was cancelled", "AGENT_CANCELLED")
 
     async def run_confirmed_tool(self, context: RunContext, tool_code: str) -> None:
-        try:
-            await self._prepare_run(context, emit_run_started=False)
-            if self._compiled is None:
-                self._compiled = self._build_graph()
-            final_state: AgentState = await self._compiled.ainvoke(
-                Command(resume={"toolCode": tool_code, "approved": True}),
-                config={"recursion_limit": max(8, self._max_iterations * 4), "configurable": {"thread_id": f"agent-run:{context.runId}"}},
-            )
-            if final_state.get("__interrupt__"):
-                return
-            answer = final_state.get("final_answer") or ""
-            await self._clear_checkpoint(context)
-            await self._complete_run(context, answer, intent="agent_graph")
-        except BudgetExceeded as exc:
-            await self._fail_run(context.runId, exc.error_code, exc.message)
-        except ToolExecutionError as exc:
-            if exc.error_code == "AGENT_CANCELLED":
-                await self._clear_checkpoint(context)
-                return
-            await self._fail_run(context.runId, exc.error_code or "TOOL_CALL_FAILED", str(exc))
-        except Exception as exc:  # pragma: no cover
-            LOGGER.exception("agent graph confirmed-tool run failed runId=%s tool=%s", context.runId, tool_code)
-            await self._fail_run(context.runId, "AGENT_INTERNAL_ERROR", str(exc))
+        # Compatibility entrypoint; notification text cannot grant approval.
+        await self.recover(context)
 
     async def debug_route(self, context: RunContext) -> AgentRouteDebugResponse:
         requested_modality = requested_output_modality(context.message)
@@ -266,9 +380,9 @@ class AgentGraphEngine:
     # ------------------------------------------------------------------ #
     def _build_graph(self):
         graph = StateGraph(AgentState)
-        graph.add_node("agent", self._agent_node)
-        graph.add_node("tools", self._tools_node)
-        graph.add_node("finalize", self._finalize_node)
+        graph.add_node("agent", self._durable_node("agent", self._agent_node))
+        graph.add_node("tools", self._durable_node("tools", self._tools_node))
+        graph.add_node("finalize", self._durable_node("finalize", self._finalize_node))
         graph.add_edge(START, "agent")
         graph.add_conditional_edges("agent", self._route_after_agent, {"agent": "agent", "tools": "tools", "finalize": "finalize"})
         graph.add_conditional_edges("tools", self._route_after_tools, {"agent": "agent", "finalize": "finalize", "end": END})
@@ -319,12 +433,6 @@ class AgentGraphEngine:
             return
         answer = final_state.get("final_answer") or ""
         await self._complete_run(context, answer, intent="agent_graph")
-        await self.memory_runtime.curate_after_run(
-            context,
-            answer,
-            tool_result=None,
-            memory_tool_executed=context.runId in self._memory_tool_executed_runs,
-        )
 
     # ------------------------------------------------------------------ #
     # Graph nodes
@@ -339,6 +447,7 @@ class AgentGraphEngine:
             self._refresh_tool_defs(context, artifacts=state.get("artifacts") or self._run_artifacts)
         iteration = int(state.get("iteration", 0)) + 1
         self._guard.reserve_model_call(self._budget)
+        await self._persist_runtime()
         with model_audit_scope("tool.loop", iteration):
             turn = await self._stream_chat_turn(state["messages"])
         tool_calls = list(getattr(turn, "tool_calls", []) or [])
@@ -504,7 +613,11 @@ class AgentGraphEngine:
                 }
 
             if name in {MEMORY_ADD_TOOL, MEMORY_REPLACE_TOOL, MEMORY_REMOVE_TOOL}:
-                result = await self._execute_memory_tool(context, name, arguments)
+                token = operation_identity.set(f"call:{call_id}")
+                try:
+                    result = await self._execute_memory_tool(context, name, arguments)
+                finally:
+                    operation_identity.reset(token)
                 new_messages.append(self._tool_message(call_id, name, result))
                 continue
 
@@ -547,22 +660,26 @@ class AgentGraphEngine:
 
             execution_args = await self._build_product_arguments(context, tool, arguments)
 
-            if not self._should_auto_call(context, tool):
+            if not self._should_auto_call(context, tool) or call_id in self._approvals:
                 # LangGraph persists this exact node boundary before returning the interrupt.
-                await self.backend.append_event(
-                    context.runId,
-                    RunEventCreate(eventType=TOOL_CONFIRMATION_REQUIRED, eventText=tool.toolCode, eventJson={
-                        "toolCode": tool.toolCode,
-                        "toolName": tool.toolName,
-                        "description": tool.description,
-                        "creditCost": tool.estimatedCreditCost,
-                        "inputSchema": tool.inputSchema,
-                        "arguments": execution_args,
-                    }),
-                )
+                if call_id not in self._approvals:
+                    await self.backend.append_event(
+                        context.runId,
+                        RunEventCreate(eventType=TOOL_CONFIRMATION_REQUIRED, eventText=tool.toolCode, eventJson={
+                            "toolCode": tool.toolCode,
+                            "callId": call_id,
+                            "toolName": tool.toolName,
+                            "description": tool.description,
+                            "creditCost": tool.estimatedCreditCost,
+                            "inputSchema": tool.inputSchema,
+                            "arguments": execution_args,
+                        }),
+                    )
                 approval = interrupt({"toolCode": tool.toolCode, "callId": call_id, "arguments": execution_args})
                 if not isinstance(approval, dict) or approval.get("toolCode") != tool.toolCode or not approval.get("approved"):
                     raise ToolExecutionError("tool confirmation was rejected", "TOOL_CONFIRMATION_REJECTED")
+                if isinstance(approval.get("arguments"), dict):
+                    execution_args = approval["arguments"]
 
             await self.backend.append_event(
                 context.runId,
@@ -579,7 +696,10 @@ class AgentGraphEngine:
             except ToolExecutionError as exc:
                 # Reflect / retry: surface the failure to the model so it can fix
                 # arguments and retry, but bound retries per tool to avoid loops.
-                self._tool_failures[tool.toolCode] = self._tool_failures.get(tool.toolCode, 0) + 1
+                if call_id not in self._observed_failure_ids:
+                    self._tool_failures[tool.toolCode] = self._tool_failures.get(tool.toolCode, 0) + 1
+                    self._observed_failure_ids.add(call_id)
+                    await self._persist_runtime()
                 exhausted = self._tool_failures[tool.toolCode] >= self._max_tool_retries
                 details = getattr(exc, "details", {}) if hasattr(exc, "details") else {}
                 if exc.error_code == "SCHEMA_VALIDATION" and not exhausted:
@@ -629,7 +749,8 @@ class AgentGraphEngine:
                 self._pending_schema_validation_tool_code = None
             artifact = self._artifact_from_result(tool, result)
             artifacts.append(artifact)
-            self._run_artifacts.append(artifact)
+            if artifact not in self._run_artifacts:
+                self._run_artifacts.append(artifact)
             await self.backend.append_event(
                 context.runId,
                 RunEventCreate(eventType=TOOL_CALL_EXECUTED, eventJson={
@@ -1159,8 +1280,22 @@ class AgentGraphEngine:
         await self.backend.append_event(run_id, RunEventCreate(eventType=MESSAGE_COMPLETED, eventText=normalized, eventJson={"content": normalized}))
 
     async def _complete_run(self, context: RunContext, final_answer: str, *, intent: str) -> None:
+        if self._curation_status == "started":
+            raise RecoveryUnsafe("Post-run memory update outcome requires reconciliation")
+        if context.workspaceId and self._curation_status == "pending":
+            self._curation_status = "started"
+            await self._persist_runtime()
+            token = operation_identity.set("post-run-memory")
+            try:
+                await self.memory_runtime.curate_after_run(context, final_answer, tool_result=None,
+                    memory_tool_executed=context.runId in self._memory_tool_executed_runs)
+                self._curation_status = "done"
+                await self._persist_runtime()
+            finally:
+                operation_identity.reset(token)
         normalized = (final_answer or "").strip() or "抱歉，本次未能生成有效回复，请换个说法或补充更多信息后再试。"
         usage = self._model_usage_or_estimate(context, normalized)
+        usage = {key: usage.get(key, 0) + self._prior_usage.get(key, 0) for key in ("promptTokens", "completionTokens")}
         await self.backend.complete_run(
             context.runId,
             RunComplete(
@@ -1176,6 +1311,7 @@ class AgentGraphEngine:
 
     async def _fail_run(self, run_id: int, error_code: str, error_message: str) -> None:
         usage = self._model_usage()
+        usage = {key: usage.get(key, 0) + self._prior_usage.get(key, 0) for key in ("promptTokens", "completionTokens")}
         consumed = self._budget.consumed_credits if self._budget.consumed_credits > 0 else None
         if consumed is None and (usage["promptTokens"] or usage["completionTokens"]):
             consumed = self._guard.default_consumed_credits
